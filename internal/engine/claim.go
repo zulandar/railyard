@@ -33,7 +33,7 @@ func ClaimBead(db *gorm.DB, engineID, track string) (*models.Bead, error) {
 			Where("blocker.status NOT IN ?", []string{"done", "cancelled"})
 
 		// Find the highest-priority ready bead, locking the row.
-		result := tx.Where("status = ? AND assignee = ? AND track = ?", "open", "", track).
+		result := tx.Where("status = ? AND (assignee = ? OR assignee IS NULL) AND track = ?", "open", "", track).
 			Where("id NOT IN (?)", blockedSub).
 			Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
 			Order("priority ASC, created_at ASC").

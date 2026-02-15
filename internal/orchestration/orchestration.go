@@ -265,7 +265,7 @@ func Status(db *gorm.DB, tmux Tmux) (*StatusInfo, error) {
 		// Ready = open with no unresolved blockers (simplified: count open with no deps or all deps done).
 		var ready int64
 		db.Model(&models.Bead{}).
-			Where("track = ? AND status = ? AND assignee = ?", t.Name, "open", "").
+			Where("track = ? AND status = ? AND (assignee = ? OR assignee IS NULL)", t.Name, "open", "").
 			Where("id NOT IN (?)",
 				db.Model(&models.BeadDep{}).
 					Select("bead_id").

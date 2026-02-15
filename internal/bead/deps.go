@@ -71,7 +71,7 @@ func RemoveDep(db *gorm.DB, beadID, blockedBy string) error {
 // ReadyBeads returns beads that are ready for work: status=open, no assignee,
 // and all blockers are done or cancelled. Per ARCHITECTURE.md Section 2.
 func ReadyBeads(db *gorm.DB, track string) ([]models.Bead, error) {
-	q := db.Where("status = ? AND assignee = ?", "open", "").
+	q := db.Where("status = ? AND (assignee = ? OR assignee IS NULL)", "open", "").
 		Where("id NOT IN (?)",
 			db.Table("bead_deps").
 				Select("bead_deps.bead_id").
