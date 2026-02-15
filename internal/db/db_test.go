@@ -151,3 +151,33 @@ func TestSeedTracks_EmptySlice(t *testing.T) {
 		t.Errorf("SeedTracks(nil, []) = %v, want nil", err)
 	}
 }
+
+func TestConnect_Error(t *testing.T) {
+	// Port 1 is unlikely to have a MySQL server; expect connection error.
+	_, err := Connect("127.0.0.1", 1, "nonexistent")
+	if err == nil {
+		t.Fatal("expected error connecting to invalid port")
+	}
+	if !strings.Contains(err.Error(), "db: connect to") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "db: connect to")
+	}
+}
+
+func TestConnectAdmin_Error(t *testing.T) {
+	_, err := ConnectAdmin("127.0.0.1", 1)
+	if err == nil {
+		t.Fatal("expected error connecting to invalid port")
+	}
+	if !strings.Contains(err.Error(), "db: admin connect to") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "db: admin connect to")
+	}
+}
+
+func TestMarshalJSON_Error(t *testing.T) {
+	// Channels cannot be marshaled to JSON.
+	_, err := marshalJSON(make(chan int))
+	if err == nil {
+		t.Fatal("expected error marshaling channel")
+	}
+}
+

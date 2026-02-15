@@ -1,0 +1,4 @@
+repo: git@github.com:org/app.git
+tracks:
+  - name: api
+    language: go

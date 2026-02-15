@@ -68,9 +68,10 @@ func SeedTracks(db *gorm.DB, tracks []config.TrackConfig) error {
 // SeedConfig writes or updates the RailyardConfig row for this owner.
 func SeedConfig(db *gorm.DB, cfg *config.Config) error {
 	rc := models.RailyardConfig{
-		Owner:   cfg.Owner,
-		RepoURL: cfg.Repo,
-		Mode:    "local",
+		Owner:    cfg.Owner,
+		RepoURL:  cfg.Repo,
+		Mode:     "local",
+		Settings: "{}",
 	}
 
 	result := db.Clauses(clause.OnConflict{

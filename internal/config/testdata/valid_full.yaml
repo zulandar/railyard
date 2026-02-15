@@ -1,0 +1,24 @@
+owner: alice
+repo: git@github.com:org/myapp.git
+branch_prefix: ry/alice
+
+dolt:
+  host: 10.0.0.5
+  port: 3307
+  database: railyard_alice
+
+tracks:
+  - name: backend
+    language: go
+    file_patterns: ["cmd/**", "internal/**", "pkg/**", "*.go"]
+    engine_slots: 5
+    conventions:
+      go_version: "1.22"
+      style: "stdlib-first, no frameworks"
+
+  - name: frontend
+    language: typescript
+    file_patterns: ["src/**", "*.ts", "*.tsx"]
+    engine_slots: 3
+    conventions:
+      framework: "Next.js 15"

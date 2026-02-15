@@ -293,6 +293,80 @@ func TestLoad_FileNotFound(t *testing.T) {
 	}
 }
 
+// --- Fixture-based tests using testdata/ files ---
+
+func TestLoad_FullFixture(t *testing.T) {
+	cfg, err := Load("testdata/valid_full.yaml")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Owner != "alice" {
+		t.Errorf("Owner = %q, want %q", cfg.Owner, "alice")
+	}
+	if cfg.Dolt.Host != "10.0.0.5" {
+		t.Errorf("Dolt.Host = %q, want %q", cfg.Dolt.Host, "10.0.0.5")
+	}
+	if len(cfg.Tracks) != 2 {
+		t.Fatalf("len(Tracks) = %d, want 2", len(cfg.Tracks))
+	}
+}
+
+func TestLoad_MinimalFixture(t *testing.T) {
+	cfg, err := Load("testdata/valid_minimal.yaml")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Owner != "bob" {
+		t.Errorf("Owner = %q, want %q", cfg.Owner, "bob")
+	}
+	if cfg.Dolt.Host != "127.0.0.1" {
+		t.Errorf("Dolt.Host = %q, want default %q", cfg.Dolt.Host, "127.0.0.1")
+	}
+	if cfg.Dolt.Port != 3306 {
+		t.Errorf("Dolt.Port = %d, want default %d", cfg.Dolt.Port, 3306)
+	}
+}
+
+func TestLoad_MissingOwnerFixture(t *testing.T) {
+	_, err := Load("testdata/missing_owner.yaml")
+	if err == nil {
+		t.Fatal("expected error for missing owner")
+	}
+	if !strings.Contains(err.Error(), "owner is required") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "owner is required")
+	}
+}
+
+func TestLoad_MissingRepoFixture(t *testing.T) {
+	_, err := Load("testdata/missing_repo.yaml")
+	if err == nil {
+		t.Fatal("expected error for missing repo")
+	}
+	if !strings.Contains(err.Error(), "repo is required") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "repo is required")
+	}
+}
+
+func TestLoad_NoTracksFixture(t *testing.T) {
+	_, err := Load("testdata/no_tracks.yaml")
+	if err == nil {
+		t.Fatal("expected error for no tracks")
+	}
+	if !strings.Contains(err.Error(), "at least one track is required") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "at least one track is required")
+	}
+}
+
+func TestLoad_InvalidYAMLFixture(t *testing.T) {
+	_, err := Load("testdata/invalid.yaml")
+	if err == nil {
+		t.Fatal("expected error for invalid YAML")
+	}
+	if !strings.Contains(err.Error(), "config: parse:") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "config: parse:")
+	}
+}
+
 func TestParse_ConventionsWithSliceValues(t *testing.T) {
 	yaml := `
 owner: alice
