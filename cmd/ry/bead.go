@@ -21,6 +21,8 @@ func newBeadCmd() *cobra.Command {
 	cmd.AddCommand(newBeadListCmd())
 	cmd.AddCommand(newBeadShowCmd())
 	cmd.AddCommand(newBeadUpdateCmd())
+	cmd.AddCommand(newBeadDepCmd())
+	cmd.AddCommand(newBeadReadyCmd())
 	return cmd
 }
 
@@ -308,6 +310,175 @@ func connectFromConfig(configPath string) (*config.Config, *gorm.DB, error) {
 	}
 
 	return cfg, gormDB, nil
+}
+
+func newBeadDepCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "dep",
+		Short: "Manage bead dependencies",
+	}
+
+	cmd.AddCommand(newBeadDepAddCmd())
+	cmd.AddCommand(newBeadDepListCmd())
+	cmd.AddCommand(newBeadDepRemoveCmd())
+	return cmd
+}
+
+func newBeadDepAddCmd() *cobra.Command {
+	var (
+		configPath string
+		blockedBy  string
+		depType    string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "add <bead-id>",
+		Short: "Add a dependency",
+		Long:  "Creates a blocking dependency: the bead is blocked by the specified blocker.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, gormDB, err := connectFromConfig(configPath)
+			if err != nil {
+				return err
+			}
+			if err := bead.AddDep(gormDB, args[0], blockedBy, depType); err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "Added dependency: %s blocked by %s\n", args[0], blockedBy)
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVarP(&configPath, "config", "c", "railyard.yaml", "path to Railyard config file")
+	cmd.Flags().StringVar(&blockedBy, "blocked-by", "", "bead ID that blocks this bead (required)")
+	cmd.Flags().StringVar(&depType, "type", "blocks", "dependency type")
+	cmd.MarkFlagRequired("blocked-by")
+	return cmd
+}
+
+func newBeadDepListCmd() *cobra.Command {
+	var configPath string
+
+	cmd := &cobra.Command{
+		Use:   "list <bead-id>",
+		Short: "List bead dependencies",
+		Long:  "Shows what blocks this bead and what this bead blocks.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, gormDB, err := connectFromConfig(configPath)
+			if err != nil {
+				return err
+			}
+			blockers, dependents, err := bead.ListDeps(gormDB, args[0])
+			if err != nil {
+				return err
+			}
+
+			out := cmd.OutOrStdout()
+			if len(blockers) == 0 && len(dependents) == 0 {
+				fmt.Fprintf(out, "No dependencies for %s\n", args[0])
+				return nil
+			}
+
+			if len(blockers) > 0 {
+				w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+				fmt.Fprintln(out, "Blocked by:")
+				fmt.Fprintln(w, "  BLOCKER\tTYPE")
+				for _, b := range blockers {
+					fmt.Fprintf(w, "  %s\t%s\n", b.BlockedBy, b.DepType)
+				}
+				w.Flush()
+			}
+
+			if len(dependents) > 0 {
+				w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+				fmt.Fprintln(out, "Blocks:")
+				fmt.Fprintln(w, "  DEPENDENT\tTYPE")
+				for _, d := range dependents {
+					fmt.Fprintf(w, "  %s\t%s\n", d.BeadID, d.DepType)
+				}
+				w.Flush()
+			}
+
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVarP(&configPath, "config", "c", "railyard.yaml", "path to Railyard config file")
+	return cmd
+}
+
+func newBeadDepRemoveCmd() *cobra.Command {
+	var (
+		configPath string
+		blockedBy  string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "remove <bead-id>",
+		Short: "Remove a dependency",
+		Long:  "Removes a blocking dependency between two beads.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, gormDB, err := connectFromConfig(configPath)
+			if err != nil {
+				return err
+			}
+			if err := bead.RemoveDep(gormDB, args[0], blockedBy); err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "Removed dependency: %s blocked by %s\n", args[0], blockedBy)
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVarP(&configPath, "config", "c", "railyard.yaml", "path to Railyard config file")
+	cmd.Flags().StringVar(&blockedBy, "blocked-by", "", "bead ID to remove as blocker (required)")
+	cmd.MarkFlagRequired("blocked-by")
+	return cmd
+}
+
+func newBeadReadyCmd() *cobra.Command {
+	var (
+		configPath string
+		track      string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "ready",
+		Short: "List ready beads",
+		Long:  "Lists beads that are ready for work: status=open, unassigned, and all blockers resolved.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, gormDB, err := connectFromConfig(configPath)
+			if err != nil {
+				return err
+			}
+
+			beads, err := bead.ReadyBeads(gormDB, track)
+			if err != nil {
+				return err
+			}
+
+			out := cmd.OutOrStdout()
+			if len(beads) == 0 {
+				fmt.Fprintln(out, "No ready beads.")
+				return nil
+			}
+
+			w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+			fmt.Fprintln(w, "ID\tTITLE\tTRACK\tPRI")
+			for _, b := range beads {
+				fmt.Fprintf(w, "%s\t%s\t%s\t%d\n",
+					b.ID, truncate(b.Title, 40), b.Track, b.Priority)
+			}
+			w.Flush()
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVarP(&configPath, "config", "c", "railyard.yaml", "path to Railyard config file")
+	cmd.Flags().StringVar(&track, "track", "", "filter by track")
+	return cmd
 }
 
 // truncate shortens a string to maxLen, adding "..." if truncated.

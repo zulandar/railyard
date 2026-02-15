@@ -293,6 +293,155 @@ func TestTruncate(t *testing.T) {
 	}
 }
 
+// --- dep command tests ---
+
+func TestBeadDepCmd_Help(t *testing.T) {
+	cmd := newRootCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"bead", "dep", "--help"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("bead dep --help failed: %v", err)
+	}
+
+	out := buf.String()
+	for _, sub := range []string{"add", "list", "remove"} {
+		if !strings.Contains(out, sub) {
+			t.Errorf("expected dep help to list %q subcommand, got: %s", sub, out)
+		}
+	}
+}
+
+func TestNewBeadDepCmd(t *testing.T) {
+	cmd := newBeadDepCmd()
+	if cmd.Use != "dep" {
+		t.Errorf("Use = %q, want %q", cmd.Use, "dep")
+	}
+	if !cmd.HasSubCommands() {
+		t.Error("dep command should have subcommands")
+	}
+}
+
+func TestBeadDepAddCmd_Flags(t *testing.T) {
+	cmd := newBeadDepAddCmd()
+	if cmd.Use != "add <bead-id>" {
+		t.Errorf("Use = %q, want %q", cmd.Use, "add <bead-id>")
+	}
+	if cmd.Flags().Lookup("blocked-by") == nil {
+		t.Error("expected --blocked-by flag")
+	}
+	if cmd.Flags().Lookup("type") == nil {
+		t.Error("expected --type flag")
+	}
+	typeFlag := cmd.Flags().Lookup("type")
+	if typeFlag.DefValue != "blocks" {
+		t.Errorf("--type default = %q, want %q", typeFlag.DefValue, "blocks")
+	}
+}
+
+func TestBeadDepAddCmd_NoArgs(t *testing.T) {
+	cmd := newRootCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"bead", "dep", "add"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for missing args")
+	}
+}
+
+func TestBeadDepAddCmd_MissingBlockedBy(t *testing.T) {
+	cmd := newRootCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"bead", "dep", "add", "be-12345"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for missing --blocked-by")
+	}
+}
+
+func TestBeadDepListCmd_Flags(t *testing.T) {
+	cmd := newBeadDepListCmd()
+	if cmd.Use != "list <bead-id>" {
+		t.Errorf("Use = %q, want %q", cmd.Use, "list <bead-id>")
+	}
+}
+
+func TestBeadDepListCmd_NoArgs(t *testing.T) {
+	cmd := newRootCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"bead", "dep", "list"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for missing args")
+	}
+}
+
+func TestBeadDepRemoveCmd_Flags(t *testing.T) {
+	cmd := newBeadDepRemoveCmd()
+	if cmd.Use != "remove <bead-id>" {
+		t.Errorf("Use = %q, want %q", cmd.Use, "remove <bead-id>")
+	}
+	if cmd.Flags().Lookup("blocked-by") == nil {
+		t.Error("expected --blocked-by flag")
+	}
+}
+
+func TestBeadDepRemoveCmd_NoArgs(t *testing.T) {
+	cmd := newRootCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"bead", "dep", "remove"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for missing args")
+	}
+}
+
+// --- ready command tests ---
+
+func TestBeadReadyCmd_Help(t *testing.T) {
+	cmd := newRootCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"bead", "ready", "--help"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("bead ready --help failed: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "ready") {
+		t.Errorf("expected help to mention 'ready', got: %s", out)
+	}
+	if !strings.Contains(out, "--track") {
+		t.Errorf("expected --track flag, got: %s", out)
+	}
+}
+
+func TestNewBeadReadyCmd(t *testing.T) {
+	cmd := newBeadReadyCmd()
+	if cmd.Use != "ready" {
+		t.Errorf("Use = %q, want %q", cmd.Use, "ready")
+	}
+	if cmd.Flags().Lookup("track") == nil {
+		t.Error("expected --track flag")
+	}
+}
+
 func TestRootCmd_HasBeadSubcommand(t *testing.T) {
 	cmd := newRootCmd()
 	buf := new(bytes.Buffer)
