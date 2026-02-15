@@ -128,14 +128,14 @@ func writeRecentCommits(w *strings.Builder, commits []string) {
 func writeInstructions(w *strings.Builder) {
 	w.WriteString("## When You're Done\n")
 	w.WriteString("1. Run tests, ensure they pass\n")
-	w.WriteString("2. Update bead status: call ry.complete(bead_id, \"summary of what was done\")\n")
+	w.WriteString("2. Update bead status: `ry bead complete <bead-id> \"summary of what was done\"`\n")
 	w.WriteString("3. The daemon will handle git push and /clear\n")
 	w.WriteString("\n## If You're Stuck\n")
-	w.WriteString("1. Update progress: call ry.progress(bead_id, \"what you tried, what failed\")\n")
-	w.WriteString("2. Send message: call ry.message(\"yardmaster\", \"need help with X\")\n")
+	w.WriteString("1. Update progress: `ry bead progress <bead-id> \"what you tried, what failed\"`\n")
+	w.WriteString("2. Send message: `ry message send --from <engine-id> --to yardmaster --subject \"help\" --body \"need help with X\"`\n")
 	w.WriteString("3. The Yardmaster will receive your message and may provide guidance\n")
 	w.WriteString("\n## If You Need to Split Work\n")
-	w.WriteString("1. Create child beads: call ry.create_bead(parent=bead_id, title=\"sub-task\")\n")
+	w.WriteString("1. Create child beads: `ry bead create --title \"sub-task\" --track <track> --parent <bead-id> --type task`\n")
 	w.WriteString("2. Continue on the current bead, children will be picked up by other engines\n")
 }
 

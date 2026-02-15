@@ -265,12 +265,12 @@ func TestRenderContext_Instructions(t *testing.T) {
 	}
 	for _, want := range []string{
 		"## When You're Done",
-		"ry.complete(bead_id",
+		"ry bead complete",
 		"## If You're Stuck",
-		"ry.progress(bead_id",
-		"ry.message(\"yardmaster\"",
+		"ry bead progress",
+		"ry message send",
 		"## If You Need to Split Work",
-		"ry.create_bead(parent=bead_id",
+		"ry bead create",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("instructions missing %q", want)

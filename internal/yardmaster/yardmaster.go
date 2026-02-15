@@ -31,8 +31,12 @@ func Start(opts StartOpts) error {
 		return fmt.Errorf("yardmaster: render prompt: %w", err)
 	}
 
-	cmd := exec.Command("claude", "--system-prompt", prompt)
-	cmd.Stdin = os.Stdin
+	// Launch claude in autonomous mode (no human interaction in tmux pane)
+	cmd := exec.Command("claude",
+		"--dangerously-skip-permissions",
+		"--system-prompt", prompt,
+		"-p", "You are now running as the Yardmaster supervisor. Begin your monitoring loop: check engine health, completed beads, and blocked beads.",
+	)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
@@ -45,5 +49,9 @@ func Start(opts StartOpts) error {
 // BuildCommand constructs the exec.Cmd for the yardmaster Claude session.
 // Exported for testing.
 func BuildCommand(prompt string) *exec.Cmd {
-	return exec.Command("claude", "--system-prompt", prompt)
+	return exec.Command("claude",
+		"--dangerously-skip-permissions",
+		"--system-prompt", prompt,
+		"-p", "You are now running as the Yardmaster supervisor. Begin your monitoring loop: check engine health, completed beads, and blocked beads.",
+	)
 }

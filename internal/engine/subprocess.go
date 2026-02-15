@@ -151,6 +151,7 @@ func buildCommand(ctx context.Context, opts SpawnOpts) (*exec.Cmd, context.Cance
 	}
 
 	cmd := exec.CommandContext(ctx, binary,
+		"--dangerously-skip-permissions",
 		"--system-prompt", opts.ContextPayload,
 		"-p", "Begin working on your assigned bead. Follow the instructions in the system prompt.",
 	)

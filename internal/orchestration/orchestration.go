@@ -52,6 +52,11 @@ func Start(opts StartOpts) (*StartResult, error) {
 		opts.Tmux = DefaultTmux
 	}
 
+	// Ensure .claude/settings.json has the permissions engines need.
+	if err := EnsureClaudeSettings(opts.ConfigPath); err != nil {
+		return nil, err
+	}
+
 	// Check if already running.
 	if opts.Tmux.SessionExists(SessionName) {
 		return nil, fmt.Errorf("orchestration: railyard session already running (use 'ry stop' first)")

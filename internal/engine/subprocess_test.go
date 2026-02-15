@@ -70,10 +70,14 @@ func TestBuildCommand_Args(t *testing.T) {
 		t.Errorf("binary = %q, want %q", args[0], "/usr/bin/claude")
 	}
 
-	// Find --system-prompt flag and value.
+	// Find required flags.
+	foundSkipPerms := false
 	foundSP := false
 	foundP := false
 	for i, a := range args {
+		if a == "--dangerously-skip-permissions" {
+			foundSkipPerms = true
+		}
 		if a == "--system-prompt" && i+1 < len(args) {
 			foundSP = true
 			if args[i+1] != "test context" {
@@ -86,6 +90,9 @@ func TestBuildCommand_Args(t *testing.T) {
 				t.Error("-p value should not be empty")
 			}
 		}
+	}
+	if !foundSkipPerms {
+		t.Error("--dangerously-skip-permissions flag not found in args")
 	}
 	if !foundSP {
 		t.Error("--system-prompt flag not found in args")

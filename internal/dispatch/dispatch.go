@@ -30,9 +30,12 @@ func Start(opts StartOpts) error {
 		return fmt.Errorf("dispatch: render prompt: %w", err)
 	}
 
-	// Launch claude with the dispatch system prompt
-	cmd := exec.Command("claude", "--system-prompt", prompt)
-	cmd.Stdin = os.Stdin
+	// Launch claude in autonomous mode (no human interaction in tmux pane)
+	cmd := exec.Command("claude",
+		"--dangerously-skip-permissions",
+		"--system-prompt", prompt,
+		"-p", "You are now running as the Dispatch planner. Monitor for incoming feature requests and decompose them into beads. Check status with: ry bead list && ry bead ready",
+	)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
@@ -45,5 +48,9 @@ func Start(opts StartOpts) error {
 // BuildCommand constructs the exec.Cmd for the dispatch Claude session.
 // Exported for testing.
 func BuildCommand(prompt string) *exec.Cmd {
-	return exec.Command("claude", "--system-prompt", prompt)
+	return exec.Command("claude",
+		"--dangerously-skip-permissions",
+		"--system-prompt", prompt,
+		"-p", "You are now running as the Dispatch planner. Monitor for incoming feature requests and decompose them into beads. Check status with: ry bead list && ry bead ready",
+	)
 }

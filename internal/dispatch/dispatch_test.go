@@ -173,14 +173,35 @@ func TestBuildCommand_Args(t *testing.T) {
 		t.Fatal("command path is empty")
 	}
 	args := cmd.Args
-	if len(args) < 3 {
-		t.Fatalf("len(args) = %d, want at least 3", len(args))
+
+	// Find required flags.
+	foundSkipPerms := false
+	foundSP := false
+	foundP := false
+	for i, a := range args {
+		if a == "--dangerously-skip-permissions" {
+			foundSkipPerms = true
+		}
+		if a == "--system-prompt" && i+1 < len(args) {
+			foundSP = true
+			if args[i+1] != "test prompt" {
+				t.Errorf("--system-prompt value = %q, want %q", args[i+1], "test prompt")
+			}
+		}
+		if a == "-p" && i+1 < len(args) {
+			foundP = true
+			if args[i+1] == "" {
+				t.Error("-p value should not be empty")
+			}
+		}
 	}
-	// args[0] is the command name, args[1] should be "--system-prompt", args[2] the prompt
-	if args[1] != "--system-prompt" {
-		t.Errorf("args[1] = %q, want %q", args[1], "--system-prompt")
+	if !foundSkipPerms {
+		t.Error("--dangerously-skip-permissions flag not found in args")
 	}
-	if args[2] != "test prompt" {
-		t.Errorf("args[2] = %q, want %q", args[2], "test prompt")
+	if !foundSP {
+		t.Error("--system-prompt flag not found in args")
+	}
+	if !foundP {
+		t.Error("-p flag not found in args")
 	}
 }
