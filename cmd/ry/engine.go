@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"text/tabwriter"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -17,6 +18,7 @@ import (
 	"github.com/zulandar/railyard/internal/engine"
 	"github.com/zulandar/railyard/internal/messaging"
 	"github.com/zulandar/railyard/internal/models"
+	"github.com/zulandar/railyard/internal/orchestration"
 	"gorm.io/gorm"
 )
 
@@ -29,6 +31,9 @@ func newEngineCmd() *cobra.Command {
 	}
 
 	cmd.AddCommand(newEngineStartCmd())
+	cmd.AddCommand(newEngineScaleCmd())
+	cmd.AddCommand(newEngineListCmd())
+	cmd.AddCommand(newEngineRestartCmd())
 	return cmd
 }
 
@@ -352,4 +357,157 @@ func sleepWithContext(ctx context.Context, d time.Duration) {
 	case <-ctx.Done():
 	case <-time.After(d):
 	}
+}
+
+func newEngineScaleCmd() *cobra.Command {
+	var (
+		configPath string
+		track      string
+		count      int
+	)
+
+	cmd := &cobra.Command{
+		Use:   "scale",
+		Short: "Scale engine count for a track",
+		Long:  "Adjusts the number of engines running on a specific track. Scale up creates new tmux panes; scale down drains newest engines first.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runEngineScale(cmd, configPath, track, count)
+		},
+	}
+
+	cmd.Flags().StringVarP(&configPath, "config", "c", "railyard.yaml", "path to Railyard config file")
+	cmd.Flags().StringVar(&track, "track", "", "track to scale (required)")
+	cmd.Flags().IntVar(&count, "count", 0, "desired engine count (required)")
+	_ = cmd.MarkFlagRequired("track")
+	_ = cmd.MarkFlagRequired("count")
+	return cmd
+}
+
+func runEngineScale(cmd *cobra.Command, configPath, track string, count int) error {
+	cfg, gormDB, err := connectFromConfig(configPath)
+	if err != nil {
+		return err
+	}
+
+	result, err := orchestration.Scale(orchestration.ScaleOpts{
+		DB:         gormDB,
+		Config:     cfg,
+		ConfigPath: configPath,
+		Track:      track,
+		Count:      count,
+	})
+	if err != nil {
+		return err
+	}
+
+	out := cmd.OutOrStdout()
+	fmt.Fprintf(out, "Track %s: %d → %d engines\n", result.Track, result.Previous, result.Current)
+	if len(result.PanesCreated) > 0 {
+		fmt.Fprintf(out, "  Created %d new engine panes\n", len(result.PanesCreated))
+	}
+	if len(result.PanesKilled) > 0 {
+		fmt.Fprintf(out, "  Removed %d engines\n", len(result.PanesKilled))
+	}
+	return nil
+}
+
+func newEngineListCmd() *cobra.Command {
+	var (
+		configPath   string
+		track        string
+		statusFilter string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "list",
+		Short: "List engines",
+		Long:  "Displays all engines with ID, track, status, current bead, last activity, and uptime.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runEngineList(cmd, configPath, track, statusFilter)
+		},
+	}
+
+	cmd.Flags().StringVarP(&configPath, "config", "c", "railyard.yaml", "path to Railyard config file")
+	cmd.Flags().StringVar(&track, "track", "", "filter by track")
+	cmd.Flags().StringVar(&statusFilter, "status", "", "filter by status")
+	return cmd
+}
+
+func runEngineList(cmd *cobra.Command, configPath, track, statusFilter string) error {
+	_, gormDB, err := connectFromConfig(configPath)
+	if err != nil {
+		return err
+	}
+
+	engines, err := orchestration.ListEngines(orchestration.EngineListOpts{
+		DB:     gormDB,
+		Track:  track,
+		Status: statusFilter,
+	})
+	if err != nil {
+		return err
+	}
+
+	out := cmd.OutOrStdout()
+	if len(engines) == 0 {
+		fmt.Fprintln(out, "No engines found.")
+		return nil
+	}
+
+	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "ID\tTRACK\tSTATUS\tCURRENT BEAD\tLAST ACTIVITY\tUPTIME")
+	for _, e := range engines {
+		bead := e.CurrentBead
+		if bead == "" {
+			bead = "-"
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
+			e.ID, e.Track, e.Status, bead,
+			e.LastActivity.Format("15:04:05"),
+			formatUptime(e.Uptime))
+	}
+	w.Flush()
+	return nil
+}
+
+func newEngineRestartCmd() *cobra.Command {
+	var configPath string
+
+	cmd := &cobra.Command{
+		Use:   "restart <engine-id>",
+		Short: "Restart an engine",
+		Long:  "Restart an engine: kills it and creates a new one on the same track with a new ID.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runEngineRestart(cmd, configPath, args[0])
+		},
+	}
+
+	cmd.Flags().StringVarP(&configPath, "config", "c", "railyard.yaml", "path to Railyard config file")
+	return cmd
+}
+
+func runEngineRestart(cmd *cobra.Command, configPath, engineID string) error {
+	_, gormDB, err := connectFromConfig(configPath)
+	if err != nil {
+		return err
+	}
+
+	if err := orchestration.RestartEngine(gormDB, configPath, engineID, nil); err != nil {
+		return err
+	}
+
+	fmt.Fprintf(cmd.OutOrStdout(), "Engine %s restarted.\n", engineID)
+	return nil
+}
+
+// formatUptime formats a duration as "Xh Ym" or "Ym Zs".
+func formatUptime(d time.Duration) string {
+	h := int(d.Hours())
+	m := int(d.Minutes()) % 60
+	s := int(d.Seconds()) % 60
+	if h > 0 {
+		return fmt.Sprintf("%dh %dm", h, m)
+	}
+	return fmt.Sprintf("%dm %ds", m, s)
 }

@@ -32,6 +32,9 @@ func newRootCmd() *cobra.Command {
 	cmd.AddCommand(newDispatchCmd())
 	cmd.AddCommand(newYardmasterCmd())
 	cmd.AddCommand(newSwitchCmd())
+	cmd.AddCommand(newStartCmd())
+	cmd.AddCommand(newStopCmd())
+	cmd.AddCommand(newStatusCmd())
 	return cmd
 }
 
