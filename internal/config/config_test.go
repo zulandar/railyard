@@ -412,6 +412,49 @@ tracks:
 	}
 }
 
+func TestParse_StallDefaults(t *testing.T) {
+	cfg, err := Parse([]byte(minimalYAML))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Stall.StdoutTimeoutSec != 120 {
+		t.Errorf("Stall.StdoutTimeoutSec = %d, want 120 (default)", cfg.Stall.StdoutTimeoutSec)
+	}
+	if cfg.Stall.RepeatedErrorMax != 3 {
+		t.Errorf("Stall.RepeatedErrorMax = %d, want 3 (default)", cfg.Stall.RepeatedErrorMax)
+	}
+	if cfg.Stall.MaxClearCycles != 5 {
+		t.Errorf("Stall.MaxClearCycles = %d, want 5 (default)", cfg.Stall.MaxClearCycles)
+	}
+}
+
+func TestParse_StallCustomValues(t *testing.T) {
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+stall:
+  stdout_timeout_sec: 60
+  repeated_error_max: 5
+  max_clear_cycles: 10
+tracks:
+  - name: backend
+    language: go
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Stall.StdoutTimeoutSec != 60 {
+		t.Errorf("Stall.StdoutTimeoutSec = %d, want 60", cfg.Stall.StdoutTimeoutSec)
+	}
+	if cfg.Stall.RepeatedErrorMax != 5 {
+		t.Errorf("Stall.RepeatedErrorMax = %d, want 5", cfg.Stall.RepeatedErrorMax)
+	}
+	if cfg.Stall.MaxClearCycles != 10 {
+		t.Errorf("Stall.MaxClearCycles = %d, want 10", cfg.Stall.MaxClearCycles)
+	}
+}
+
 func TestParse_EmptyFilePatterns(t *testing.T) {
 	yaml := `
 owner: alice

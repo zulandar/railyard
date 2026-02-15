@@ -63,6 +63,9 @@ func TestStatusConstants(t *testing.T) {
 	if StatusWorking != "working" {
 		t.Errorf("StatusWorking = %q, want %q", StatusWorking, "working")
 	}
+	if StatusStalled != "stalled" {
+		t.Errorf("StatusStalled = %q, want %q", StatusStalled, "stalled")
+	}
 	if StatusDead != "dead" {
 		t.Errorf("StatusDead = %q, want %q", StatusDead, "dead")
 	}

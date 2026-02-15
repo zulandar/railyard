@@ -15,7 +15,15 @@ type Config struct {
 	Repo         string        `yaml:"repo"`
 	BranchPrefix string        `yaml:"branch_prefix"`
 	Dolt         DoltConfig    `yaml:"dolt"`
+	Stall        StallConfig   `yaml:"stall"`
 	Tracks       []TrackConfig `yaml:"tracks"`
+}
+
+// StallConfig holds thresholds for engine stall detection.
+type StallConfig struct {
+	StdoutTimeoutSec int `yaml:"stdout_timeout_sec"` // no stdout for N seconds = stall (default 120)
+	RepeatedErrorMax int `yaml:"repeated_error_max"` // same error N times = stall (default 3)
+	MaxClearCycles   int `yaml:"max_clear_cycles"`   // more than N cycles = stall (default 5)
 }
 
 // DoltConfig holds connection settings for the Dolt SQL server.
@@ -69,6 +77,15 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Dolt.Database == "" && c.Owner != "" {
 		c.Dolt.Database = "railyard_" + c.Owner
+	}
+	if c.Stall.StdoutTimeoutSec == 0 {
+		c.Stall.StdoutTimeoutSec = 120
+	}
+	if c.Stall.RepeatedErrorMax == 0 {
+		c.Stall.RepeatedErrorMax = 3
+	}
+	if c.Stall.MaxClearCycles == 0 {
+		c.Stall.MaxClearCycles = 5
 	}
 	for i := range c.Tracks {
 		if c.Tracks[i].EngineSlots == 0 {

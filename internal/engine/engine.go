@@ -16,6 +16,7 @@ import (
 const (
 	StatusIdle    = "idle"
 	StatusWorking = "working"
+	StatusStalled = "stalled"
 	StatusDead    = "dead"
 )
 

@@ -49,6 +49,7 @@ type logWriter struct {
 	mu      sync.Mutex
 	buf     bytes.Buffer
 	writeFn func(models.AgentLog) error
+	onWrite func([]byte) // optional callback invoked on each Write
 }
 
 // DefaultFlushInterval is the interval between periodic log flushes.
@@ -183,7 +184,11 @@ func newLogWriter(db *gorm.DB, engineID, sessionID, beadID, direction string) *l
 func (w *logWriter) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return w.buf.Write(p)
+	n, err := w.buf.Write(p)
+	if w.onWrite != nil {
+		w.onWrite(p)
+	}
+	return n, err
 }
 
 // Flush writes accumulated buffer contents to agent_logs and resets the buffer.
