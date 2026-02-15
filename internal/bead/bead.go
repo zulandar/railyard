@@ -31,6 +31,13 @@ type ListFilters struct {
 	Status   string
 	Type     string
 	Assignee string
+	ParentID string
+}
+
+// StatusCount holds a status and its count for children summaries.
+type StatusCount struct {
+	Status string
+	Count  int
 }
 
 // ValidTransitions maps each status to its valid next statuses.
@@ -62,6 +69,24 @@ func Create(db *gorm.DB, opts CreateOpts) (*models.Bead, error) {
 	if opts.Title == "" {
 		return nil, fmt.Errorf("bead: title is required")
 	}
+
+	// Validate parent and inherit track if needed (before track check).
+	if opts.ParentID != "" {
+		var parent models.Bead
+		if err := db.Where("id = ?", opts.ParentID).First(&parent).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, fmt.Errorf("bead: parent not found: %s", opts.ParentID)
+			}
+			return nil, fmt.Errorf("bead: check parent %s: %w", opts.ParentID, err)
+		}
+		if parent.Type != "epic" {
+			return nil, fmt.Errorf("bead: parent %s is type %q, only epics can have children", opts.ParentID, parent.Type)
+		}
+		if opts.Track == "" {
+			opts.Track = parent.Track
+		}
+	}
+
 	if opts.Track == "" {
 		return nil, fmt.Errorf("bead: track is required")
 	}
@@ -127,6 +152,9 @@ func List(db *gorm.DB, filters ListFilters) ([]models.Bead, error) {
 	if filters.Assignee != "" {
 		q = q.Where("assignee = ?", filters.Assignee)
 	}
+	if filters.ParentID != "" {
+		q = q.Where("parent_id = ?", filters.ParentID)
+	}
 
 	var beads []models.Bead
 	if err := q.Order("priority ASC, created_at ASC").Find(&beads).Error; err != nil {
@@ -181,6 +209,38 @@ func isValidTransition(from, to string) bool {
 		}
 	}
 	return false
+}
+
+// GetChildren returns all children of a parent bead, ordered by priority then creation time.
+func GetChildren(db *gorm.DB, parentID string) ([]models.Bead, error) {
+	// Verify parent exists.
+	var count int64
+	if err := db.Model(&models.Bead{}).Where("id = ?", parentID).Count(&count).Error; err != nil {
+		return nil, fmt.Errorf("bead: check parent %s: %w", parentID, err)
+	}
+	if count == 0 {
+		return nil, fmt.Errorf("bead: parent not found: %s", parentID)
+	}
+
+	var children []models.Bead
+	if err := db.Where("parent_id = ?", parentID).Order("priority ASC, created_at ASC").Find(&children).Error; err != nil {
+		return nil, fmt.Errorf("bead: get children of %s: %w", parentID, err)
+	}
+	return children, nil
+}
+
+// ChildrenSummary returns status counts for all children of a parent bead.
+func ChildrenSummary(db *gorm.DB, parentID string) ([]StatusCount, error) {
+	var results []StatusCount
+	if err := db.Model(&models.Bead{}).
+		Select("status, COUNT(*) as count").
+		Where("parent_id = ?", parentID).
+		Group("status").
+		Order("status ASC").
+		Find(&results).Error; err != nil {
+		return nil, fmt.Errorf("bead: children summary of %s: %w", parentID, err)
+	}
+	return results, nil
 }
 
 // generateUniqueID generates an ID and retries once on collision.

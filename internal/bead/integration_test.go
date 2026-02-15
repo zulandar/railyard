@@ -671,6 +671,215 @@ func TestIntegration_Update_Cancelled(t *testing.T) {
 	}
 }
 
+func TestIntegration_Create_InvalidParent(t *testing.T) {
+	srv := setupTestDB(t, "railyard_bead_invpar")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_bead_invpar")
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	_, err = Create(gormDB, CreateOpts{
+		Title:        "Orphan task",
+		Track:        "backend",
+		ParentID:     "be-zzzzz",
+		BranchPrefix: "ry/alice",
+	})
+	if err == nil {
+		t.Fatal("expected error for non-existent parent")
+	}
+	if !strings.Contains(err.Error(), "parent not found") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "parent not found")
+	}
+}
+
+func TestIntegration_Create_NonEpicParent(t *testing.T) {
+	srv := setupTestDB(t, "railyard_bead_neppar")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_bead_neppar")
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	task, err := Create(gormDB, CreateOpts{
+		Title:        "A task (not epic)",
+		Track:        "backend",
+		Type:         "task",
+		BranchPrefix: "ry/alice",
+	})
+	if err != nil {
+		t.Fatalf("Create task: %v", err)
+	}
+
+	_, err = Create(gormDB, CreateOpts{
+		Title:        "Child of task",
+		Track:        "backend",
+		ParentID:     task.ID,
+		BranchPrefix: "ry/alice",
+	})
+	if err == nil {
+		t.Fatal("expected error for non-epic parent")
+	}
+	if !strings.Contains(err.Error(), "only epics can have children") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "only epics can have children")
+	}
+}
+
+func TestIntegration_Create_TrackInheritance(t *testing.T) {
+	srv := setupTestDB(t, "railyard_bead_trackinh")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_bead_trackinh")
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	parent, err := Create(gormDB, CreateOpts{
+		Title:        "Parent epic",
+		Track:        "backend",
+		Type:         "epic",
+		BranchPrefix: "ry/alice",
+	})
+	if err != nil {
+		t.Fatalf("Create parent: %v", err)
+	}
+
+	// Create child without specifying track — should inherit from parent.
+	child, err := Create(gormDB, CreateOpts{
+		Title:        "Inherited track child",
+		ParentID:     parent.ID,
+		BranchPrefix: "ry/alice",
+	})
+	if err != nil {
+		t.Fatalf("Create child: %v", err)
+	}
+	if child.Track != "backend" {
+		t.Errorf("Track = %q, want %q (inherited from parent)", child.Track, "backend")
+	}
+	if !strings.Contains(child.Branch, "backend") {
+		t.Errorf("Branch = %q, want to contain %q", child.Branch, "backend")
+	}
+}
+
+func TestIntegration_GetChildren(t *testing.T) {
+	srv := setupTestDB(t, "railyard_bead_getchi")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_bead_getchi")
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	epic, err := Create(gormDB, CreateOpts{
+		Title:        "Parent epic",
+		Track:        "backend",
+		Type:         "epic",
+		BranchPrefix: "ry/alice",
+	})
+	if err != nil {
+		t.Fatalf("Create epic: %v", err)
+	}
+
+	for _, title := range []string{"Child 1", "Child 2", "Child 3"} {
+		if _, err := Create(gormDB, CreateOpts{
+			Title:        title,
+			Track:        "backend",
+			ParentID:     epic.ID,
+			BranchPrefix: "ry/alice",
+		}); err != nil {
+			t.Fatalf("Create %q: %v", title, err)
+		}
+	}
+
+	children, err := GetChildren(gormDB, epic.ID)
+	if err != nil {
+		t.Fatalf("GetChildren: %v", err)
+	}
+	if len(children) != 3 {
+		t.Errorf("GetChildren: got %d, want 3", len(children))
+	}
+
+	// Non-existent parent.
+	_, err = GetChildren(gormDB, "be-zzzzz")
+	if err == nil {
+		t.Fatal("expected error for non-existent parent")
+	}
+	if !strings.Contains(err.Error(), "parent not found") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "parent not found")
+	}
+}
+
+func TestIntegration_ChildrenSummary(t *testing.T) {
+	srv := setupTestDB(t, "railyard_bead_chsum")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_bead_chsum")
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	epic, err := Create(gormDB, CreateOpts{
+		Title:        "Summary epic",
+		Track:        "backend",
+		Type:         "epic",
+		BranchPrefix: "ry/alice",
+	})
+	if err != nil {
+		t.Fatalf("Create epic: %v", err)
+	}
+
+	// Create 3 children, move one to ready and one through to done.
+	c1, err := Create(gormDB, CreateOpts{
+		Title: "Open child", Track: "backend", ParentID: epic.ID, BranchPrefix: "ry/alice",
+	})
+	if err != nil {
+		t.Fatalf("Create c1: %v", err)
+	}
+	_ = c1
+
+	c2, err := Create(gormDB, CreateOpts{
+		Title: "Ready child", Track: "backend", ParentID: epic.ID, BranchPrefix: "ry/alice",
+	})
+	if err != nil {
+		t.Fatalf("Create c2: %v", err)
+	}
+	if err := Update(gormDB, c2.ID, map[string]interface{}{"status": "ready"}); err != nil {
+		t.Fatalf("Update c2 ready: %v", err)
+	}
+
+	c3, err := Create(gormDB, CreateOpts{
+		Title: "Done child", Track: "backend", ParentID: epic.ID, BranchPrefix: "ry/alice",
+	})
+	if err != nil {
+		t.Fatalf("Create c3: %v", err)
+	}
+	for _, status := range []string{"ready", "claimed", "in_progress", "done"} {
+		updates := map[string]interface{}{"status": status}
+		if status == "claimed" {
+			updates["assignee"] = "engine-01"
+		}
+		if err := Update(gormDB, c3.ID, updates); err != nil {
+			t.Fatalf("Update c3 %s: %v", status, err)
+		}
+	}
+
+	summary, err := ChildrenSummary(gormDB, epic.ID)
+	if err != nil {
+		t.Fatalf("ChildrenSummary: %v", err)
+	}
+
+	counts := make(map[string]int)
+	total := 0
+	for _, sc := range summary {
+		counts[sc.Status] = sc.Count
+		total += sc.Count
+	}
+	if total != 3 {
+		t.Errorf("total children = %d, want 3", total)
+	}
+	if counts["open"] != 1 {
+		t.Errorf("open count = %d, want 1", counts["open"])
+	}
+	if counts["done"] != 1 {
+		t.Errorf("done count = %d, want 1", counts["done"])
+	}
+	if counts["ready"] != 1 {
+		t.Errorf("ready count = %d, want 1", counts["ready"])
+	}
+}
+
 // closedGormDB returns a GORM connection with the underlying sql.DB closed.
 func closedGormDB(t *testing.T) *gorm.DB {
 	t.Helper()

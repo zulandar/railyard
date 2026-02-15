@@ -138,7 +138,14 @@ func TestCreateOpts_Defaults(t *testing.T) {
 
 func TestListFilters_ZeroValue(t *testing.T) {
 	f := ListFilters{}
-	if f.Track != "" || f.Status != "" || f.Type != "" || f.Assignee != "" {
+	if f.Track != "" || f.Status != "" || f.Type != "" || f.Assignee != "" || f.ParentID != "" {
 		t.Error("zero-value ListFilters should have all empty fields")
+	}
+}
+
+func TestStatusCount_ZeroValue(t *testing.T) {
+	sc := StatusCount{}
+	if sc.Status != "" || sc.Count != 0 {
+		t.Error("zero-value StatusCount should have empty Status and zero Count")
 	}
 }

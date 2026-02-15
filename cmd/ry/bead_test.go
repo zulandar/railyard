@@ -21,7 +21,7 @@ func TestBeadCmd_Help(t *testing.T) {
 	if !strings.Contains(out, "Bead management") {
 		t.Errorf("expected help to mention 'Bead management', got: %s", out)
 	}
-	for _, sub := range []string{"create", "list", "show", "update"} {
+	for _, sub := range []string{"create", "list", "show", "update", "children"} {
 		if !strings.Contains(out, sub) {
 			t.Errorf("expected help to list %q subcommand, got: %s", sub, out)
 		}
@@ -109,6 +109,17 @@ func TestNewBeadCreateCmd(t *testing.T) {
 	}
 	if cfgFlag.Shorthand != "c" {
 		t.Errorf("--config shorthand = %q, want %q", cfgFlag.Shorthand, "c")
+	}
+}
+
+func TestBeadCreateCmd_ParentFlag(t *testing.T) {
+	cmd := newBeadCreateCmd()
+	flag := cmd.Flags().Lookup("parent")
+	if flag == nil {
+		t.Fatal("expected --parent flag")
+	}
+	if flag.DefValue != "" {
+		t.Errorf("--parent default = %q, want empty", flag.DefValue)
 	}
 }
 
@@ -439,6 +450,48 @@ func TestNewBeadReadyCmd(t *testing.T) {
 	}
 	if cmd.Flags().Lookup("track") == nil {
 		t.Error("expected --track flag")
+	}
+}
+
+// --- children command tests ---
+
+func TestBeadChildrenCmd_Help(t *testing.T) {
+	cmd := newRootCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"bead", "children", "--help"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("bead children --help failed: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "children") {
+		t.Errorf("expected help to mention 'children', got: %s", out)
+	}
+}
+
+func TestBeadChildrenCmd_Flags(t *testing.T) {
+	cmd := newBeadChildrenCmd()
+	if cmd.Use != "children <parent-id>" {
+		t.Errorf("Use = %q, want %q", cmd.Use, "children <parent-id>")
+	}
+	if cmd.Flags().Lookup("config") == nil {
+		t.Error("expected --config flag")
+	}
+}
+
+func TestBeadChildrenCmd_NoArgs(t *testing.T) {
+	cmd := newRootCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"bead", "children"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for missing args")
 	}
 }
 

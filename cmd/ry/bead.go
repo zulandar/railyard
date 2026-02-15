@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
@@ -23,6 +24,7 @@ func newBeadCmd() *cobra.Command {
 	cmd.AddCommand(newBeadUpdateCmd())
 	cmd.AddCommand(newBeadDepCmd())
 	cmd.AddCommand(newBeadReadyCmd())
+	cmd.AddCommand(newBeadChildrenCmd())
 	return cmd
 }
 
@@ -36,6 +38,7 @@ func newBeadCreateCmd() *cobra.Command {
 		description string
 		acceptance  string
 		design      string
+		parentID    string
 	)
 
 	cmd := &cobra.Command{
@@ -51,20 +54,21 @@ func newBeadCreateCmd() *cobra.Command {
 				Description: description,
 				Acceptance:  acceptance,
 				DesignNotes: design,
+				ParentID:    parentID,
 			})
 		},
 	}
 
 	cmd.Flags().StringVarP(&configPath, "config", "c", "railyard.yaml", "path to Railyard config file")
 	cmd.Flags().StringVar(&title, "title", "", "bead title (required)")
-	cmd.Flags().StringVar(&track, "track", "", "track name (required)")
+	cmd.Flags().StringVar(&track, "track", "", "track name (required if no parent with track)")
 	cmd.Flags().StringVar(&beadType, "type", "task", "bead type (task, epic, bug, spike)")
 	cmd.Flags().IntVar(&priority, "priority", 2, "priority (0=critical → 4=backlog)")
 	cmd.Flags().StringVar(&description, "description", "", "detailed description")
 	cmd.Flags().StringVar(&acceptance, "acceptance", "", "acceptance criteria")
 	cmd.Flags().StringVar(&design, "design", "", "design notes")
+	cmd.Flags().StringVar(&parentID, "parent", "", "parent epic bead ID")
 	cmd.MarkFlagRequired("title")
-	cmd.MarkFlagRequired("track")
 	return cmd
 }
 
@@ -83,6 +87,9 @@ func runBeadCreate(cmd *cobra.Command, configPath string, opts bead.CreateOpts) 
 	out := cmd.OutOrStdout()
 	fmt.Fprintf(out, "Created bead %s\n", b.ID)
 	fmt.Fprintf(out, "Branch: %s\n", b.Branch)
+	if b.ParentID != nil {
+		fmt.Fprintf(out, "Parent: %s\n", *b.ParentID)
+	}
 	return nil
 }
 
@@ -189,6 +196,20 @@ func runBeadShow(cmd *cobra.Command, configPath, id string) error {
 	}
 	if b.ParentID != nil {
 		fmt.Fprintf(out, "Parent:      %s\n", *b.ParentID)
+	}
+	if b.Type == "epic" {
+		summary, err := bead.ChildrenSummary(gormDB, b.ID)
+		if err == nil {
+			total := 0
+			parts := []string{}
+			for _, sc := range summary {
+				total += sc.Count
+				parts = append(parts, fmt.Sprintf("%d %s", sc.Count, sc.Status))
+			}
+			if total > 0 {
+				fmt.Fprintf(out, "Children:    %d (%s)\n", total, strings.Join(parts, ", "))
+			}
+		}
 	}
 	fmt.Fprintf(out, "Created:     %s\n", b.CreatedAt.Format("2006-01-02 15:04:05"))
 	fmt.Fprintf(out, "Updated:     %s\n", b.UpdatedAt.Format("2006-01-02 15:04:05"))
@@ -479,6 +500,61 @@ func newBeadReadyCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&configPath, "config", "c", "railyard.yaml", "path to Railyard config file")
 	cmd.Flags().StringVar(&track, "track", "", "filter by track")
 	return cmd
+}
+
+func newBeadChildrenCmd() *cobra.Command {
+	var configPath string
+
+	cmd := &cobra.Command{
+		Use:   "children <parent-id>",
+		Short: "List children of an epic",
+		Long:  "Lists all child beads of an epic, with a status summary.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runBeadChildren(cmd, configPath, args[0])
+		},
+	}
+
+	cmd.Flags().StringVarP(&configPath, "config", "c", "railyard.yaml", "path to Railyard config file")
+	return cmd
+}
+
+func runBeadChildren(cmd *cobra.Command, configPath, parentID string) error {
+	_, gormDB, err := connectFromConfig(configPath)
+	if err != nil {
+		return err
+	}
+
+	children, err := bead.GetChildren(gormDB, parentID)
+	if err != nil {
+		return err
+	}
+
+	out := cmd.OutOrStdout()
+	if len(children) == 0 {
+		fmt.Fprintf(out, "No children for %s\n", parentID)
+		return nil
+	}
+
+	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "ID\tTITLE\tSTATUS\tTRACK\tPRI")
+	for _, b := range children {
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\n",
+			b.ID, truncate(b.Title, 40), b.Status, b.Track, b.Priority)
+	}
+	w.Flush()
+
+	// Print status summary.
+	summary, err := bead.ChildrenSummary(gormDB, parentID)
+	if err != nil {
+		return err
+	}
+	parts := []string{}
+	for _, sc := range summary {
+		parts = append(parts, fmt.Sprintf("%d %s", sc.Count, sc.Status))
+	}
+	fmt.Fprintf(out, "\nSummary: %s\n", strings.Join(parts, ", "))
+	return nil
 }
 
 // truncate shortens a string to maxLen, adding "..." if truncated.
