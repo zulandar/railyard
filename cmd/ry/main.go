@@ -27,6 +27,9 @@ func newRootCmd() *cobra.Command {
 	cmd.AddCommand(newEngineCmd())
 	cmd.AddCommand(newCompleteCmd())
 	cmd.AddCommand(newProgressCmd())
+	cmd.AddCommand(newMessageCmd())
+	cmd.AddCommand(newInboxCmd())
+	cmd.AddCommand(newDispatchCmd())
 	return cmd
 }
 

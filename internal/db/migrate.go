@@ -19,6 +19,7 @@ func AllModels() []interface{} {
 		&models.Track{},
 		&models.Engine{},
 		&models.Message{},
+		&models.BroadcastAck{},
 		&models.AgentLog{},
 		&models.RailyardConfig{},
 		&models.ReindexJob{},

@@ -152,6 +152,21 @@ func TestRenderPrompt_MultipleTracksRendered(t *testing.T) {
 	}
 }
 
+func TestStart_ValidConfig_FailsOnClaude(t *testing.T) {
+	cfg := testConfig(config.TrackConfig{
+		Name:     "backend",
+		Language: "go",
+	})
+	err := Start(StartOpts{Config: cfg})
+	// Start renders the prompt successfully but fails when trying to run claude.
+	if err == nil {
+		t.Fatal("expected error (claude binary not available in test)")
+	}
+	if !strings.Contains(err.Error(), "claude session") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "claude session")
+	}
+}
+
 func TestBuildCommand_Args(t *testing.T) {
 	cmd := BuildCommand("test prompt")
 	if cmd.Path == "" {
