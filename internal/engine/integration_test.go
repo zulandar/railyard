@@ -6,13 +6,16 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/zulandar/railyard/internal/bead"
 	"github.com/zulandar/railyard/internal/db"
+	"github.com/zulandar/railyard/internal/models"
 	"gorm.io/gorm"
 )
 
@@ -731,5 +734,101 @@ func TestIntegration_ClaimBead_DBError(t *testing.T) {
 	_, err := ClaimBead(gormDB, "eng-12345", "backend")
 	if err == nil {
 		t.Fatal("expected error from ClaimBead with closed DB")
+	}
+}
+
+// --- SpawnAgent tests ---
+
+func TestIntegration_SpawnAgent(t *testing.T) {
+	dbName := "railyard_eng_spawn"
+	srv := setupTestDB(t, dbName)
+	gormDB := connectDB(t, srv, dbName)
+
+	// Register an engine.
+	eng, err := Register(gormDB, RegisterOpts{Track: "backend"})
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	// Create a mock binary that writes known output.
+	dir := t.TempDir()
+	mockScript := `#!/bin/sh
+echo "stdout line 1"
+echo "stdout line 2"
+echo "stderr output" >&2
+`
+	mockPath := filepath.Join(dir, "mock-claude")
+	if err := os.WriteFile(mockPath, []byte(mockScript), 0755); err != nil {
+		t.Fatalf("write mock binary: %v", err)
+	}
+
+	sess, err := SpawnAgent(context.Background(), gormDB, SpawnOpts{
+		EngineID:       eng.ID,
+		BeadID:         "bead-integ1",
+		ContextPayload: "integration test context",
+		WorkDir:        dir,
+		ClaudeBinary:   mockPath,
+	})
+	if err != nil {
+		t.Fatalf("SpawnAgent: %v", err)
+	}
+
+	if err := sess.Wait(); err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+
+	// Give a moment for final flushes to settle.
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify agent_logs rows were created.
+	var logs []models.AgentLog
+	if err := gormDB.Where("session_id = ?", sess.ID).Find(&logs).Error; err != nil {
+		t.Fatalf("query agent_logs: %v", err)
+	}
+
+	if len(logs) == 0 {
+		t.Fatal("expected agent_log rows, got 0")
+	}
+
+	// Check we have both stdout and stderr entries.
+	var hasOut, hasErr bool
+	for _, log := range logs {
+		if log.EngineID != eng.ID {
+			t.Errorf("log.EngineID = %q, want %q", log.EngineID, eng.ID)
+		}
+		if log.SessionID != sess.ID {
+			t.Errorf("log.SessionID = %q, want %q", log.SessionID, sess.ID)
+		}
+		if log.BeadID != "bead-integ1" {
+			t.Errorf("log.BeadID = %q, want %q", log.BeadID, "bead-integ1")
+		}
+		switch log.Direction {
+		case "out":
+			hasOut = true
+			if !strings.Contains(log.Content, "stdout line 1") {
+				t.Errorf("stdout log content = %q, want to contain %q", log.Content, "stdout line 1")
+			}
+		case "err":
+			hasErr = true
+			if !strings.Contains(log.Content, "stderr output") {
+				t.Errorf("stderr log content = %q, want to contain %q", log.Content, "stderr output")
+			}
+		}
+	}
+
+	if !hasOut {
+		t.Error("no stdout log entry found")
+	}
+	if !hasErr {
+		t.Error("no stderr log entry found")
+	}
+
+	// Verify engine.session_id was updated.
+	gotEng, err := Get(gormDB, eng.ID)
+	if err != nil {
+		t.Fatalf("Get engine: %v", err)
+	}
+	if gotEng.SessionID != sess.ID {
+		t.Errorf("engine.SessionID = %q, want %q", gotEng.SessionID, sess.ID)
 	}
 }
