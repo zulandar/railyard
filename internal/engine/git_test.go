@@ -324,3 +324,72 @@ func TestRecentCommits_OnBranch(t *testing.T) {
 		t.Errorf("commits[0] = %q, want to contain %q", commits[0], "branch commit")
 	}
 }
+
+// --- ChangedFiles tests ---
+
+func TestChangedFiles_EmptyRepoDir(t *testing.T) {
+	_, err := ChangedFiles("")
+	if err == nil {
+		t.Fatal("expected error for empty repo dir")
+	}
+	if !strings.Contains(err.Error(), "repo directory is required") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "repo directory is required")
+	}
+}
+
+func TestChangedFiles_NoChanges(t *testing.T) {
+	dir := initTestRepo(t)
+	files, err := ChangedFiles(dir)
+	if err != nil {
+		t.Fatalf("ChangedFiles: %v", err)
+	}
+	if files != nil {
+		t.Errorf("expected nil for no changes, got %v", files)
+	}
+}
+
+func TestChangedFiles_WithChanges(t *testing.T) {
+	dir := initTestRepo(t)
+
+	// Modify an existing file.
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("modified\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	files, err := ChangedFiles(dir)
+	if err != nil {
+		t.Fatalf("ChangedFiles: %v", err)
+	}
+	if len(files) != 1 {
+		t.Fatalf("got %d files, want 1", len(files))
+	}
+	if files[0] != "README.md" {
+		t.Errorf("files[0] = %q, want %q", files[0], "README.md")
+	}
+}
+
+func TestChangedFiles_MultipleFiles(t *testing.T) {
+	dir := initTestRepo(t)
+
+	// Modify existing and create new (tracked) files.
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("modified\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "new.txt"), []byte("new file\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Stage the new file so git diff HEAD sees it.
+	cmd := exec.Command("git", "add", "new.txt")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git add: %s\n%s", err, out)
+	}
+
+	files, err := ChangedFiles(dir)
+	if err != nil {
+		t.Fatalf("ChangedFiles: %v", err)
+	}
+	if len(files) != 2 {
+		t.Fatalf("got %d files, want 2: %v", len(files), files)
+	}
+}

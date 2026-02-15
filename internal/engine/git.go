@@ -89,3 +89,23 @@ func RecentCommits(repoDir, branchName string, n int) ([]string, error) {
 	}
 	return strings.Split(raw, "\n"), nil
 }
+
+// ChangedFiles returns the list of files with uncommitted changes (staged + unstaged).
+func ChangedFiles(repoDir string) ([]string, error) {
+	if repoDir == "" {
+		return nil, fmt.Errorf("engine: repo directory is required")
+	}
+
+	cmd := exec.Command("git", "diff", "--name-only", "HEAD")
+	cmd.Dir = repoDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("engine: changed files: %s", strings.TrimSpace(string(out)))
+	}
+
+	raw := strings.TrimSpace(string(out))
+	if raw == "" {
+		return nil, nil
+	}
+	return strings.Split(raw, "\n"), nil
+}

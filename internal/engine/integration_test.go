@@ -832,3 +832,340 @@ echo "stderr output" >&2
 		t.Errorf("engine.SessionID = %q, want %q", gotEng.SessionID, sess.ID)
 	}
 }
+
+// --- HandleCompletion tests ---
+
+func TestIntegration_HandleCompletion(t *testing.T) {
+	dbName := "railyard_eng_comp"
+	srv := setupTestDB(t, dbName)
+	gormDB := connectDB(t, srv, dbName)
+
+	// Register an engine and create a bead.
+	eng, err := Register(gormDB, RegisterOpts{Track: "backend"})
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	b, err := bead.Create(gormDB, bead.CreateOpts{
+		Title:        "Completable bead",
+		Track:        "backend",
+		BranchPrefix: "ry/test",
+	})
+	if err != nil {
+		t.Fatalf("bead.Create: %v", err)
+	}
+
+	// Transition bead to done (simulating agent completing via ry complete).
+	for _, status := range []string{"ready", "claimed", "in_progress", "done"} {
+		updates := map[string]interface{}{"status": status}
+		if status == "claimed" {
+			updates["assignee"] = eng.ID
+		}
+		if err := bead.Update(gormDB, b.ID, updates); err != nil {
+			t.Fatalf("bead.Update %s: %v", status, err)
+		}
+	}
+
+	// Set engine to working state.
+	gormDB.Model(&models.Engine{}).Where("id = ?", eng.ID).Updates(map[string]interface{}{
+		"status":       StatusWorking,
+		"current_bead": b.ID,
+		"session_id":   "sess-comp1",
+	})
+
+	// Set up a bare repo as remote for push.
+	bareDir := t.TempDir()
+	run := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v: %s\n%s", args, err, out)
+		}
+	}
+	run(bareDir, "git", "init", "--bare")
+
+	repoDir := t.TempDir()
+	run(repoDir, "git", "init")
+	run(repoDir, "git", "config", "user.name", "Test")
+	run(repoDir, "git", "config", "user.email", "test@test.com")
+	os.WriteFile(filepath.Join(repoDir, "f.txt"), []byte("x"), 0644)
+	run(repoDir, "git", "add", ".")
+	run(repoDir, "git", "commit", "-m", "init")
+	run(repoDir, "git", "branch", "-M", "main")
+	run(repoDir, "git", "remote", "add", "origin", bareDir)
+	run(repoDir, "git", "checkout", "-b", b.Branch)
+	os.WriteFile(filepath.Join(repoDir, "g.txt"), []byte("y"), 0644)
+	run(repoDir, "git", "add", ".")
+	run(repoDir, "git", "commit", "-m", "bead work")
+
+	err = HandleCompletion(gormDB, b, eng, CompletionOpts{
+		RepoDir:   repoDir,
+		SessionID: "sess-comp1",
+		Note:      "All tests pass, feature complete.",
+	})
+	if err != nil {
+		t.Fatalf("HandleCompletion: %v", err)
+	}
+
+	// Verify progress note written.
+	var progress []models.BeadProgress
+	gormDB.Where("bead_id = ?", b.ID).Find(&progress)
+	if len(progress) == 0 {
+		t.Fatal("expected progress note, got 0")
+	}
+	found := false
+	for _, p := range progress {
+		if p.Note == "All tests pass, feature complete." {
+			found = true
+			if p.EngineID != eng.ID {
+				t.Errorf("progress.EngineID = %q, want %q", p.EngineID, eng.ID)
+			}
+			if p.SessionID != "sess-comp1" {
+				t.Errorf("progress.SessionID = %q, want %q", p.SessionID, "sess-comp1")
+			}
+		}
+	}
+	if !found {
+		t.Error("completion note not found in progress entries")
+	}
+
+	// Verify engine is back to idle.
+	gotEng, err := Get(gormDB, eng.ID)
+	if err != nil {
+		t.Fatalf("Get engine: %v", err)
+	}
+	if gotEng.Status != StatusIdle {
+		t.Errorf("engine.Status = %q, want %q", gotEng.Status, StatusIdle)
+	}
+	if gotEng.CurrentBead != "" {
+		t.Errorf("engine.CurrentBead = %q, want empty", gotEng.CurrentBead)
+	}
+	if gotEng.SessionID != "" {
+		t.Errorf("engine.SessionID = %q, want empty", gotEng.SessionID)
+	}
+}
+
+func TestIntegration_HandleCompletion_DefaultNote(t *testing.T) {
+	dbName := "railyard_eng_compdef"
+	srv := setupTestDB(t, dbName)
+	gormDB := connectDB(t, srv, dbName)
+
+	eng, err := Register(gormDB, RegisterOpts{Track: "backend"})
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	// Create a bead with no branch (skip push).
+	b := &models.Bead{ID: "be-nobrn", Track: "backend"}
+	gormDB.Create(b)
+
+	gormDB.Model(&models.Engine{}).Where("id = ?", eng.ID).Updates(map[string]interface{}{
+		"status":       StatusWorking,
+		"current_bead": b.ID,
+	})
+
+	// Use a valid repo dir but no branch to push.
+	repoDir := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = repoDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v: %s\n%s", args, err, out)
+		}
+	}
+	run("git", "init")
+	run("git", "config", "user.name", "Test")
+	run("git", "config", "user.email", "test@test.com")
+	os.WriteFile(filepath.Join(repoDir, "f.txt"), []byte("x"), 0644)
+	run("git", "add", ".")
+	run("git", "commit", "-m", "init")
+
+	err = HandleCompletion(gormDB, b, eng, CompletionOpts{RepoDir: repoDir})
+	if err != nil {
+		t.Fatalf("HandleCompletion: %v", err)
+	}
+
+	var progress []models.BeadProgress
+	gormDB.Where("bead_id = ?", b.ID).Find(&progress)
+	if len(progress) == 0 {
+		t.Fatal("expected default progress note")
+	}
+	if progress[0].Note != "Bead completed successfully." {
+		t.Errorf("note = %q, want default", progress[0].Note)
+	}
+}
+
+// --- HandleClearCycle tests ---
+
+func TestIntegration_HandleClearCycle(t *testing.T) {
+	dbName := "railyard_eng_clear"
+	srv := setupTestDB(t, dbName)
+	gormDB := connectDB(t, srv, dbName)
+
+	eng, err := Register(gormDB, RegisterOpts{Track: "backend"})
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	b, err := bead.Create(gormDB, bead.CreateOpts{
+		Title:        "In-progress bead",
+		Track:        "backend",
+		BranchPrefix: "ry/test",
+	})
+	if err != nil {
+		t.Fatalf("bead.Create: %v", err)
+	}
+
+	// Set up a repo with uncommitted changes.
+	repoDir := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = repoDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v: %s\n%s", args, err, out)
+		}
+	}
+	run("git", "init")
+	run("git", "config", "user.name", "Test")
+	run("git", "config", "user.email", "test@test.com")
+	os.WriteFile(filepath.Join(repoDir, "main.go"), []byte("package main\n"), 0644)
+	run("git", "add", ".")
+	run("git", "commit", "-m", "init")
+	// Now modify a file to simulate in-progress work.
+	os.WriteFile(filepath.Join(repoDir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0644)
+
+	err = HandleClearCycle(gormDB, b, eng, ClearCycleOpts{
+		RepoDir:   repoDir,
+		SessionID: "sess-clr1",
+		Cycle:     1,
+		Note:      "Scaffolded the handler, tests pending.",
+	})
+	if err != nil {
+		t.Fatalf("HandleClearCycle: %v", err)
+	}
+
+	// Verify progress note.
+	var progress []models.BeadProgress
+	gormDB.Where("bead_id = ? AND cycle = ?", b.ID, 1).Find(&progress)
+	if len(progress) != 1 {
+		t.Fatalf("got %d progress entries, want 1", len(progress))
+	}
+
+	p := progress[0]
+	if p.Note != "Scaffolded the handler, tests pending." {
+		t.Errorf("note = %q, want custom note", p.Note)
+	}
+	if p.EngineID != eng.ID {
+		t.Errorf("engineID = %q, want %q", p.EngineID, eng.ID)
+	}
+	if p.SessionID != "sess-clr1" {
+		t.Errorf("sessionID = %q, want %q", p.SessionID, "sess-clr1")
+	}
+	if p.Cycle != 1 {
+		t.Errorf("cycle = %d, want 1", p.Cycle)
+	}
+	// FilesChanged should contain main.go.
+	if !strings.Contains(p.FilesChanged, "main.go") {
+		t.Errorf("filesChanged = %q, want to contain %q", p.FilesChanged, "main.go")
+	}
+}
+
+func TestIntegration_HandleClearCycle_DefaultNote(t *testing.T) {
+	dbName := "railyard_eng_cleardf"
+	srv := setupTestDB(t, dbName)
+	gormDB := connectDB(t, srv, dbName)
+
+	eng, err := Register(gormDB, RegisterOpts{Track: "backend"})
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	b := &models.Bead{ID: "be-clrdf", Track: "backend", Title: "test"}
+	gormDB.Create(b)
+
+	err = HandleClearCycle(gormDB, b, eng, ClearCycleOpts{
+		Cycle: 3,
+	})
+	if err != nil {
+		t.Fatalf("HandleClearCycle: %v", err)
+	}
+
+	var progress []models.BeadProgress
+	gormDB.Where("bead_id = ? AND cycle = ?", b.ID, 3).Find(&progress)
+	if len(progress) != 1 {
+		t.Fatalf("got %d progress entries, want 1", len(progress))
+	}
+	if !strings.Contains(progress[0].Note, "Clear cycle 3") {
+		t.Errorf("note = %q, want to contain 'Clear cycle 3'", progress[0].Note)
+	}
+}
+
+func TestIntegration_HandleClearCycle_NoRepoDir(t *testing.T) {
+	dbName := "railyard_eng_clearnr"
+	srv := setupTestDB(t, dbName)
+	gormDB := connectDB(t, srv, dbName)
+
+	eng, err := Register(gormDB, RegisterOpts{Track: "backend"})
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	b := &models.Bead{ID: "be-clrnr", Track: "backend", Title: "test"}
+	gormDB.Create(b)
+
+	// No RepoDir — should still write progress note, just no files.
+	err = HandleClearCycle(gormDB, b, eng, ClearCycleOpts{
+		Cycle: 1,
+		Note:  "Progress without repo.",
+	})
+	if err != nil {
+		t.Fatalf("HandleClearCycle: %v", err)
+	}
+
+	var progress []models.BeadProgress
+	gormDB.Where("bead_id = ?", b.ID).Find(&progress)
+	if len(progress) != 1 {
+		t.Fatalf("got %d progress entries, want 1", len(progress))
+	}
+	if progress[0].FilesChanged != "" {
+		t.Errorf("filesChanged = %q, want empty (no repo)", progress[0].FilesChanged)
+	}
+}
+
+func TestIntegration_HandleClearCycle_MultipleCycles(t *testing.T) {
+	dbName := "railyard_eng_clearm"
+	srv := setupTestDB(t, dbName)
+	gormDB := connectDB(t, srv, dbName)
+
+	eng, err := Register(gormDB, RegisterOpts{Track: "backend"})
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	b := &models.Bead{ID: "be-clrm", Track: "backend", Title: "test"}
+	gormDB.Create(b)
+
+	for cycle := 1; cycle <= 3; cycle++ {
+		err = HandleClearCycle(gormDB, b, eng, ClearCycleOpts{
+			Cycle: cycle,
+			Note:  fmt.Sprintf("Cycle %d work", cycle),
+		})
+		if err != nil {
+			t.Fatalf("HandleClearCycle cycle %d: %v", cycle, err)
+		}
+	}
+
+	var progress []models.BeadProgress
+	gormDB.Where("bead_id = ?", b.ID).Order("cycle ASC").Find(&progress)
+	if len(progress) != 3 {
+		t.Fatalf("got %d progress entries, want 3", len(progress))
+	}
+	for i, p := range progress {
+		if p.Cycle != i+1 {
+			t.Errorf("progress[%d].Cycle = %d, want %d", i, p.Cycle, i+1)
+		}
+	}
+}
