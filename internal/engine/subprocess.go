@@ -55,13 +55,13 @@ type logWriter struct {
 // DefaultFlushInterval is the interval between periodic log flushes.
 const DefaultFlushInterval = 5 * time.Second
 
-// GenerateSessionID creates a unique session ID in sess-xxxxx format (5-char hex).
+// GenerateSessionID creates a unique session ID in sess-xxxxxxxx format (8-char hex).
 func GenerateSessionID() (string, error) {
-	b := make([]byte, 3)
+	b := make([]byte, 4)
 	if _, err := rand.Read(b); err != nil {
 		return "", fmt.Errorf("engine: generate session ID: %w", err)
 	}
-	return "sess-" + hex.EncodeToString(b)[:5], nil
+	return "sess-" + hex.EncodeToString(b), nil
 }
 
 // SpawnAgent spawns a claude CLI subprocess with the given context payload.

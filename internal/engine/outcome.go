@@ -44,11 +44,12 @@ func HandleCompletion(db *gorm.DB, bead *models.Bead, engine *models.Engine, opt
 	}
 
 	if err := db.Create(&models.BeadProgress{
-		BeadID:    bead.ID,
-		EngineID:  engine.ID,
-		SessionID: opts.SessionID,
-		Note:      note,
-		CreatedAt: time.Now(),
+		BeadID:       bead.ID,
+		EngineID:     engine.ID,
+		SessionID:    opts.SessionID,
+		Note:         note,
+		FilesChanged: "[]",
+		CreatedAt:    time.Now(),
 	}).Error; err != nil {
 		return fmt.Errorf("engine: write completion progress: %w", err)
 	}
@@ -88,7 +89,7 @@ func HandleClearCycle(db *gorm.DB, bead *models.Bead, engine *models.Engine, opt
 	}
 
 	// Capture files changed since last commit.
-	var filesJSON string
+	filesJSON := "[]"
 	if opts.RepoDir != "" {
 		files, err := ChangedFiles(opts.RepoDir)
 		if err == nil && len(files) > 0 {

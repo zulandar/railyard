@@ -1130,8 +1130,8 @@ func TestIntegration_HandleClearCycle_NoRepoDir(t *testing.T) {
 	if len(progress) != 1 {
 		t.Fatalf("got %d progress entries, want 1", len(progress))
 	}
-	if progress[0].FilesChanged != "" {
-		t.Errorf("filesChanged = %q, want empty (no repo)", progress[0].FilesChanged)
+	if progress[0].FilesChanged != "[]" {
+		t.Errorf("filesChanged = %q, want %q (no repo)", progress[0].FilesChanged, "[]")
 	}
 }
 

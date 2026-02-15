@@ -23,8 +23,8 @@ func TestGenerateSessionID_Format(t *testing.T) {
 	if !strings.HasPrefix(id, "sess-") {
 		t.Errorf("ID %q missing sess- prefix", id)
 	}
-	if len(id) != 10 {
-		t.Errorf("ID %q length = %d, want 10", id, len(id))
+	if len(id) != 13 {
+		t.Errorf("ID %q length = %d, want 13", id, len(id))
 	}
 }
 

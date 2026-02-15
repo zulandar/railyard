@@ -28,13 +28,13 @@ type RegisterOpts struct {
 	SessionID string
 }
 
-// GenerateID creates a unique engine ID in eng-xxxxx format (5-char hex).
+// GenerateID creates a unique engine ID in eng-xxxxxxxx format (8-char hex).
 func GenerateID() (string, error) {
-	b := make([]byte, 3)
+	b := make([]byte, 4)
 	if _, err := rand.Read(b); err != nil {
 		return "", fmt.Errorf("engine: generate ID: %w", err)
 	}
-	return "eng-" + hex.EncodeToString(b)[:5], nil
+	return "eng-" + hex.EncodeToString(b), nil
 }
 
 // generateUniqueID generates an ID and retries once on collision.

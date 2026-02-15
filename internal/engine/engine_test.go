@@ -14,9 +14,9 @@ func TestGenerateID_Format(t *testing.T) {
 	if !strings.HasPrefix(id, "eng-") {
 		t.Errorf("ID %q missing eng- prefix", id)
 	}
-	// eng- (4 chars) + 5 hex chars = 9 total
-	if len(id) != 9 {
-		t.Errorf("ID length = %d, want 9; id = %q", len(id), id)
+	// eng- (4 chars) + 8 hex chars = 12 total
+	if len(id) != 12 {
+		t.Errorf("ID length = %d, want 12; id = %q", len(id), id)
 	}
 }
 
