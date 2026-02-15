@@ -30,6 +30,8 @@ func newRootCmd() *cobra.Command {
 	cmd.AddCommand(newMessageCmd())
 	cmd.AddCommand(newInboxCmd())
 	cmd.AddCommand(newDispatchCmd())
+	cmd.AddCommand(newYardmasterCmd())
+	cmd.AddCommand(newSwitchCmd())
 	return cmd
 }
 
