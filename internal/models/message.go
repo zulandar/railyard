@@ -15,3 +15,9 @@ type Message struct {
 	Acknowledged bool      `gorm:"default:false;index"`
 	CreatedAt    time.Time
 }
+
+// BroadcastAck tracks which agents have acknowledged a broadcast message.
+type BroadcastAck struct {
+	MessageID uint   `gorm:"primaryKey"`
+	AgentID   string `gorm:"primaryKey;size:64"`
+}

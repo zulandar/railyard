@@ -15,6 +15,7 @@ import (
 	"github.com/zulandar/railyard/internal/config"
 	"github.com/zulandar/railyard/internal/db"
 	"github.com/zulandar/railyard/internal/engine"
+	"github.com/zulandar/railyard/internal/messaging"
 	"github.com/zulandar/railyard/internal/models"
 	"gorm.io/gorm"
 )
@@ -137,6 +138,41 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 			fmt.Fprintf(out, "Heartbeat error: %v\n", err)
 			return fmt.Errorf("heartbeat: %w", err)
 		default:
+		}
+
+		// Process inbox — check for yardmaster instructions.
+		instructions, inboxErr := engine.ProcessInbox(gormDB, eng.ID)
+		if inboxErr != nil {
+			log.Printf("inbox error: %v", inboxErr)
+		}
+
+		// Handle pause instruction.
+		if engine.ShouldPause(instructions) {
+			fmt.Fprintf(out, "Paused by yardmaster. Waiting for resume...\n")
+			for {
+				sleepWithContext(ctx, pollInterval)
+				if ctx.Err() != nil {
+					break
+				}
+				resumeInst, _ := engine.ProcessInbox(gormDB, eng.ID)
+				if engine.HasResume(resumeInst) {
+					fmt.Fprintf(out, "Resumed by yardmaster.\n")
+					break
+				}
+			}
+			continue
+		}
+
+		// Handle abort instruction for current bead.
+		if eng.CurrentBead != "" && engine.ShouldAbort(instructions, eng.CurrentBead) {
+			fmt.Fprintf(out, "Abort instruction received for bead %s\n", eng.CurrentBead)
+			gormDB.Model(&models.Engine{}).Where("id = ?", eng.ID).Updates(map[string]interface{}{
+				"current_bead": "",
+				"status":       engine.StatusIdle,
+			})
+			eng.CurrentBead = ""
+			cycle = 0
+			continue
 		}
 
 		// Try to claim a bead (or re-claim current if mid-cycle).
@@ -307,10 +343,7 @@ func loadProgress(gormDB *gorm.DB, beadID string) ([]models.BeadProgress, error)
 
 // loadMessages retrieves unacknowledged messages for an engine.
 func loadMessages(gormDB *gorm.DB, engineID string) ([]models.Message, error) {
-	var msgs []models.Message
-	err := gormDB.Where("to_agent = ? AND acknowledged = ?", engineID, false).
-		Order("created_at ASC").Find(&msgs).Error
-	return msgs, err
+	return messaging.Inbox(gormDB, engineID)
 }
 
 // sleepWithContext sleeps for the given duration but returns early if ctx is cancelled.
