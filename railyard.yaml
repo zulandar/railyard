@@ -1,0 +1,47 @@
+# Railyard configuration — local development
+#
+# This file configures a single-user Railyard instance.
+# See ARCHITECTURE.md for full documentation.
+#
+# Usage:
+#   ry db init -c railyard.yaml
+#   ry start -c railyard.yaml --engines 2
+
+owner: testuser
+repo: git@github.com:zulandar/railyard.git
+# branch_prefix defaults to ry/{owner} if omitted
+
+dolt:
+  host: 127.0.0.1
+  port: 3306
+  # database defaults to railyard_{owner} if omitted
+
+# Stall detection thresholds (optional — these are the defaults)
+stall:
+  stdout_timeout_sec: 120   # no stdout for 120s = stall
+  repeated_error_max: 3     # same error 3x = stall
+  max_clear_cycles: 5       # more than 5 /clear cycles = stall
+
+tracks:
+  - name: backend
+    language: go
+    file_patterns: ["cmd/**", "internal/**", "pkg/**", "*.go"]
+    engine_slots: 2
+    conventions:
+      go_version: "1.25"
+      style: "stdlib-first, no frameworks"
+      test_framework: "stdlib table-driven"
+
+  # Uncomment to add more tracks:
+  # - name: frontend
+  #   language: typescript
+  #   file_patterns: ["src/**", "*.ts", "*.tsx", "*.css"]
+  #   engine_slots: 2
+  #   conventions:
+  #     framework: "Next.js 15"
+  #     styling: "Tailwind CSS"
+
+  # - name: infra
+  #   language: mixed
+  #   file_patterns: ["terraform/**", "docker/**", ".github/**", "Makefile"]
+  #   engine_slots: 1
