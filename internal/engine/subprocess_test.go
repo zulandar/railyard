@@ -72,11 +72,15 @@ func TestBuildCommand_Args(t *testing.T) {
 
 	// Find required flags.
 	foundSkipPerms := false
+	foundStreamJSON := false
 	foundSP := false
 	foundP := false
 	for i, a := range args {
 		if a == "--dangerously-skip-permissions" {
 			foundSkipPerms = true
+		}
+		if a == "--output-format" && i+1 < len(args) && args[i+1] == "stream-json" {
+			foundStreamJSON = true
 		}
 		if a == "--system-prompt" && i+1 < len(args) {
 			foundSP = true
@@ -93,6 +97,9 @@ func TestBuildCommand_Args(t *testing.T) {
 	}
 	if !foundSkipPerms {
 		t.Error("--dangerously-skip-permissions flag not found in args")
+	}
+	if !foundStreamJSON {
+		t.Error("--output-format stream-json not found in args")
 	}
 	if !foundSP {
 		t.Error("--system-prompt flag not found in args")
