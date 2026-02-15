@@ -2,9 +2,11 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/zulandar/railyard/internal/engine"
 	"github.com/zulandar/railyard/internal/orchestration"
 )
 
@@ -39,6 +41,11 @@ func runStop(cmd *cobra.Command, configPath string, timeout time.Duration) error
 		Timeout: timeout,
 	}); err != nil {
 		return err
+	}
+
+	// Clean up any orphaned engine worktrees.
+	if repoDir, err := os.Getwd(); err == nil {
+		engine.CleanupWorktrees(repoDir)
 	}
 
 	fmt.Fprintf(cmd.OutOrStdout(), "Railyard stopped.\n")

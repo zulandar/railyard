@@ -2,10 +2,77 @@ package engine
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
+
+// EnsureWorktree creates a git worktree at engines/<engineID> if it doesn't exist.
+// Returns the absolute path to the worktree directory.
+func EnsureWorktree(repoDir, engineID string) (string, error) {
+	wtDir := filepath.Join(repoDir, "engines", engineID)
+
+	// If worktree directory already exists (stale from crash), reuse it.
+	if _, err := os.Stat(wtDir); err == nil {
+		return wtDir, nil
+	}
+
+	if err := os.MkdirAll(filepath.Join(repoDir, "engines"), 0755); err != nil {
+		return "", fmt.Errorf("engine: create engines dir: %w", err)
+	}
+
+	cmd := exec.Command("git", "worktree", "add", "--detach", wtDir)
+	cmd.Dir = repoDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("engine: create worktree %q: %s", engineID, strings.TrimSpace(string(out)))
+	}
+
+	return wtDir, nil
+}
+
+// RemoveWorktree removes an engine's git worktree.
+func RemoveWorktree(repoDir, engineID string) error {
+	wtPath := filepath.Join("engines", engineID)
+	cmd := exec.Command("git", "worktree", "remove", "--force", wtPath)
+	cmd.Dir = repoDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		// Non-fatal if worktree doesn't exist.
+		if strings.Contains(string(out), "is not a working tree") {
+			return nil
+		}
+		return fmt.Errorf("engine: remove worktree %q: %s", engineID, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// CleanupWorktrees removes all engine worktrees and prunes stale entries.
+func CleanupWorktrees(repoDir string) error {
+	enginesDir := filepath.Join(repoDir, "engines")
+	entries, err := os.ReadDir(enginesDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("engine: read engines dir: %w", err)
+	}
+
+	for _, e := range entries {
+		if e.IsDir() && strings.HasPrefix(e.Name(), "eng-") {
+			_ = RemoveWorktree(repoDir, e.Name())
+		}
+	}
+
+	// Prune orphaned worktree entries.
+	cmd := exec.Command("git", "worktree", "prune")
+	cmd.Dir = repoDir
+	cmd.CombinedOutput() //nolint:errcheck
+
+	return nil
+}
 
 // CreateBranch creates a new git branch from main, or checks out an existing one.
 // The repoDir parameter specifies the git repository working directory.

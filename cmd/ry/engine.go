@@ -126,6 +126,12 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 		return fmt.Errorf("get working directory: %w", err)
 	}
 
+	// Create a dedicated git worktree for this engine.
+	workDir, err := engine.EnsureWorktree(repoDir, eng.ID)
+	if err != nil {
+		return fmt.Errorf("setup worktree: %w", err)
+	}
+
 	fmt.Fprintf(out, "Engine %s starting daemon loop (poll every %s)...\n", eng.ID, pollInterval)
 
 	cycle := 0
@@ -136,6 +142,9 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 			fmt.Fprintf(out, "Engine %s deregistering...\n", eng.ID)
 			if err := engine.Deregister(gormDB, eng.ID); err != nil {
 				log.Printf("deregister error: %v", err)
+			}
+			if err := engine.RemoveWorktree(repoDir, eng.ID); err != nil {
+				log.Printf("remove worktree error: %v", err)
 			}
 			fmt.Fprintf(out, "Engine %s stopped.\n", eng.ID)
 			return nil
@@ -199,7 +208,7 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 		// Render context.
 		progress, _ := loadProgress(gormDB, claimed.ID)
 		messages, _ := loadMessages(gormDB, eng.ID)
-		commits, _ := engine.RecentCommits(repoDir, claimed.Branch, 10)
+		commits, _ := engine.RecentCommits(workDir, claimed.Branch, 10)
 
 		contextPayload, err := engine.RenderContext(engine.ContextInput{
 			Bead:          claimed,
@@ -216,7 +225,7 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 		}
 
 		// Create git branch.
-		if err := engine.CreateBranch(repoDir, claimed.Branch); err != nil {
+		if err := engine.CreateBranch(workDir, claimed.Branch); err != nil {
 			log.Printf("create branch error: %v", err)
 			sleepWithContext(ctx, pollInterval)
 			continue
@@ -227,7 +236,7 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 			EngineID:       eng.ID,
 			BeadID:         claimed.ID,
 			ContextPayload: contextPayload,
-			WorkDir:        repoDir,
+			WorkDir:        workDir,
 		})
 		if err != nil {
 			log.Printf("spawn error: %v", err)
@@ -250,7 +259,7 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 		case outcomeCompleted:
 			fmt.Fprintf(out, "[cycle %d] Bead %s completed\n", cycle, claimed.ID)
 			if err := engine.HandleCompletion(gormDB, claimed, eng, engine.CompletionOpts{
-				RepoDir:   repoDir,
+				RepoDir:   workDir,
 				SessionID: sess.ID,
 			}); err != nil {
 				log.Printf("completion handling error: %v", err)
@@ -261,7 +270,7 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 		case outcomeClear:
 			fmt.Fprintf(out, "[cycle %d] Agent exited (clear cycle), will re-claim\n", cycle)
 			if err := engine.HandleClearCycle(gormDB, claimed, eng, engine.ClearCycleOpts{
-				RepoDir:   repoDir,
+				RepoDir:   workDir,
 				SessionID: sess.ID,
 				Cycle:     cycle,
 			}); err != nil {
@@ -280,6 +289,9 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 			fmt.Fprintf(out, "[cycle %d] Cancelled, shutting down\n", cycle)
 			if err := engine.Deregister(gormDB, eng.ID); err != nil {
 				log.Printf("deregister error: %v", err)
+			}
+			if err := engine.RemoveWorktree(repoDir, eng.ID); err != nil {
+				log.Printf("remove worktree error: %v", err)
 			}
 			return nil
 		}
