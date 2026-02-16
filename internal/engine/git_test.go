@@ -77,6 +77,55 @@ func addCommit(t *testing.T, dir, msg string) {
 	}
 }
 
+// --- EnsureWorktree tests ---
+
+func TestEnsureWorktree_CreatesClaudeIgnore(t *testing.T) {
+	dir := initTestRepo(t)
+
+	wtDir, err := EnsureWorktree(dir, "eng-test0001")
+	if err != nil {
+		t.Fatalf("EnsureWorktree: %v", err)
+	}
+
+	ignoreFile := filepath.Join(wtDir, ".claudeignore")
+	data, err := os.ReadFile(ignoreFile)
+	if err != nil {
+		t.Fatalf("expected .claudeignore to exist: %v", err)
+	}
+
+	content := string(data)
+	for _, want := range []string{"railyard.yaml", ".beads/", "engines/"} {
+		if !strings.Contains(content, want) {
+			t.Errorf(".claudeignore missing %q, got:\n%s", want, content)
+		}
+	}
+}
+
+func TestEnsureWorktree_ReusedStillHasClaudeIgnore(t *testing.T) {
+	dir := initTestRepo(t)
+
+	wtDir, err := EnsureWorktree(dir, "eng-test0002")
+	if err != nil {
+		t.Fatalf("first EnsureWorktree: %v", err)
+	}
+
+	// Remove the ignore file to simulate a stale worktree without one.
+	os.Remove(filepath.Join(wtDir, ".claudeignore"))
+
+	// Second call reuses the existing worktree and should recreate .claudeignore.
+	wtDir2, err := EnsureWorktree(dir, "eng-test0002")
+	if err != nil {
+		t.Fatalf("second EnsureWorktree: %v", err)
+	}
+	if wtDir2 != wtDir {
+		t.Errorf("worktree path changed: %q → %q", wtDir, wtDir2)
+	}
+
+	if _, err := os.Stat(filepath.Join(wtDir2, ".claudeignore")); err != nil {
+		t.Fatalf("expected .claudeignore after reuse: %v", err)
+	}
+}
+
 // --- CreateBranch tests ---
 
 func TestCreateBranch(t *testing.T) {

@@ -16,6 +16,7 @@ func EnsureWorktree(repoDir, engineID string) (string, error) {
 
 	// If worktree directory already exists (stale from crash), reuse it.
 	if _, err := os.Stat(wtDir); err == nil {
+		writeClaudeIgnore(wtDir)
 		return wtDir, nil
 	}
 
@@ -30,7 +31,20 @@ func EnsureWorktree(repoDir, engineID string) (string, error) {
 		return "", fmt.Errorf("engine: create worktree %q: %s", engineID, strings.TrimSpace(string(out)))
 	}
 
+	writeClaudeIgnore(wtDir)
 	return wtDir, nil
+}
+
+// writeClaudeIgnore writes a .claudeignore file to the worktree so the
+// Claude Code agent doesn't see Railyard orchestration files (config,
+// beads, other engine worktrees) that could confuse it during work.
+func writeClaudeIgnore(wtDir string) {
+	const ignoreContent = `# Railyard orchestration files — not part of the project
+railyard.yaml
+.beads/
+engines/
+`
+	os.WriteFile(filepath.Join(wtDir, ".claudeignore"), []byte(ignoreContent), 0644)
 }
 
 // RemoveWorktree removes an engine's git worktree.

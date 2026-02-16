@@ -282,6 +282,9 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 			if err := engine.HandleStall(gormDB, eng.ID, claimed.ID, outcome.stallReason); err != nil {
 				log.Printf("stall handling error: %v", err)
 			}
+			// Clear current_car so the engine doesn't re-claim the now-blocked car.
+			gormDB.Model(&models.Engine{}).Where("id = ?", eng.ID).Update("current_car", "")
+			eng.CurrentCar = ""
 			// Reset cycle — car is now blocked, engine should move on.
 			cycle = 0
 
@@ -340,10 +343,11 @@ func claimOrReclaim(gormDB *gorm.DB, eng *models.Engine, track string) (*models.
 	// Check if engine already has a car assigned (re-claim after clear cycle).
 	if eng.CurrentCar != "" {
 		b, err := car.Get(gormDB, eng.CurrentCar)
-		if err == nil && b.Status != "done" && b.Status != "cancelled" {
+		// Only re-claim if car is still actively workable (not done, cancelled, or blocked).
+		if err == nil && b.Status != "done" && b.Status != "cancelled" && b.Status != "blocked" {
 			return b, nil
 		}
-		// Clear stale current_car.
+		// Clear stale current_car — car is in a terminal/blocked state.
 		gormDB.Model(&models.Engine{}).Where("id = ?", eng.ID).Update("current_car", "")
 		eng.CurrentCar = ""
 	}

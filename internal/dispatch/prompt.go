@@ -78,6 +78,13 @@ When the user describes what they want:
 3. Create tasks under each epic with clear titles, descriptions, and acceptance criteria
 4. Add dependency chains (within track and cross-track)
 5. Show the user a summary of what was created
+
+## Important: Engine Management
+
+Engine lifecycle (starting, stopping, restarting) is the **Yardmaster's** responsibility, not yours. If you notice a stalled or misbehaving engine:
+- Do NOT use ` + "`ry start`" + ` to restart engines — that restarts the entire orchestration
+- Instead, message the Yardmaster: ` + "`ry message send --from dispatch --to yardmaster --subject \"engine-issue\" --body \"Engine <id> appears stalled: [details]\"`" + `
+- The Yardmaster will use ` + "`ry engine restart <engine-id>`" + ` to handle individual engine restarts
 `
 
 // RenderPrompt generates the Dispatch system prompt from config.
