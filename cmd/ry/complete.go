@@ -50,9 +50,10 @@ func runComplete(cmd *cobra.Command, configPath, carID, summary string) error {
 
 	// Write final progress note.
 	if err := gormDB.Create(&models.CarProgress{
-		CarID:    carID,
-		Note:      summary,
-		CreatedAt: time.Now(),
+		CarID:        carID,
+		Note:         summary,
+		FilesChanged: "[]",
+		CreatedAt:    time.Now(),
 	}).Error; err != nil {
 		return fmt.Errorf("write completion note for %s: %w", carID, err)
 	}
@@ -95,9 +96,10 @@ func runProgress(cmd *cobra.Command, configPath, carID, note string) error {
 
 	// Write progress note.
 	if err := gormDB.Create(&models.CarProgress{
-		CarID:    carID,
-		Note:      note,
-		CreatedAt: time.Now(),
+		CarID:        carID,
+		Note:         note,
+		FilesChanged: "[]",
+		CreatedAt:    time.Now(),
 	}).Error; err != nil {
 		return fmt.Errorf("write progress note for %s: %w", carID, err)
 	}

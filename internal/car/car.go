@@ -47,6 +47,7 @@ var ValidTransitions = map[string][]string{
 	"ready":       {"claimed", "blocked"},
 	"claimed":     {"in_progress", "blocked"},
 	"in_progress": {"done", "blocked"},
+	"done":        {"merged"},
 	"blocked":     {"open", "ready"},
 }
 

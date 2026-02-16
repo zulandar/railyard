@@ -97,6 +97,13 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 
 	result.Merged = true
 
+	// Mark car as merged so it won't be re-processed.
+	now := time.Now()
+	db.Model(&models.Car{}).Where("id = ?", carID).Updates(map[string]interface{}{
+		"status":       "merged",
+		"completed_at": now,
+	})
+
 	// Unblock cross-track dependencies.
 	unblocked, _ := UnblockDeps(db, carID)
 	if len(unblocked) > 0 {
@@ -140,7 +147,7 @@ func UnblockDeps(db *gorm.DB, carID string) ([]models.Car, error) {
 		var otherBlockers int64
 		db.Model(&models.CarDep{}).
 			Where("car_id = ? AND blocked_by != ?", dep.CarID, carID).
-			Joins("JOIN cars ON cars.id = car_deps.blocked_by AND cars.status != 'done'").
+			Joins("JOIN cars ON cars.id = car_deps.blocked_by AND cars.status NOT IN ('done', 'merged')").
 			Count(&otherBlockers)
 
 		if otherBlockers == 0 {
@@ -235,10 +242,10 @@ func TryCloseEpic(db *gorm.DB, epicID string) {
 		return
 	}
 
-	// Count children that are NOT done or cancelled.
+	// Count children that are NOT done, merged, or cancelled.
 	var remaining int64
 	db.Model(&models.Car{}).
-		Where("parent_id = ? AND status NOT IN ?", epicID, []string{"done", "cancelled"}).
+		Where("parent_id = ? AND status NOT IN ?", epicID, []string{"done", "merged", "cancelled"}).
 		Count(&remaining)
 
 	if remaining > 0 {

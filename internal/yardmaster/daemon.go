@@ -61,8 +61,6 @@ func RunDaemon(ctx context.Context, db *gorm.DB, cfg *config.Config, repoDir str
 		fmt.Fprintf(out, "Yardmaster stopped.\n")
 	}()
 
-	merged := make(map[string]bool)
-
 	for {
 		select {
 		case <-ctx.Done():
@@ -88,13 +86,18 @@ func RunDaemon(ctx context.Context, db *gorm.DB, cfg *config.Config, repoDir str
 		}
 
 		// Phase 3: Handle completed cars.
-		if err := handleCompletedCars(ctx, db, cfg, repoDir, out, merged); err != nil {
+		if err := handleCompletedCars(ctx, db, cfg, repoDir, out); err != nil {
 			log.Printf("yardmaster completed cars error: %v", err)
 		}
 
 		// Phase 4: Handle blocked cars (safety-net sweep).
 		if err := handleBlockedCars(db, out); err != nil {
 			log.Printf("yardmaster blocked cars error: %v", err)
+		}
+
+		// Phase 5: Reconcile stale cars whose branches are already merged.
+		if err := reconcileStaleCars(db, repoDir, out); err != nil {
+			log.Printf("yardmaster reconcile error: %v", err)
 		}
 
 		sleepWithContext(ctx, pollInterval)
@@ -222,18 +225,14 @@ func handleStaleEngines(db *gorm.DB, out io.Writer) error {
 }
 
 // handleCompletedCars finds cars with status "done" and runs the switch flow.
-// The merged map tracks cars already processed this session to avoid duplicates.
-func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, repoDir string, out io.Writer, merged map[string]bool) error {
+// Switch() marks cars as "merged" after successful merge, so they won't reappear.
+func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, repoDir string, out io.Writer) error {
 	cars, err := car.List(db, car.ListFilters{Status: "done"})
 	if err != nil {
 		return err
 	}
 
 	for _, c := range cars {
-		if merged[c.ID] {
-			continue
-		}
-
 		fmt.Fprintf(out, "Completed car %s (%s) — switching\n", c.ID, c.Title)
 
 		var testCommand string
@@ -272,7 +271,6 @@ func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, r
 		}
 
 		if result.Merged {
-			merged[c.ID] = true
 			fmt.Fprintf(out, "Car %s merged (branch %s)\n", c.ID, result.Branch)
 
 			commitHash := getHeadCommit(repoDir)
@@ -290,19 +288,64 @@ func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, r
 // handleBlockedCars is a safety-net sweep that tries to unblock cars whose
 // dependencies may have resolved outside the normal switch flow.
 func handleBlockedCars(db *gorm.DB, out io.Writer) error {
-	doneCars, err := car.List(db, car.ListFilters{Status: "done"})
-	if err != nil {
-		return err
+	for _, status := range []string{"done", "merged"} {
+		completedCars, err := car.List(db, car.ListFilters{Status: status})
+		if err != nil {
+			return err
+		}
+
+		for _, c := range completedCars {
+			unblocked, err := UnblockDeps(db, c.ID)
+			if err != nil {
+				log.Printf("unblock deps for %s: %v", c.ID, err)
+				continue
+			}
+			for _, u := range unblocked {
+				fmt.Fprintf(out, "Unblocked car %s (dependency %s resolved)\n", u.ID, c.ID)
+			}
+		}
 	}
 
-	for _, c := range doneCars {
-		unblocked, err := UnblockDeps(db, c.ID)
-		if err != nil {
-			log.Printf("unblock deps for %s: %v", c.ID, err)
-			continue
+	return nil
+}
+
+// reconcileStaleCars detects cars whose branches have already been merged to
+// main (e.g., via a monolithic epic commit) and updates their status to "merged".
+func reconcileStaleCars(db *gorm.DB, repoDir string, out io.Writer) error {
+	// Get all branches merged into main.
+	cmd := exec.Command("git", "branch", "-a", "--merged", "main")
+	cmd.Dir = repoDir
+	output, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("git branch --merged: %w", err)
+	}
+
+	mergedBranches := make(map[string]bool)
+	for _, line := range strings.Split(string(output), "\n") {
+		branch := strings.TrimSpace(line)
+		branch = strings.TrimPrefix(branch, "* ")
+		branch = strings.TrimPrefix(branch, "remotes/origin/")
+		if branch != "" {
+			mergedBranches[branch] = true
 		}
-		for _, u := range unblocked {
-			fmt.Fprintf(out, "Unblocked car %s (dependency %s resolved)\n", u.ID, c.ID)
+	}
+
+	// Find active cars whose branches are already merged.
+	var activeCars []models.Car
+	if err := db.Where("status IN ? AND branch != ''",
+		[]string{"open", "ready", "claimed", "in_progress"}).
+		Find(&activeCars).Error; err != nil {
+		return fmt.Errorf("query active cars: %w", err)
+	}
+
+	now := time.Now()
+	for _, c := range activeCars {
+		if mergedBranches[c.Branch] {
+			fmt.Fprintf(out, "Reconciled car %s (%s) — branch %s already merged\n", c.ID, c.Title, c.Branch)
+			db.Model(&models.Car{}).Where("id = ?", c.ID).Updates(map[string]interface{}{
+				"status":       "merged",
+				"completed_at": now,
+			})
 		}
 	}
 
