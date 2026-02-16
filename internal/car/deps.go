@@ -69,9 +69,10 @@ func RemoveDep(db *gorm.DB, carID, blockedBy string) error {
 }
 
 // ReadyCars returns cars that are ready for work: status=open, no assignee,
-// and all blockers are done or cancelled. Per ARCHITECTURE.md Section 2.
+// and all blockers are done or cancelled. Epics are excluded since they are
+// container cars and not directly implementable. Per ARCHITECTURE.md Section 2.
 func ReadyCars(db *gorm.DB, track string) ([]models.Car, error) {
-	q := db.Where("status = ? AND (assignee = ? OR assignee IS NULL)", "open", "").
+	q := db.Where("status = ? AND (assignee = ? OR assignee IS NULL) AND type != ?", "open", "", "epic").
 		Where("id NOT IN (?)",
 			db.Table("car_deps").
 				Select("car_deps.car_id").

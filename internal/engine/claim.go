@@ -33,7 +33,8 @@ func ClaimCar(db *gorm.DB, engineID, track string) (*models.Car, error) {
 			Where("blocker.status NOT IN ?", []string{"done", "cancelled"})
 
 		// Find the highest-priority ready car, locking the row.
-		result := tx.Where("status = ? AND (assignee = ? OR assignee IS NULL) AND track = ?", "open", "", track).
+		// Exclude epics — they are container cars, not implementable work.
+		result := tx.Where("status = ? AND (assignee = ? OR assignee IS NULL) AND track = ? AND type != ?", "open", "", track, "epic").
 			Where("id NOT IN (?)", blockedSub).
 			Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
 			Order("priority ASC, created_at ASC").

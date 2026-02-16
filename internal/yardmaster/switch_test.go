@@ -82,3 +82,15 @@ func TestCreateReindexJob_EmptyTrack(t *testing.T) {
 		t.Fatal("expected error")
 	}
 }
+
+// --- TryCloseEpic validation tests ---
+
+func TestTryCloseEpic_NilDB(t *testing.T) {
+	// Should not panic with nil DB.
+	TryCloseEpic(nil, "epic-001")
+}
+
+func TestTryCloseEpic_EmptyID(t *testing.T) {
+	// Should not panic with empty ID.
+	TryCloseEpic(nil, "")
+}

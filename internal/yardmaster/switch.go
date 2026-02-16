@@ -110,6 +110,11 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 		)
 	}
 
+	// Auto-close parent epic if all children are done.
+	if car.ParentID != nil && *car.ParentID != "" {
+		TryCloseEpic(db, *car.ParentID)
+	}
+
 	return result, nil
 }
 
@@ -212,6 +217,50 @@ func gitMerge(repoDir, branch string) error {
 	}
 
 	return nil
+}
+
+// TryCloseEpic checks if all children of an epic are done/cancelled and, if so,
+// marks the epic as done. This is called after each successful merge to handle
+// automatic epic completion.
+func TryCloseEpic(db *gorm.DB, epicID string) {
+	if db == nil || epicID == "" {
+		return
+	}
+
+	var epic models.Car
+	if err := db.First(&epic, "id = ?", epicID).Error; err != nil {
+		return
+	}
+	if epic.Type != "epic" {
+		return
+	}
+
+	// Count children that are NOT done or cancelled.
+	var remaining int64
+	db.Model(&models.Car{}).
+		Where("parent_id = ? AND status NOT IN ?", epicID, []string{"done", "cancelled"}).
+		Count(&remaining)
+
+	if remaining > 0 {
+		return
+	}
+
+	// All children are done/cancelled — close the epic.
+	now := time.Now()
+	db.Model(&models.Car{}).Where("id = ?", epicID).Updates(map[string]interface{}{
+		"status":       "done",
+		"completed_at": now,
+	})
+
+	messaging.Send(db, "yardmaster", "broadcast", "epic-closed",
+		fmt.Sprintf("Epic %s (%s) auto-closed — all children complete", epicID, epic.Title),
+		messaging.SendOpts{CarID: epicID},
+	)
+
+	// Recurse: if the epic itself has a parent epic, check that too.
+	if epic.ParentID != nil && *epic.ParentID != "" {
+		TryCloseEpic(db, *epic.ParentID)
+	}
 }
 
 // CreateReindexJob inserts a reindex_jobs row after a successful merge.
