@@ -176,32 +176,34 @@ func TestBuildCommand_Args(t *testing.T) {
 
 	// Find required flags.
 	foundSkipPerms := false
-	foundSP := false
-	foundP := false
+	foundAppendSP := false
 	for i, a := range args {
 		if a == "--dangerously-skip-permissions" {
 			foundSkipPerms = true
 		}
-		if a == "--system-prompt" && i+1 < len(args) {
-			foundSP = true
+		if a == "--append-system-prompt" && i+1 < len(args) {
+			foundAppendSP = true
 			if args[i+1] != "test prompt" {
-				t.Errorf("--system-prompt value = %q, want %q", args[i+1], "test prompt")
+				t.Errorf("--append-system-prompt value = %q, want %q", args[i+1], "test prompt")
 			}
 		}
-		if a == "-p" && i+1 < len(args) {
-			foundP = true
-			if args[i+1] == "" {
-				t.Error("-p value should not be empty")
-			}
+		if a == "-p" {
+			t.Error("-p flag should not be present (dispatch must be interactive)")
 		}
 	}
 	if !foundSkipPerms {
 		t.Error("--dangerously-skip-permissions flag not found in args")
 	}
-	if !foundSP {
-		t.Error("--system-prompt flag not found in args")
+	if !foundAppendSP {
+		t.Error("--append-system-prompt flag not found in args")
 	}
-	if !foundP {
-		t.Error("-p flag not found in args")
+}
+
+func TestBuildCommand_NoOneShot(t *testing.T) {
+	cmd := BuildCommand("prompt")
+	for _, a := range cmd.Args {
+		if a == "-p" || a == "--print" {
+			t.Errorf("found one-shot flag %q; dispatch must be interactive", a)
+		}
 	}
 }

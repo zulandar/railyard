@@ -30,12 +30,12 @@ func Start(opts StartOpts) error {
 		return fmt.Errorf("dispatch: render prompt: %w", err)
 	}
 
-	// Launch claude in autonomous mode (no human interaction in tmux pane)
+	// Launch claude interactively — user attaches to tmux pane and converses.
 	cmd := exec.Command("claude",
 		"--dangerously-skip-permissions",
-		"--system-prompt", prompt,
-		"-p", "You are now running as the Dispatch planner. Monitor for incoming feature requests and decompose them into beads. Check status with: ry bead list && ry bead ready",
+		"--append-system-prompt", prompt,
 	)
+	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
@@ -50,7 +50,6 @@ func Start(opts StartOpts) error {
 func BuildCommand(prompt string) *exec.Cmd {
 	return exec.Command("claude",
 		"--dangerously-skip-permissions",
-		"--system-prompt", prompt,
-		"-p", "You are now running as the Dispatch planner. Monitor for incoming feature requests and decompose them into beads. Check status with: ry bead list && ry bead ready",
+		"--append-system-prompt", prompt,
 	)
 }
