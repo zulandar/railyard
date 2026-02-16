@@ -248,6 +248,10 @@ internal/
   yardmaster/        Yardmaster supervisor: health checks, switch/merge
 ```
 
+## Tutorials
+
+- **[Build a Todo App with Railyard](docs/tutorial-todo-app.md)** — Step-by-step walkthrough building a Go API with multiple agents working in parallel
+
 ## License
 
 All rights reserved.
