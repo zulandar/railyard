@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zulandar/railyard/internal/bead"
+	"github.com/zulandar/railyard/internal/car"
 	"github.com/zulandar/railyard/internal/db"
 	"github.com/zulandar/railyard/internal/models"
 	"gorm.io/gorm"
@@ -377,9 +377,9 @@ func TestIntegration_StartHeartbeat_ContextCancel(t *testing.T) {
 	}
 }
 
-// --- ClaimBead tests ---
+// --- ClaimCar tests ---
 
-func TestIntegration_ClaimBead(t *testing.T) {
+func TestIntegration_ClaimCar(t *testing.T) {
 	dbName := "railyard_eng_claim"
 	srv := setupTestDB(t, dbName)
 	gormDB := connectDB(t, srv, dbName)
@@ -390,21 +390,21 @@ func TestIntegration_ClaimBead(t *testing.T) {
 		t.Fatalf("Register: %v", err)
 	}
 
-	// Create a bead.
-	b, err := bead.Create(gormDB, bead.CreateOpts{
-		Title:        "Claimable bead",
+	// Create a car.
+	b, err := car.Create(gormDB, car.CreateOpts{
+		Title:        "Claimable car",
 		Track:        "backend",
 		Priority:     2,
 		BranchPrefix: "ry/test",
 	})
 	if err != nil {
-		t.Fatalf("bead.Create: %v", err)
+		t.Fatalf("car.Create: %v", err)
 	}
 
 	// Claim it.
-	claimed, err := ClaimBead(gormDB, eng.ID, "backend")
+	claimed, err := ClaimCar(gormDB, eng.ID, "backend")
 	if err != nil {
-		t.Fatalf("ClaimBead: %v", err)
+		t.Fatalf("ClaimCar: %v", err)
 	}
 
 	if claimed.ID != b.ID {
@@ -428,12 +428,12 @@ func TestIntegration_ClaimBead(t *testing.T) {
 	if gotEng.Status != StatusWorking {
 		t.Errorf("engine Status = %q, want %q", gotEng.Status, StatusWorking)
 	}
-	if gotEng.CurrentBead != b.ID {
-		t.Errorf("engine CurrentBead = %q, want %q", gotEng.CurrentBead, b.ID)
+	if gotEng.CurrentCar != b.ID {
+		t.Errorf("engine CurrentCar = %q, want %q", gotEng.CurrentCar, b.ID)
 	}
 }
 
-func TestIntegration_ClaimBead_NoReadyBeads(t *testing.T) {
+func TestIntegration_ClaimCar_NoReadyCars(t *testing.T) {
 	dbName := "railyard_eng_claimnone"
 	srv := setupTestDB(t, dbName)
 	gormDB := connectDB(t, srv, dbName)
@@ -443,16 +443,16 @@ func TestIntegration_ClaimBead_NoReadyBeads(t *testing.T) {
 		t.Fatalf("Register: %v", err)
 	}
 
-	_, err = ClaimBead(gormDB, eng.ID, "backend")
+	_, err = ClaimCar(gormDB, eng.ID, "backend")
 	if err == nil {
-		t.Fatal("expected error when no beads available")
+		t.Fatal("expected error when no cars available")
 	}
-	if !strings.Contains(err.Error(), "no ready beads") {
-		t.Errorf("error = %q, want to contain %q", err.Error(), "no ready beads")
+	if !strings.Contains(err.Error(), "no ready cars") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "no ready cars")
 	}
 }
 
-func TestIntegration_ClaimBead_PriorityOrder(t *testing.T) {
+func TestIntegration_ClaimCar_PriorityOrder(t *testing.T) {
 	dbName := "railyard_eng_claimpri"
 	srv := setupTestDB(t, dbName)
 	gormDB := connectDB(t, srv, dbName)
@@ -462,39 +462,39 @@ func TestIntegration_ClaimBead_PriorityOrder(t *testing.T) {
 		t.Fatalf("Register: %v", err)
 	}
 
-	// Create beads with different priorities.
-	lowPri, err := bead.Create(gormDB, bead.CreateOpts{
+	// Create cars with different priorities.
+	lowPri, err := car.Create(gormDB, car.CreateOpts{
 		Title:        "Low priority",
 		Track:        "backend",
 		Priority:     4,
 		BranchPrefix: "ry/test",
 	})
 	if err != nil {
-		t.Fatalf("bead.Create low: %v", err)
+		t.Fatalf("car.Create low: %v", err)
 	}
 
-	highPri, err := bead.Create(gormDB, bead.CreateOpts{
+	highPri, err := car.Create(gormDB, car.CreateOpts{
 		Title:        "High priority",
 		Track:        "backend",
 		Priority:     1,
 		BranchPrefix: "ry/test",
 	})
 	if err != nil {
-		t.Fatalf("bead.Create high: %v", err)
+		t.Fatalf("car.Create high: %v", err)
 	}
 	_ = lowPri
 
-	// Should claim the higher-priority bead first.
-	claimed, err := ClaimBead(gormDB, eng.ID, "backend")
+	// Should claim the higher-priority car first.
+	claimed, err := ClaimCar(gormDB, eng.ID, "backend")
 	if err != nil {
-		t.Fatalf("ClaimBead: %v", err)
+		t.Fatalf("ClaimCar: %v", err)
 	}
 	if claimed.ID != highPri.ID {
 		t.Errorf("claimed ID = %q, want highest priority %q", claimed.ID, highPri.ID)
 	}
 }
 
-func TestIntegration_ClaimBead_SkipsBlocked(t *testing.T) {
+func TestIntegration_ClaimCar_SkipsBlocked(t *testing.T) {
 	dbName := "railyard_eng_claimblk"
 	srv := setupTestDB(t, dbName)
 	gormDB := connectDB(t, srv, dbName)
@@ -504,51 +504,51 @@ func TestIntegration_ClaimBead_SkipsBlocked(t *testing.T) {
 		t.Fatalf("Register: %v", err)
 	}
 
-	// Create a blocker bead (open, so it blocks).
-	blocker, err := bead.Create(gormDB, bead.CreateOpts{
+	// Create a blocker car (open, so it blocks).
+	blocker, err := car.Create(gormDB, car.CreateOpts{
 		Title:        "Blocker",
 		Track:        "backend",
 		Priority:     2,
 		BranchPrefix: "ry/test",
 	})
 	if err != nil {
-		t.Fatalf("bead.Create blocker: %v", err)
+		t.Fatalf("car.Create blocker: %v", err)
 	}
 
-	// Create a blocked bead (depends on blocker).
-	blocked, err := bead.Create(gormDB, bead.CreateOpts{
-		Title:        "Blocked bead",
+	// Create a blocked car (depends on blocker).
+	blocked, err := car.Create(gormDB, car.CreateOpts{
+		Title:        "Blocked car",
 		Track:        "backend",
 		Priority:     1, // higher priority, but blocked
 		BranchPrefix: "ry/test",
 	})
 	if err != nil {
-		t.Fatalf("bead.Create blocked: %v", err)
+		t.Fatalf("car.Create blocked: %v", err)
 	}
 
-	if err := bead.AddDep(gormDB, blocked.ID, blocker.ID, "blocks"); err != nil {
+	if err := car.AddDep(gormDB, blocked.ID, blocker.ID, "blocks"); err != nil {
 		t.Fatalf("AddDep: %v", err)
 	}
 
-	// Create an unblocked bead.
-	unblocked, err := bead.Create(gormDB, bead.CreateOpts{
-		Title:        "Unblocked bead",
+	// Create an unblocked car.
+	unblocked, err := car.Create(gormDB, car.CreateOpts{
+		Title:        "Unblocked car",
 		Track:        "backend",
 		Priority:     3,
 		BranchPrefix: "ry/test",
 	})
 	if err != nil {
-		t.Fatalf("bead.Create unblocked: %v", err)
+		t.Fatalf("car.Create unblocked: %v", err)
 	}
 
-	// Should claim the unblocked bead, not the blocked one (even though blocked has higher priority).
+	// Should claim the unblocked car, not the blocked one (even though blocked has higher priority).
 	// The blocker itself is also claimable since it has no deps.
-	claimed, err := ClaimBead(gormDB, eng.ID, "backend")
+	claimed, err := ClaimCar(gormDB, eng.ID, "backend")
 	if err != nil {
-		t.Fatalf("ClaimBead: %v", err)
+		t.Fatalf("ClaimCar: %v", err)
 	}
 	if claimed.ID == blocked.ID {
-		t.Errorf("should not have claimed blocked bead %q", blocked.ID)
+		t.Errorf("should not have claimed blocked car %q", blocked.ID)
 	}
 	// Should be blocker (priority 2) since it's unblocked and higher priority than unblocked (3).
 	if claimed.ID != blocker.ID {
@@ -556,7 +556,7 @@ func TestIntegration_ClaimBead_SkipsBlocked(t *testing.T) {
 	}
 }
 
-func TestIntegration_ClaimBead_BlockerDone(t *testing.T) {
+func TestIntegration_ClaimCar_BlockerDone(t *testing.T) {
 	dbName := "railyard_eng_claimbd"
 	srv := setupTestDB(t, dbName)
 	gormDB := connectDB(t, srv, dbName)
@@ -567,13 +567,13 @@ func TestIntegration_ClaimBead_BlockerDone(t *testing.T) {
 	}
 
 	// Create and complete a blocker.
-	blocker, err := bead.Create(gormDB, bead.CreateOpts{
+	blocker, err := car.Create(gormDB, car.CreateOpts{
 		Title:        "Blocker",
 		Track:        "backend",
 		BranchPrefix: "ry/test",
 	})
 	if err != nil {
-		t.Fatalf("bead.Create blocker: %v", err)
+		t.Fatalf("car.Create blocker: %v", err)
 	}
 
 	// Transition blocker to done.
@@ -582,37 +582,37 @@ func TestIntegration_ClaimBead_BlockerDone(t *testing.T) {
 		if status == "claimed" {
 			updates["assignee"] = "other-engine"
 		}
-		if err := bead.Update(gormDB, blocker.ID, updates); err != nil {
-			t.Fatalf("bead.Update blocker %s: %v", status, err)
+		if err := car.Update(gormDB, blocker.ID, updates); err != nil {
+			t.Fatalf("car.Update blocker %s: %v", status, err)
 		}
 	}
 
-	// Create a bead that depends on the now-done blocker.
-	dependent, err := bead.Create(gormDB, bead.CreateOpts{
-		Title:        "Dependent bead",
+	// Create a car that depends on the now-done blocker.
+	dependent, err := car.Create(gormDB, car.CreateOpts{
+		Title:        "Dependent car",
 		Track:        "backend",
 		Priority:     1,
 		BranchPrefix: "ry/test",
 	})
 	if err != nil {
-		t.Fatalf("bead.Create dependent: %v", err)
+		t.Fatalf("car.Create dependent: %v", err)
 	}
 
-	if err := bead.AddDep(gormDB, dependent.ID, blocker.ID, "blocks"); err != nil {
+	if err := car.AddDep(gormDB, dependent.ID, blocker.ID, "blocks"); err != nil {
 		t.Fatalf("AddDep: %v", err)
 	}
 
 	// Since blocker is done, dependent should be claimable.
-	claimed, err := ClaimBead(gormDB, eng.ID, "backend")
+	claimed, err := ClaimCar(gormDB, eng.ID, "backend")
 	if err != nil {
-		t.Fatalf("ClaimBead: %v", err)
+		t.Fatalf("ClaimCar: %v", err)
 	}
 	if claimed.ID != dependent.ID {
 		t.Errorf("claimed ID = %q, want %q (blocker is done)", claimed.ID, dependent.ID)
 	}
 }
 
-func TestIntegration_ClaimBead_AlreadyAssigned(t *testing.T) {
+func TestIntegration_ClaimCar_AlreadyAssigned(t *testing.T) {
 	dbName := "railyard_eng_claimas"
 	srv := setupTestDB(t, dbName)
 	gormDB := connectDB(t, srv, dbName)
@@ -622,36 +622,36 @@ func TestIntegration_ClaimBead_AlreadyAssigned(t *testing.T) {
 		t.Fatalf("Register: %v", err)
 	}
 
-	// Create a bead that is already assigned.
-	b, err := bead.Create(gormDB, bead.CreateOpts{
+	// Create a car that is already assigned.
+	b, err := car.Create(gormDB, car.CreateOpts{
 		Title:        "Already assigned",
 		Track:        "backend",
 		BranchPrefix: "ry/test",
 	})
 	if err != nil {
-		t.Fatalf("bead.Create: %v", err)
+		t.Fatalf("car.Create: %v", err)
 	}
-	if err := bead.Update(gormDB, b.ID, map[string]interface{}{"status": "ready"}); err != nil {
-		t.Fatalf("bead.Update ready: %v", err)
+	if err := car.Update(gormDB, b.ID, map[string]interface{}{"status": "ready"}); err != nil {
+		t.Fatalf("car.Update ready: %v", err)
 	}
-	if err := bead.Update(gormDB, b.ID, map[string]interface{}{
+	if err := car.Update(gormDB, b.ID, map[string]interface{}{
 		"status":   "claimed",
 		"assignee": "other-engine",
 	}); err != nil {
-		t.Fatalf("bead.Update claimed: %v", err)
+		t.Fatalf("car.Update claimed: %v", err)
 	}
 
-	// No open unassigned beads should be found.
-	_, err = ClaimBead(gormDB, eng.ID, "backend")
+	// No open unassigned cars should be found.
+	_, err = ClaimCar(gormDB, eng.ID, "backend")
 	if err == nil {
-		t.Fatal("expected error when all beads assigned")
+		t.Fatal("expected error when all cars assigned")
 	}
-	if !strings.Contains(err.Error(), "no ready beads") {
-		t.Errorf("error = %q, want to contain %q", err.Error(), "no ready beads")
+	if !strings.Contains(err.Error(), "no ready cars") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "no ready cars")
 	}
 }
 
-func TestIntegration_ClaimBead_TrackFilter(t *testing.T) {
+func TestIntegration_ClaimCar_TrackFilter(t *testing.T) {
 	dbName := "railyard_eng_claimtr"
 	srv := setupTestDB(t, dbName)
 	gormDB := connectDB(t, srv, dbName)
@@ -661,37 +661,37 @@ func TestIntegration_ClaimBead_TrackFilter(t *testing.T) {
 		t.Fatalf("Register: %v", err)
 	}
 
-	// Create a bead on a different track.
-	_, err = bead.Create(gormDB, bead.CreateOpts{
-		Title:        "Frontend bead",
+	// Create a car on a different track.
+	_, err = car.Create(gormDB, car.CreateOpts{
+		Title:        "Frontend car",
 		Track:        "frontend",
 		BranchPrefix: "ry/test",
 	})
 	if err != nil {
-		t.Fatalf("bead.Create frontend: %v", err)
+		t.Fatalf("car.Create frontend: %v", err)
 	}
 
-	// Create a bead on the engine's track.
-	backendBead, err := bead.Create(gormDB, bead.CreateOpts{
-		Title:        "Backend bead",
+	// Create a car on the engine's track.
+	backendCar, err := car.Create(gormDB, car.CreateOpts{
+		Title:        "Backend car",
 		Track:        "backend",
 		BranchPrefix: "ry/test",
 	})
 	if err != nil {
-		t.Fatalf("bead.Create backend: %v", err)
+		t.Fatalf("car.Create backend: %v", err)
 	}
 
-	// Should only claim the backend bead.
-	claimed, err := ClaimBead(gormDB, eng.ID, "backend")
+	// Should only claim the backend car.
+	claimed, err := ClaimCar(gormDB, eng.ID, "backend")
 	if err != nil {
-		t.Fatalf("ClaimBead: %v", err)
+		t.Fatalf("ClaimCar: %v", err)
 	}
-	if claimed.ID != backendBead.ID {
-		t.Errorf("claimed ID = %q, want backend bead %q", claimed.ID, backendBead.ID)
+	if claimed.ID != backendCar.ID {
+		t.Errorf("claimed ID = %q, want backend car %q", claimed.ID, backendCar.ID)
 	}
 }
 
-func TestIntegration_ClaimBead_ValidationError(t *testing.T) {
+func TestIntegration_ClaimCar_ValidationError(t *testing.T) {
 	dbName := "railyard_eng_claimval"
 	srv := setupTestDB(t, dbName)
 	gormDB := connectDB(t, srv, dbName)
@@ -718,7 +718,7 @@ func TestIntegration_ClaimBead_ValidationError(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := ClaimBead(gormDB, tt.engineID, tt.track)
+			_, err := ClaimCar(gormDB, tt.engineID, tt.track)
 			if err == nil {
 				t.Fatal("expected error")
 			}
@@ -729,11 +729,11 @@ func TestIntegration_ClaimBead_ValidationError(t *testing.T) {
 	}
 }
 
-func TestIntegration_ClaimBead_DBError(t *testing.T) {
+func TestIntegration_ClaimCar_DBError(t *testing.T) {
 	gormDB := closedGormDB(t)
-	_, err := ClaimBead(gormDB, "eng-12345", "backend")
+	_, err := ClaimCar(gormDB, "eng-12345", "backend")
 	if err == nil {
-		t.Fatal("expected error from ClaimBead with closed DB")
+		t.Fatal("expected error from ClaimCar with closed DB")
 	}
 }
 
@@ -764,7 +764,7 @@ echo "stderr output" >&2
 
 	sess, err := SpawnAgent(context.Background(), gormDB, SpawnOpts{
 		EngineID:       eng.ID,
-		BeadID:         "bead-integ1",
+		CarID:         "car-integ1",
 		ContextPayload: "integration test context",
 		WorkDir:        dir,
 		ClaudeBinary:   mockPath,
@@ -799,8 +799,8 @@ echo "stderr output" >&2
 		if log.SessionID != sess.ID {
 			t.Errorf("log.SessionID = %q, want %q", log.SessionID, sess.ID)
 		}
-		if log.BeadID != "bead-integ1" {
-			t.Errorf("log.BeadID = %q, want %q", log.BeadID, "bead-integ1")
+		if log.CarID != "car-integ1" {
+			t.Errorf("log.CarID = %q, want %q", log.CarID, "car-integ1")
 		}
 		switch log.Direction {
 		case "out":
@@ -840,36 +840,36 @@ func TestIntegration_HandleCompletion(t *testing.T) {
 	srv := setupTestDB(t, dbName)
 	gormDB := connectDB(t, srv, dbName)
 
-	// Register an engine and create a bead.
+	// Register an engine and create a car.
 	eng, err := Register(gormDB, RegisterOpts{Track: "backend"})
 	if err != nil {
 		t.Fatalf("Register: %v", err)
 	}
 
-	b, err := bead.Create(gormDB, bead.CreateOpts{
-		Title:        "Completable bead",
+	b, err := car.Create(gormDB, car.CreateOpts{
+		Title:        "Completable car",
 		Track:        "backend",
 		BranchPrefix: "ry/test",
 	})
 	if err != nil {
-		t.Fatalf("bead.Create: %v", err)
+		t.Fatalf("car.Create: %v", err)
 	}
 
-	// Transition bead to done (simulating agent completing via ry complete).
+	// Transition car to done (simulating agent completing via ry complete).
 	for _, status := range []string{"ready", "claimed", "in_progress", "done"} {
 		updates := map[string]interface{}{"status": status}
 		if status == "claimed" {
 			updates["assignee"] = eng.ID
 		}
-		if err := bead.Update(gormDB, b.ID, updates); err != nil {
-			t.Fatalf("bead.Update %s: %v", status, err)
+		if err := car.Update(gormDB, b.ID, updates); err != nil {
+			t.Fatalf("car.Update %s: %v", status, err)
 		}
 	}
 
 	// Set engine to working state.
 	gormDB.Model(&models.Engine{}).Where("id = ?", eng.ID).Updates(map[string]interface{}{
 		"status":       StatusWorking,
-		"current_bead": b.ID,
+		"current_car": b.ID,
 		"session_id":   "sess-comp1",
 	})
 
@@ -897,7 +897,7 @@ func TestIntegration_HandleCompletion(t *testing.T) {
 	run(repoDir, "git", "checkout", "-b", b.Branch)
 	os.WriteFile(filepath.Join(repoDir, "g.txt"), []byte("y"), 0644)
 	run(repoDir, "git", "add", ".")
-	run(repoDir, "git", "commit", "-m", "bead work")
+	run(repoDir, "git", "commit", "-m", "car work")
 
 	err = HandleCompletion(gormDB, b, eng, CompletionOpts{
 		RepoDir:   repoDir,
@@ -909,8 +909,8 @@ func TestIntegration_HandleCompletion(t *testing.T) {
 	}
 
 	// Verify progress note written.
-	var progress []models.BeadProgress
-	gormDB.Where("bead_id = ?", b.ID).Find(&progress)
+	var progress []models.CarProgress
+	gormDB.Where("car_id = ?", b.ID).Find(&progress)
 	if len(progress) == 0 {
 		t.Fatal("expected progress note, got 0")
 	}
@@ -938,8 +938,8 @@ func TestIntegration_HandleCompletion(t *testing.T) {
 	if gotEng.Status != StatusIdle {
 		t.Errorf("engine.Status = %q, want %q", gotEng.Status, StatusIdle)
 	}
-	if gotEng.CurrentBead != "" {
-		t.Errorf("engine.CurrentBead = %q, want empty", gotEng.CurrentBead)
+	if gotEng.CurrentCar != "" {
+		t.Errorf("engine.CurrentCar = %q, want empty", gotEng.CurrentCar)
 	}
 	if gotEng.SessionID != "" {
 		t.Errorf("engine.SessionID = %q, want empty", gotEng.SessionID)
@@ -956,13 +956,13 @@ func TestIntegration_HandleCompletion_DefaultNote(t *testing.T) {
 		t.Fatalf("Register: %v", err)
 	}
 
-	// Create a bead with no branch (skip push).
-	b := &models.Bead{ID: "be-nobrn", Track: "backend"}
+	// Create a car with no branch (skip push).
+	b := &models.Car{ID: "car-nobrn", Track: "backend"}
 	gormDB.Create(b)
 
 	gormDB.Model(&models.Engine{}).Where("id = ?", eng.ID).Updates(map[string]interface{}{
 		"status":       StatusWorking,
-		"current_bead": b.ID,
+		"current_car": b.ID,
 	})
 
 	// Use a valid repo dir but no branch to push.
@@ -987,12 +987,12 @@ func TestIntegration_HandleCompletion_DefaultNote(t *testing.T) {
 		t.Fatalf("HandleCompletion: %v", err)
 	}
 
-	var progress []models.BeadProgress
-	gormDB.Where("bead_id = ?", b.ID).Find(&progress)
+	var progress []models.CarProgress
+	gormDB.Where("car_id = ?", b.ID).Find(&progress)
 	if len(progress) == 0 {
 		t.Fatal("expected default progress note")
 	}
-	if progress[0].Note != "Bead completed successfully." {
+	if progress[0].Note != "Car completed successfully." {
 		t.Errorf("note = %q, want default", progress[0].Note)
 	}
 }
@@ -1009,13 +1009,13 @@ func TestIntegration_HandleClearCycle(t *testing.T) {
 		t.Fatalf("Register: %v", err)
 	}
 
-	b, err := bead.Create(gormDB, bead.CreateOpts{
-		Title:        "In-progress bead",
+	b, err := car.Create(gormDB, car.CreateOpts{
+		Title:        "In-progress car",
 		Track:        "backend",
 		BranchPrefix: "ry/test",
 	})
 	if err != nil {
-		t.Fatalf("bead.Create: %v", err)
+		t.Fatalf("car.Create: %v", err)
 	}
 
 	// Set up a repo with uncommitted changes.
@@ -1048,8 +1048,8 @@ func TestIntegration_HandleClearCycle(t *testing.T) {
 	}
 
 	// Verify progress note.
-	var progress []models.BeadProgress
-	gormDB.Where("bead_id = ? AND cycle = ?", b.ID, 1).Find(&progress)
+	var progress []models.CarProgress
+	gormDB.Where("car_id = ? AND cycle = ?", b.ID, 1).Find(&progress)
 	if len(progress) != 1 {
 		t.Fatalf("got %d progress entries, want 1", len(progress))
 	}
@@ -1083,7 +1083,7 @@ func TestIntegration_HandleClearCycle_DefaultNote(t *testing.T) {
 		t.Fatalf("Register: %v", err)
 	}
 
-	b := &models.Bead{ID: "be-clrdf", Track: "backend", Title: "test"}
+	b := &models.Car{ID: "car-clrdf", Track: "backend", Title: "test"}
 	gormDB.Create(b)
 
 	err = HandleClearCycle(gormDB, b, eng, ClearCycleOpts{
@@ -1093,8 +1093,8 @@ func TestIntegration_HandleClearCycle_DefaultNote(t *testing.T) {
 		t.Fatalf("HandleClearCycle: %v", err)
 	}
 
-	var progress []models.BeadProgress
-	gormDB.Where("bead_id = ? AND cycle = ?", b.ID, 3).Find(&progress)
+	var progress []models.CarProgress
+	gormDB.Where("car_id = ? AND cycle = ?", b.ID, 3).Find(&progress)
 	if len(progress) != 1 {
 		t.Fatalf("got %d progress entries, want 1", len(progress))
 	}
@@ -1113,7 +1113,7 @@ func TestIntegration_HandleClearCycle_NoRepoDir(t *testing.T) {
 		t.Fatalf("Register: %v", err)
 	}
 
-	b := &models.Bead{ID: "be-clrnr", Track: "backend", Title: "test"}
+	b := &models.Car{ID: "car-clrnr", Track: "backend", Title: "test"}
 	gormDB.Create(b)
 
 	// No RepoDir — should still write progress note, just no files.
@@ -1125,8 +1125,8 @@ func TestIntegration_HandleClearCycle_NoRepoDir(t *testing.T) {
 		t.Fatalf("HandleClearCycle: %v", err)
 	}
 
-	var progress []models.BeadProgress
-	gormDB.Where("bead_id = ?", b.ID).Find(&progress)
+	var progress []models.CarProgress
+	gormDB.Where("car_id = ?", b.ID).Find(&progress)
 	if len(progress) != 1 {
 		t.Fatalf("got %d progress entries, want 1", len(progress))
 	}
@@ -1145,7 +1145,7 @@ func TestIntegration_HandleClearCycle_MultipleCycles(t *testing.T) {
 		t.Fatalf("Register: %v", err)
 	}
 
-	b := &models.Bead{ID: "be-clrm", Track: "backend", Title: "test"}
+	b := &models.Car{ID: "car-clrm", Track: "backend", Title: "test"}
 	gormDB.Create(b)
 
 	for cycle := 1; cycle <= 3; cycle++ {
@@ -1158,8 +1158,8 @@ func TestIntegration_HandleClearCycle_MultipleCycles(t *testing.T) {
 		}
 	}
 
-	var progress []models.BeadProgress
-	gormDB.Where("bead_id = ?", b.ID).Order("cycle ASC").Find(&progress)
+	var progress []models.CarProgress
+	gormDB.Where("car_id = ?", b.ID).Order("cycle ASC").Find(&progress)
 	if len(progress) != 3 {
 		t.Fatalf("got %d progress entries, want 3", len(progress))
 	}

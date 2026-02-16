@@ -11,11 +11,11 @@ import (
 
 func makeInput() ContextInput {
 	return ContextInput{
-		Bead: &models.Bead{
-			ID:          "bead-001",
+		Car: &models.Car{
+			ID:          "car-001",
 			Title:       "Implement widget",
 			Priority:    1,
-			Branch:      "ry/alice/backend/bead-001",
+			Branch:      "ry/alice/backend/car-001",
 			Description: "Build the widget feature",
 			DesignNotes: "Use existing patterns",
 			Acceptance:  "Widget works end-to-end",
@@ -35,14 +35,14 @@ func makeInput() ContextInput {
 
 // --- Validation tests ---
 
-func TestRenderContext_NilBead(t *testing.T) {
+func TestRenderContext_NilCar(t *testing.T) {
 	input := makeInput()
-	input.Bead = nil
+	input.Car = nil
 	_, err := RenderContext(input)
 	if err == nil {
-		t.Fatal("expected error for nil bead")
+		t.Fatal("expected error for nil car")
 	}
-	if !strings.Contains(err.Error(), "bead is required") {
+	if !strings.Contains(err.Error(), "car is required") {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
@@ -124,17 +124,17 @@ func TestRenderContext_ConventionsEmpty(t *testing.T) {
 	}
 }
 
-func TestRenderContext_CurrentBead(t *testing.T) {
+func TestRenderContext_CurrentCar(t *testing.T) {
 	out, err := RenderContext(makeInput())
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"## Your Current Bead",
-		"Bead: bead-001",
+		"## Your Current Car",
+		"Car: car-001",
 		"Title: Implement widget",
 		"Priority: 1",
-		"Branch: ry/alice/backend/bead-001",
+		"Branch: ry/alice/backend/car-001",
 		"### Description",
 		"Build the widget feature",
 		"### Design Notes",
@@ -143,14 +143,14 @@ func TestRenderContext_CurrentBead(t *testing.T) {
 		"Widget works end-to-end",
 	} {
 		if !strings.Contains(out, want) {
-			t.Errorf("current bead missing %q", want)
+			t.Errorf("current car missing %q", want)
 		}
 	}
 }
 
 func TestRenderContext_Progress(t *testing.T) {
 	input := makeInput()
-	input.Progress = []models.BeadProgress{
+	input.Progress = []models.CarProgress{
 		{Cycle: 2, Note: "Fixed tests", FilesChanged: `["main.go"]`, CommitHash: "abc1234"},
 		{Cycle: 1, Note: "Initial scaffolding", FilesChanged: `["main.go","go.mod"]`, CommitHash: "def5678"},
 	}
@@ -265,12 +265,12 @@ func TestRenderContext_Instructions(t *testing.T) {
 	}
 	for _, want := range []string{
 		"## When You're Done",
-		"ry bead complete",
+		"ry car complete",
 		"## If You're Stuck",
-		"ry bead progress",
+		"ry car progress",
 		"ry message send",
 		"## If You Need to Split Work",
-		"ry bead create",
+		"ry car create",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("instructions missing %q", want)
@@ -280,7 +280,7 @@ func TestRenderContext_Instructions(t *testing.T) {
 
 func TestRenderContext_FullTemplate(t *testing.T) {
 	input := makeInput()
-	input.Progress = []models.BeadProgress{
+	input.Progress = []models.CarProgress{
 		{Cycle: 1, Note: "Scaffolded", FilesChanged: `["main.go"]`, CommitHash: "aaa1111"},
 	}
 	input.Messages = []models.Message{
@@ -297,7 +297,7 @@ func TestRenderContext_FullTemplate(t *testing.T) {
 	sections := []string{
 		"# You are an engine on track:",
 		"## Project Conventions",
-		"## Your Current Bead",
+		"## Your Current Car",
 		"## Previous Progress (if resuming)",
 		"## Yardmaster Messages",
 		"## Recent Commits on Your Branch",

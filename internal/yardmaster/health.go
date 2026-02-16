@@ -36,42 +36,42 @@ func StaleEngines(db *gorm.DB) ([]models.Engine, error) {
 	return CheckEngineHealth(db, DefaultStaleThreshold)
 }
 
-// ReassignBead releases a bead from a stalled/dead engine so it can be reclaimed.
-// It sets the bead status to "open", clears the assignee, marks the old engine
+// ReassignCar releases a car from a stalled/dead engine so it can be reclaimed.
+// It sets the car status to "open", clears the assignee, marks the old engine
 // as dead, writes a progress note, and sends a broadcast notification.
-func ReassignBead(db *gorm.DB, beadID, fromEngineID, reason string) error {
+func ReassignCar(db *gorm.DB, carID, fromEngineID, reason string) error {
 	if db == nil {
 		return fmt.Errorf("yardmaster: db is required")
 	}
-	if beadID == "" {
-		return fmt.Errorf("yardmaster: beadID is required")
+	if carID == "" {
+		return fmt.Errorf("yardmaster: carID is required")
 	}
 	if fromEngineID == "" {
 		return fmt.Errorf("yardmaster: fromEngineID is required")
 	}
 
-	// Release the bead: set status=open, clear assignee.
-	result := db.Model(&models.Bead{}).Where("id = ?", beadID).Updates(map[string]interface{}{
+	// Release the car: set status=open, clear assignee.
+	result := db.Model(&models.Car{}).Where("id = ?", carID).Updates(map[string]interface{}{
 		"status":   "open",
 		"assignee": "",
 	})
 	if result.Error != nil {
-		return fmt.Errorf("yardmaster: release bead %s: %w", beadID, result.Error)
+		return fmt.Errorf("yardmaster: release car %s: %w", carID, result.Error)
 	}
 	if result.RowsAffected == 0 {
-		return fmt.Errorf("yardmaster: bead %s not found", beadID)
+		return fmt.Errorf("yardmaster: car %s not found", carID)
 	}
 
-	// Mark the engine as dead and clear its current bead.
+	// Mark the engine as dead and clear its current car.
 	db.Model(&models.Engine{}).Where("id = ?", fromEngineID).Updates(map[string]interface{}{
 		"status":       "dead",
-		"current_bead": "",
+		"current_car": "",
 	})
 
 	// Write progress note.
 	note := fmt.Sprintf("Reassigned from engine %s: %s", fromEngineID, reason)
-	db.Create(&models.BeadProgress{
-		BeadID:       beadID,
+	db.Create(&models.CarProgress{
+		CarID:       carID,
 		EngineID:     fromEngineID,
 		Note:         note,
 		FilesChanged: "[]",
@@ -80,8 +80,8 @@ func ReassignBead(db *gorm.DB, beadID, fromEngineID, reason string) error {
 
 	// Send broadcast notification.
 	messaging.Send(db, "yardmaster", "broadcast", "reassignment",
-		fmt.Sprintf("Bead %s reassigned from stalled engine %s", beadID, fromEngineID),
-		messaging.SendOpts{BeadID: beadID, Priority: "urgent"},
+		fmt.Sprintf("Car %s reassigned from stalled engine %s", carID, fromEngineID),
+		messaging.SendOpts{CarID: carID, Priority: "urgent"},
 	)
 
 	return nil

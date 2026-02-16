@@ -1,5 +1,5 @@
-// Package bead provides bead lifecycle operations.
-package bead
+// Package car provides car lifecycle operations.
+package car
 
 import (
 	"crypto/rand"
@@ -12,7 +12,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// CreateOpts holds parameters for creating a new bead.
+// CreateOpts holds parameters for creating a new car.
 type CreateOpts struct {
 	Title        string
 	Description  string
@@ -25,7 +25,7 @@ type CreateOpts struct {
 	BranchPrefix string // e.g., "ry/alice"
 }
 
-// ListFilters holds optional filters for listing beads.
+// ListFilters holds optional filters for listing cars.
 type ListFilters struct {
 	Track    string
 	Status   string
@@ -50,37 +50,37 @@ var ValidTransitions = map[string][]string{
 	"blocked":     {"open", "ready"},
 }
 
-// GenerateID creates a unique bead ID in be-xxxxx format (5-char hex).
+// GenerateID creates a unique car ID in car-xxxxx format (5-char hex).
 func GenerateID() (string, error) {
 	b := make([]byte, 3)
 	if _, err := rand.Read(b); err != nil {
-		return "", fmt.Errorf("bead: generate ID: %w", err)
+		return "", fmt.Errorf("car: generate ID: %w", err)
 	}
-	return "be-" + hex.EncodeToString(b)[:5], nil
+	return "car-" + hex.EncodeToString(b)[:5], nil
 }
 
-// ComputeBranch builds the git branch name for a bead.
+// ComputeBranch builds the git branch name for a car.
 func ComputeBranch(branchPrefix, track, id string) string {
 	return fmt.Sprintf("%s/%s/%s", branchPrefix, track, id)
 }
 
-// Create creates a new bead with an auto-generated ID.
-func Create(db *gorm.DB, opts CreateOpts) (*models.Bead, error) {
+// Create creates a new car with an auto-generated ID.
+func Create(db *gorm.DB, opts CreateOpts) (*models.Car, error) {
 	if opts.Title == "" {
-		return nil, fmt.Errorf("bead: title is required")
+		return nil, fmt.Errorf("car: title is required")
 	}
 
 	// Validate parent and inherit track if needed (before track check).
 	if opts.ParentID != "" {
-		var parent models.Bead
+		var parent models.Car
 		if err := db.Where("id = ?", opts.ParentID).First(&parent).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return nil, fmt.Errorf("bead: parent not found: %s", opts.ParentID)
+				return nil, fmt.Errorf("car: parent not found: %s", opts.ParentID)
 			}
-			return nil, fmt.Errorf("bead: check parent %s: %w", opts.ParentID, err)
+			return nil, fmt.Errorf("car: check parent %s: %w", opts.ParentID, err)
 		}
 		if parent.Type != "epic" {
-			return nil, fmt.Errorf("bead: parent %s is type %q, only epics can have children", opts.ParentID, parent.Type)
+			return nil, fmt.Errorf("car: parent %s is type %q, only epics can have children", opts.ParentID, parent.Type)
 		}
 		if opts.Track == "" {
 			opts.Track = parent.Track
@@ -88,7 +88,7 @@ func Create(db *gorm.DB, opts CreateOpts) (*models.Bead, error) {
 	}
 
 	if opts.Track == "" {
-		return nil, fmt.Errorf("bead: track is required")
+		return nil, fmt.Errorf("car: track is required")
 	}
 
 	if opts.Type == "" {
@@ -100,7 +100,7 @@ func Create(db *gorm.DB, opts CreateOpts) (*models.Bead, error) {
 		return nil, err
 	}
 
-	bead := models.Bead{
+	car := models.Car{
 		ID:          id,
 		Title:       opts.Title,
 		Description: opts.Description,
@@ -114,31 +114,31 @@ func Create(db *gorm.DB, opts CreateOpts) (*models.Bead, error) {
 	}
 
 	if opts.ParentID != "" {
-		bead.ParentID = &opts.ParentID
+		car.ParentID = &opts.ParentID
 	}
 
-	if err := db.Create(&bead).Error; err != nil {
-		return nil, fmt.Errorf("bead: create: %w", err)
+	if err := db.Create(&car).Error; err != nil {
+		return nil, fmt.Errorf("car: create: %w", err)
 	}
 
-	return &bead, nil
+	return &car, nil
 }
 
-// Get retrieves a bead by ID, preloading Deps and Progress.
-func Get(db *gorm.DB, id string) (*models.Bead, error) {
-	var bead models.Bead
-	if err := db.Preload("Deps").Preload("Progress").Where("id = ?", id).First(&bead).Error; err != nil {
+// Get retrieves a car by ID, preloading Deps and Progress.
+func Get(db *gorm.DB, id string) (*models.Car, error) {
+	var car models.Car
+	if err := db.Preload("Deps").Preload("Progress").Where("id = ?", id).First(&car).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, fmt.Errorf("bead: not found: %s", id)
+			return nil, fmt.Errorf("car: not found: %s", id)
 		}
-		return nil, fmt.Errorf("bead: get %s: %w", id, err)
+		return nil, fmt.Errorf("car: get %s: %w", id, err)
 	}
-	return &bead, nil
+	return &car, nil
 }
 
-// List returns beads matching the given filters, ordered by priority then creation time.
-func List(db *gorm.DB, filters ListFilters) ([]models.Bead, error) {
-	q := db.Model(&models.Bead{})
+// List returns cars matching the given filters, ordered by priority then creation time.
+func List(db *gorm.DB, filters ListFilters) ([]models.Car, error) {
+	q := db.Model(&models.Car{})
 
 	if filters.Track != "" {
 		q = q.Where("track = ?", filters.Track)
@@ -156,27 +156,27 @@ func List(db *gorm.DB, filters ListFilters) ([]models.Bead, error) {
 		q = q.Where("parent_id = ?", filters.ParentID)
 	}
 
-	var beads []models.Bead
-	if err := q.Order("priority ASC, created_at ASC").Find(&beads).Error; err != nil {
-		return nil, fmt.Errorf("bead: list: %w", err)
+	var cars []models.Car
+	if err := q.Order("priority ASC, created_at ASC").Find(&cars).Error; err != nil {
+		return nil, fmt.Errorf("car: list: %w", err)
 	}
-	return beads, nil
+	return cars, nil
 }
 
-// Update modifies bead fields. Status transitions are validated against ValidTransitions.
+// Update modifies car fields. Status transitions are validated against ValidTransitions.
 func Update(db *gorm.DB, id string, updates map[string]interface{}) error {
-	var bead models.Bead
-	if err := db.Where("id = ?", id).First(&bead).Error; err != nil {
+	var car models.Car
+	if err := db.Where("id = ?", id).First(&car).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return fmt.Errorf("bead: not found: %s", id)
+			return fmt.Errorf("car: not found: %s", id)
 		}
-		return fmt.Errorf("bead: get %s for update: %w", id, err)
+		return fmt.Errorf("car: get %s for update: %w", id, err)
 	}
 
 	if newStatus, ok := updates["status"].(string); ok {
-		if !isValidTransition(bead.Status, newStatus) {
-			valid := ValidTransitions[bead.Status]
-			return fmt.Errorf("bead: invalid status transition from %q to %q; valid transitions: %v", bead.Status, newStatus, valid)
+		if !isValidTransition(car.Status, newStatus) {
+			valid := ValidTransitions[car.Status]
+			return fmt.Errorf("car: invalid status transition from %q to %q; valid transitions: %v", car.Status, newStatus, valid)
 		}
 
 		now := time.Now()
@@ -188,8 +188,8 @@ func Update(db *gorm.DB, id string, updates map[string]interface{}) error {
 		}
 	}
 
-	if err := db.Model(&models.Bead{}).Where("id = ?", id).Updates(updates).Error; err != nil {
-		return fmt.Errorf("bead: update %s: %w", id, err)
+	if err := db.Model(&models.Car{}).Where("id = ?", id).Updates(updates).Error; err != nil {
+		return fmt.Errorf("car: update %s: %w", id, err)
 	}
 	return nil
 }
@@ -211,34 +211,34 @@ func isValidTransition(from, to string) bool {
 	return false
 }
 
-// GetChildren returns all children of a parent bead, ordered by priority then creation time.
-func GetChildren(db *gorm.DB, parentID string) ([]models.Bead, error) {
+// GetChildren returns all children of a parent car, ordered by priority then creation time.
+func GetChildren(db *gorm.DB, parentID string) ([]models.Car, error) {
 	// Verify parent exists.
 	var count int64
-	if err := db.Model(&models.Bead{}).Where("id = ?", parentID).Count(&count).Error; err != nil {
-		return nil, fmt.Errorf("bead: check parent %s: %w", parentID, err)
+	if err := db.Model(&models.Car{}).Where("id = ?", parentID).Count(&count).Error; err != nil {
+		return nil, fmt.Errorf("car: check parent %s: %w", parentID, err)
 	}
 	if count == 0 {
-		return nil, fmt.Errorf("bead: parent not found: %s", parentID)
+		return nil, fmt.Errorf("car: parent not found: %s", parentID)
 	}
 
-	var children []models.Bead
+	var children []models.Car
 	if err := db.Where("parent_id = ?", parentID).Order("priority ASC, created_at ASC").Find(&children).Error; err != nil {
-		return nil, fmt.Errorf("bead: get children of %s: %w", parentID, err)
+		return nil, fmt.Errorf("car: get children of %s: %w", parentID, err)
 	}
 	return children, nil
 }
 
-// ChildrenSummary returns status counts for all children of a parent bead.
+// ChildrenSummary returns status counts for all children of a parent car.
 func ChildrenSummary(db *gorm.DB, parentID string) ([]StatusCount, error) {
 	var results []StatusCount
-	if err := db.Model(&models.Bead{}).
+	if err := db.Model(&models.Car{}).
 		Select("status, COUNT(*) as count").
 		Where("parent_id = ?", parentID).
 		Group("status").
 		Order("status ASC").
 		Find(&results).Error; err != nil {
-		return nil, fmt.Errorf("bead: children summary of %s: %w", parentID, err)
+		return nil, fmt.Errorf("car: children summary of %s: %w", parentID, err)
 	}
 	return results, nil
 }
@@ -251,12 +251,12 @@ func generateUniqueID(db *gorm.DB) (string, error) {
 			return "", err
 		}
 		var count int64
-		if err := db.Model(&models.Bead{}).Where("id = ?", id).Count(&count).Error; err != nil {
-			return "", fmt.Errorf("bead: check ID uniqueness: %w", err)
+		if err := db.Model(&models.Car{}).Where("id = ?", id).Count(&count).Error; err != nil {
+			return "", fmt.Errorf("car: check ID uniqueness: %w", err)
 		}
 		if count == 0 {
 			return id, nil
 		}
 	}
-	return "", fmt.Errorf("bead: failed to generate unique ID after retries")
+	return "", fmt.Errorf("car: failed to generate unique ID after retries")
 }

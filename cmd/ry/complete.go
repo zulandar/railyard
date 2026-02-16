@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/zulandar/railyard/internal/bead"
+	"github.com/zulandar/railyard/internal/car"
 	"github.com/zulandar/railyard/internal/models"
 )
 
@@ -14,14 +14,14 @@ func newCompleteCmd() *cobra.Command {
 	var configPath string
 
 	cmd := &cobra.Command{
-		Use:   "complete <bead-id> <summary>",
-		Short: "Mark a bead as done",
-		Long:  "Marks a bead as done, sets completed_at, and writes a final progress note. Called by the agent from within a Claude Code session.",
+		Use:   "complete <car-id> <summary>",
+		Short: "Mark a car as done",
+		Long:  "Marks a car as done, sets completed_at, and writes a final progress note. Called by the agent from within a Claude Code session.",
 		Args:  cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			beadID := args[0]
+			carID := args[0]
 			summary := strings.Join(args[1:], " ")
-			return runComplete(cmd, configPath, beadID, summary)
+			return runComplete(cmd, configPath, carID, summary)
 		},
 	}
 
@@ -29,36 +29,36 @@ func newCompleteCmd() *cobra.Command {
 	return cmd
 }
 
-func runComplete(cmd *cobra.Command, configPath, beadID, summary string) error {
+func runComplete(cmd *cobra.Command, configPath, carID, summary string) error {
 	_, gormDB, err := connectFromConfig(configPath)
 	if err != nil {
 		return err
 	}
 
-	// Verify the bead exists and is in a completable state.
-	b, err := bead.Get(gormDB, beadID)
+	// Verify the car exists and is in a completable state.
+	b, err := car.Get(gormDB, carID)
 	if err != nil {
 		return err
 	}
 
 	// Transition to done.
-	if err := bead.Update(gormDB, beadID, map[string]interface{}{
+	if err := car.Update(gormDB, carID, map[string]interface{}{
 		"status": "done",
 	}); err != nil {
-		return fmt.Errorf("complete bead %s: %w", beadID, err)
+		return fmt.Errorf("complete car %s: %w", carID, err)
 	}
 
 	// Write final progress note.
-	if err := gormDB.Create(&models.BeadProgress{
-		BeadID:    beadID,
+	if err := gormDB.Create(&models.CarProgress{
+		CarID:    carID,
 		Note:      summary,
 		CreatedAt: time.Now(),
 	}).Error; err != nil {
-		return fmt.Errorf("write completion note for %s: %w", beadID, err)
+		return fmt.Errorf("write completion note for %s: %w", carID, err)
 	}
 
 	out := cmd.OutOrStdout()
-	fmt.Fprintf(out, "Bead %s marked done: %s\n", b.ID, b.Title)
+	fmt.Fprintf(out, "Car %s marked done: %s\n", b.ID, b.Title)
 	return nil
 }
 
@@ -66,14 +66,14 @@ func newProgressCmd() *cobra.Command {
 	var configPath string
 
 	cmd := &cobra.Command{
-		Use:   "progress <bead-id> <note>",
-		Short: "Write a progress note for a bead",
-		Long:  "Writes a progress note to bead_progress without changing the bead's status. Used before /clear to preserve context for the next cycle.",
+		Use:   "progress <car-id> <note>",
+		Short: "Write a progress note for a car",
+		Long:  "Writes a progress note to car_progress without changing the car's status. Used before /clear to preserve context for the next cycle.",
 		Args:  cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			beadID := args[0]
+			carID := args[0]
 			note := strings.Join(args[1:], " ")
-			return runProgress(cmd, configPath, beadID, note)
+			return runProgress(cmd, configPath, carID, note)
 		},
 	}
 
@@ -81,28 +81,28 @@ func newProgressCmd() *cobra.Command {
 	return cmd
 }
 
-func runProgress(cmd *cobra.Command, configPath, beadID, note string) error {
+func runProgress(cmd *cobra.Command, configPath, carID, note string) error {
 	_, gormDB, err := connectFromConfig(configPath)
 	if err != nil {
 		return err
 	}
 
-	// Verify the bead exists.
-	b, err := bead.Get(gormDB, beadID)
+	// Verify the car exists.
+	b, err := car.Get(gormDB, carID)
 	if err != nil {
 		return err
 	}
 
 	// Write progress note.
-	if err := gormDB.Create(&models.BeadProgress{
-		BeadID:    beadID,
+	if err := gormDB.Create(&models.CarProgress{
+		CarID:    carID,
 		Note:      note,
 		CreatedAt: time.Now(),
 	}).Error; err != nil {
-		return fmt.Errorf("write progress note for %s: %w", beadID, err)
+		return fmt.Errorf("write progress note for %s: %w", carID, err)
 	}
 
 	out := cmd.OutOrStdout()
-	fmt.Fprintf(out, "Progress note written for bead %s: %s\n", b.ID, b.Title)
+	fmt.Fprintf(out, "Progress note written for car %s: %s\n", b.ID, b.Title)
 	return nil
 }

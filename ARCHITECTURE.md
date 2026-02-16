@@ -10,20 +10,20 @@ Railyard is a multi-agent AI orchestration system that coordinates coding agents
 |---|---|
 | **Railyard** | An employee's orchestration instance (each person runs their own) |
 | **Track** | An area of concern within the repo (backend, frontend, infra) |
-| **Bead** | A unit of work (from the [Beads](https://github.com/steveyegge/beads) model) |
+| **Car** | A unit of work (from the [Beads](https://github.com/steveyegge/beads) model) |
 | **Engine** | A worker agent (Claude Code, Codex, etc.) |
 | **Yardmaster** | The supervisor agent — merges, monitors, coordinates |
 | **Dispatch** | The planner agent — your interface, breaks down work |
 | **Roundhouse** | CocoIndex GPU box — re-indexes code after merges |
-| **Coupling** | Bead dependencies — beads linked together |
+| **Coupling** | Car dependencies — cars linked together |
 | **Switch** | Merging a branch back to main |
 
 **Multi-railyard model:**
 ```
 repo: github.com/org/myapp
-├── alice's railyard  → branches: ry/alice/backend/be-001, ry/alice/frontend/fe-010
-├── bob's railyard    → branches: ry/bob/backend/be-050, ry/bob/infra/be-080
-└── carol's railyard  → branches: ry/carol/frontend/fe-030
+├── alice's railyard  → branches: ry/alice/backend/car-001, ry/alice/frontend/car-010
+├── bob's railyard    → branches: ry/bob/backend/car-050, ry/bob/infra/car-080
+└── carol's railyard  → branches: ry/carol/frontend/car-030
 ```
 
 Each railyard is fully independent (Phase 1). Phase 2 adds a shared merge queue and file-level conflict awareness across railyards.
@@ -39,8 +39,8 @@ Dolt replaces Beads' git-backed JSONL with a proper SQL database that retains ve
 **Why Dolt over plain Postgres:**
 - `dolt diff` on any table shows exactly what changed and when — full audit trail
 - `dolt log` gives you commit history of orchestration state changes
-- `dolt revert` lets you undo bad state changes (e.g., accidental mass-close of beads)
-- Time-travel queries: `SELECT * FROM beads AS OF 'HEAD~5'` to debug what went wrong
+- `dolt revert` lets you undo bad state changes (e.g., accidental mass-close of cars)
+- Time-travel queries: `SELECT * FROM cars AS OF 'HEAD~5'` to debug what went wrong
 - Each railyard instance gets its own Dolt database — true isolation between employees
 
 **Database per railyard instance:**
@@ -48,7 +48,7 @@ Each employee's Railyard gets its own Dolt database. In local dev, each person r
 
 ```
 # Local (alice's machine)
-railyard_alice/          — alice's beads, messages, logs, config
+railyard_alice/          — alice's cars, messages, logs, config
 
 # Production (shared Dolt server)
 railyard_alice/          — alice's railyard
@@ -57,20 +57,20 @@ railyard_carol/          — carol's railyard
 railyard_shared/         — shared config, merge queue (Phase 2)
 ```
 
-**Tracks are logical, not separate databases.** Since tracks are areas of concern within the same repo (backend, frontend, infra), they live as a column on the beads table — not as separate databases. This simplifies cross-track queries for the Yardmaster:
+**Tracks are logical, not separate databases.** Since tracks are areas of concern within the same repo (backend, frontend, infra), they live as a column on the cars table — not as separate databases. This simplifies cross-track queries for the Yardmaster:
 
 ```sql
 -- Yardmaster checks all tracks at once
-SELECT * FROM beads WHERE status = 'done' AND track = 'backend';
-SELECT * FROM beads WHERE status = 'blocked';  -- all tracks
+SELECT * FROM cars WHERE status = 'done' AND track = 'backend';
+SELECT * FROM cars WHERE status = 'blocked';  -- all tracks
 ```
 
 **Branch namespacing:** Each railyard owns a branch prefix in the shared repo:
 ```
-ry/{owner}/{track}/{bead_id}
-ry/alice/backend/be-001
-ry/alice/frontend/fe-010
-ry/bob/backend/be-050
+ry/{owner}/{track}/{car_id}
+ry/alice/backend/car-001
+ry/alice/frontend/car-010
+ry/bob/backend/car-050
 ```
 This prevents branch collisions between employees and makes ownership instantly clear.
 
@@ -86,9 +86,9 @@ import (
     "gorm.io/gorm"
 )
 
-// Bead is the core work item (from the Beads model).
-type Bead struct {
-    ID          string     `gorm:"primaryKey;size:32"`     // e.g., be-a1b2c
+// Car is the core work item (from the Beads model).
+type Car struct {
+    ID          string     `gorm:"primaryKey;size:32"`     // e.g., car-a1b2c
     Title       string     `gorm:"not null"`
     Description string     `gorm:"type:text"`
     Type        string     `gorm:"size:16;default:task"`   // task, epic, bug, spike
@@ -97,7 +97,7 @@ type Bead struct {
     Track       string     `gorm:"size:64;index"`          // backend, frontend, infra
     Assignee    string     `gorm:"size:64"`                // engine ID
     ParentID    *string    `gorm:"size:32"`                // epic parent
-    Branch      string     `gorm:"size:128"`               // git branch: ry/alice/backend/be-001
+    Branch      string     `gorm:"size:128"`               // git branch: ry/alice/backend/car-001
     DesignNotes string     `gorm:"type:text"`
     Acceptance  string     `gorm:"type:text"`
     CreatedAt   time.Time
@@ -106,34 +106,34 @@ type Bead struct {
     CompletedAt *time.Time
 
     // Relations
-    Parent   *Bead        `gorm:"foreignKey:ParentID"`
-    Children []Bead       `gorm:"foreignKey:ParentID"`
-    Deps     []BeadDep    `gorm:"foreignKey:BeadID"`
-    Progress []BeadProgress `gorm:"foreignKey:BeadID"`
+    Parent   *Car        `gorm:"foreignKey:ParentID"`
+    Children []Car       `gorm:"foreignKey:ParentID"`
+    Deps     []CarDep    `gorm:"foreignKey:CarID"`
+    Progress []CarProgress `gorm:"foreignKey:CarID"`
 }
 
-// BeadDep tracks blocking relationships between beads.
-type BeadDep struct {
-    BeadID    string `gorm:"primaryKey;size:32"`
+// CarDep tracks blocking relationships between cars.
+type CarDep struct {
+    CarID    string `gorm:"primaryKey;size:32"`
     BlockedBy string `gorm:"primaryKey;size:32"`
     DepType   string `gorm:"size:16;default:blocks"` // blocks, relates_to
 
-    Bead    Bead `gorm:"foreignKey:BeadID"`
-    Blocker Bead `gorm:"foreignKey:BlockedBy"`
+    Car     Car `gorm:"foreignKey:CarID"`
+    Blocker Car `gorm:"foreignKey:BlockedBy"`
 }
 
-// BeadDepExternal tracks cross-railyard dependencies (Phase 2).
-type BeadDepExternal struct {
-    BeadID          string `gorm:"primaryKey;size:32"`
+// CarDepExternal tracks cross-railyard dependencies (Phase 2).
+type CarDepExternal struct {
+    CarID          string `gorm:"primaryKey;size:32"`
     BlockedByOwner  string `gorm:"primaryKey;size:64"`  // foreign railyard owner
-    BlockedByID     string `gorm:"primaryKey;size:32"`  // foreign bead ID
+    BlockedByID     string `gorm:"primaryKey;size:32"`  // foreign car ID
     DepType         string `gorm:"size:16;default:blocks"`
 }
 
-// BeadProgress logs work done across /clear cycles.
-type BeadProgress struct {
+// CarProgress logs work done across /clear cycles.
+type CarProgress struct {
     ID           uint      `gorm:"primaryKey;autoIncrement"`
-    BeadID       string    `gorm:"size:32;index"`
+    CarID       string    `gorm:"size:32;index"`
     Cycle        int                                    // /clear cycle number
     SessionID    string    `gorm:"size:64"`
     EngineID     string    `gorm:"size:64"`
@@ -161,7 +161,7 @@ type Engine struct {
     Track        string    `gorm:"size:64;index"`
     Role         string    `gorm:"size:16"`              // engine, yardmaster, dispatch
     Status       string    `gorm:"size:16;index"`        // idle, working, clearing, stalled, dead
-    CurrentBead  string    `gorm:"size:32"`
+    CurrentCar  string    `gorm:"size:32"`
     SessionID    string    `gorm:"size:64"`
     StartedAt    time.Time
     LastActivity time.Time `gorm:"index"`
@@ -172,7 +172,7 @@ type Message struct {
     ID           uint      `gorm:"primaryKey;autoIncrement"`
     FromAgent    string    `gorm:"size:64;not null"`
     ToAgent      string    `gorm:"size:64;not null;index"` // engine ID, 'yardmaster', 'dispatch', 'broadcast'
-    BeadID       string    `gorm:"size:32"`                // optional bead context
+    CarID       string    `gorm:"size:32"`                // optional car context
     ThreadID     *uint                                     // parent message for threading
     Subject      string    `gorm:"size:256"`
     Body         string    `gorm:"type:text"`
@@ -186,7 +186,7 @@ type AgentLog struct {
     ID         uint      `gorm:"primaryKey;autoIncrement"`
     EngineID   string    `gorm:"size:64;index:idx_engine_session"`
     SessionID  string    `gorm:"size:64;index:idx_engine_session"`
-    BeadID     string    `gorm:"size:32;index"`
+    CarID     string    `gorm:"size:32;index"`
     Direction  string    `gorm:"size:4"`                 // 'in' or 'out'
     Content    string    `gorm:"type:mediumtext"`
     TokenCount int
@@ -243,10 +243,10 @@ func Connect(owner, host string, port int) (*gorm.DB, error) {
 // AutoMigrate creates/updates all tables.
 func AutoMigrate(db *gorm.DB) error {
     return db.AutoMigrate(
-        &models.Bead{},
-        &models.BeadDep{},
-        &models.BeadDepExternal{},
-        &models.BeadProgress{},
+        &models.Car{},
+        &models.CarDep{},
+        &models.CarDepExternal{},
+        &models.CarProgress{},
         &models.Track{},
         &models.Engine{},
         &models.Message{},
@@ -263,10 +263,10 @@ Schema is defined by GORM models above (Section 1.5). GORM AutoMigrate creates a
 
 | Table | Purpose |
 |---|---|
-| `beads` | Work items — the core unit. Has `track` column for filtering. |
-| `bead_deps` | Blocking relationships between beads (same railyard) |
-| `bead_deps_external` | Cross-railyard dependencies (Phase 2) |
-| `bead_progress` | Work log across /clear cycles |
+| `cars` | Work items — the core unit. Has `track` column for filtering. |
+| `car_deps` | Blocking relationships between cars (same railyard) |
+| `car_deps_external` | Cross-railyard dependencies (Phase 2) |
+| `car_progress` | Work log across /clear cycles |
 | `tracks` | Track definitions (backend, frontend, infra) |
 | `engines` | Worker agent state and health |
 | `messages` | Agent-to-agent communication |
@@ -277,59 +277,59 @@ Schema is defined by GORM models above (Section 1.5). GORM AutoMigrate creates a
 **Key GORM operations:**
 
 ```go
-// Claim next ready bead (atomic, scoped to track)
-func ClaimBead(db *gorm.DB, engineID, track string) (*models.Bead, error) {
-    var bead models.Bead
+// Claim next ready car (atomic, scoped to track)
+func ClaimCar(db *gorm.DB, engineID, track string) (*models.Car, error) {
+    var car models.Car
     err := db.Transaction(func(tx *gorm.DB) error {
-        // Lock the first ready bead on this track
+        // Lock the first ready car on this track
         if err := tx.Set("gorm:query_option", "FOR UPDATE SKIP LOCKED").
             Where("track = ? AND status = ? AND assignee IS NULL", track, "ready").
             Order("priority ASC, created_at ASC").
-            First(&bead).Error; err != nil {
-            return err // no ready beads
+            First(&car).Error; err != nil {
+            return err // no ready cars
         }
         // Claim it
         now := time.Now()
-        return tx.Model(&bead).Updates(map[string]interface{}{
+        return tx.Model(&car).Updates(map[string]interface{}{
             "status":    "claimed",
             "assignee":  engineID,
             "claimed_at": now,
         }).Error
     })
-    return &bead, err
+    return &car, err
 }
 
-// Mark bead done
-func CompleteBead(db *gorm.DB, beadID, engineID, note string) error {
+// Mark car done
+func CompleteCar(db *gorm.DB, carID, engineID, note string) error {
     now := time.Now()
     return db.Transaction(func(tx *gorm.DB) error {
-        if err := tx.Model(&models.Bead{}).Where("id = ?", beadID).Updates(map[string]interface{}{
+        if err := tx.Model(&models.Car{}).Where("id = ?", carID).Updates(map[string]interface{}{
             "status":       "done",
             "completed_at": now,
         }).Error; err != nil {
             return err
         }
-        return tx.Create(&models.BeadProgress{
-            BeadID:   beadID,
+        return tx.Create(&models.CarProgress{
+            CarID:   carID,
             EngineID: engineID,
             Note:     note,
         }).Error
     })
 }
 
-// Ready detection — bead is ready when all blockers are done
-func ReadyBeads(db *gorm.DB, track string) ([]models.Bead, error) {
-    var beads []models.Bead
+// Ready detection — car is ready when all blockers are done
+func ReadyCars(db *gorm.DB, track string) ([]models.Car, error) {
+    var cars []models.Car
     err := db.Where("track = ? AND status = ? AND assignee IS NULL", track, "open").
         Where("id NOT IN (?)",
-            db.Table("bead_deps").
-                Select("bead_id").
-                Joins("JOIN beads blocker ON bead_deps.blocked_by = blocker.id").
+            db.Table("car_deps").
+                Select("car_id").
+                Joins("JOIN cars blocker ON car_deps.blocked_by = blocker.id").
                 Where("blocker.status NOT IN ?", []string{"done", "cancelled"}),
         ).
         Order("priority ASC, created_at ASC").
-        Find(&beads).Error
-    return beads, err
+        Find(&cars).Error
+    return cars, err
 }
 ```
 
@@ -348,7 +348,7 @@ Messages are just rows in the `messages` table. Engines poll on interval. Dolt d
 ```
 Engine loop:
   1. Poll: SELECT * FROM messages WHERE to_agent = @me AND acknowledged = FALSE
-  2. Process messages (Yardmaster instructions, bead assignments, etc.)
+  2. Process messages (Yardmaster instructions, car assignments, etc.)
   3. Acknowledge: UPDATE messages SET acknowledged = TRUE WHERE id = @msg_id
 ```
 
@@ -358,8 +358,8 @@ Add Kafka when direct DB polling becomes a bottleneck. The Dolt messages table b
 
 ```
 Topic structure:
-  railyard.{owner}.track.{track_name}.assignments  — new bead assignments
-  railyard.{owner}.track.{track_name}.completions   — bead done notifications
+  railyard.{owner}.track.{track_name}.assignments  — new car assignments
+  railyard.{owner}.track.{track_name}.completions   — car done notifications
   railyard.{owner}.track.{track_name}.messages      — general agent-to-agent
   railyard.{owner}.yardmaster.commands              — Yardmaster directives
   railyard.{owner}.system.heartbeats                — engine health
@@ -392,8 +392,8 @@ Everything runs on your laptop. Your own Dolt instance, GORM handles schema, age
 │                                                      │
 │  Dolt database: railyard_alice                       │
 │  ┌──────────────────────────────────────────┐       │
-│  │ beads (track=backend | frontend | infra) │       │
-│  │ engines, messages, bead_progress, ...    │       │
+│  │ cars (track=backend | frontend | infra) │       │
+│  │ engines, messages, car_progress, ...    │       │
 │  └──────────────────────────────────────────┘       │
 │                                                      │
 │  Background services:                                │
@@ -408,7 +408,7 @@ Everything runs on your laptop. Your own Dolt instance, GORM handles schema, age
 │    config.yaml         — track definitions, owner    │
 │    ry                  — CLI binary (Go)             │
 │                                                      │
-│  Git branches: ry/alice/backend/be-001, ...          │
+│  Git branches: ry/alice/backend/car-001, ...          │
 │                                                      │
 └──────────────────────────────────────────────────────┘
 ```
@@ -482,9 +482,9 @@ Shared infrastructure hosts multiple railyard instances. Each employee's Dispatc
 │  │ :3306 internal       │  │ :22 internal               │     │
 │  │                      │  │                            │     │
 │  │ DBs:                 │  │ Branches:                  │     │
-│  │  railyard_alice      │  │  ry/alice/backend/be-001   │     │
-│  │  railyard_bob        │  │  ry/bob/backend/be-050     │     │
-│  │  railyard_carol      │  │  ry/carol/frontend/fe-030  │     │
+│  │  railyard_alice      │  │  ry/alice/backend/car-001   │     │
+│  │  railyard_bob        │  │  ry/bob/backend/car-050     │     │
+│  │  railyard_carol      │  │  ry/carol/frontend/car-030  │     │
 │  │  railyard_shared     │  │                            │     │
 │  └──────────────────────┘  └────────────────────────────┘     │
 │                                                                │
@@ -504,7 +504,7 @@ Shared infrastructure hosts multiple railyard instances. Each employee's Dispatc
 │  ┌─────────┐ ┌─────────┐  ┌─────────┐ ┌─────────┐           │
 │  │ VM-01   │ │ VM-02   │  │ VM-03   │ │ VM-04   │           │
 │  │ Engine  │ │ Engine  │  │ Engine  │ │ Engine  │           │
-│  │ alice:be│ │ alice:fe│  │ bob:be  │ │ bob:inf │           │
+│  │ alice:car│ │ alice:fe│  │ bob:car  │ │ bob:inf │           │
 │  └─────────┘ └─────────┘  └─────────┘ └─────────┘           │
 │                                                                │
 └────────────────────────────────────────────────────────────────┘
@@ -525,7 +525,7 @@ Dispatch manages VM lifecycle. Could target any cloud provider (Terraform, Pulum
 owner: alice                    # unique owner ID, used for DB name + branch prefix
 
 repo: git@github.com:org/myapp.git   # shared repo (same for all employees)
-branch_prefix: ry/alice              # all branches: ry/alice/{track}/{bead_id}
+branch_prefix: ry/alice              # all branches: ry/alice/{track}/{car_id}
 
 dolt:
   host: 127.0.0.1              # local dev; production: dolt-server.vpc.internal
@@ -545,7 +545,7 @@ provisioner:
   scaling:
     min_engines: 2
     max_engines: 20
-    scale_up_threshold: 5    # ready beads per engine
+    scale_up_threshold: 5    # ready cars per engine
     scale_down_idle_minutes: 15
 
 tracks:
@@ -594,10 +594,10 @@ provisioning → ready → claimed → working → draining → terminated
 
 **Spin-up flow:**
 ```
-1. Dispatch detects: ready_beads / active_engines > threshold
+1. Dispatch detects: ready_cars / active_engines > threshold
 2. Provisions new VM via cloud API
 3. Waits for SSH availability
-4. Assigns track based on which track has most queued ready beads
+4. Assigns track based on which track has most queued ready cars
 5. Seeds VM with config: 
    - Clones repo, checks out branch prefix (ry/{owner}/)
    - Writes track-specific AGENTS.md
@@ -608,9 +608,9 @@ provisioning → ready → claimed → working → draining → terminated
 
 **Spin-down flow:**
 ```
-1. Dispatch detects: engine idle > 15 minutes, no ready beads for its track
+1. Dispatch detects: engine idle > 15 minutes, no ready cars for its track
 2. Sets VM status = 'draining'
-3. Waits for current bead to complete (or timeout)
+3. Waits for current car to complete (or timeout)
 4. Engine daemon exits cleanly
 5. Terminates VM via cloud API
 6. Updates railyard.vms table
@@ -648,8 +648,8 @@ ry engine attach vm-07
 # Outputs: ssh -J bastion... (copy/paste)
 # Also prints: tmux attach -t engine (run after SSH)
 
-# Force-reassign a bead from a stuck engine
-ry bead reassign be-a1b2c --from vm-07 --reason "stuck on test failure"
+# Force-reassign a car from a stuck engine
+ry car reassign car-a1b2c --from vm-07 --reason "stuck on test failure"
 
 # Drain a VM (finish current work, then idle)
 ry vm drain vm-07
@@ -664,7 +664,7 @@ ry engine restart vm-07
 ┌─ tmux: engine @ vm-07 ──────────────────────────┐
 │                                                   │
 │  Claude Code session                              │
-│  Bead: be-a1b2c "Add /users endpoint"      │
+│  Car: car-a1b2c "Add /users endpoint"      │
 │  Track: backend-api                                 │
 │  Cycle: 3 (2 previous /clear cycles)             │
 │                                                   │
@@ -739,7 +739,7 @@ Each row captures one interaction cycle:
 {
   "engine_id": "vm-07-engine",
   "session_id": "sess-a8f3c",
-  "bead_id": "be-a1b2c",
+  "car_id": "car-a1b2c",
   "direction": "in",
   "content": "[full system prompt + user message sent to Claude]",
   "token_count": 4200,
@@ -758,19 +758,19 @@ Each row captures one interaction cycle:
 Because it's Dolt, you can replay exactly what happened:
 
 ```sql
--- What was the bead state when the engine claimed it?
-SELECT * FROM beads AS OF 'HASHOF(commit-when-claimed)' WHERE id = 'be-a1b2c';
+-- What was the car state when the engine claimed it?
+SELECT * FROM cars AS OF 'HASHOF(commit-when-claimed)' WHERE id = 'car-a1b2c';
 
 -- What messages did the engine receive during this session?
 SELECT * FROM messages 
 WHERE to_agent = 'vm-07-engine' 
   AND created_at BETWEEN '2026-02-14 10:00:00' AND '2026-02-14 11:00:00';
 
--- Diff bead state between engine claiming and completing
-SELECT * FROM dolt_diff_beads 
+-- Diff car state between engine claiming and completing
+SELECT * FROM dolt_diff_cars 
 WHERE to_commit = @done_commit 
   AND from_commit = @claim_commit 
-  AND to_id = 'be-a1b2c';
+  AND to_id = 'car-a1b2c';
 
 -- Full session replay: every log entry in order
 SELECT direction, LEFT(content, 200) as preview, token_count, latency_ms, tool_calls
@@ -796,20 +796,20 @@ This runs on every engine VM. It's not an AI agent — it's a bash/Go/Python scr
 │                                                  │
 │  Main Loop:                                      │
 │  ┌────────────────────────────────────────────┐ │
-│  │ 1. Poll Dolt for ready bead (track-scoped)   │ │
-│  │ 2. Claim bead (atomic transaction)       │ │
+│  │ 1. Poll Dolt for ready car (track-scoped)   │ │
+│  │ 2. Claim car (atomic transaction)       │ │
 │  │ 3. Check for messages from Yardmaster      │ │
 │  │ 4. Render context payload:                 │ │
 │  │    - Track AGENTS.md (from config)         │ │
-│  │    - Bead details (title, desc, design)     │ │
+│  │    - Car details (title, desc, design)     │ │
 │  │    - Progress log (if resuming)            │ │
 │  │    - Recent commits on branch              │ │
 │  │    - Yardmaster messages                   │ │
 │  │ 5. Start Claude Code with context          │ │
 │  │ 6. Monitor: capture I/O, detect stall      │ │
 │  │ 7. On exit:                                │ │
-│  │    a. Check if bead marked done in DB      │ │
-│  │    b. If done: push branch, next bead      │ │
+│  │    a. Check if car marked done in DB      │ │
+│  │    b. If done: push branch, next car      │ │
 │  │    c. If /clear mid-task: ensure progress  │ │
 │  │       note was written, restart loop at 1  │ │
 │  │    d. If crash/stall: mark stalled in DB,  │ │
@@ -846,23 +846,23 @@ Language: {track.language}
 IMPORTANT: You ONLY work on this project. Do not use patterns, languages,
 or frameworks from other projects. Follow the conventions above exactly.
 
-## Your Current Bead
-Bead: {bead.id}
-Title: {bead.title}
-Priority: {bead.priority}
-Branch: {bead.branch}
+## Your Current Car
+Car: {car.id}
+Title: {car.title}
+Priority: {car.priority}
+Branch: {car.branch}
 
 ### Description
-{bead.description}
+{car.description}
 
 ### Design Notes
-{bead.design_notes}
+{car.design_notes}
 
 ### Acceptance Criteria
-{bead.acceptance}
+{car.acceptance}
 
 ## Previous Progress (if resuming)
-{bead_progress entries, most recent first}
+{car_progress entries, most recent first}
 
 ## Yardmaster Messages
 {unacknowledged messages for this engine}
@@ -872,17 +872,17 @@ Branch: {bead.branch}
 
 ## When You're Done
 1. Run tests, ensure they pass
-2. Update bead status: call ry.complete(bead_id, "summary of what was done")
+2. Update car status: call ry.complete(car_id, "summary of what was done")
 3. The daemon will handle git push and /clear
 
 ## If You're Stuck
-1. Update progress: call ry.progress(bead_id, "what you tried, what failed")
+1. Update progress: call ry.progress(car_id, "what you tried, what failed")
 2. Send message: call ry.message("yardmaster", "need help with X")
 3. The Yardmaster will receive your message and may provide guidance
 
 ## If You Need to Split Work
-1. Create child beads: call ry.create_bead(parent=bead_id, title="sub-task")
-2. Continue on the current bead, children will be picked up by other engines
+1. Create child cars: call ry.create_car(parent=car_id, title="sub-task")
+2. Continue on the current car, children will be picked up by other engines
 ```
 
 ### Railyard API (MCP Server or CLI Wrapper)
@@ -890,13 +890,13 @@ Branch: {bead.branch}
 The agent needs a way to interact with Dolt. Easiest: a small MCP server or CLI tool (`ry`) that wraps SQL calls.
 
 ```
-ry claim(track)              → claims next ready bead
-ry complete(bead_id, note)   → marks done, writes progress
-ry progress(bead_id, note)   → writes progress (for mid-task /clear)
+ry claim(track)              → claims next ready car
+ry complete(car_id, note)   → marks done, writes progress
+ry progress(car_id, note)   → writes progress (for mid-task /clear)
 ry message(to, body)         → sends message
 ry inbox()                   → reads unacknowledged messages
-ry create_bead(...)          → creates child bead (discovered work)
-ry status(bead_id, status)   → updates bead status
+ry create_car(...)          → creates child car (discovered work)
+ry status(car_id, status)   → updates car status
 ```
 
 ---
@@ -1088,7 +1088,7 @@ The Yardmaster triggers Roundhouse re-indexing. Add to the supervisor's responsi
 
 ```
 Yardmaster switch flow:
-  1. Engine completes bead, pushes branch
+  1. Engine completes car, pushes branch
   2. Yardmaster pulls branch, runs tests
   3. If tests pass: switch to main (merge)
   4. After switch: trigger Roundhouse re-index for that track
@@ -1208,16 +1208,16 @@ The Yardmaster is also an AI agent, but with broader permissions and a different
 3. Run post-switch CI/tests
 4. Trigger Roundhouse re-indexing after switch (insert reindex_jobs row)
 5. Resolve cross-track dependency unblocking (within this railyard)
-6. Reassign beads from dead/stalled engines
+6. Reassign cars from dead/stalled engines
 7. Escalate to human when stuck
 
-**Yardmaster sees all tracks** (unlike engines which are track-scoped). Queries beads across all tracks within its owner's database.
+**Yardmaster sees all tracks** (unlike engines which are track-scoped). Queries cars across all tracks within its owner's database.
 
 ---
 
 ## Dispatch (Agent1)
 
-Dispatch is your interface. You tell it what you want built, it breaks it down into beads across tracks with proper dependency chains. All beads are created within your railyard's database with branches under your prefix.
+Dispatch is your interface. You tell it what you want built, it breaks it down into cars across tracks with proper dependency chains. All cars are created within your railyard's database with branches under your prefix.
 
 **Example interaction:**
 ```
@@ -1226,28 +1226,28 @@ You: "Add user authentication. Backend needs JWT endpoints,
 
 Dispatch creates (in railyard_alice):
   track: backend
-    be-001 [epic] "User Authentication Backend"
-      be-002 [task] "POST /auth/login endpoint with JWT"
-         branch: ry/alice/backend/be-002
-      be-003 [task] "POST /auth/register endpoint"
-         branch: ry/alice/backend/be-003
-      be-004 [task] "JWT middleware for protected routes"
-         branch: ry/alice/backend/be-004
-      be-005 [task] "User model and database migration"
-         branch: ry/alice/backend/be-005
-      be-002 blocked_by be-005
-      be-004 blocked_by be-002
+    car-001 [epic] "User Authentication Backend"
+      car-002 [task] "POST /auth/login endpoint with JWT"
+         branch: ry/alice/backend/car-002
+      car-003 [task] "POST /auth/register endpoint"
+         branch: ry/alice/backend/car-003
+      car-004 [task] "JWT middleware for protected routes"
+         branch: ry/alice/backend/car-004
+      car-005 [task] "User model and database migration"
+         branch: ry/alice/backend/car-005
+      car-002 blocked_by car-005
+      car-004 blocked_by car-002
 
   track: frontend
-    fe-001 [epic] "User Authentication Frontend"
-      fe-002 [task] "Login page with form and validation"
-         branch: ry/alice/frontend/fe-002
-         blocked_by be-002 (cross-track, same railyard)
-      fe-003 [task] "Auth context provider with JWT storage"
-         branch: ry/alice/frontend/fe-003
-         blocked_by be-002 (cross-track, same railyard)
-      fe-004 [task] "Protected route wrapper component"
-         branch: ry/alice/frontend/fe-004
+    car-f01 [epic] "User Authentication Frontend"
+      car-f02 [task] "Login page with form and validation"
+         branch: ry/alice/frontend/car-002
+         blocked_by car-002 (cross-track, same railyard)
+      car-f03 [task] "Auth context provider with JWT storage"
+         branch: ry/alice/frontend/car-003
+         blocked_by car-002 (cross-track, same railyard)
+      car-f04 [task] "Protected route wrapper component"
+         branch: ry/alice/frontend/car-004
 ```
 
 ---
@@ -1298,9 +1298,9 @@ A `railyard_shared` database on the shared Dolt server tracks merge ordering:
 type MergeRequest struct {
     ID          uint      `gorm:"primaryKey;autoIncrement"`
     Owner       string    `gorm:"size:64;not null"`       // alice, bob
-    BeadID      string    `gorm:"size:32;not null"`
+    CarID      string    `gorm:"size:32;not null"`
     Track       string    `gorm:"size:64"`
-    Branch      string    `gorm:"size:128;not null"`      // ry/alice/backend/be-002
+    Branch      string    `gorm:"size:128;not null"`      // ry/alice/backend/car-002
     Status      string    `gorm:"size:16;default:pending"` // pending, testing, merged, conflict, rejected
     Priority    int       `gorm:"default:2"`
     FilesTouched string   `gorm:"type:json"`               // ["internal/auth/handler.go", ...]
@@ -1312,7 +1312,7 @@ type MergeRequest struct {
 
 ### File-Level Conflict Detection
 
-Before an engine starts working on a bead, check if another railyard's active beads touch the same files:
+Before an engine starts working on a car, check if another railyard's active cars touch the same files:
 
 ```go
 // Check if any other railyard is touching the same files
@@ -1331,33 +1331,33 @@ func DetectConflicts(sharedDB *gorm.DB, owner, track string, files []string) ([]
 
 When conflict detected, Yardmaster can:
 1. **Warn** — "Bob is also working on `internal/auth/handler.go`, coordinate?"
-2. **Block** — Automatically hold the bead until the conflicting merge resolves
+2. **Block** — Automatically hold the car until the conflicting merge resolves
 3. **Sequence** — Add to merge queue with ordering to minimize conflicts
 
 ### Cross-Railyard Dependencies
 
-The `BeadDepExternal` model enables Phase 2 dependencies:
+The `CarDepExternal` model enables Phase 2 dependencies:
 
 ```go
-// Alice's bead depends on Bob's bead
-dep := models.BeadDepExternal{
-    BeadID:         "fe-002",           // alice's bead
+// Alice's car depends on Bob's car
+dep := models.CarDepExternal{
+    CarID:         "car-f02",           // alice's car
     BlockedByOwner: "bob",              // bob's railyard
-    BlockedByID:    "be-050",           // bob's bead
+    BlockedByID:    "car-050",           // bob's car
     DepType:        "blocks",
 }
 ```
 
-The Yardmaster polls the shared database to check if cross-railyard blockers are resolved. When Bob's `be-050` merges to main, Alice's `fe-002` becomes unblocked.
+The Yardmaster polls the shared database to check if cross-railyard blockers are resolved. When Bob's `car-050` merges to main, Alice's `car-f02` becomes unblocked.
 
 ### Production Topology (Phase 2)
 
 ```
 ┌─ Shared Dolt Server ──────────────────┐
 │                                        │
-│  railyard_alice    (alice's beads)     │
-│  railyard_bob      (bob's beads)      │
-│  railyard_carol    (carol's beads)    │
+│  railyard_alice    (alice's cars)     │
+│  railyard_bob      (bob's cars)      │
+│  railyard_carol    (carol's cars)    │
 │  railyard_shared   (merge queue,      │
 │                     conflict tracking) │
 │                                        │

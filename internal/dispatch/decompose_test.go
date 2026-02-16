@@ -19,23 +19,23 @@ func TestValidatePlan_Empty(t *testing.T) {
 	}
 	found := false
 	for _, e := range errs {
-		if strings.Contains(e, "no beads") {
+		if strings.Contains(e, "no cars") {
 			found = true
 		}
 	}
 	if !found {
-		t.Errorf("expected 'no beads' error, got: %v", errs)
+		t.Errorf("expected 'no cars' error, got: %v", errs)
 	}
 }
 
 func TestValidatePlan_Valid(t *testing.T) {
 	plan := &DecompositionPlan{
-		Beads: []BeadPlan{
-			{ID: "be-001", Title: "Epic", Track: "backend", Type: "epic", Acceptance: ">90% coverage"},
-			{ID: "be-002", Title: "Task", Track: "backend", Type: "task", ParentID: "be-001", Acceptance: ">90% coverage"},
+		Cars: []CarPlan{
+			{ID: "car-001", Title: "Epic", Track: "backend", Type: "epic", Acceptance: ">90% coverage"},
+			{ID: "car-002", Title: "Task", Track: "backend", Type: "task", ParentID: "car-001", Acceptance: ">90% coverage"},
 		},
 		Deps: []DepPlan{
-			{BeadID: "be-002", BlockedBy: "be-001"},
+			{CarID: "car-002", BlockedBy: "car-001"},
 		},
 	}
 	errs := ValidatePlan(plan)
@@ -46,7 +46,7 @@ func TestValidatePlan_Valid(t *testing.T) {
 
 func TestValidatePlan_MissingFields(t *testing.T) {
 	plan := &DecompositionPlan{
-		Beads: []BeadPlan{
+		Cars: []CarPlan{
 			{ID: "", Title: "", Track: "", Type: "", Acceptance: ""},
 		},
 	}
@@ -58,8 +58,8 @@ func TestValidatePlan_MissingFields(t *testing.T) {
 
 func TestValidatePlan_InvalidType(t *testing.T) {
 	plan := &DecompositionPlan{
-		Beads: []BeadPlan{
-			{ID: "be-001", Title: "Test", Track: "backend", Type: "invalid", Acceptance: "done"},
+		Cars: []CarPlan{
+			{ID: "car-001", Title: "Test", Track: "backend", Type: "invalid", Acceptance: "done"},
 		},
 	}
 	errs := ValidatePlan(plan)
@@ -76,8 +76,8 @@ func TestValidatePlan_InvalidType(t *testing.T) {
 
 func TestValidatePlan_InvalidPriority(t *testing.T) {
 	plan := &DecompositionPlan{
-		Beads: []BeadPlan{
-			{ID: "be-001", Title: "Test", Track: "backend", Type: "task", Priority: 5, Acceptance: "done"},
+		Cars: []CarPlan{
+			{ID: "car-001", Title: "Test", Track: "backend", Type: "task", Priority: 5, Acceptance: "done"},
 		},
 	}
 	errs := ValidatePlan(plan)
@@ -94,9 +94,9 @@ func TestValidatePlan_InvalidPriority(t *testing.T) {
 
 func TestValidatePlan_DuplicateID(t *testing.T) {
 	plan := &DecompositionPlan{
-		Beads: []BeadPlan{
-			{ID: "be-001", Title: "A", Track: "backend", Type: "task", Acceptance: "done"},
-			{ID: "be-001", Title: "B", Track: "backend", Type: "task", Acceptance: "done"},
+		Cars: []CarPlan{
+			{ID: "car-001", Title: "A", Track: "backend", Type: "task", Acceptance: "done"},
+			{ID: "car-001", Title: "B", Track: "backend", Type: "task", Acceptance: "done"},
 		},
 	}
 	errs := ValidatePlan(plan)
@@ -113,8 +113,8 @@ func TestValidatePlan_DuplicateID(t *testing.T) {
 
 func TestValidatePlan_BadParentRef(t *testing.T) {
 	plan := &DecompositionPlan{
-		Beads: []BeadPlan{
-			{ID: "be-001", Title: "Test", Track: "backend", Type: "task", ParentID: "be-999", Acceptance: "done"},
+		Cars: []CarPlan{
+			{ID: "car-001", Title: "Test", Track: "backend", Type: "task", ParentID: "car-999", Acceptance: "done"},
 		},
 	}
 	errs := ValidatePlan(plan)
@@ -131,11 +131,11 @@ func TestValidatePlan_BadParentRef(t *testing.T) {
 
 func TestValidatePlan_SelfDep(t *testing.T) {
 	plan := &DecompositionPlan{
-		Beads: []BeadPlan{
-			{ID: "be-001", Title: "Test", Track: "backend", Type: "task", Acceptance: "done"},
+		Cars: []CarPlan{
+			{ID: "car-001", Title: "Test", Track: "backend", Type: "task", Acceptance: "done"},
 		},
 		Deps: []DepPlan{
-			{BeadID: "be-001", BlockedBy: "be-001"},
+			{CarID: "car-001", BlockedBy: "car-001"},
 		},
 	}
 	errs := ValidatePlan(plan)
@@ -152,8 +152,8 @@ func TestValidatePlan_SelfDep(t *testing.T) {
 
 func TestDetectCycle_NoCycle(t *testing.T) {
 	deps := []DepPlan{
-		{BeadID: "b", BlockedBy: "a"},
-		{BeadID: "c", BlockedBy: "b"},
+		{CarID: "b", BlockedBy: "a"},
+		{CarID: "c", BlockedBy: "b"},
 	}
 	if cycle := DetectCycle(deps); cycle != nil {
 		t.Errorf("expected no cycle, got: %v", cycle)
@@ -162,8 +162,8 @@ func TestDetectCycle_NoCycle(t *testing.T) {
 
 func TestDetectCycle_SimpleCycle(t *testing.T) {
 	deps := []DepPlan{
-		{BeadID: "a", BlockedBy: "b"},
-		{BeadID: "b", BlockedBy: "a"},
+		{CarID: "a", BlockedBy: "b"},
+		{CarID: "b", BlockedBy: "a"},
 	}
 	cycle := DetectCycle(deps)
 	if cycle == nil {
@@ -177,9 +177,9 @@ func TestDetectCycle_SimpleCycle(t *testing.T) {
 
 func TestDetectCycle_ThreeNodeCycle(t *testing.T) {
 	deps := []DepPlan{
-		{BeadID: "a", BlockedBy: "b"},
-		{BeadID: "b", BlockedBy: "c"},
-		{BeadID: "c", BlockedBy: "a"},
+		{CarID: "a", BlockedBy: "b"},
+		{CarID: "b", BlockedBy: "c"},
+		{CarID: "c", BlockedBy: "a"},
 	}
 	cycle := DetectCycle(deps)
 	if cycle == nil {
@@ -195,13 +195,13 @@ func TestDetectCycle_Empty(t *testing.T) {
 
 func TestValidatePlan_CycleDetected(t *testing.T) {
 	plan := &DecompositionPlan{
-		Beads: []BeadPlan{
-			{ID: "be-001", Title: "A", Track: "backend", Type: "task", Acceptance: "done"},
-			{ID: "be-002", Title: "B", Track: "backend", Type: "task", Acceptance: "done"},
+		Cars: []CarPlan{
+			{ID: "car-001", Title: "A", Track: "backend", Type: "task", Acceptance: "done"},
+			{ID: "car-002", Title: "B", Track: "backend", Type: "task", Acceptance: "done"},
 		},
 		Deps: []DepPlan{
-			{BeadID: "be-001", BlockedBy: "be-002"},
-			{BeadID: "be-002", BlockedBy: "be-001"},
+			{CarID: "car-001", BlockedBy: "car-002"},
+			{CarID: "car-002", BlockedBy: "car-001"},
 		},
 	}
 	errs := ValidatePlan(plan)
@@ -218,10 +218,10 @@ func TestValidatePlan_CycleDetected(t *testing.T) {
 
 func TestTrackSummary(t *testing.T) {
 	plan := &DecompositionPlan{
-		Beads: []BeadPlan{
-			{ID: "be-001", Title: "A", Track: "backend", Type: "task"},
-			{ID: "be-002", Title: "B", Track: "frontend", Type: "task"},
-			{ID: "be-003", Title: "C", Track: "backend", Type: "task"},
+		Cars: []CarPlan{
+			{ID: "car-001", Title: "A", Track: "backend", Type: "task"},
+			{ID: "car-002", Title: "B", Track: "frontend", Type: "task"},
+			{ID: "car-003", Title: "C", Track: "backend", Type: "task"},
 		},
 	}
 	summary := TrackSummary(plan)

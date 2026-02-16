@@ -6,34 +6,34 @@ import (
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
-	"github.com/zulandar/railyard/internal/bead"
+	"github.com/zulandar/railyard/internal/car"
 	"github.com/zulandar/railyard/internal/config"
 	"github.com/zulandar/railyard/internal/db"
 	"gorm.io/gorm"
 )
 
-func newBeadCmd() *cobra.Command {
+func newCarCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "bead",
-		Short: "Bead management commands",
+		Use:   "car",
+		Short: "Car management commands",
 	}
 
-	cmd.AddCommand(newBeadCreateCmd())
-	cmd.AddCommand(newBeadListCmd())
-	cmd.AddCommand(newBeadShowCmd())
-	cmd.AddCommand(newBeadUpdateCmd())
-	cmd.AddCommand(newBeadDepCmd())
-	cmd.AddCommand(newBeadReadyCmd())
-	cmd.AddCommand(newBeadChildrenCmd())
+	cmd.AddCommand(newCarCreateCmd())
+	cmd.AddCommand(newCarListCmd())
+	cmd.AddCommand(newCarShowCmd())
+	cmd.AddCommand(newCarUpdateCmd())
+	cmd.AddCommand(newCarDepCmd())
+	cmd.AddCommand(newCarReadyCmd())
+	cmd.AddCommand(newCarChildrenCmd())
 	return cmd
 }
 
-func newBeadCreateCmd() *cobra.Command {
+func newCarCreateCmd() *cobra.Command {
 	var (
 		configPath  string
 		title       string
 		track       string
-		beadType    string
+		carType    string
 		priority    int
 		description string
 		acceptance  string
@@ -43,13 +43,13 @@ func newBeadCreateCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "create",
-		Short: "Create a new bead",
-		Long:  "Creates a new bead (work item) in the Railyard database with an auto-generated ID.",
+		Short: "Create a new car",
+		Long:  "Creates a new car (work item) in the Railyard database with an auto-generated ID.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runBeadCreate(cmd, configPath, bead.CreateOpts{
+			return runCarCreate(cmd, configPath, car.CreateOpts{
 				Title:       title,
 				Track:       track,
-				Type:        beadType,
+				Type:        carType,
 				Priority:    priority,
 				Description: description,
 				Acceptance:  acceptance,
@@ -60,32 +60,32 @@ func newBeadCreateCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&configPath, "config", "c", "railyard.yaml", "path to Railyard config file")
-	cmd.Flags().StringVar(&title, "title", "", "bead title (required)")
+	cmd.Flags().StringVar(&title, "title", "", "car title (required)")
 	cmd.Flags().StringVar(&track, "track", "", "track name (required if no parent with track)")
-	cmd.Flags().StringVar(&beadType, "type", "task", "bead type (task, epic, bug, spike)")
+	cmd.Flags().StringVar(&carType, "type", "task", "car type (task, epic, bug, spike)")
 	cmd.Flags().IntVar(&priority, "priority", 2, "priority (0=critical → 4=backlog)")
 	cmd.Flags().StringVar(&description, "description", "", "detailed description")
 	cmd.Flags().StringVar(&acceptance, "acceptance", "", "acceptance criteria")
 	cmd.Flags().StringVar(&design, "design", "", "design notes")
-	cmd.Flags().StringVar(&parentID, "parent", "", "parent epic bead ID")
+	cmd.Flags().StringVar(&parentID, "parent", "", "parent epic car ID")
 	cmd.MarkFlagRequired("title")
 	return cmd
 }
 
-func runBeadCreate(cmd *cobra.Command, configPath string, opts bead.CreateOpts) error {
+func runCarCreate(cmd *cobra.Command, configPath string, opts car.CreateOpts) error {
 	cfg, gormDB, err := connectFromConfig(configPath)
 	if err != nil {
 		return err
 	}
 	opts.BranchPrefix = cfg.BranchPrefix
 
-	b, err := bead.Create(gormDB, opts)
+	b, err := car.Create(gormDB, opts)
 	if err != nil {
 		return err
 	}
 
 	out := cmd.OutOrStdout()
-	fmt.Fprintf(out, "Created bead %s\n", b.ID)
+	fmt.Fprintf(out, "Created car %s\n", b.ID)
 	fmt.Fprintf(out, "Branch: %s\n", b.Branch)
 	if b.ParentID != nil {
 		fmt.Fprintf(out, "Parent: %s\n", *b.ParentID)
@@ -93,24 +93,24 @@ func runBeadCreate(cmd *cobra.Command, configPath string, opts bead.CreateOpts) 
 	return nil
 }
 
-func newBeadListCmd() *cobra.Command {
+func newCarListCmd() *cobra.Command {
 	var (
 		configPath string
 		track      string
 		status     string
-		beadType   string
+		carType   string
 		assignee   string
 	)
 
 	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "List beads",
-		Long:  "Lists beads with optional filters. Output is formatted as a table.",
+		Short: "List cars",
+		Long:  "Lists cars with optional filters. Output is formatted as a table.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runBeadList(cmd, configPath, bead.ListFilters{
+			return runCarList(cmd, configPath, car.ListFilters{
 				Track:    track,
 				Status:   status,
-				Type:     beadType,
+				Type:     carType,
 				Assignee: assignee,
 			})
 		},
@@ -119,31 +119,31 @@ func newBeadListCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&configPath, "config", "c", "railyard.yaml", "path to Railyard config file")
 	cmd.Flags().StringVar(&track, "track", "", "filter by track")
 	cmd.Flags().StringVar(&status, "status", "", "filter by status")
-	cmd.Flags().StringVar(&beadType, "type", "", "filter by type")
+	cmd.Flags().StringVar(&carType, "type", "", "filter by type")
 	cmd.Flags().StringVar(&assignee, "assignee", "", "filter by assignee")
 	return cmd
 }
 
-func runBeadList(cmd *cobra.Command, configPath string, filters bead.ListFilters) error {
+func runCarList(cmd *cobra.Command, configPath string, filters car.ListFilters) error {
 	_, gormDB, err := connectFromConfig(configPath)
 	if err != nil {
 		return err
 	}
 
-	beads, err := bead.List(gormDB, filters)
+	cars, err := car.List(gormDB, filters)
 	if err != nil {
 		return err
 	}
 
 	out := cmd.OutOrStdout()
-	if len(beads) == 0 {
-		fmt.Fprintln(out, "No beads found.")
+	if len(cars) == 0 {
+		fmt.Fprintln(out, "No cars found.")
 		return nil
 	}
 
 	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "ID\tTITLE\tSTATUS\tTRACK\tPRI\tASSIGNEE")
-	for _, b := range beads {
+	for _, b := range cars {
 		a := b.Assignee
 		if a == "" {
 			a = "-"
@@ -155,16 +155,16 @@ func runBeadList(cmd *cobra.Command, configPath string, filters bead.ListFilters
 	return nil
 }
 
-func newBeadShowCmd() *cobra.Command {
+func newCarShowCmd() *cobra.Command {
 	var configPath string
 
 	cmd := &cobra.Command{
 		Use:   "show <id>",
-		Short: "Show bead details",
-		Long:  "Displays full details of a bead including description, acceptance criteria, design notes, progress, and dependencies.",
+		Short: "Show car details",
+		Long:  "Displays full details of a car including description, acceptance criteria, design notes, progress, and dependencies.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runBeadShow(cmd, configPath, args[0])
+			return runCarShow(cmd, configPath, args[0])
 		},
 	}
 
@@ -172,13 +172,13 @@ func newBeadShowCmd() *cobra.Command {
 	return cmd
 }
 
-func runBeadShow(cmd *cobra.Command, configPath, id string) error {
+func runCarShow(cmd *cobra.Command, configPath, id string) error {
 	_, gormDB, err := connectFromConfig(configPath)
 	if err != nil {
 		return err
 	}
 
-	b, err := bead.Get(gormDB, id)
+	b, err := car.Get(gormDB, id)
 	if err != nil {
 		return err
 	}
@@ -198,7 +198,7 @@ func runBeadShow(cmd *cobra.Command, configPath, id string) error {
 		fmt.Fprintf(out, "Parent:      %s\n", *b.ParentID)
 	}
 	if b.Type == "epic" {
-		summary, err := bead.ChildrenSummary(gormDB, b.ID)
+		summary, err := car.ChildrenSummary(gormDB, b.ID)
 		if err == nil {
 			total := 0
 			parts := []string{}
@@ -233,7 +233,7 @@ func runBeadShow(cmd *cobra.Command, configPath, id string) error {
 	if len(b.Deps) > 0 {
 		fmt.Fprintln(out, "\nDependencies:")
 		for _, d := range b.Deps {
-			fmt.Fprintf(out, "  %s %s %s\n", d.BeadID, d.DepType, d.BlockedBy)
+			fmt.Fprintf(out, "  %s %s %s\n", d.CarID, d.DepType, d.BlockedBy)
 		}
 	}
 
@@ -248,7 +248,7 @@ func runBeadShow(cmd *cobra.Command, configPath, id string) error {
 	return nil
 }
 
-func newBeadUpdateCmd() *cobra.Command {
+func newCarUpdateCmd() *cobra.Command {
 	var (
 		configPath  string
 		status      string
@@ -261,8 +261,8 @@ func newBeadUpdateCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "update <id>",
-		Short: "Update a bead",
-		Long:  "Updates bead fields. Status transitions are validated.",
+		Short: "Update a car",
+		Long:  "Updates car fields. Status transitions are validated.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			updates := make(map[string]interface{})
@@ -290,7 +290,7 @@ func newBeadUpdateCmd() *cobra.Command {
 				return fmt.Errorf("no fields to update; use --status, --assignee, --priority, --description, --acceptance, or --design")
 			}
 
-			return runBeadUpdate(cmd, configPath, args[0], updates)
+			return runCarUpdate(cmd, configPath, args[0], updates)
 		},
 	}
 
@@ -304,17 +304,17 @@ func newBeadUpdateCmd() *cobra.Command {
 	return cmd
 }
 
-func runBeadUpdate(cmd *cobra.Command, configPath, id string, updates map[string]interface{}) error {
+func runCarUpdate(cmd *cobra.Command, configPath, id string, updates map[string]interface{}) error {
 	_, gormDB, err := connectFromConfig(configPath)
 	if err != nil {
 		return err
 	}
 
-	if err := bead.Update(gormDB, id, updates); err != nil {
+	if err := car.Update(gormDB, id, updates); err != nil {
 		return err
 	}
 
-	fmt.Fprintf(cmd.OutOrStdout(), "Updated bead %s\n", id)
+	fmt.Fprintf(cmd.OutOrStdout(), "Updated car %s\n", id)
 	return nil
 }
 
@@ -333,19 +333,19 @@ func connectFromConfig(configPath string) (*config.Config, *gorm.DB, error) {
 	return cfg, gormDB, nil
 }
 
-func newBeadDepCmd() *cobra.Command {
+func newCarDepCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "dep",
-		Short: "Manage bead dependencies",
+		Short: "Manage car dependencies",
 	}
 
-	cmd.AddCommand(newBeadDepAddCmd())
-	cmd.AddCommand(newBeadDepListCmd())
-	cmd.AddCommand(newBeadDepRemoveCmd())
+	cmd.AddCommand(newCarDepAddCmd())
+	cmd.AddCommand(newCarDepListCmd())
+	cmd.AddCommand(newCarDepRemoveCmd())
 	return cmd
 }
 
-func newBeadDepAddCmd() *cobra.Command {
+func newCarDepAddCmd() *cobra.Command {
 	var (
 		configPath string
 		blockedBy  string
@@ -353,16 +353,16 @@ func newBeadDepAddCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "add <bead-id>",
+		Use:   "add <car-id>",
 		Short: "Add a dependency",
-		Long:  "Creates a blocking dependency: the bead is blocked by the specified blocker.",
+		Long:  "Creates a blocking dependency: the car is blocked by the specified blocker.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, gormDB, err := connectFromConfig(configPath)
 			if err != nil {
 				return err
 			}
-			if err := bead.AddDep(gormDB, args[0], blockedBy, depType); err != nil {
+			if err := car.AddDep(gormDB, args[0], blockedBy, depType); err != nil {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Added dependency: %s blocked by %s\n", args[0], blockedBy)
@@ -371,26 +371,26 @@ func newBeadDepAddCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&configPath, "config", "c", "railyard.yaml", "path to Railyard config file")
-	cmd.Flags().StringVar(&blockedBy, "blocked-by", "", "bead ID that blocks this bead (required)")
+	cmd.Flags().StringVar(&blockedBy, "blocked-by", "", "car ID that blocks this car (required)")
 	cmd.Flags().StringVar(&depType, "type", "blocks", "dependency type")
 	cmd.MarkFlagRequired("blocked-by")
 	return cmd
 }
 
-func newBeadDepListCmd() *cobra.Command {
+func newCarDepListCmd() *cobra.Command {
 	var configPath string
 
 	cmd := &cobra.Command{
-		Use:   "list <bead-id>",
-		Short: "List bead dependencies",
-		Long:  "Shows what blocks this bead and what this bead blocks.",
+		Use:   "list <car-id>",
+		Short: "List car dependencies",
+		Long:  "Shows what blocks this car and what this car blocks.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, gormDB, err := connectFromConfig(configPath)
 			if err != nil {
 				return err
 			}
-			blockers, dependents, err := bead.ListDeps(gormDB, args[0])
+			blockers, dependents, err := car.ListDeps(gormDB, args[0])
 			if err != nil {
 				return err
 			}
@@ -416,7 +416,7 @@ func newBeadDepListCmd() *cobra.Command {
 				fmt.Fprintln(out, "Blocks:")
 				fmt.Fprintln(w, "  DEPENDENT\tTYPE")
 				for _, d := range dependents {
-					fmt.Fprintf(w, "  %s\t%s\n", d.BeadID, d.DepType)
+					fmt.Fprintf(w, "  %s\t%s\n", d.CarID, d.DepType)
 				}
 				w.Flush()
 			}
@@ -429,23 +429,23 @@ func newBeadDepListCmd() *cobra.Command {
 	return cmd
 }
 
-func newBeadDepRemoveCmd() *cobra.Command {
+func newCarDepRemoveCmd() *cobra.Command {
 	var (
 		configPath string
 		blockedBy  string
 	)
 
 	cmd := &cobra.Command{
-		Use:   "remove <bead-id>",
+		Use:   "remove <car-id>",
 		Short: "Remove a dependency",
-		Long:  "Removes a blocking dependency between two beads.",
+		Long:  "Removes a blocking dependency between two cars.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, gormDB, err := connectFromConfig(configPath)
 			if err != nil {
 				return err
 			}
-			if err := bead.RemoveDep(gormDB, args[0], blockedBy); err != nil {
+			if err := car.RemoveDep(gormDB, args[0], blockedBy); err != nil {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Removed dependency: %s blocked by %s\n", args[0], blockedBy)
@@ -454,12 +454,12 @@ func newBeadDepRemoveCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&configPath, "config", "c", "railyard.yaml", "path to Railyard config file")
-	cmd.Flags().StringVar(&blockedBy, "blocked-by", "", "bead ID to remove as blocker (required)")
+	cmd.Flags().StringVar(&blockedBy, "blocked-by", "", "car ID to remove as blocker (required)")
 	cmd.MarkFlagRequired("blocked-by")
 	return cmd
 }
 
-func newBeadReadyCmd() *cobra.Command {
+func newCarReadyCmd() *cobra.Command {
 	var (
 		configPath string
 		track      string
@@ -467,28 +467,28 @@ func newBeadReadyCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "ready",
-		Short: "List ready beads",
-		Long:  "Lists beads that are ready for work: status=open, unassigned, and all blockers resolved.",
+		Short: "List ready cars",
+		Long:  "Lists cars that are ready for work: status=open, unassigned, and all blockers resolved.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, gormDB, err := connectFromConfig(configPath)
 			if err != nil {
 				return err
 			}
 
-			beads, err := bead.ReadyBeads(gormDB, track)
+			cars, err := car.ReadyCars(gormDB, track)
 			if err != nil {
 				return err
 			}
 
 			out := cmd.OutOrStdout()
-			if len(beads) == 0 {
-				fmt.Fprintln(out, "No ready beads.")
+			if len(cars) == 0 {
+				fmt.Fprintln(out, "No ready cars.")
 				return nil
 			}
 
 			w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 			fmt.Fprintln(w, "ID\tTITLE\tTRACK\tPRI")
-			for _, b := range beads {
+			for _, b := range cars {
 				fmt.Fprintf(w, "%s\t%s\t%s\t%d\n",
 					b.ID, truncate(b.Title, 40), b.Track, b.Priority)
 			}
@@ -502,16 +502,16 @@ func newBeadReadyCmd() *cobra.Command {
 	return cmd
 }
 
-func newBeadChildrenCmd() *cobra.Command {
+func newCarChildrenCmd() *cobra.Command {
 	var configPath string
 
 	cmd := &cobra.Command{
 		Use:   "children <parent-id>",
 		Short: "List children of an epic",
-		Long:  "Lists all child beads of an epic, with a status summary.",
+		Long:  "Lists all child cars of an epic, with a status summary.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runBeadChildren(cmd, configPath, args[0])
+			return runCarChildren(cmd, configPath, args[0])
 		},
 	}
 
@@ -519,13 +519,13 @@ func newBeadChildrenCmd() *cobra.Command {
 	return cmd
 }
 
-func runBeadChildren(cmd *cobra.Command, configPath, parentID string) error {
+func runCarChildren(cmd *cobra.Command, configPath, parentID string) error {
 	_, gormDB, err := connectFromConfig(configPath)
 	if err != nil {
 		return err
 	}
 
-	children, err := bead.GetChildren(gormDB, parentID)
+	children, err := car.GetChildren(gormDB, parentID)
 	if err != nil {
 		return err
 	}
@@ -545,7 +545,7 @@ func runBeadChildren(cmd *cobra.Command, configPath, parentID string) error {
 	w.Flush()
 
 	// Print status summary.
-	summary, err := bead.ChildrenSummary(gormDB, parentID)
+	summary, err := car.ChildrenSummary(gormDB, parentID)
 	if err != nil {
 		return err
 	}

@@ -180,9 +180,9 @@ func TestIntegration_AutoMigrate(t *testing.T) {
 
 	// Verify all 9 tables exist
 	expectedTables := []string{
-		"beads",
-		"bead_deps",
-		"bead_progresses",
+		"cars",
+		"car_deps",
+		"car_progresses",
 		"tracks",
 		"engines",
 		"messages",
@@ -225,13 +225,13 @@ func TestIntegration_AutoMigrate_TableColumns(t *testing.T) {
 		t.Fatalf("AutoMigrate: %v", err)
 	}
 
-	// Spot-check key columns on beads table
+	// Spot-check key columns on cars table
 	type columnInfo struct {
 		Field string `gorm:"column:Field"`
 	}
 	var cols []columnInfo
-	if err := db.Raw("DESCRIBE beads").Scan(&cols).Error; err != nil {
-		t.Fatalf("DESCRIBE beads: %v", err)
+	if err := db.Raw("DESCRIBE cars").Scan(&cols).Error; err != nil {
+		t.Fatalf("DESCRIBE cars: %v", err)
 	}
 
 	colSet := make(map[string]bool)
@@ -239,10 +239,10 @@ func TestIntegration_AutoMigrate_TableColumns(t *testing.T) {
 		colSet[c.Field] = true
 	}
 
-	beadCols := []string{"id", "title", "description", "type", "status", "priority", "track", "assignee", "parent_id", "branch"}
-	for _, col := range beadCols {
+	carCols := []string{"id", "title", "description", "type", "status", "priority", "track", "assignee", "parent_id", "branch"}
+	for _, col := range carCols {
 		if !colSet[col] {
-			t.Errorf("beads table missing column %q", col)
+			t.Errorf("cars table missing column %q", col)
 		}
 	}
 

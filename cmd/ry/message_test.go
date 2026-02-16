@@ -54,7 +54,7 @@ func TestMessageSendCmd_Help(t *testing.T) {
 	}
 
 	out := buf.String()
-	for _, flag := range []string{"--from", "--to", "--subject", "--body", "--bead-id", "--thread-id", "--priority", "--config"} {
+	for _, flag := range []string{"--from", "--to", "--subject", "--body", "--car-id", "--thread-id", "--priority", "--config"} {
 		if !strings.Contains(out, flag) {
 			t.Errorf("expected %s flag, got: %s", flag, out)
 		}
@@ -67,7 +67,7 @@ func TestNewMessageSendCmd(t *testing.T) {
 		t.Errorf("Use = %q, want %q", cmd.Use, "send")
 	}
 
-	for _, name := range []string{"from", "to", "subject", "body", "bead-id", "thread-id", "priority", "config"} {
+	for _, name := range []string{"from", "to", "subject", "body", "car-id", "thread-id", "priority", "config"} {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Errorf("expected --%s flag", name)
 		}

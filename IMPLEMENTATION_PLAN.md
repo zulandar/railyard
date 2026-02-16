@@ -4,17 +4,17 @@
 
 **In scope:** Phase 1, local-first. Single developer, 1–100 engines, all three agent roles (Engine, Yardmaster, Dispatch). Go + GORM + Dolt. Direct DB messaging.
 
-**Out of scope:** Phase 2 (cross-railyard), production deployment (VPC/VMs/bastion), CocoIndex/Roundhouse, Kafka, log shipping/redaction/retention, `BeadDepExternal` model.
+**Out of scope:** Phase 2 (cross-railyard), production deployment (VPC/VMs/bastion), CocoIndex/Roundhouse, Kafka, log shipping/redaction/retention, `CarDepExternal` model.
 
 ## Approach
 
-**Thinnest end-to-end first** — 7 sequential epics, each a runnable increment. Foundation → Bead CRUD → Engine Loop → Messaging → Yardmaster → Dispatch → Local Orchestration.
+**Thinnest end-to-end first** — 7 sequential epics, each a runnable increment. Foundation → Car CRUD → Engine Loop → Messaging → Yardmaster → Dispatch → Local Orchestration.
 
 **Hierarchy:** Epic → Feature → Task. Each level has rich context in its description. All acceptance criteria require >90% test coverage.
 
 ## Assumptions
 
-- Dolt is installed (prerequisite, not a bead)
+- Dolt is installed (prerequisite, not a car)
 - Claude Code is the primary engine agent runtime
 - `bd` CLI (beads v0.50.2) is used for issue tracking
 - `ry` CLI is the main user-facing Go binary
@@ -31,7 +31,7 @@
 
 ### Feature 1.1: Project Scaffold & Dependencies
 
-**Description:** Initialize the Go module, establish the canonical directory structure, and add all core dependencies. This creates the skeleton that every subsequent feature and task builds on. Directory layout: `cmd/ry/main.go` (CLI entrypoint), `internal/models/` (GORM structs), `internal/db/` (connection + migration), `internal/config/` (YAML loading), `internal/bead/` (bead operations), `internal/engine/` (engine daemon), `internal/messaging/` (agent communication), `internal/yardmaster/` (supervisor), `internal/dispatch/` (planner).
+**Description:** Initialize the Go module, establish the canonical directory structure, and add all core dependencies. This creates the skeleton that every subsequent feature and task builds on. Directory layout: `cmd/ry/main.go` (CLI entrypoint), `internal/models/` (GORM structs), `internal/db/` (connection + migration), `internal/config/` (YAML loading), `internal/car/` (car operations), `internal/engine/` (engine daemon), `internal/messaging/` (agent communication), `internal/yardmaster/` (supervisor), `internal/dispatch/` (planner).
 
 #### Tasks
 
@@ -55,12 +55,12 @@
 
 ### Feature 1.3: GORM Data Models
 
-**Description:** Define all Phase 1 GORM model structs exactly as specified in ARCHITECTURE.md Section 1.5. These structs are the single source of truth for the database schema — GORM AutoMigrate creates tables from them. Models: Bead, BeadDep, BeadProgress, Track, Engine, Message, AgentLog, RailyardConfig, ReindexJob. Excludes BeadDepExternal (Phase 2).
+**Description:** Define all Phase 1 GORM model structs exactly as specified in ARCHITECTURE.md Section 1.5. These structs are the single source of truth for the database schema — GORM AutoMigrate creates tables from them. Models: Car, CarDep, CarProgress, Track, Engine, Message, AgentLog, RailyardConfig, ReindexJob. Excludes CarDepExternal (Phase 2).
 
 #### Tasks
 
 - **T1.3.1: Implement core work item models**
-  Create `internal/models/bead.go` with `Bead`, `BeadDep`, `BeadProgress` structs. All fields, GORM tags, and relations exactly per ARCHITECTURE.md. Bead has: ID, Title, Description, Type, Status, Priority, Track, Assignee, ParentID, Branch, DesignNotes, Acceptance, timestamps, relations (Parent, Children, Deps, Progress).
+  Create `internal/models/car.go` with `Car`, `CarDep`, `CarProgress` structs. All fields, GORM tags, and relations exactly per ARCHITECTURE.md. Car has: ID, Title, Description, Type, Status, Priority, Track, Assignee, ParentID, Branch, DesignNotes, Acceptance, timestamps, relations (Parent, Children, Deps, Progress).
 
 - **T1.3.2: Implement infrastructure models**
   Create `internal/models/track.go` (Track), `internal/models/engine.go` (Engine), `internal/models/message.go` (Message), `internal/models/agent_log.go` (AgentLog), `internal/models/config.go` (RailyardConfig), `internal/models/reindex_job.go` (ReindexJob). All fields per ARCHITECTURE.md Section 1.5.
@@ -94,77 +94,77 @@
 
 ---
 
-## Epic 2: Bead Management — CLI CRUD & Dependency Tracking
+## Epic 2: Car Management — CLI CRUD & Dependency Tracking
 
-**Goal:** Full bead lifecycle through the `ry` CLI with dependency management and ready detection.
+**Goal:** Full car lifecycle through the `ry` CLI with dependency management and ready detection.
 
-**Context:** This epic builds on Epic 1's GORM models and database layer. It adds the business logic for creating, querying, and managing beads — the core work unit in Railyard. The critical deliverable is the `ReadyBeads()` query (ARCHITECTURE.md Section 2), which the engine daemon uses to find claimable work. Bead IDs are short hashes (e.g., `be-a1b2c`). Branch names follow the pattern `ry/{owner}/{track}/{bead_id}`.
+**Context:** This epic builds on Epic 1's GORM models and database layer. It adds the business logic for creating, querying, and managing cars — the core work unit in Railyard. The critical deliverable is the `ReadyCars()` query (ARCHITECTURE.md Section 2), which the engine daemon uses to find claimable work. Car IDs are short hashes (e.g., `car-a1b2c`). Branch names follow the pattern `ry/{owner}/{track}/{car_id}`.
 
-### Feature 2.1: Bead CRUD Operations
+### Feature 2.1: Car CRUD Operations
 
-**Description:** The `internal/bead/` package providing Create, Get, List, Update functions, plus CLI commands. Bead IDs are auto-generated short hashes. Status defaults to "open". Branch name is auto-computed from owner + track + ID. The CLI commands provide the primary interface for managing beads before Dispatch is built.
+**Description:** The `internal/car/` package providing Create, Get, List, Update functions, plus CLI commands. Car IDs are auto-generated short hashes. Status defaults to "open". Branch name is auto-computed from owner + track + ID. The CLI commands provide the primary interface for managing cars before Dispatch is built.
 
 #### Tasks
 
-- **T2.1.1: Implement bead package core functions**
-  Create `internal/bead/bead.go` with `Create(db, opts) (*Bead, error)`, `Get(db, id) (*Bead, error)`, `List(db, filters) ([]Bead, error)`, `Update(db, id, updates) error`. ID generation: 5-char hex hash with `be-` prefix (e.g., `be-a1b2c`). Ensure uniqueness check on create. Branch auto-computed as `ry/{owner}/{track}/{id}` from config.
+- **T2.1.1: Implement car package core functions**
+  Create `internal/car/car.go` with `Create(db, opts) (*Car, error)`, `Get(db, id) (*Car, error)`, `List(db, filters) ([]Car, error)`, `Update(db, id, updates) error`. ID generation: 5-char hex hash with `car-` prefix (e.g., `car-a1b2c`). Ensure uniqueness check on create. Branch auto-computed as `ry/{owner}/{track}/{id}` from config.
 
-- **T2.1.2: Implement `ry bead create` CLI command**
-  Cobra subcommand: `ry bead create --title "..." --track backend --type task --priority 2 --description "..." --acceptance "..."`. Required: title, track. Defaults: type=task, priority=2, status=open. Prints created bead ID and branch name.
+- **T2.1.2: Implement `ry car create` CLI command**
+  Cobra subcommand: `ry car create --title "..." --track backend --type task --priority 2 --description "..." --acceptance "..."`. Required: title, track. Defaults: type=task, priority=2, status=open. Prints created car ID and branch name.
 
-- **T2.1.3: Implement `ry bead list` and `ry bead show`**
-  `ry bead list` with filters: `--track`, `--status`, `--type`, `--assignee`. Table-formatted output (ID, title, status, track, priority, assignee). `ry bead show <id>` — full detail view including description, acceptance, design notes, progress entries, dependencies.
+- **T2.1.3: Implement `ry car list` and `ry car show`**
+  `ry car list` with filters: `--track`, `--status`, `--type`, `--assignee`. Table-formatted output (ID, title, status, track, priority, assignee). `ry car show <id>` — full detail view including description, acceptance, design notes, progress entries, dependencies.
 
-- **T2.1.4: Implement `ry bead update` with status validation**
-  `ry bead update <id> --status claimed --assignee engine-01 --priority 1`. Status transition validation: valid transitions are open→ready→claimed→in_progress→done, open→cancelled, any→blocked. Invalid transitions return error with explanation.
+- **T2.1.4: Implement `ry car update` with status validation**
+  `ry car update <id> --status claimed --assignee engine-01 --priority 1`. Status transition validation: valid transitions are open→ready→claimed→in_progress→done, open→cancelled, any→blocked. Invalid transitions return error with explanation.
 
 ### Feature 2.2: Dependency Management & Ready Detection
 
-**Description:** Blocking relationships between beads and the critical `ReadyBeads()` query. A bead is "ready" when its status is "open" AND all beads that block it are "done" or "cancelled". This query (ARCHITECTURE.md Section 2) is the foundation of the engine daemon's work selection. Dependencies are stored in the `bead_deps` table.
+**Description:** Blocking relationships between cars and the critical `ReadyCars()` query. A car is "ready" when its status is "open" AND all cars that block it are "done" or "cancelled". This query (ARCHITECTURE.md Section 2) is the foundation of the engine daemon's work selection. Dependencies are stored in the `car_deps` table.
 
 #### Tasks
 
-- **T2.2.1: Implement bead dependency functions**
-  Create `internal/bead/deps.go` with `AddDep(db, beadID, blockedBy, depType) error`, `ListDeps(db, beadID) ([]BeadDep, error)`, `RemoveDep(db, beadID, blockedBy) error`. Validate both bead IDs exist. Prevent self-dependency. Detect simple cycles (A blocks B, B blocks A).
+- **T2.2.1: Implement car dependency functions**
+  Create `internal/car/deps.go` with `AddDep(db, carID, blockedBy, depType) error`, `ListDeps(db, carID) ([]CarDep, error)`, `RemoveDep(db, carID, blockedBy) error`. Validate both car IDs exist. Prevent self-dependency. Detect simple cycles (A blocks B, B blocks A).
 
-- **T2.2.2: Implement `ry bead dep` CLI commands**
-  `ry bead dep add <bead> --blocked-by <blocker>` — creates blocking dependency. `ry bead dep list <bead>` — shows what blocks this bead and what this bead blocks. `ry bead dep remove <bead> --blocked-by <blocker>`.
+- **T2.2.2: Implement `ry car dep` CLI commands**
+  `ry car dep add <car> --blocked-by <blocker>` — creates blocking dependency. `ry car dep list <car>` — shows what blocks this car and what this car blocks. `ry car dep remove <car> --blocked-by <blocker>`.
 
-- **T2.2.3: Implement ReadyBeads query and `ry bead ready`**
-  `ReadyBeads(db, track) ([]Bead, error)` — exactly per ARCHITECTURE.md: beads where status=open, track matches, and NOT IN (beads that have incomplete blockers). `ry bead ready --track backend` — lists beads ready for claiming. This is the engine daemon's core query.
+- **T2.2.3: Implement ReadyCars query and `ry car ready`**
+  `ReadyCars(db, track) ([]Car, error)` — exactly per ARCHITECTURE.md: cars where status=open, track matches, and NOT IN (cars that have incomplete blockers). `ry car ready --track backend` — lists cars ready for claiming. This is the engine daemon's core query.
 
-### Feature 2.3: Bead Hierarchy (Epics & Parents)
+### Feature 2.3: Car Hierarchy (Epics & Parents)
 
-**Description:** Parent-child relationships for organizing beads. Epics are parent beads that contain child tasks/features. Uses the `ParentID` field on the Bead model. Supports `ry bead children <epic-id>` to list all children of a parent.
+**Description:** Parent-child relationships for organizing cars. Epics are parent cars that contain child tasks/features. Uses the `ParentID` field on the Car model. Supports `ry car children <epic-id>` to list all children of a parent.
 
 #### Tasks
 
 - **T2.3.1: Implement parent-child relationships and CLI**
-  `ry bead create --type epic --title "..." --track backend` creates an epic. `ry bead create --type task --parent <epic-id> --title "..."` creates a child. `ry bead children <parent-id>` lists children with status summary. Validate parent exists on create.
+  `ry car create --type epic --title "..." --track backend` creates an epic. `ry car create --type task --parent <epic-id> --title "..."` creates a child. `ry car children <parent-id>` lists children with status summary. Validate parent exists on create.
 
-### Feature 2.4: Bead Management Test Suite
+### Feature 2.4: Car Management Test Suite
 
-**Description:** Comprehensive tests for bead operations. >90% coverage for `internal/bead/`. Unit tests for ID generation, status validation, cycle detection. Integration tests with Dolt for CRUD, dependencies, and ready detection.
+**Description:** Comprehensive tests for car operations. >90% coverage for `internal/car/`. Unit tests for ID generation, status validation, cycle detection. Integration tests with Dolt for CRUD, dependencies, and ready detection.
 
 #### Tasks
 
-- **T2.4.1: Unit tests for bead operations**
+- **T2.4.1: Unit tests for car operations**
   Test: ID generation uniqueness, status transition validation (valid + invalid), cycle detection in dependencies, parent-child validation.
 
 - **T2.4.2: Integration tests for dependencies and ready detection**
-  Test: Create beads with dependency chain (A blocks B blocks C). Verify ReadyBeads returns only A. Complete A, verify B becomes ready. Create cross-track dependencies, verify correct behavior. Edge case: bead with cancelled blocker is ready.
+  Test: Create cars with dependency chain (A blocks B blocks C). Verify ReadyCars returns only A. Complete A, verify B becomes ready. Create cross-track dependencies, verify correct behavior. Edge case: car with cancelled blocker is ready.
 
 ---
 
-## Epic 3: Engine Core Loop — Bead Execution Runtime
+## Epic 3: Engine Core Loop — Car Execution Runtime
 
-**Goal:** A running engine daemon that claims beads, spawns Claude Code with full context, and handles the complete lifecycle (completion, /clear cycles, stalls).
+**Goal:** A running engine daemon that claims cars, spawns Claude Code with full context, and handles the complete lifecycle (completion, /clear cycles, stalls).
 
-**Context:** This is the heart of Railyard. The engine daemon (ARCHITECTURE.md Section "Engine Daemon — The Core Loop") runs on each engine instance. It polls Dolt for ready beads on its track, claims one atomically, renders context (ARCHITECTURE.md Section "Context Injection Template"), spawns Claude Code, monitors the subprocess, and handles exit (done, /clear, stall). The daemon is a Go binary, not an AI agent — it manages the agent lifecycle.
+**Context:** This is the heart of Railyard. The engine daemon (ARCHITECTURE.md Section "Engine Daemon — The Core Loop") runs on each engine instance. It polls Dolt for ready cars on its track, claims one atomically, renders context (ARCHITECTURE.md Section "Context Injection Template"), spawns Claude Code, monitors the subprocess, and handles exit (done, /clear, stall). The daemon is a Go binary, not an AI agent — it manages the agent lifecycle.
 
 ### Feature 3.1: Engine Lifecycle Management
 
-**Description:** Engine registration, heartbeating, and atomic bead claiming. When an engine starts, it registers in the `engines` table. A background goroutine updates `last_activity` every 10s. The `ClaimBead()` function uses `FOR UPDATE SKIP LOCKED` for safe concurrent claiming across multiple engines on the same track.
+**Description:** Engine registration, heartbeating, and atomic car claiming. When an engine starts, it registers in the `engines` table. A background goroutine updates `last_activity` every 10s. The `ClaimCar()` function uses `FOR UPDATE SKIP LOCKED` for safe concurrent claiming across multiple engines on the same track.
 
 #### Tasks
 
@@ -174,38 +174,38 @@
 - **T3.1.2: Implement heartbeat goroutine**
   `StartHeartbeat(ctx context.Context, db *gorm.DB, engineID string, interval time.Duration)` — goroutine that updates `last_activity = NOW()` on the engine row every 10s. Respects context cancellation for clean shutdown. Other components use stale heartbeats to detect dead engines.
 
-- **T3.1.3: Implement atomic bead claiming**
-  `ClaimBead(db, engineID, track) (*Bead, error)` — exactly per ARCHITECTURE.md Section 2: transaction with `FOR UPDATE SKIP LOCKED`, find first ready bead on track (priority ASC, created_at ASC), set status=claimed, assignee=engineID, claimed_at=now. Returns nil if no ready beads. Note: calls `ReadyBeads` logic from Epic 2 within the transaction.
+- **T3.1.3: Implement atomic car claiming**
+  `ClaimCar(db, engineID, track) (*Car, error)` — exactly per ARCHITECTURE.md Section 2: transaction with `FOR UPDATE SKIP LOCKED`, find first ready car on track (priority ASC, created_at ASC), set status=claimed, assignee=engineID, claimed_at=now. Returns nil if no ready cars. Note: calls `ReadyCars` logic from Epic 2 within the transaction.
 
 ### Feature 3.2: Context Injection & Agent Execution
 
-**Description:** The context renderer takes a claimed bead + track config and produces the full markdown prompt that gets fed to Claude Code. This follows ARCHITECTURE.md Section "Context Injection Template" exactly. The subprocess manager spawns `claude` CLI, pipes the context in, creates the git branch, and captures I/O to the agent_logs table.
+**Description:** The context renderer takes a claimed car + track config and produces the full markdown prompt that gets fed to Claude Code. This follows ARCHITECTURE.md Section "Context Injection Template" exactly. The subprocess manager spawns `claude` CLI, pipes the context in, creates the git branch, and captures I/O to the agent_logs table.
 
 #### Tasks
 
 - **T3.2.1: Implement context injection template renderer**
-  Create `internal/engine/context.go`. `RenderContext(bead *Bead, track *Track, config *Config, progress []BeadProgress, messages []Message) (string, error)` — renders the full context template from ARCHITECTURE.md. Sections: track conventions, bead details (title, description, design notes, acceptance), previous progress (most recent first), yardmaster messages, recent commits on branch. Include `ry complete` and `ry progress` usage instructions.
+  Create `internal/engine/context.go`. `RenderContext(car *Car, track *Track, config *Config, progress []CarProgress, messages []Message) (string, error)` — renders the full context template from ARCHITECTURE.md. Sections: track conventions, car details (title, description, design notes, acceptance), previous progress (most recent first), yardmaster messages, recent commits on branch. Include `ry complete` and `ry progress` usage instructions.
 
 - **T3.2.2: Implement Claude Code subprocess management**
-  Create `internal/engine/subprocess.go`. `SpawnAgent(ctx, bead, contextPayload) (*Session, error)` — spawns `claude` CLI with rendered context via stdin or `--prompt` flag. Captures stdout/stderr in real-time. Writes to `agent_logs` table (engine_id, session_id, bead_id, direction=out, content). Returns session handle for monitoring. Session ID generated per spawn.
+  Create `internal/engine/subprocess.go`. `SpawnAgent(ctx, car, contextPayload) (*Session, error)` — spawns `claude` CLI with rendered context via stdin or `--prompt` flag. Captures stdout/stderr in real-time. Writes to `agent_logs` table (engine_id, session_id, car_id, direction=out, content). Returns session handle for monitoring. Session ID generated per spawn.
 
 - **T3.2.3: Implement git branch creation and push logic**
-  Create `internal/engine/git.go`. `CreateBranch(branchName string) error` — creates and checks out `ry/{owner}/{track}/{bead_id}` from main. `PushBranch(branchName string) error` — pushes to remote. `RecentCommits(branchName string, n int) ([]string, error)` — returns last N commit messages for context injection. Uses `os/exec` to call git.
+  Create `internal/engine/git.go`. `CreateBranch(branchName string) error` — creates and checks out `ry/{owner}/{track}/{car_id}` from main. `PushBranch(branchName string) error` — pushes to remote. `RecentCommits(branchName string, n int) ([]string, error)` — returns last N commit messages for context injection. Uses `os/exec` to call git.
 
 ### Feature 3.3: Completion, Progress & Failure Handling
 
-**Description:** Handles the three possible outcomes of an agent session: (1) bead completed successfully, (2) mid-task exit / `/clear` cycle, (3) stall or crash. The engine daemon detects the outcome and takes appropriate action per ARCHITECTURE.md Section "Engine Daemon".
+**Description:** Handles the three possible outcomes of an agent session: (1) car completed successfully, (2) mid-task exit / `/clear` cycle, (3) stall or crash. The engine daemon detects the outcome and takes appropriate action per ARCHITECTURE.md Section "Engine Daemon".
 
 #### Tasks
 
 - **T3.3.1: Implement completion handling**
-  `HandleCompletion(db, bead, engine) error` — called when agent exits and bead is marked done. Flow: push branch, log progress note, set engine status=idle, loop back for next bead. Uses `CompleteBead()` from ARCHITECTURE.md Section 2.
+  `HandleCompletion(db, car, engine) error` — called when agent exits and car is marked done. Flow: push branch, log progress note, set engine status=idle, loop back for next car. Uses `CompleteCar()` from ARCHITECTURE.md Section 2.
 
 - **T3.3.2: Implement progress notes for /clear cycles**
-  `HandleClearCycle(db, bead, engine, cycle int) error` — called when agent exits but bead is NOT done. Writes progress note to `bead_progress` (cycle number, files changed, what was done). Increments cycle counter. Engine re-claims the same bead on next loop iteration.
+  `HandleClearCycle(db, car, engine, cycle int) error` — called when agent exits but car is NOT done. Writes progress note to `car_progress` (cycle number, files changed, what was done). Increments cycle counter. Engine re-claims the same car on next loop iteration.
 
 - **T3.3.3: Implement stall detection and escalation**
-  `StallDetector` monitors the subprocess. Conditions: no stdout for 120s, same error repeated 3x, /clear cycle count > configurable threshold (default 5). On stall: mark engine status=stalled, mark bead status=blocked, send message to yardmaster via messaging package: "Engine {id} stalled on bead {id}: {reason}".
+  `StallDetector` monitors the subprocess. Conditions: no stdout for 120s, same error repeated 3x, /clear cycle count > configurable threshold (default 5). On stall: mark engine status=stalled, mark car status=blocked, send message to yardmaster via messaging package: "Engine {id} stalled on car {id}: {reason}".
 
 ### Feature 3.4: Engine CLI Commands
 
@@ -217,7 +217,7 @@
   Cobra subcommand: `ry engine start --track backend`. Loads config, connects to Dolt, registers engine, starts heartbeat, enters main daemon loop (poll → claim → render context → spawn → monitor → handle exit → sleep 5s → repeat). Handles SIGINT/SIGTERM for clean shutdown.
 
 - **T3.4.2: Implement `ry complete` and `ry progress` commands**
-  `ry complete <bead-id> "summary of what was done"` — marks bead as done, writes final progress note. Called by the agent from within Claude Code. `ry progress <bead-id> "what I did, what's next"` — writes progress note without completing. Used before `/clear` to preserve context.
+  `ry complete <car-id> "summary of what was done"` — marks car as done, writes final progress note. Called by the agent from within Claude Code. `ry progress <car-id> "what I did, what's next"` — writes progress note without completing. Used before `/clear` to preserve context.
 
 ### Feature 3.5: Engine Test Suite
 
@@ -226,10 +226,10 @@
 #### Tasks
 
 - **T3.5.1: Unit tests for engine components**
-  Test: context renderer produces correct markdown for various bead states (fresh, with progress, with messages). Claim logic handles no-ready-beads case. Stall detection triggers on correct conditions. Engine registration/deregistration.
+  Test: context renderer produces correct markdown for various car states (fresh, with progress, with messages). Claim logic handles no-ready-cars case. Stall detection triggers on correct conditions. Engine registration/deregistration.
 
 - **T3.5.2: Integration tests with mock subprocess**
-  Test: seed a ready bead, start engine, verify it claims and creates branch. Mock Claude Code (simple script that writes to stdout and exits). Verify agent_logs written. Verify bead status transitions. Test /clear cycle handling. Test stall detection with a hanging mock process.
+  Test: seed a ready car, start engine, verify it claims and creates branch. Mock Claude Code (simple script that writes to stdout and exits). Verify agent_logs written. Verify car status transitions. Test /clear cycle handling. Test stall detection with a hanging mock process.
 
 ---
 
@@ -241,12 +241,12 @@
 
 ### Feature 4.1: Message Core Functions
 
-**Description:** The `internal/messaging/` package providing Send, Inbox, Acknowledge, and threading. Messages have: from_agent, to_agent, subject, body, bead_id (optional context), thread_id (optional parent), priority, acknowledged flag.
+**Description:** The `internal/messaging/` package providing Send, Inbox, Acknowledge, and threading. Messages have: from_agent, to_agent, subject, body, car_id (optional context), thread_id (optional parent), priority, acknowledged flag.
 
 #### Tasks
 
 - **T4.1.1: Implement messaging package (Send, Inbox, Acknowledge)**
-  Create `internal/messaging/messaging.go`. `Send(db, from, to, subject, body string, opts ...SendOption) (*Message, error)` — creates message row. Options: beadID, threadID, priority. `Inbox(db, agentID) ([]Message, error)` — unacknowledged messages for agent, ordered by priority then created_at. `Acknowledge(db, messageID) error` — sets acknowledged=true.
+  Create `internal/messaging/messaging.go`. `Send(db, from, to, subject, body string, opts ...SendOption) (*Message, error)` — creates message row. Options: carID, threadID, priority. `Inbox(db, agentID) ([]Message, error)` — unacknowledged messages for agent, ordered by priority then created_at. `Acknowledge(db, messageID) error` — sets acknowledged=true.
 
 - **T4.1.2: Implement threading support**
   `GetThread(db, threadID uint) ([]Message, error)` — returns all messages in a thread, ordered chronologically. `Reply(db, parentMsgID uint, from, body string) (*Message, error)` — creates reply with same thread_id, to_agent, subject prefix "Re:".
@@ -256,7 +256,7 @@
 
 ### Feature 4.2: Engine Inbox Integration
 
-**Description:** The engine daemon checks its inbox at the start of each loop iteration. Yardmaster instructions (abort bead, switch track, pause, resume) are processed before claiming new work.
+**Description:** The engine daemon checks its inbox at the start of each loop iteration. Yardmaster instructions (abort car, switch track, pause, resume) are processed before claiming new work.
 
 #### Tasks
 
@@ -264,7 +264,7 @@
   Modify engine daemon loop (Epic 3): after heartbeat, before claim, call `Inbox(db, engineID)`. Process each message based on subject/type. Acknowledge after processing.
 
 - **T4.2.2: Implement yardmaster instruction processing**
-  Handle known instruction types: `abort` (stop current bead, mark blocked), `switch-track` (change engine's track), `pause` (stop claiming new beads), `resume` (unpause), `guidance` (log advice for current bead context). Unknown message types are logged and acknowledged.
+  Handle known instruction types: `abort` (stop current car, mark blocked), `switch-track` (change engine's track), `pause` (stop claiming new cars), `resume` (unpause), `guidance` (log advice for current car context). Unknown message types are logged and acknowledged.
 
 ### Feature 4.3: Messaging CLI Commands
 
@@ -305,7 +305,7 @@
   Create `internal/yardmaster/yardmaster.go`. `Start(db *gorm.DB, config *Config) error` — launches Claude Code with the yardmaster system prompt. Manages the subprocess lifecycle. Handles restart on crash.
 
 - **T5.1.2: Write yardmaster system prompt**
-  Create `internal/yardmaster/prompt.go` or `yardmaster_prompt.md`. Prompt defines: role (supervisor of all engines across all tracks), responsibilities (monitor health, merge branches, handle stalls, manage deps), available `ry` commands (engine list, bead list, bead reassign, switch, message send, inbox), poll interval (30s), escalation rules (when to message human).
+  Create `internal/yardmaster/prompt.go` or `yardmaster_prompt.md`. Prompt defines: role (supervisor of all engines across all tracks), responsibilities (monitor health, merge branches, handle stalls, manage deps), available `ry` commands (engine list, car list, car reassign, switch, message send, inbox), poll interval (30s), escalation rules (when to message human).
 
 ### Feature 5.2: Engine Health Monitoring & Stall Handling
 
@@ -316,23 +316,23 @@
 - **T5.2.1: Implement heartbeat staleness detection**
   Create `internal/yardmaster/health.go`. `CheckEngineHealth(db *gorm.DB, threshold time.Duration) ([]Engine, error)` — returns engines where `last_activity` is older than threshold and status is not dead. `StaleEngines(db) ([]Engine, error)` — convenience wrapper with default 60s threshold.
 
-- **T5.2.2: Implement stalled engine handling and bead reassignment**
-  `ReassignBead(db, beadID, fromEngineID, reason string) error` — unclaims bead (status→open, assignee→nil), writes progress note with reassignment reason, marks old engine as dead, sends message to broadcast about reassignment. `ry bead reassign` CLI wraps this.
+- **T5.2.2: Implement stalled engine handling and car reassignment**
+  `ReassignCar(db, carID, fromEngineID, reason string) error` — unclaims car (status→open, assignee→nil), writes progress note with reassignment reason, marks old engine as dead, sends message to broadcast about reassignment. `ry car reassign` CLI wraps this.
 
 ### Feature 5.3: Branch Merging (Switch)
 
-**Description:** When an engine completes a bead, the Yardmaster pulls the branch, runs the track's test suite, and merges to main. This is the "switch" operation in Railyard terminology. If tests fail, the bead is sent back to an engine.
+**Description:** When an engine completes a car, the Yardmaster pulls the branch, runs the track's test suite, and merges to main. This is the "switch" operation in Railyard terminology. If tests fail, the car is sent back to an engine.
 
 #### Tasks
 
 - **T5.3.1: Implement branch merge flow**
-  Create `internal/yardmaster/switch.go`. `Switch(db, beadID string) error` — flow: fetch branch, checkout, run track test command (`go test ./...` for Go tracks, `npm test` for frontend), if pass: merge to main (fast-forward or merge commit), if fail: set bead status=blocked, send test failure message to engine.
+  Create `internal/yardmaster/switch.go`. `Switch(db, carID string) error` — flow: fetch branch, checkout, run track test command (`go test ./...` for Go tracks, `npm test` for frontend), if pass: merge to main (fast-forward or merge commit), if fail: set car status=blocked, send test failure message to engine.
 
 - **T5.3.2: Implement `ry switch` CLI command**
-  `ry switch <bead-id>` — runs the switch flow manually. Prints test results and merge status. `ry switch --dry-run <bead-id>` — runs tests without merging.
+  `ry switch <car-id>` — runs the switch flow manually. Prints test results and merge status. `ry switch --dry-run <car-id>` — runs tests without merging.
 
 - **T5.3.3: Implement cross-track dependency unblocking after merge**
-  After successful merge, query `bead_deps` for beads on OTHER tracks that were blocked by the completed bead. Transition each from blocked→open. Log the unblocking. This is single-railyard only (same owner's database).
+  After successful merge, query `car_deps` for cars on OTHER tracks that were blocked by the completed car. Transition each from blocked→open. Log the unblocking. This is single-railyard only (same owner's database).
 
 ### Feature 5.4: Post-Merge Operations
 
@@ -353,42 +353,42 @@
   Cobra subcommand: `ry yardmaster`. Loads config, connects to Dolt, starts yardmaster agent. Single instance per railyard (check for existing, error if running).
 
 - **T5.5.2: Unit tests for yardmaster operations**
-  Test: heartbeat staleness detection (stale vs healthy engines), bead reassignment (status transitions, progress notes), dependency unblocking logic (cross-track deps resolved after merge).
+  Test: heartbeat staleness detection (stale vs healthy engines), car reassignment (status transitions, progress notes), dependency unblocking logic (cross-track deps resolved after merge).
 
 - **T5.5.3: Integration tests for merge flow and reassignment**
-  Test: create bead, create branch with commits, run switch flow, verify merge to main. Test: stalled engine detected, bead reassigned to new engine. Test: completed bead unblocks cross-track dependent.
+  Test: create car, create branch with commits, run switch flow, verify merge to main. Test: stalled engine detected, car reassigned to new engine. Test: completed car unblocks cross-track dependent.
 
 ---
 
 ## Epic 6: Dispatch — Planner Agent
 
-**Goal:** The Dispatch agent decomposes feature requests into structured bead plans across tracks with dependency chains.
+**Goal:** The Dispatch agent decomposes feature requests into structured car plans across tracks with dependency chains.
 
 **Context:** ARCHITECTURE.md Section "Dispatch (Agent1)". Dispatch is the user's primary interface. You describe what you want, it creates epics, features, and tasks across the appropriate tracks with correct dependency ordering. It understands track boundaries (Go→backend, React→frontend, Terraform→infra) and creates cross-track dependencies within the same railyard.
 
 ### Feature 6.1: Dispatch Agent Framework
 
-**Description:** The dispatch package scaffold and system prompt. Dispatch is a Claude Code session with a planner prompt that has access to `ry bead create`, `ry bead dep add`, and track configuration.
+**Description:** The dispatch package scaffold and system prompt. Dispatch is a Claude Code session with a planner prompt that has access to `ry car create`, `ry car dep add`, and track configuration.
 
 #### Tasks
 
 - **T6.1.1: Implement dispatch package scaffold**
-  Create `internal/dispatch/dispatch.go`. `Start(db *gorm.DB, config *Config) error` — launches Claude Code with the dispatch system prompt. Interactive mode — user types requests, Dispatch creates beads.
+  Create `internal/dispatch/dispatch.go`. `Start(db *gorm.DB, config *Config) error` — launches Claude Code with the dispatch system prompt. Interactive mode — user types requests, Dispatch creates cars.
 
 - **T6.1.2: Write dispatch system prompt with track awareness**
-  Create `internal/dispatch/prompt.go` or `dispatch_prompt.md`. Prompt includes: role (planner that decomposes work into beads), track definitions from config (name, language, conventions, file patterns), available `ry` commands (bead create, bead dep add, bead list, bead ready), examples of good decomposition (from ARCHITECTURE.md Section "Dispatch" — the auth example), rules (one bead per atomic unit of work, always set acceptance criteria, always set dependencies).
+  Create `internal/dispatch/prompt.go` or `dispatch_prompt.md`. Prompt includes: role (planner that decomposes work into cars), track definitions from config (name, language, conventions, file patterns), available `ry` commands (car create, car dep add, car list, car ready), examples of good decomposition (from ARCHITECTURE.md Section "Dispatch" — the auth example), rules (one car per atomic unit of work, always set acceptance criteria, always set dependencies).
 
 ### Feature 6.2: Work Decomposition
 
-**Description:** The logic and prompt engineering for Dispatch to break down feature requests into properly structured bead hierarchies with dependency chains across tracks.
+**Description:** The logic and prompt engineering for Dispatch to break down feature requests into properly structured car hierarchies with dependency chains across tracks.
 
 #### Tasks
 
 - **T6.2.1: Implement work decomposition patterns**
-  The dispatch prompt must guide Claude Code to: create an epic per track when work spans tracks, create tasks under each epic, set appropriate priorities (backend foundations lower number = higher priority), use bead types correctly (epic for containers, task for atomic work, spike for research).
+  The dispatch prompt must guide Claude Code to: create an epic per track when work spans tracks, create tasks under each epic, set appropriate priorities (backend foundations lower number = higher priority), use car types correctly (epic for containers, task for atomic work, spike for research).
 
 - **T6.2.2: Implement dependency chain creation with cycle detection**
-  Dispatch creates dependencies via `ry bead dep add`. Prompt must enforce: backend model before backend handler, backend API before frontend consumer. After creating all beads, Dispatch runs `ry bead dep list` to verify the chain and checks for cycles. If cycles detected, it resolves them.
+  Dispatch creates dependencies via `ry car dep add`. Prompt must enforce: backend model before backend handler, backend API before frontend consumer. After creating all cars, Dispatch runs `ry car dep list` to verify the chain and checks for cycles. If cycles detected, it resolves them.
 
 ### Feature 6.3: Dispatch CLI & Test Suite
 
@@ -400,7 +400,7 @@
   Cobra subcommand: `ry dispatch`. Loads config, connects to Dolt, starts dispatch agent. Interactive — opens Claude Code in the current terminal for direct conversation.
 
 - **T6.3.2: Integration tests for multi-track decomposition**
-  Test: give a multi-track feature request (e.g., "Add user auth with JWT backend and React login page"), verify Dispatch creates: backend epic with tasks, frontend epic with tasks, cross-track dependencies (frontend blocked by backend API). Verify bead fields are populated (title, description, acceptance, track, type, parent).
+  Test: give a multi-track feature request (e.g., "Add user auth with JWT backend and React login page"), verify Dispatch creates: backend epic with tasks, frontend epic with tasks, cross-track dependencies (frontend blocked by backend API). Verify car fields are populated (title, description, acceptance, track, type, parent).
 
 ---
 
@@ -420,14 +420,14 @@
   Cobra subcommand: `ry start [--engines N]`. Flow: validate config, check Dolt is running (or start it), run `ry db init` if needed, create tmux session "railyard", pane 0: Dispatch, pane 1: Yardmaster, panes 2..N+1: engines (track assignment from config engine_slots). Engine count from `--engines` flag or sum of engine_slots in config.
 
 - **T7.1.2: Implement `ry stop` command**
-  `ry stop [--timeout 60s]`. Flow: send "drain" broadcast message to all engines, wait for in-progress beads to complete (up to timeout), kill all engine processes, kill yardmaster, kill dispatch, kill tmux session, update all engine statuses to dead in Dolt.
+  `ry stop [--timeout 60s]`. Flow: send "drain" broadcast message to all engines, wait for in-progress cars to complete (up to timeout), kill all engine processes, kill yardmaster, kill dispatch, kill tmux session, update all engine statuses to dead in Dolt.
 
 - **T7.1.3: Implement `ry status` command**
-  `ry status`. Dashboard output: engine table (ID, track, status, current bead, last activity, uptime), bead summary per track (open/ready/claimed/in_progress/done/blocked counts), message queue depth, tmux session status. Table-formatted, refreshable with `--watch`.
+  `ry status`. Dashboard output: engine table (ID, track, status, current car, last activity, uptime), car summary per track (open/ready/claimed/in_progress/done/blocked counts), message queue depth, tmux session status. Table-formatted, refreshable with `--watch`.
 
 ### Feature 7.2: Engine Scaling & Track Assignment
 
-**Description:** Dynamic engine count management. Users can scale engines up/down per track. Track assignment distributes engines proportionally based on config engine_slots and current ready bead counts.
+**Description:** Dynamic engine count management. Users can scale engines up/down per track. Track assignment distributes engines proportionally based on config engine_slots and current ready car counts.
 
 #### Tasks
 
@@ -435,10 +435,10 @@
   `ry engine scale --count 5 --track backend`. Calculates delta between desired and current engine count for the track. Spins up new tmux panes for additional engines, or sends drain messages to excess engines. Respects max engine_slots per track from config.
 
 - **T7.2.2: Implement track assignment logic**
-  `AssignTracks(config *Config, totalEngines int) map[string]int` — distributes N engines across tracks. Algorithm: proportional to engine_slots in config, with floor of 1 per active track. If ready bead counts available, weight toward tracks with more ready beads.
+  `AssignTracks(config *Config, totalEngines int) map[string]int` — distributes N engines across tracks. Algorithm: proportional to engine_slots in config, with floor of 1 per active track. If ready car counts available, weight toward tracks with more ready cars.
 
 - **T7.2.3: Implement `ry engine list` and `ry engine restart`**
-  `ry engine list` — shows all engines with status, track, current bead, uptime. `ry engine restart <id>` — kills the engine's tmux pane and creates a new one. Engine deregisters and re-registers on restart.
+  `ry engine list` — shows all engines with status, track, current car, uptime. `ry engine restart <id>` — kills the engine's tmux pane and creates a new one. Engine deregisters and re-registers on restart.
 
 ### Feature 7.3: Orchestration Test Suite
 
@@ -458,7 +458,7 @@
 
 ```
 Epic 1 (Foundation)
-  └─► Epic 2 (Bead Management)
+  └─► Epic 2 (Car Management)
         └─► Epic 3 (Engine Core Loop)
               ├─► Epic 4 (Messaging)
               │     └─► Epic 5 (Yardmaster)
@@ -471,7 +471,7 @@ Epic 1 (Foundation)
 
 ```
 F1.1 (Scaffold) → F1.2 (Config) → F1.3 (Models) → F1.4 (DB Layer) → F1.5 (Tests)
-F1.4 → F2.1 (Bead CRUD) → F2.2 (Deps & Ready) → F2.3 (Hierarchy) → F2.4 (Tests)
+F1.4 → F2.1 (Car CRUD) → F2.2 (Deps & Ready) → F2.3 (Hierarchy) → F2.4 (Tests)
 F2.2 → F3.1 (Engine Lifecycle) → F3.2 (Context & Execution) → F3.3 (Completion) → F3.4 (CLI) → F3.5 (Tests)
 F3.1 → F4.1 (Message Core) → F4.2 (Engine Inbox) → F4.3 (Message CLI) → F4.4 (Tests)
 F4.2 → F5.1 (YM Framework) → F5.2 (Health Monitor) → F5.3 (Switch/Merge) → F5.4 (Post-Merge) → F5.5 (Tests)
@@ -487,10 +487,10 @@ F5.5 + F6.3 → F7.1 (Lifecycle) → F7.2 (Scaling) → F7.3 (Tests)
 | 2 | Local-first | Both local+prod | Validates architecture without cloud overhead. Production is a future epic. |
 | 3 | Runnable vertical slices | Compilable modules, feature-complete components | Catches integration issues early. Each slice testable end-to-end. |
 | 4 | CocoIndex deferred | Include as final slices | Engines work without semantic search. Reduces scope significantly. |
-| 5 | All three agent roles | Engine only, Engine+Yardmaster | Full orchestration from start. Dispatch avoids manual bead creation. |
+| 5 | All three agent roles | Engine only, Engine+Yardmaster | Full orchestration from start. Dispatch avoids manual car creation. |
 | 6 | Agent logs in Dolt via GORM | Full logging arch, stdout only | Queryable debugging without shipping/redaction complexity. |
 | 7 | End-to-end first (Approach A) | Two-track parallel, horizontal | Natural dependency chain. Running system by Epic 3. Lowest integration risk. |
 | 8 | Direct DB messaging | Kafka | Polling 5s fine for local. Kafka is future scale optimization. |
 | 9 | Variable engine count (1-100) | Fixed count | User controls concurrency dynamically. Proportional track assignment. |
-| 10 | 3-level hierarchy (Epic→Feature→Task) | 2-level (Epic→Task) | Features group related tasks, providing intermediate context. Matches beads issue_type support. |
-| 11 | >90% test coverage per bead | Minimal tests, full e2e suite | Each slice is testable independently. High coverage catches regressions as epics build on each other. |
+| 10 | 3-level hierarchy (Epic→Feature→Task) | 2-level (Epic→Task) | Features group related tasks, providing intermediate context. Matches bd issue_type support. |
+| 11 | >90% test coverage per car | Minimal tests, full e2e suite | Each slice is testable independently. High coverage catches regressions as epics build on each other. |

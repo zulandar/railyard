@@ -2,8 +2,8 @@ package models
 
 import "time"
 
-// Bead is the core work item in Railyard.
-type Bead struct {
+// Car is the core work item in Railyard.
+type Car struct {
 	ID          string     `gorm:"primaryKey;size:32"`
 	Title       string     `gorm:"not null"`
 	Description string     `gorm:"type:text"`
@@ -21,26 +21,26 @@ type Bead struct {
 	ClaimedAt   *time.Time
 	CompletedAt *time.Time
 
-	Parent   *Bead          `gorm:"foreignKey:ParentID"`
-	Children []Bead         `gorm:"foreignKey:ParentID"`
-	Deps     []BeadDep      `gorm:"foreignKey:BeadID"`
-	Progress []BeadProgress `gorm:"foreignKey:BeadID"`
+	Parent   *Car          `gorm:"foreignKey:ParentID"`
+	Children []Car         `gorm:"foreignKey:ParentID"`
+	Deps     []CarDep      `gorm:"foreignKey:CarID"`
+	Progress []CarProgress `gorm:"foreignKey:CarID"`
 }
 
-// BeadDep represents a blocking relationship between beads.
-type BeadDep struct {
-	BeadID    string `gorm:"primaryKey;size:32"`
+// CarDep represents a blocking relationship between cars.
+type CarDep struct {
+	CarID    string `gorm:"primaryKey;size:32"`
 	BlockedBy string `gorm:"primaryKey;size:32"`
 	DepType   string `gorm:"size:16;default:blocks"`
 
-	Bead    Bead `gorm:"foreignKey:BeadID"`
-	Blocker Bead `gorm:"foreignKey:BlockedBy"`
+	Car    Car `gorm:"foreignKey:CarID"`
+	Blocker Car `gorm:"foreignKey:BlockedBy"`
 }
 
-// BeadProgress tracks work done across /clear cycles.
-type BeadProgress struct {
+// CarProgress tracks work done across /clear cycles.
+type CarProgress struct {
 	ID           uint      `gorm:"primaryKey;autoIncrement"`
-	BeadID       string    `gorm:"size:32;index"`
+	CarID       string    `gorm:"size:32;index"`
 	Cycle        int
 	SessionID    string    `gorm:"size:64"`
 	EngineID     string    `gorm:"size:64"`

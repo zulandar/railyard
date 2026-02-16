@@ -88,8 +88,8 @@ func testDB(t *testing.T) *gorm.DB {
 	if err := db.AutoMigrate(
 		&models.Engine{},
 		&models.Track{},
-		&models.Bead{},
-		&models.BeadDep{},
+		&models.Car{},
+		&models.CarDep{},
 		&models.Message{},
 	); err != nil {
 		t.Fatalf("migrate test db: %v", err)
@@ -865,7 +865,7 @@ func TestStatus_WithEnginesAndTracks(t *testing.T) {
 	// Create engines.
 	db.Create(&models.Engine{
 		ID: "eng-1", Track: "backend", Status: "working",
-		CurrentBead: "b-1", StartedAt: now.Add(-30 * time.Minute), LastActivity: now,
+		CurrentCar: "b-1", StartedAt: now.Add(-30 * time.Minute), LastActivity: now,
 	})
 	db.Create(&models.Engine{
 		ID: "eng-2", Track: "backend", Status: "idle",
@@ -881,10 +881,10 @@ func TestStatus_WithEnginesAndTracks(t *testing.T) {
 	db.Create(&models.Track{Name: "backend", Active: true})
 	db.Create(&models.Track{Name: "frontend", Active: true})
 
-	// Create beads.
-	db.Create(&models.Bead{ID: "b-1", Track: "backend", Status: "open"})
-	db.Create(&models.Bead{ID: "b-2", Track: "backend", Status: "in_progress", Assignee: "eng-1"})
-	db.Create(&models.Bead{ID: "b-3", Track: "backend", Status: "done"})
+	// Create cars.
+	db.Create(&models.Car{ID: "b-1", Track: "backend", Status: "open"})
+	db.Create(&models.Car{ID: "b-2", Track: "backend", Status: "in_progress", Assignee: "eng-1"})
+	db.Create(&models.Car{ID: "b-3", Track: "backend", Status: "done"})
 
 	// Create messages.
 	db.Create(&models.Message{FromAgent: "a", ToAgent: "eng-1", Acknowledged: false})
@@ -1332,7 +1332,7 @@ func TestFormatStatus_Running(t *testing.T) {
 				ID:           "eng-abcd1234",
 				Track:        "backend",
 				Status:       "working",
-				CurrentBead:  "be-12345",
+				CurrentCar:  "car-12345",
 				LastActivity: time.Now(),
 				Uptime:       30 * time.Minute,
 			},
@@ -1369,7 +1369,7 @@ func TestFormatStatus_Stopped(t *testing.T) {
 	}
 }
 
-func TestFormatStatus_EmptyBead(t *testing.T) {
+func TestFormatStatus_EmptyCar(t *testing.T) {
 	info := &StatusInfo{
 		SessionRunning: true,
 		Engines: []EngineInfo{
@@ -1377,7 +1377,7 @@ func TestFormatStatus_EmptyBead(t *testing.T) {
 				ID:           "eng-1",
 				Track:        "backend",
 				Status:       "idle",
-				CurrentBead:  "",
+				CurrentCar:  "",
 				LastActivity: time.Now(),
 				Uptime:       5 * time.Minute,
 			},
@@ -1385,7 +1385,7 @@ func TestFormatStatus_EmptyBead(t *testing.T) {
 	}
 	out := FormatStatus(info)
 	if !strings.Contains(out, "-") {
-		t.Errorf("expected '-' for empty bead, got: %s", out)
+		t.Errorf("expected '-' for empty car, got: %s", out)
 	}
 }
 

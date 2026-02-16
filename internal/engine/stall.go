@@ -38,7 +38,7 @@ type StallReason struct {
 type StallDetector struct {
 	cfg      StallConfig
 	engineID string
-	beadID   string
+	carID   string
 
 	mu           sync.Mutex
 	lastStdoutAt time.Time
@@ -67,7 +67,7 @@ func NewStallDetector(sess *Session, cfg StallConfig) *StallDetector {
 	sd := &StallDetector{
 		cfg:          cfg,
 		engineID:     sess.EngineID,
-		beadID:       sess.BeadID,
+		carID:       sess.CarID,
 		lastStdoutAt: time.Now(),
 		stallCh:      make(chan StallReason, 1),
 	}
@@ -119,30 +119,30 @@ func (sd *StallDetector) Stop() {
 }
 
 // HandleStall processes a detected stall: updates engine status to stalled,
-// bead status to blocked, and sends a message to the yardmaster.
-func HandleStall(db *gorm.DB, engineID, beadID string, reason StallReason) error {
+// car status to blocked, and sends a message to the yardmaster.
+func HandleStall(db *gorm.DB, engineID, carID string, reason StallReason) error {
 	// Update engine status to stalled.
 	if err := db.Model(&models.Engine{}).Where("id = ?", engineID).
 		Update("status", StatusStalled).Error; err != nil {
 		return fmt.Errorf("engine: mark stalled %s: %w", engineID, err)
 	}
 
-	// Update bead status to blocked.
-	if err := db.Model(&models.Bead{}).Where("id = ?", beadID).
+	// Update car status to blocked.
+	if err := db.Model(&models.Car{}).Where("id = ?", carID).
 		Update("status", "blocked").Error; err != nil {
-		return fmt.Errorf("engine: mark bead blocked %s: %w", beadID, err)
+		return fmt.Errorf("engine: mark car blocked %s: %w", carID, err)
 	}
 
 	// Build message body with context.
-	body := fmt.Sprintf("Engine: %s\nBead: %s\nStall type: %s\nReason: %s",
-		engineID, beadID, reason.Type, reason.Detail)
+	body := fmt.Sprintf("Engine: %s\nCar: %s\nStall type: %s\nReason: %s",
+		engineID, carID, reason.Type, reason.Detail)
 	if reason.Snippet != "" {
 		body += fmt.Sprintf("\nLast output:\n%s", reason.Snippet)
 	}
 
 	// Send message to yardmaster.
 	_, err := messaging.Send(db, engineID, "yardmaster", "engine-stalled", body, messaging.SendOpts{
-		BeadID:   beadID,
+		CarID:   carID,
 		Priority: "urgent",
 	})
 	if err != nil {

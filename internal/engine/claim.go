@@ -9,13 +9,13 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-// ClaimBead atomically finds the highest-priority ready bead on the given track
+// ClaimCar atomically finds the highest-priority ready car on the given track
 // and assigns it to the engine. It uses SELECT ... FOR UPDATE SKIP LOCKED for
 // concurrency safety.
 //
 // Note: Dolt may not fully support row-level SKIP LOCKED. Correctness is
 // preserved via transaction serialization; just lower concurrency.
-func ClaimBead(db *gorm.DB, engineID, track string) (*models.Bead, error) {
+func ClaimCar(db *gorm.DB, engineID, track string) (*models.Car, error) {
 	if engineID == "" {
 		return nil, fmt.Errorf("engine: engineID is required")
 	}
@@ -23,16 +23,16 @@ func ClaimBead(db *gorm.DB, engineID, track string) (*models.Bead, error) {
 		return nil, fmt.Errorf("engine: track is required")
 	}
 
-	var claimed models.Bead
+	var claimed models.Car
 
 	err := db.Transaction(func(tx *gorm.DB) error {
-		// Subquery: bead IDs that have at least one non-done, non-cancelled blocker.
-		blockedSub := tx.Table("bead_deps").
-			Select("bead_deps.bead_id").
-			Joins("JOIN beads blocker ON bead_deps.blocked_by = blocker.id").
+		// Subquery: car IDs that have at least one non-done, non-cancelled blocker.
+		blockedSub := tx.Table("car_deps").
+			Select("car_deps.car_id").
+			Joins("JOIN cars blocker ON car_deps.blocked_by = blocker.id").
 			Where("blocker.status NOT IN ?", []string{"done", "cancelled"})
 
-		// Find the highest-priority ready bead, locking the row.
+		// Find the highest-priority ready car, locking the row.
 		result := tx.Where("status = ? AND (assignee = ? OR assignee IS NULL) AND track = ?", "open", "", track).
 			Where("id NOT IN (?)", blockedSub).
 			Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
@@ -41,29 +41,29 @@ func ClaimBead(db *gorm.DB, engineID, track string) (*models.Bead, error) {
 			Find(&claimed)
 
 		if result.Error != nil {
-			return fmt.Errorf("engine: find ready bead: %w", result.Error)
+			return fmt.Errorf("engine: find ready car: %w", result.Error)
 		}
 		if result.RowsAffected == 0 {
-			return fmt.Errorf("engine: no ready beads: %w", gorm.ErrRecordNotFound)
+			return fmt.Errorf("engine: no ready cars: %w", gorm.ErrRecordNotFound)
 		}
 
-		// Update the bead: status=claimed, assignee=engineID, claimed_at=now.
+		// Update the car: status=claimed, assignee=engineID, claimed_at=now.
 		now := time.Now()
-		if err := tx.Model(&models.Bead{}).Where("id = ?", claimed.ID).Updates(map[string]interface{}{
+		if err := tx.Model(&models.Car{}).Where("id = ?", claimed.ID).Updates(map[string]interface{}{
 			"status":     "claimed",
 			"assignee":   engineID,
 			"claimed_at": now,
 		}).Error; err != nil {
-			return fmt.Errorf("engine: claim bead %s: %w", claimed.ID, err)
+			return fmt.Errorf("engine: claim car %s: %w", claimed.ID, err)
 		}
 		claimed.Status = "claimed"
 		claimed.Assignee = engineID
 		claimed.ClaimedAt = &now
 
-		// Update the engine: status=working, current_bead=bead.ID.
+		// Update the engine: status=working, current_car=car.ID.
 		if err := tx.Model(&models.Engine{}).Where("id = ?", engineID).Updates(map[string]interface{}{
 			"status":       StatusWorking,
-			"current_bead": claimed.ID,
+			"current_car": claimed.ID,
 		}).Error; err != nil {
 			return fmt.Errorf("engine: update engine %s: %w", engineID, err)
 		}

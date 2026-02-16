@@ -23,7 +23,7 @@ func newRootCmd() *cobra.Command {
 
 	cmd.AddCommand(newVersionCmd())
 	cmd.AddCommand(newDBCmd())
-	cmd.AddCommand(newBeadCmd())
+	cmd.AddCommand(newCarCmd())
 	cmd.AddCommand(newEngineCmd())
 	cmd.AddCommand(newCompleteCmd())
 	cmd.AddCommand(newProgressCmd())

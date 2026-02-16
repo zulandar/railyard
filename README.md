@@ -2,18 +2,18 @@
 
 Multi-agent AI orchestration for coding. Railyard coordinates multiple Claude Code agents across tracks (backend, frontend, infra) with per-branch isolation, a version-controlled SQL database, and automated supervision.
 
-Each developer runs their own Railyard instance against the same repo. Agents work on isolated branches (`ry/{owner}/{track}/{bead-id}`), and a supervisor (Yardmaster) handles merges, stall detection, and dependency management.
+Each developer runs their own Railyard instance against the same repo. Agents work on isolated branches (`ry/{owner}/{track}/{car-id}`), and a supervisor (Yardmaster) handles merges, stall detection, and dependency management.
 
 ## Terminology
 
 | Term | Meaning |
 |---|---|
 | **Track** | An area of concern within the repo (backend, frontend, infra) |
-| **Bead** | A unit of work (task, bug, feature, epic) |
-| **Engine** | A worker agent (Claude Code session that claims and executes beads) |
+| **Car** | A unit of work (task, bug, feature, epic) |
+| **Engine** | A worker agent (Claude Code session that claims and executes cars) |
 | **Yardmaster** | Supervisor agent — merges branches, monitors engines, handles stalls |
-| **Dispatch** | Planner agent — your interface, decomposes requests into beads |
-| **Switch** | Merging a completed bead's branch back to main |
+| **Dispatch** | Planner agent — your interface, decomposes requests into cars |
+| **Switch** | Merging a completed car's branch back to main |
 
 ## Architecture
 
@@ -21,7 +21,7 @@ Each developer runs their own Railyard instance against the same repo. Agents wo
                     ┌───────────┐
                     │  Dispatch │  ← You talk to this
                     └─────┬─────┘
-                          │ creates beads
+                          │ creates cars
                     ┌─────▼─────┐
               ┌─────┤   Dolt DB  ├─────┐
               │     └─────┬─────┘     │
@@ -36,9 +36,9 @@ Each developer runs their own Railyard instance against the same repo. Agents wo
               └───────────┘
 ```
 
-- **Dolt** (version-controlled MySQL) stores all state: beads, engine status, messages, logs
+- **Dolt** (version-controlled MySQL) stores all state: cars, engine status, messages, logs
 - **tmux** manages agent sessions — each engine, Dispatch, and Yardmaster runs in its own pane
-- **Engines** poll for ready beads, spawn Claude Code sessions, and handle completion/stall outcomes
+- **Engines** poll for ready cars, spawn Claude Code sessions, and handle completion/stall outcomes
 - **Yardmaster** runs tests and merges completed branches back to main
 
 ## Prerequisites
@@ -125,32 +125,32 @@ tmux attach -t railyard
 
 ```bash
 ry start -c railyard.yaml --engines 2   # Start Dispatch + Yardmaster + N engines
-ry status -c railyard.yaml              # Dashboard: engines, beads, messages
+ry status -c railyard.yaml              # Dashboard: engines, cars, messages
 ry status -c railyard.yaml --watch      # Auto-refresh every 5s
 ry stop -c railyard.yaml                # Graceful shutdown
 ```
 
-### Bead Management
+### Car Management
 
 ```bash
 # Create work items
-ry bead create -c railyard.yaml --title "Add auth middleware" --track backend --type task
-ry bead create -c railyard.yaml --title "Auth epic" --track backend --type epic
+ry car create -c railyard.yaml --title "Add auth middleware" --track backend --type task
+ry car create -c railyard.yaml --title "Auth epic" --track backend --type epic
 
 # List and inspect
-ry bead list -c railyard.yaml --track backend --status open
-ry bead show <bead-id>
-ry bead ready                           # Beads with no blockers, ready for work
-ry bead children <epic-id>              # Children of an epic with status summary
+ry car list -c railyard.yaml --track backend --status open
+ry car show <car-id>
+ry car ready                           # Cars with no blockers, ready for work
+ry car children <epic-id>              # Children of an epic with status summary
 
 # Update
-ry bead update <bead-id> --status in_progress
-ry bead update <bead-id> --priority 0 --description "Updated scope"
+ry car update <car-id> --status in_progress
+ry car update <car-id> --priority 0 --description "Updated scope"
 
 # Dependencies
-ry bead dep add <bead-id> --blocked-by <blocker-id>
-ry bead dep list <bead-id>
-ry bead dep remove <bead-id> --blocked-by <blocker-id>
+ry car dep add <car-id> --blocked-by <blocker-id>
+ry car dep list <car-id>
+ry car dep remove <car-id> --blocked-by <blocker-id>
 ```
 
 ### Engine Management
@@ -169,15 +169,15 @@ ry yardmaster                           # Start Yardmaster supervisor
 ry engine start --track backend         # Start a single engine daemon
 
 # Called by agents during work
-ry complete <bead-id> "summary"         # Mark bead done
-ry progress <bead-id> "checkpoint"      # Log progress without completing
+ry complete <car-id> "summary"         # Mark car done
+ry progress <car-id> "checkpoint"      # Log progress without completing
 ```
 
 ### Merging
 
 ```bash
-ry switch <bead-id>                     # Run tests + merge branch to main
-ry switch <bead-id> --dry-run           # Run tests only, don't merge
+ry switch <car-id>                     # Run tests + merge branch to main
+ry switch <car-id> --dry-run           # Run tests only, don't merge
 ```
 
 ### Messaging
@@ -225,10 +225,10 @@ tracks:
 
 ## How It Works
 
-1. **Dispatch** decomposes your request into structured beads with dependencies
-2. **Engines** poll the database for ready beads (no unresolved blockers), claim one atomically, and spawn a Claude Code session with full context (bead description, track conventions, prior progress, recent commits)
-3. Each engine works on an isolated git branch (`ry/{owner}/{track}/{bead-id}`)
-4. When an agent finishes, it calls `ry complete` — the engine daemon picks up the next bead
+1. **Dispatch** decomposes your request into structured cars with dependencies
+2. **Engines** poll the database for ready cars (no unresolved blockers), claim one atomically, and spawn a Claude Code session with full context (car description, track conventions, prior progress, recent commits)
+3. Each engine works on an isolated git branch (`ry/{owner}/{track}/{car-id}`)
+4. When an agent finishes, it calls `ry complete` — the engine daemon picks up the next car
 5. **Yardmaster** monitors for stalls (no stdout, repeated errors, excessive /clear cycles), runs tests on completed branches, and merges them back to main via `ry switch`
 6. All state lives in Dolt — fully auditable with `dolt diff`, `dolt log`, and time-travel queries
 
@@ -237,13 +237,13 @@ tracks:
 ```
 cmd/ry/              CLI entry point (Cobra commands)
 internal/
-  bead/              Bead CRUD, dependencies, ready detection
+  car/              Car CRUD, dependencies, ready detection
   config/            YAML config loading and validation
   db/                Dolt/GORM connection and migrations
   dispatch/          Dispatch planner agent (decomposition)
   engine/            Engine daemon: claim, spawn, stall detection, outcomes
   messaging/         Agent-to-agent message passing via DB
-  models/            GORM models (Bead, Engine, Message, Track, etc.)
+  models/            GORM models (Car, Engine, Message, Track, etc.)
   orchestration/     tmux session management, start/stop/scale/status
   yardmaster/        Yardmaster supervisor: health checks, switch/merge
 ```

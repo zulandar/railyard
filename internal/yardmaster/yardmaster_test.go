@@ -135,10 +135,10 @@ func TestRenderPrompt_ContainsCommands(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	for _, cmd := range []string{
-		"ry bead list",
+		"ry car list",
 		"ry message send",
 		"ry inbox",
-		"ry bead update",
+		"ry car update",
 		"ry switch",
 	} {
 		if !strings.Contains(prompt, cmd) {
@@ -159,7 +159,7 @@ func TestRenderPrompt_ContainsDecisionRules(t *testing.T) {
 	}
 	for _, rule := range []string{
 		"Stalled Engine",
-		"Completed Bead",
+		"Completed Car",
 		"Escalation to Human",
 	} {
 		if !strings.Contains(prompt, rule) {

@@ -1,6 +1,6 @@
 //go:build integration
 
-package bead
+package car
 
 import (
 	"fmt"
@@ -112,15 +112,15 @@ func setupTestDB(t *testing.T, dbName string) *testDoltServer {
 }
 
 func TestIntegration_Create(t *testing.T) {
-	srv := setupTestDB(t, "railyard_bead_create")
-	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_bead_create")
+	srv := setupTestDB(t, "railyard_car_create")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_create")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
 
-	bead, err := Create(gormDB, CreateOpts{
-		Title:        "Test bead",
-		Description:  "A test bead",
+	car, err := Create(gormDB, CreateOpts{
+		Title:        "Test car",
+		Description:  "A test car",
 		Track:        "backend",
 		Priority:     2,
 		BranchPrefix: "ry/alice",
@@ -129,32 +129,32 @@ func TestIntegration_Create(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	if !strings.HasPrefix(bead.ID, "be-") {
-		t.Errorf("ID %q missing be- prefix", bead.ID)
+	if !strings.HasPrefix(car.ID, "car-") {
+		t.Errorf("ID %q missing car- prefix", car.ID)
 	}
-	if bead.Title != "Test bead" {
-		t.Errorf("Title = %q, want %q", bead.Title, "Test bead")
+	if car.Title != "Test car" {
+		t.Errorf("Title = %q, want %q", car.Title, "Test car")
 	}
-	if bead.Status != "open" {
-		t.Errorf("Status = %q, want %q", bead.Status, "open")
+	if car.Status != "open" {
+		t.Errorf("Status = %q, want %q", car.Status, "open")
 	}
-	if bead.Type != "task" {
-		t.Errorf("Type = %q, want %q (default)", bead.Type, "task")
+	if car.Type != "task" {
+		t.Errorf("Type = %q, want %q (default)", car.Type, "task")
 	}
-	if !strings.HasPrefix(bead.Branch, "ry/alice/backend/be-") {
-		t.Errorf("Branch = %q, want prefix %q", bead.Branch, "ry/alice/backend/be-")
+	if !strings.HasPrefix(car.Branch, "ry/alice/backend/car-") {
+		t.Errorf("Branch = %q, want prefix %q", car.Branch, "ry/alice/backend/car-")
 	}
 }
 
 func TestIntegration_Create_WithType(t *testing.T) {
-	srv := setupTestDB(t, "railyard_bead_type")
-	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_bead_type")
+	srv := setupTestDB(t, "railyard_car_type")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_type")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
 
-	bead, err := Create(gormDB, CreateOpts{
-		Title:        "Epic bead",
+	car, err := Create(gormDB, CreateOpts{
+		Title:        "Epic car",
 		Track:        "frontend",
 		Type:         "epic",
 		BranchPrefix: "ry/bob",
@@ -162,14 +162,14 @@ func TestIntegration_Create_WithType(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if bead.Type != "epic" {
-		t.Errorf("Type = %q, want %q", bead.Type, "epic")
+	if car.Type != "epic" {
+		t.Errorf("Type = %q, want %q", car.Type, "epic")
 	}
 }
 
 func TestIntegration_Create_WithParent(t *testing.T) {
-	srv := setupTestDB(t, "railyard_bead_parent")
-	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_bead_parent")
+	srv := setupTestDB(t, "railyard_car_parent")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_parent")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -199,8 +199,8 @@ func TestIntegration_Create_WithParent(t *testing.T) {
 }
 
 func TestIntegration_Create_ValidationErrors(t *testing.T) {
-	srv := setupTestDB(t, "railyard_bead_val")
-	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_bead_val")
+	srv := setupTestDB(t, "railyard_car_val")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_val")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -236,8 +236,8 @@ func TestIntegration_Create_ValidationErrors(t *testing.T) {
 }
 
 func TestIntegration_Get(t *testing.T) {
-	srv := setupTestDB(t, "railyard_bead_get")
-	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_bead_get")
+	srv := setupTestDB(t, "railyard_car_get")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_get")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -271,13 +271,13 @@ func TestIntegration_Get(t *testing.T) {
 }
 
 func TestIntegration_Get_NotFound(t *testing.T) {
-	srv := setupTestDB(t, "railyard_bead_getnf")
-	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_bead_getnf")
+	srv := setupTestDB(t, "railyard_car_getnf")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_getnf")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
 
-	_, err = Get(gormDB, "be-zzzzz")
+	_, err = Get(gormDB, "car-zzzzz")
 	if err == nil {
 		t.Fatal("expected error for non-existent ID")
 	}
@@ -287,8 +287,8 @@ func TestIntegration_Get_NotFound(t *testing.T) {
 }
 
 func TestIntegration_List(t *testing.T) {
-	srv := setupTestDB(t, "railyard_bead_list")
-	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_bead_list")
+	srv := setupTestDB(t, "railyard_car_list")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_list")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -316,7 +316,7 @@ func TestIntegration_List(t *testing.T) {
 		t.Fatalf("List all: %v", err)
 	}
 	if len(all) != 3 {
-		t.Errorf("List all: got %d beads, want 3", len(all))
+		t.Errorf("List all: got %d cars, want 3", len(all))
 	}
 
 	// Filter by track
@@ -325,7 +325,7 @@ func TestIntegration_List(t *testing.T) {
 		t.Fatalf("List backend: %v", err)
 	}
 	if len(be) != 2 {
-		t.Errorf("List backend: got %d beads, want 2", len(be))
+		t.Errorf("List backend: got %d cars, want 2", len(be))
 	}
 
 	fe, err := List(gormDB, ListFilters{Track: "frontend"})
@@ -333,34 +333,34 @@ func TestIntegration_List(t *testing.T) {
 		t.Fatalf("List frontend: %v", err)
 	}
 	if len(fe) != 1 {
-		t.Errorf("List frontend: got %d beads, want 1", len(fe))
+		t.Errorf("List frontend: got %d cars, want 1", len(fe))
 	}
 }
 
 func TestIntegration_List_Empty(t *testing.T) {
-	srv := setupTestDB(t, "railyard_bead_empty")
-	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_bead_empty")
+	srv := setupTestDB(t, "railyard_car_empty")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_empty")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
 
-	beads, err := List(gormDB, ListFilters{})
+	cars, err := List(gormDB, ListFilters{})
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if len(beads) != 0 {
-		t.Errorf("List empty DB: got %d beads, want 0", len(beads))
+	if len(cars) != 0 {
+		t.Errorf("List empty DB: got %d cars, want 0", len(cars))
 	}
 }
 
 func TestIntegration_Update_Status(t *testing.T) {
-	srv := setupTestDB(t, "railyard_bead_upd")
-	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_bead_upd")
+	srv := setupTestDB(t, "railyard_car_upd")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_upd")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
 
-	bead, err := Create(gormDB, CreateOpts{
+	car, err := Create(gormDB, CreateOpts{
 		Title:        "Update test",
 		Track:        "backend",
 		BranchPrefix: "ry/alice",
@@ -370,19 +370,19 @@ func TestIntegration_Update_Status(t *testing.T) {
 	}
 
 	// open → ready
-	if err := Update(gormDB, bead.ID, map[string]interface{}{"status": "ready"}); err != nil {
+	if err := Update(gormDB, car.ID, map[string]interface{}{"status": "ready"}); err != nil {
 		t.Fatalf("Update open→ready: %v", err)
 	}
 
 	// ready → claimed (should set claimed_at)
-	if err := Update(gormDB, bead.ID, map[string]interface{}{
+	if err := Update(gormDB, car.ID, map[string]interface{}{
 		"status":   "claimed",
 		"assignee": "engine-01",
 	}); err != nil {
 		t.Fatalf("Update ready→claimed: %v", err)
 	}
 
-	got, err := Get(gormDB, bead.ID)
+	got, err := Get(gormDB, car.ID)
 	if err != nil {
 		t.Fatalf("Get after claimed: %v", err)
 	}
@@ -398,13 +398,13 @@ func TestIntegration_Update_Status(t *testing.T) {
 }
 
 func TestIntegration_Update_InvalidTransition(t *testing.T) {
-	srv := setupTestDB(t, "railyard_bead_inv")
-	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_bead_inv")
+	srv := setupTestDB(t, "railyard_car_inv")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_inv")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
 
-	bead, err := Create(gormDB, CreateOpts{
+	car, err := Create(gormDB, CreateOpts{
 		Title:        "Invalid transition",
 		Track:        "backend",
 		BranchPrefix: "ry/alice",
@@ -414,7 +414,7 @@ func TestIntegration_Update_InvalidTransition(t *testing.T) {
 	}
 
 	// open → done is not valid
-	err = Update(gormDB, bead.ID, map[string]interface{}{"status": "done"})
+	err = Update(gormDB, car.ID, map[string]interface{}{"status": "done"})
 	if err == nil {
 		t.Fatal("expected error for invalid transition open→done")
 	}
@@ -424,13 +424,13 @@ func TestIntegration_Update_InvalidTransition(t *testing.T) {
 }
 
 func TestIntegration_Update_Blocked(t *testing.T) {
-	srv := setupTestDB(t, "railyard_bead_blk")
-	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_bead_blk")
+	srv := setupTestDB(t, "railyard_car_blk")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_blk")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
 
-	bead, err := Create(gormDB, CreateOpts{
+	car, err := Create(gormDB, CreateOpts{
 		Title:        "Block test",
 		Track:        "backend",
 		BranchPrefix: "ry/alice",
@@ -440,24 +440,24 @@ func TestIntegration_Update_Blocked(t *testing.T) {
 	}
 
 	// Any status → blocked should work
-	if err := Update(gormDB, bead.ID, map[string]interface{}{"status": "blocked"}); err != nil {
+	if err := Update(gormDB, car.ID, map[string]interface{}{"status": "blocked"}); err != nil {
 		t.Fatalf("Update open→blocked: %v", err)
 	}
 
 	// blocked → open (unblock)
-	if err := Update(gormDB, bead.ID, map[string]interface{}{"status": "open"}); err != nil {
+	if err := Update(gormDB, car.ID, map[string]interface{}{"status": "open"}); err != nil {
 		t.Fatalf("Update blocked→open: %v", err)
 	}
 }
 
 func TestIntegration_Update_NotFound(t *testing.T) {
-	srv := setupTestDB(t, "railyard_bead_updnf")
-	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_bead_updnf")
+	srv := setupTestDB(t, "railyard_car_updnf")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_updnf")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
 
-	err = Update(gormDB, "be-zzzzz", map[string]interface{}{"status": "ready"})
+	err = Update(gormDB, "car-zzzzz", map[string]interface{}{"status": "ready"})
 	if err == nil {
 		t.Fatal("expected error for non-existent ID")
 	}
@@ -467,13 +467,13 @@ func TestIntegration_Update_NotFound(t *testing.T) {
 }
 
 func TestIntegration_Update_NonStatusFields(t *testing.T) {
-	srv := setupTestDB(t, "railyard_bead_fld")
-	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_bead_fld")
+	srv := setupTestDB(t, "railyard_car_fld")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_fld")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
 
-	bead, err := Create(gormDB, CreateOpts{
+	car, err := Create(gormDB, CreateOpts{
 		Title:        "Field update test",
 		Track:        "backend",
 		BranchPrefix: "ry/alice",
@@ -482,14 +482,14 @@ func TestIntegration_Update_NonStatusFields(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	if err := Update(gormDB, bead.ID, map[string]interface{}{
+	if err := Update(gormDB, car.ID, map[string]interface{}{
 		"description": "Updated description",
 		"priority":    1,
 	}); err != nil {
 		t.Fatalf("Update fields: %v", err)
 	}
 
-	got, err := Get(gormDB, bead.ID)
+	got, err := Get(gormDB, car.ID)
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -502,20 +502,20 @@ func TestIntegration_Update_NonStatusFields(t *testing.T) {
 }
 
 func TestIntegration_List_FilterByStatus(t *testing.T) {
-	srv := setupTestDB(t, "railyard_bead_lstat")
-	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_bead_lstat")
+	srv := setupTestDB(t, "railyard_car_lstat")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_lstat")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
 
 	b1, err := Create(gormDB, CreateOpts{
-		Title: "Open bead", Track: "backend", BranchPrefix: "ry/alice",
+		Title: "Open car", Track: "backend", BranchPrefix: "ry/alice",
 	})
 	if err != nil {
 		t.Fatalf("Create b1: %v", err)
 	}
 	b2, err := Create(gormDB, CreateOpts{
-		Title: "Ready bead", Track: "backend", BranchPrefix: "ry/alice",
+		Title: "Ready car", Track: "backend", BranchPrefix: "ry/alice",
 	})
 	if err != nil {
 		t.Fatalf("Create b2: %v", err)
@@ -529,7 +529,7 @@ func TestIntegration_List_FilterByStatus(t *testing.T) {
 		t.Fatalf("List status=open: %v", err)
 	}
 	if len(open) != 1 || open[0].ID != b1.ID {
-		t.Errorf("List status=open: got %d beads, want 1 with ID %s", len(open), b1.ID)
+		t.Errorf("List status=open: got %d cars, want 1 with ID %s", len(open), b1.ID)
 	}
 
 	ready, err := List(gormDB, ListFilters{Status: "ready"})
@@ -537,13 +537,13 @@ func TestIntegration_List_FilterByStatus(t *testing.T) {
 		t.Fatalf("List status=ready: %v", err)
 	}
 	if len(ready) != 1 || ready[0].ID != b2.ID {
-		t.Errorf("List status=ready: got %d beads, want 1 with ID %s", len(ready), b2.ID)
+		t.Errorf("List status=ready: got %d cars, want 1 with ID %s", len(ready), b2.ID)
 	}
 }
 
 func TestIntegration_List_FilterByType(t *testing.T) {
-	srv := setupTestDB(t, "railyard_bead_ltype")
-	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_bead_ltype")
+	srv := setupTestDB(t, "railyard_car_ltype")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_ltype")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -577,14 +577,14 @@ func TestIntegration_List_FilterByType(t *testing.T) {
 }
 
 func TestIntegration_List_FilterByAssignee(t *testing.T) {
-	srv := setupTestDB(t, "railyard_bead_lassn")
-	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_bead_lassn")
+	srv := setupTestDB(t, "railyard_car_lassn")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_lassn")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
 
 	b, err := Create(gormDB, CreateOpts{
-		Title: "Assigned bead", Track: "backend", BranchPrefix: "ry/alice",
+		Title: "Assigned car", Track: "backend", BranchPrefix: "ry/alice",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -596,7 +596,7 @@ func TestIntegration_List_FilterByAssignee(t *testing.T) {
 		t.Fatalf("Update claimed: %v", err)
 	}
 	if _, err := Create(gormDB, CreateOpts{
-		Title: "Unassigned bead", Track: "backend", BranchPrefix: "ry/alice",
+		Title: "Unassigned car", Track: "backend", BranchPrefix: "ry/alice",
 	}); err != nil {
 		t.Fatalf("Create unassigned: %v", err)
 	}
@@ -611,8 +611,8 @@ func TestIntegration_List_FilterByAssignee(t *testing.T) {
 }
 
 func TestIntegration_List_MultipleFilters(t *testing.T) {
-	srv := setupTestDB(t, "railyard_bead_lmulti")
-	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_bead_lmulti")
+	srv := setupTestDB(t, "railyard_car_lmulti")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_lmulti")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -644,13 +644,13 @@ func TestIntegration_List_MultipleFilters(t *testing.T) {
 }
 
 func TestIntegration_Update_Cancelled(t *testing.T) {
-	srv := setupTestDB(t, "railyard_bead_cancel")
-	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_bead_cancel")
+	srv := setupTestDB(t, "railyard_car_cancel")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_cancel")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
 
-	bead, err := Create(gormDB, CreateOpts{
+	car, err := Create(gormDB, CreateOpts{
 		Title: "Cancel test", Track: "backend", BranchPrefix: "ry/alice",
 	})
 	if err != nil {
@@ -658,11 +658,11 @@ func TestIntegration_Update_Cancelled(t *testing.T) {
 	}
 
 	// open → cancelled
-	if err := Update(gormDB, bead.ID, map[string]interface{}{"status": "cancelled"}); err != nil {
+	if err := Update(gormDB, car.ID, map[string]interface{}{"status": "cancelled"}); err != nil {
 		t.Fatalf("Update open→cancelled: %v", err)
 	}
 
-	got, err := Get(gormDB, bead.ID)
+	got, err := Get(gormDB, car.ID)
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -672,8 +672,8 @@ func TestIntegration_Update_Cancelled(t *testing.T) {
 }
 
 func TestIntegration_Create_InvalidParent(t *testing.T) {
-	srv := setupTestDB(t, "railyard_bead_invpar")
-	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_bead_invpar")
+	srv := setupTestDB(t, "railyard_car_invpar")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_invpar")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -681,7 +681,7 @@ func TestIntegration_Create_InvalidParent(t *testing.T) {
 	_, err = Create(gormDB, CreateOpts{
 		Title:        "Orphan task",
 		Track:        "backend",
-		ParentID:     "be-zzzzz",
+		ParentID:     "car-zzzzz",
 		BranchPrefix: "ry/alice",
 	})
 	if err == nil {
@@ -693,8 +693,8 @@ func TestIntegration_Create_InvalidParent(t *testing.T) {
 }
 
 func TestIntegration_Create_NonEpicParent(t *testing.T) {
-	srv := setupTestDB(t, "railyard_bead_neppar")
-	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_bead_neppar")
+	srv := setupTestDB(t, "railyard_car_neppar")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_neppar")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -724,8 +724,8 @@ func TestIntegration_Create_NonEpicParent(t *testing.T) {
 }
 
 func TestIntegration_Create_TrackInheritance(t *testing.T) {
-	srv := setupTestDB(t, "railyard_bead_trackinh")
-	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_bead_trackinh")
+	srv := setupTestDB(t, "railyard_car_trackinh")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_trackinh")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -758,8 +758,8 @@ func TestIntegration_Create_TrackInheritance(t *testing.T) {
 }
 
 func TestIntegration_GetChildren(t *testing.T) {
-	srv := setupTestDB(t, "railyard_bead_getchi")
-	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_bead_getchi")
+	srv := setupTestDB(t, "railyard_car_getchi")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_getchi")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -794,7 +794,7 @@ func TestIntegration_GetChildren(t *testing.T) {
 	}
 
 	// Non-existent parent.
-	_, err = GetChildren(gormDB, "be-zzzzz")
+	_, err = GetChildren(gormDB, "car-zzzzz")
 	if err == nil {
 		t.Fatal("expected error for non-existent parent")
 	}
@@ -804,8 +804,8 @@ func TestIntegration_GetChildren(t *testing.T) {
 }
 
 func TestIntegration_ChildrenSummary(t *testing.T) {
-	srv := setupTestDB(t, "railyard_bead_chsum")
-	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_bead_chsum")
+	srv := setupTestDB(t, "railyard_car_chsum")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_chsum")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -883,8 +883,8 @@ func TestIntegration_ChildrenSummary(t *testing.T) {
 // closedGormDB returns a GORM connection with the underlying sql.DB closed.
 func closedGormDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	srv := setupTestDB(t, "railyard_bead_closed")
-	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_bead_closed")
+	srv := setupTestDB(t, "railyard_car_closed")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_closed")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -907,12 +907,12 @@ func TestIntegration_Create_DBError(t *testing.T) {
 
 func TestIntegration_Get_DBError(t *testing.T) {
 	gormDB := closedGormDB(t)
-	_, err := Get(gormDB, "be-12345")
+	_, err := Get(gormDB, "car-12345")
 	if err == nil {
 		t.Fatal("expected error from Get with closed DB")
 	}
-	if !strings.Contains(err.Error(), "bead: get") {
-		t.Errorf("error = %q, want to contain %q", err.Error(), "bead: get")
+	if !strings.Contains(err.Error(), "car: get") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "car: get")
 	}
 }
 
@@ -922,31 +922,31 @@ func TestIntegration_List_DBError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error from List with closed DB")
 	}
-	if !strings.Contains(err.Error(), "bead: list") {
-		t.Errorf("error = %q, want to contain %q", err.Error(), "bead: list")
+	if !strings.Contains(err.Error(), "car: list") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "car: list")
 	}
 }
 
 func TestIntegration_Update_DBError(t *testing.T) {
 	gormDB := closedGormDB(t)
-	err := Update(gormDB, "be-12345", map[string]interface{}{"status": "ready"})
+	err := Update(gormDB, "car-12345", map[string]interface{}{"status": "ready"})
 	if err == nil {
 		t.Fatal("expected error from Update with closed DB")
 	}
-	if !strings.Contains(err.Error(), "bead:") {
-		t.Errorf("error = %q, want to contain %q", err.Error(), "bead:")
+	if !strings.Contains(err.Error(), "car:") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "car:")
 	}
 }
 
 func TestIntegration_FullLifecycle(t *testing.T) {
-	srv := setupTestDB(t, "railyard_bead_life")
-	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_bead_life")
+	srv := setupTestDB(t, "railyard_car_life")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_life")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
 
 	// Create
-	bead, err := Create(gormDB, CreateOpts{
+	car, err := Create(gormDB, CreateOpts{
 		Title:        "Lifecycle test",
 		Track:        "backend",
 		Priority:     1,
@@ -957,12 +957,12 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	}
 
 	// open → ready
-	if err := Update(gormDB, bead.ID, map[string]interface{}{"status": "ready"}); err != nil {
+	if err := Update(gormDB, car.ID, map[string]interface{}{"status": "ready"}); err != nil {
 		t.Fatalf("open→ready: %v", err)
 	}
 
 	// ready → claimed
-	if err := Update(gormDB, bead.ID, map[string]interface{}{
+	if err := Update(gormDB, car.ID, map[string]interface{}{
 		"status":   "claimed",
 		"assignee": "engine-01",
 	}); err != nil {
@@ -970,16 +970,16 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	}
 
 	// claimed → in_progress
-	if err := Update(gormDB, bead.ID, map[string]interface{}{"status": "in_progress"}); err != nil {
+	if err := Update(gormDB, car.ID, map[string]interface{}{"status": "in_progress"}); err != nil {
 		t.Fatalf("claimed→in_progress: %v", err)
 	}
 
 	// in_progress → done
-	if err := Update(gormDB, bead.ID, map[string]interface{}{"status": "done"}); err != nil {
+	if err := Update(gormDB, car.ID, map[string]interface{}{"status": "done"}); err != nil {
 		t.Fatalf("in_progress→done: %v", err)
 	}
 
-	got, err := Get(gormDB, bead.ID)
+	got, err := Get(gormDB, car.ID)
 	if err != nil {
 		t.Fatalf("Get final: %v", err)
 	}

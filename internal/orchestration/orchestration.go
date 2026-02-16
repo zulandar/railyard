@@ -208,12 +208,12 @@ type EngineInfo struct {
 	ID           string
 	Track        string
 	Status       string
-	CurrentBead  string
+	CurrentCar  string
 	LastActivity time.Time
 	Uptime       time.Duration
 }
 
-// TrackSummary holds per-track bead counts.
+// TrackSummary holds per-track car counts.
 type TrackSummary struct {
 	Track      string
 	Open       int64
@@ -246,7 +246,7 @@ func Status(db *gorm.DB, tmux Tmux) (*StatusInfo, error) {
 			ID:           e.ID,
 			Track:        e.Track,
 			Status:       e.Status,
-			CurrentBead:  e.CurrentBead,
+			CurrentCar:  e.CurrentCar,
 			LastActivity: e.LastActivity,
 			Uptime:       now.Sub(e.StartedAt),
 		})
@@ -258,18 +258,18 @@ func Status(db *gorm.DB, tmux Tmux) (*StatusInfo, error) {
 
 	for _, t := range tracks {
 		ts := TrackSummary{Track: t.Name}
-		db.Model(&models.Bead{}).Where("track = ? AND status = ?", t.Name, "open").Count(&ts.Open)
-		db.Model(&models.Bead{}).Where("track = ? AND status = ?", t.Name, "in_progress").Count(&ts.InProgress)
-		db.Model(&models.Bead{}).Where("track = ? AND status = ?", t.Name, "done").Count(&ts.Done)
-		db.Model(&models.Bead{}).Where("track = ? AND status = ?", t.Name, "blocked").Count(&ts.Blocked)
+		db.Model(&models.Car{}).Where("track = ? AND status = ?", t.Name, "open").Count(&ts.Open)
+		db.Model(&models.Car{}).Where("track = ? AND status = ?", t.Name, "in_progress").Count(&ts.InProgress)
+		db.Model(&models.Car{}).Where("track = ? AND status = ?", t.Name, "done").Count(&ts.Done)
+		db.Model(&models.Car{}).Where("track = ? AND status = ?", t.Name, "blocked").Count(&ts.Blocked)
 		// Ready = open with no unresolved blockers (simplified: count open with no deps or all deps done).
 		var ready int64
-		db.Model(&models.Bead{}).
+		db.Model(&models.Car{}).
 			Where("track = ? AND status = ? AND (assignee = ? OR assignee IS NULL)", t.Name, "open", "").
 			Where("id NOT IN (?)",
-				db.Model(&models.BeadDep{}).
-					Select("bead_id").
-					Joins("JOIN beads ON beads.id = bead_deps.blocked_by AND beads.status != 'done'"),
+				db.Model(&models.CarDep{}).
+					Select("car_id").
+					Joins("JOIN cars ON cars.id = car_deps.blocked_by AND cars.status != 'done'"),
 			).Count(&ready)
 		ts.Ready = ready
 		info.TrackSummary = append(info.TrackSummary, ts)
@@ -297,14 +297,14 @@ func FormatStatus(info *StatusInfo) string {
 	// Engine table.
 	b.WriteString("ENGINES\n")
 	b.WriteString(fmt.Sprintf("%-14s %-12s %-10s %-14s %-20s %s\n",
-		"ID", "TRACK", "STATUS", "CURRENT BEAD", "LAST ACTIVITY", "UPTIME"))
+		"ID", "TRACK", "STATUS", "CURRENT CAR", "LAST ACTIVITY", "UPTIME"))
 	for _, e := range info.Engines {
-		bead := e.CurrentBead
-		if bead == "" {
-			bead = "-"
+		car := e.CurrentCar
+		if car == "" {
+			car = "-"
 		}
 		b.WriteString(fmt.Sprintf("%-14s %-12s %-10s %-14s %-20s %s\n",
-			e.ID, e.Track, e.Status, bead,
+			e.ID, e.Track, e.Status, car,
 			e.LastActivity.Format("15:04:05"),
 			formatDuration(e.Uptime)))
 	}

@@ -18,7 +18,7 @@ import (
 // SpawnOpts holds parameters for spawning a claude subprocess.
 type SpawnOpts struct {
 	EngineID       string
-	BeadID         string
+	CarID         string
 	ContextPayload string
 	WorkDir        string // working directory for claude
 	ClaudeBinary   string // path to claude binary, default "claude"
@@ -28,7 +28,7 @@ type SpawnOpts struct {
 type Session struct {
 	ID       string
 	EngineID string
-	BeadID   string
+	CarID   string
 	PID      int
 
 	cmd    *exec.Cmd
@@ -43,7 +43,7 @@ type Session struct {
 type logWriter struct {
 	engineID  string
 	sessionID string
-	beadID    string
+	carID    string
 	direction string // "out" or "err"
 
 	mu      sync.Mutex
@@ -69,8 +69,8 @@ func SpawnAgent(ctx context.Context, db *gorm.DB, opts SpawnOpts) (*Session, err
 	if opts.EngineID == "" {
 		return nil, fmt.Errorf("engine: engineID is required")
 	}
-	if opts.BeadID == "" {
-		return nil, fmt.Errorf("engine: beadID is required")
+	if opts.CarID == "" {
+		return nil, fmt.Errorf("engine: carID is required")
 	}
 	if opts.ContextPayload == "" {
 		return nil, fmt.Errorf("engine: contextPayload is required")
@@ -83,8 +83,8 @@ func SpawnAgent(ctx context.Context, db *gorm.DB, opts SpawnOpts) (*Session, err
 
 	cmd, cancel := buildCommand(ctx, opts)
 
-	stdoutWriter := newLogWriter(db, opts.EngineID, sessionID, opts.BeadID, "out")
-	stderrWriter := newLogWriter(db, opts.EngineID, sessionID, opts.BeadID, "err")
+	stdoutWriter := newLogWriter(db, opts.EngineID, sessionID, opts.CarID, "out")
+	stderrWriter := newLogWriter(db, opts.EngineID, sessionID, opts.CarID, "err")
 
 	cmd.Stdout = stdoutWriter
 	cmd.Stderr = stderrWriter
@@ -121,7 +121,7 @@ func SpawnAgent(ctx context.Context, db *gorm.DB, opts SpawnOpts) (*Session, err
 	return &Session{
 		ID:       sessionID,
 		EngineID: opts.EngineID,
-		BeadID:   opts.BeadID,
+		CarID:   opts.CarID,
 		PID:      cmd.Process.Pid,
 		cmd:      cmd,
 		cancel:   cancel,
@@ -155,7 +155,7 @@ func buildCommand(ctx context.Context, opts SpawnOpts) (*exec.Cmd, context.Cance
 		"--verbose",
 		"--output-format", "stream-json",
 		"--system-prompt", opts.ContextPayload,
-		"-p", "Begin working on your assigned bead. Follow the instructions in the system prompt.",
+		"-p", "Begin working on your assigned car. Follow the instructions in the system prompt.",
 	)
 
 	if opts.WorkDir != "" {
@@ -171,11 +171,11 @@ func buildCommand(ctx context.Context, opts SpawnOpts) (*exec.Cmd, context.Cance
 }
 
 // newLogWriter creates a logWriter that flushes to the DB via db.Create.
-func newLogWriter(db *gorm.DB, engineID, sessionID, beadID, direction string) *logWriter {
+func newLogWriter(db *gorm.DB, engineID, sessionID, carID, direction string) *logWriter {
 	return &logWriter{
 		engineID:  engineID,
 		sessionID: sessionID,
-		beadID:    beadID,
+		carID:    carID,
 		direction: direction,
 		writeFn: func(log models.AgentLog) error {
 			return db.Create(&log).Error
@@ -209,7 +209,7 @@ func (w *logWriter) Flush() error {
 	return w.writeFn(models.AgentLog{
 		EngineID:  w.engineID,
 		SessionID: w.sessionID,
-		BeadID:    w.beadID,
+		CarID:    w.carID,
 		Direction: w.direction,
 		Content:   content,
 		CreatedAt: time.Now(),

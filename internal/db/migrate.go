@@ -13,9 +13,9 @@ import (
 // AllModels returns the list of all Phase 1 GORM models for migration.
 func AllModels() []interface{} {
 	return []interface{}{
-		&models.Bead{},
-		&models.BeadDep{},
-		&models.BeadProgress{},
+		&models.Car{},
+		&models.CarDep{},
+		&models.CarProgress{},
 		&models.Track{},
 		&models.Engine{},
 		&models.Message{},

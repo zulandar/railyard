@@ -191,7 +191,7 @@ func TestLogWriter_Flush(t *testing.T) {
 	w := &logWriter{
 		engineID:  "eng-abc",
 		sessionID: "sess-12345",
-		beadID:    "bead-xyz",
+		carID:    "car-xyz",
 		direction: "out",
 		writeFn: func(log models.AgentLog) error {
 			called = true
@@ -215,8 +215,8 @@ func TestLogWriter_Flush(t *testing.T) {
 	if captured.SessionID != "sess-12345" {
 		t.Errorf("SessionID = %q, want %q", captured.SessionID, "sess-12345")
 	}
-	if captured.BeadID != "bead-xyz" {
-		t.Errorf("BeadID = %q, want %q", captured.BeadID, "bead-xyz")
+	if captured.CarID != "car-xyz" {
+		t.Errorf("CarID = %q, want %q", captured.CarID, "car-xyz")
 	}
 	if captured.Direction != "out" {
 		t.Errorf("Direction = %q, want %q", captured.Direction, "out")
@@ -260,7 +260,7 @@ func TestLogWriter_Close(t *testing.T) {
 	w := &logWriter{
 		engineID:  "eng-abc",
 		sessionID: "sess-12345",
-		beadID:    "bead-xyz",
+		carID:    "car-xyz",
 		direction: "err",
 		writeFn: func(log models.AgentLog) error {
 			captured = log
@@ -285,7 +285,7 @@ func TestLogWriter_Close(t *testing.T) {
 
 func TestSpawnAgent_EmptyEngineID(t *testing.T) {
 	_, err := SpawnAgent(context.Background(), nil, SpawnOpts{
-		BeadID:         "bead-1",
+		CarID:         "car-1",
 		ContextPayload: "ctx",
 	})
 	if err == nil {
@@ -296,23 +296,23 @@ func TestSpawnAgent_EmptyEngineID(t *testing.T) {
 	}
 }
 
-func TestSpawnAgent_EmptyBeadID(t *testing.T) {
+func TestSpawnAgent_EmptyCarID(t *testing.T) {
 	_, err := SpawnAgent(context.Background(), nil, SpawnOpts{
 		EngineID:       "eng-abc",
 		ContextPayload: "ctx",
 	})
 	if err == nil {
-		t.Fatal("expected error for empty beadID")
+		t.Fatal("expected error for empty carID")
 	}
-	if !strings.Contains(err.Error(), "beadID is required") {
-		t.Errorf("error = %q, want to contain %q", err.Error(), "beadID is required")
+	if !strings.Contains(err.Error(), "carID is required") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "carID is required")
 	}
 }
 
 func TestSpawnAgent_EmptyContext(t *testing.T) {
 	_, err := SpawnAgent(context.Background(), nil, SpawnOpts{
 		EngineID: "eng-abc",
-		BeadID:   "bead-1",
+		CarID:   "car-1",
 	})
 	if err == nil {
 		t.Fatal("expected error for empty contextPayload")
@@ -343,8 +343,8 @@ func spawnWithMockDB(t *testing.T, ctx context.Context, opts SpawnOpts) *Session
 	if opts.EngineID == "" {
 		opts.EngineID = "eng-test1"
 	}
-	if opts.BeadID == "" {
-		opts.BeadID = "bead-test1"
+	if opts.CarID == "" {
+		opts.CarID = "car-test1"
 	}
 	if opts.ContextPayload == "" {
 		opts.ContextPayload = "test context"
@@ -366,7 +366,7 @@ func spawnWithMockDB(t *testing.T, ctx context.Context, opts SpawnOpts) *Session
 	stdoutWriter := &logWriter{
 		engineID:  opts.EngineID,
 		sessionID: sessionID,
-		beadID:    opts.BeadID,
+		carID:    opts.CarID,
 		direction: "out",
 		writeFn: func(log models.AgentLog) error {
 			mu.Lock()
@@ -378,7 +378,7 @@ func spawnWithMockDB(t *testing.T, ctx context.Context, opts SpawnOpts) *Session
 	stderrWriter := &logWriter{
 		engineID:  opts.EngineID,
 		sessionID: sessionID,
-		beadID:    opts.BeadID,
+		carID:    opts.CarID,
 		direction: "err",
 		writeFn: func(log models.AgentLog) error {
 			mu.Lock()
@@ -413,7 +413,7 @@ func spawnWithMockDB(t *testing.T, ctx context.Context, opts SpawnOpts) *Session
 	return &Session{
 		ID:       sessionID,
 		EngineID: opts.EngineID,
-		BeadID:   opts.BeadID,
+		CarID:   opts.CarID,
 		PID:      cmd.Process.Pid,
 		cmd:      cmd,
 		cancel:   cancel,
@@ -430,7 +430,7 @@ func TestSpawnAgent_MockBinary(t *testing.T) {
 	sess := spawnWithMockDB(t, context.Background(), SpawnOpts{
 		ClaudeBinary:   binary,
 		EngineID:       "eng-mock1",
-		BeadID:         "bead-mock1",
+		CarID:         "car-mock1",
 		ContextPayload: "test context",
 		WorkDir:        dir,
 	})
@@ -444,8 +444,8 @@ func TestSpawnAgent_MockBinary(t *testing.T) {
 	if sess.EngineID != "eng-mock1" {
 		t.Errorf("EngineID = %q, want %q", sess.EngineID, "eng-mock1")
 	}
-	if sess.BeadID != "bead-mock1" {
-		t.Errorf("BeadID = %q, want %q", sess.BeadID, "bead-mock1")
+	if sess.CarID != "car-mock1" {
+		t.Errorf("CarID = %q, want %q", sess.CarID, "car-mock1")
 	}
 
 	if err := sess.Wait(); err != nil {
@@ -461,7 +461,7 @@ echo "captured output line 2"`)
 	sess := spawnWithMockDB(t, context.Background(), SpawnOpts{
 		ClaudeBinary:   binary,
 		EngineID:       "eng-cap",
-		BeadID:         "bead-cap",
+		CarID:         "car-cap",
 		ContextPayload: "ctx",
 		WorkDir:        dir,
 	})
@@ -493,7 +493,7 @@ func TestSpawnAgent_ExitError(t *testing.T) {
 	sess := spawnWithMockDB(t, context.Background(), SpawnOpts{
 		ClaudeBinary:   binary,
 		EngineID:       "eng-exit",
-		BeadID:         "bead-exit",
+		CarID:         "car-exit",
 		ContextPayload: "ctx",
 		WorkDir:        dir,
 	})
@@ -514,7 +514,7 @@ func TestSpawnAgent_ContextCancel(t *testing.T) {
 	sess := spawnWithMockDB(t, ctx, SpawnOpts{
 		ClaudeBinary:   binary,
 		EngineID:       "eng-cancel",
-		BeadID:         "bead-cancel",
+		CarID:         "car-cancel",
 		ContextPayload: "ctx",
 		WorkDir:        dir,
 	})
@@ -543,7 +543,7 @@ func TestSpawnAgent_DoneChannel(t *testing.T) {
 	sess := spawnWithMockDB(t, context.Background(), SpawnOpts{
 		ClaudeBinary:   binary,
 		EngineID:       "eng-done",
-		BeadID:         "bead-done",
+		CarID:         "car-done",
 		ContextPayload: "ctx",
 		WorkDir:        dir,
 	})

@@ -1,4 +1,4 @@
-package bead
+package car
 
 import (
 	"strings"
@@ -10,12 +10,12 @@ func TestGenerateID_Format(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateID() error: %v", err)
 	}
-	if !strings.HasPrefix(id, "be-") {
-		t.Errorf("ID %q missing be- prefix", id)
+	if !strings.HasPrefix(id, "car-") {
+		t.Errorf("ID %q missing car- prefix", id)
 	}
-	// be- (3 chars) + 5 hex chars = 8 total
-	if len(id) != 8 {
-		t.Errorf("ID length = %d, want 8; id = %q", len(id), id)
+	// car- (4 chars) + 5 hex chars = 9 total
+	if len(id) != 9 {
+		t.Errorf("ID length = %d, want 9; id = %q", len(id), id)
 	}
 }
 
@@ -39,7 +39,7 @@ func TestGenerateID_HexChars(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GenerateID(): %v", err)
 		}
-		hex := id[3:] // strip "be-"
+		hex := id[4:] // strip "car-"
 		for _, c := range hex {
 			if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
 				t.Errorf("ID %q contains non-hex char %c", id, c)
@@ -55,9 +55,9 @@ func TestComputeBranch(t *testing.T) {
 		id     string
 		want   string
 	}{
-		{"ry/alice", "backend", "be-abc12", "ry/alice/backend/be-abc12"},
-		{"ry/bob", "frontend", "be-00000", "ry/bob/frontend/be-00000"},
-		{"ry/carol", "infra", "be-fffff", "ry/carol/infra/be-fffff"},
+		{"ry/alice", "backend", "car-abc12", "ry/alice/backend/car-abc12"},
+		{"ry/bob", "frontend", "car-00000", "ry/bob/frontend/car-00000"},
+		{"ry/carol", "infra", "car-fffff", "ry/carol/infra/car-fffff"},
 	}
 	for _, tt := range tests {
 		got := ComputeBranch(tt.prefix, tt.track, tt.id)

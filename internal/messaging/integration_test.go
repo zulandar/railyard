@@ -142,15 +142,15 @@ func TestIntegration_Send_WithOpts(t *testing.T) {
 
 	tid := uint(99)
 	msg, err := Send(gormDB, "eng-001", "eng-002", "help", "need review", SendOpts{
-		BeadID:   "be-123",
+		CarID:   "car-123",
 		ThreadID: &tid,
 		Priority: "urgent",
 	})
 	if err != nil {
 		t.Fatalf("Send: %v", err)
 	}
-	if msg.BeadID != "be-123" {
-		t.Errorf("BeadID = %q, want %q", msg.BeadID, "be-123")
+	if msg.CarID != "car-123" {
+		t.Errorf("CarID = %q, want %q", msg.CarID, "car-123")
 	}
 	if msg.ThreadID == nil || *msg.ThreadID != 99 {
 		t.Errorf("ThreadID = %v, want 99", msg.ThreadID)
@@ -380,7 +380,7 @@ func TestIntegration_FullWorkflow(t *testing.T) {
 	gormDB := setupTestDB(t, "railyard_msg_flow")
 
 	// 1. Yardmaster sends direct + broadcast.
-	direct, _ := Send(gormDB, "yardmaster", "eng-001", "abort", "stop bead X", SendOpts{Priority: "urgent"})
+	direct, _ := Send(gormDB, "yardmaster", "eng-001", "abort", "stop car X", SendOpts{Priority: "urgent"})
 	Send(gormDB, "yardmaster", "broadcast", "alert", "new priority", SendOpts{})
 
 	// 2. eng-001 sees both.

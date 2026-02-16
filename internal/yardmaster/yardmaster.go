@@ -35,7 +35,7 @@ func Start(opts StartOpts) error {
 	cmd := exec.Command("claude",
 		"--dangerously-skip-permissions",
 		"--system-prompt", prompt,
-		"-p", "You are now running as the Yardmaster supervisor. Begin your monitoring loop: check engine health, completed beads, and blocked beads.",
+		"-p", "You are now running as the Yardmaster supervisor. Begin your monitoring loop: check engine health, completed cars, and blocked cars.",
 	)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -52,6 +52,6 @@ func BuildCommand(prompt string) *exec.Cmd {
 	return exec.Command("claude",
 		"--dangerously-skip-permissions",
 		"--system-prompt", prompt,
-		"-p", "You are now running as the Yardmaster supervisor. Begin your monitoring loop: check engine health, completed beads, and blocked beads.",
+		"-p", "You are now running as the Yardmaster supervisor. Begin your monitoring loop: check engine health, completed cars, and blocked cars.",
 	)
 }

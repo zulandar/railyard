@@ -27,7 +27,7 @@ E2=$(bd create --type epic --silent \
   -p 0 \
   -l "phase-1,bead-mgmt" \
   -d "Full bead lifecycle through the ry CLI. Adds business logic for creating, querying, and managing beads — the core work unit in Railyard. Critical deliverable: ReadyBeads() query (ARCHITECTURE.md Section 2) used by engine daemon to find claimable work. Bead IDs are short hashes (be-a1b2c). Branch names follow ry/{owner}/{track}/{bead_id}. Builds on Epic 1 GORM models and database layer. See IMPLEMENTATION_PLAN.md Epic 2." \
-  --acceptance "Create epic with child tasks, set dependency chains. ry bead ready --track backend returns only unblocked beads. Full CRUD via CLI (create, list, show, update). Status transitions validated. >90% test coverage for internal/bead/." \
+  --acceptance "Create epic with child tasks, set dependency chains. ry car ready --track backend returns only unblocked beads. Full CRUD via CLI (create, list, show, update). Status transitions validated. >90% test coverage for internal/bead/." \
   --design "See ARCHITECTURE.md Section 2 (Schema) for GORM operations: ClaimBead(), CompleteBead(), ReadyBeads()")
 echo "Epic 2 (Bead Management): $E2"
 
@@ -224,8 +224,8 @@ F2_1=$(bd create --type feature --silent --parent "$E2" \
   --title "Bead CRUD Operations" \
   -p 0 \
   -l "phase-1,bead-mgmt,crud" \
-  -d "internal/bead/ package providing Create, Get, List, Update functions plus CLI commands. Bead IDs are auto-generated 5-char hex hashes with be- prefix. Status defaults to open. Branch auto-computed as ry/{owner}/{track}/{id}. CLI commands are the primary bead management interface before Dispatch is built." \
-  --acceptance "Create/Get/List/Update functions work via GORM. CLI commands ry bead create/list/show/update functional. ID generation produces unique be-xxxxx format. Branch names computed correctly. Status transitions validated. >90% test coverage for CRUD operations.")
+  -d "internal/bead/ package providing Create, Get, List, Update functions plus CLI commands. Bead IDs are auto-generated 5-char hex hashes with be- prefix. Status defaults to open. Branch auto-computed as ry/{owner}/{track}/{id}. CLI commands are the primary car management interface before Dispatch is built." \
+  --acceptance "Create/Get/List/Update functions work via GORM. CLI commands ry car create/list/show/update functional. ID generation produces unique be-xxxxx format. Branch names computed correctly. Status transitions validated. >90% test coverage for CRUD operations.")
 echo "  F2.1 (CRUD): $F2_1"
 
 T2_1_1=$(bd create --type task --silent --parent "$F2_1" \
@@ -237,26 +237,26 @@ T2_1_1=$(bd create --type task --silent --parent "$F2_1" \
 echo "    T2.1.1: $T2_1_1"
 
 T2_1_2=$(bd create --type task --silent --parent "$F2_1" \
-  --title "Implement ry bead create CLI command" \
+  --title "Implement ry car create CLI command" \
   -p 0 \
   -l "phase-1,bead-mgmt,crud" \
-  -d "Cobra subcommand: ry bead create --title '...' --track backend --type task --priority 2 --description '...' --acceptance '...' --design '...'. Required: title, track. Defaults: type=task, priority=2, status=open. Prints created bead ID and branch name on success. Loads config for owner/branch_prefix." \
+  -d "Cobra subcommand: ry car create --title '...' --track backend --type task --priority 2 --description '...' --acceptance '...' --design '...'. Required: title, track. Defaults: type=task, priority=2, status=open. Prints created bead ID and branch name on success. Loads config for owner/branch_prefix." \
   --acceptance "Command creates bead in Dolt. Prints ID and branch. Required field validation. Defaults applied. Queryable via mysql after creation. >90% test coverage.")
 echo "    T2.1.2: $T2_1_2"
 
 T2_1_3=$(bd create --type task --silent --parent "$F2_1" \
-  --title "Implement ry bead list and ry bead show" \
+  --title "Implement ry car list and ry car show" \
   -p 0 \
   -l "phase-1,bead-mgmt,crud" \
-  -d "ry bead list with filters: --track, --status, --type, --assignee. Table-formatted output showing ID, title, status, track, priority, assignee. ry bead show <id> — full detail view including description, acceptance, design notes, progress entries, dependencies, parent info, branch name, timestamps." \
+  -d "ry car list with filters: --track, --status, --type, --assignee. Table-formatted output showing ID, title, status, track, priority, assignee. ry car show <id> — full detail view including description, acceptance, design notes, progress entries, dependencies, parent info, branch name, timestamps." \
   --acceptance "List shows filtered results in table format. Show displays all bead fields. Empty results handled gracefully. Invalid ID returns clear error. >90% test coverage.")
 echo "    T2.1.3: $T2_1_3"
 
 T2_1_4=$(bd create --type task --silent --parent "$F2_1" \
-  --title "Implement ry bead update with status validation" \
+  --title "Implement ry car update with status validation" \
   -p 0 \
   -l "phase-1,bead-mgmt,crud" \
-  -d "ry bead update <id> --status claimed --assignee engine-01 --priority 1 --description '...' etc. Status transition validation: valid transitions are open→ready, ready→claimed, claimed→in_progress, in_progress→done, open→cancelled, any→blocked. Invalid transitions return error with explanation of valid transitions from current state." \
+  -d "ry car update <id> --status claimed --assignee engine-01 --priority 1 --description '...' etc. Status transition validation: valid transitions are open→ready, ready→claimed, claimed→in_progress, in_progress→done, open→cancelled, any→blocked. Invalid transitions return error with explanation of valid transitions from current state." \
   --acceptance "Update modifies fields in Dolt. Invalid status transitions rejected with helpful error. Multiple fields updatable in one command. Non-existent ID returns error. >90% test coverage.")
 echo "    T2.1.4: $T2_1_4"
 
@@ -277,19 +277,19 @@ T2_2_1=$(bd create --type task --silent --parent "$F2_2" \
 echo "    T2.2.1: $T2_2_1"
 
 T2_2_2=$(bd create --type task --silent --parent "$F2_2" \
-  --title "Implement ry bead dep CLI commands" \
+  --title "Implement ry car dep CLI commands" \
   -p 0 \
   -l "phase-1,bead-mgmt,deps" \
-  -d "ry bead dep add <bead> --blocked-by <blocker> — creates blocking dependency. ry bead dep list <bead> — shows what blocks this bead and what this bead blocks, formatted as table. ry bead dep remove <bead> --blocked-by <blocker> — removes dependency." \
+  -d "ry car dep add <bead> --blocked-by <blocker> — creates blocking dependency. ry car dep list <bead> — shows what blocks this bead and what this bead blocks, formatted as table. ry car dep remove <bead> --blocked-by <blocker> — removes dependency." \
   --acceptance "CLI commands map to dep functions correctly. Output formatted clearly. Invalid IDs return helpful errors. >90% test coverage.")
 echo "    T2.2.2: $T2_2_2"
 
 T2_2_3=$(bd create --type task --silent --parent "$F2_2" \
-  --title "Implement ReadyBeads query and ry bead ready" \
+  --title "Implement ReadyBeads query and ry car ready" \
   -p 0 \
   -l "phase-1,bead-mgmt,deps" \
-  -d "ReadyBeads(db *gorm.DB, track string) ([]models.Bead, error) — exactly per ARCHITECTURE.md Section 2: SELECT beads WHERE track=X AND status=open AND assignee IS NULL AND id NOT IN (SELECT bead_id FROM bead_deps JOIN beads blocker ON blocked_by=blocker.id WHERE blocker.status NOT IN ('done','cancelled')). Ordered by priority ASC, created_at ASC. ry bead ready --track backend — CLI wrapper listing ready beads." \
-  --acceptance "ReadyBeads returns only beads with all blockers done/cancelled. Beads with no deps and status=open are ready. Priority ordering correct. ry bead ready displays results. >90% test coverage.")
+  -d "ReadyBeads(db *gorm.DB, track string) ([]models.Bead, error) — exactly per ARCHITECTURE.md Section 2: SELECT beads WHERE track=X AND status=open AND assignee IS NULL AND id NOT IN (SELECT bead_id FROM bead_deps JOIN beads blocker ON blocked_by=blocker.id WHERE blocker.status NOT IN ('done','cancelled')). Ordered by priority ASC, created_at ASC. ry car ready --track backend — CLI wrapper listing ready beads." \
+  --acceptance "ReadyBeads returns only beads with all blockers done/cancelled. Beads with no deps and status=open are ready. Priority ordering correct. ry car ready displays results. >90% test coverage.")
 echo "    T2.2.3: $T2_2_3"
 
 F2_3=$(bd create --type feature --silent --parent "$E2" \
@@ -297,14 +297,14 @@ F2_3=$(bd create --type feature --silent --parent "$E2" \
   -p 1 \
   -l "phase-1,bead-mgmt,hierarchy" \
   -d "Parent-child relationships for organizing beads. Epics are parent beads containing child tasks/features. Uses ParentID field on Bead model. Supports listing children of a parent with status summary." \
-  --acceptance "Epic creation works. Child beads link to parent via ParentID. ry bead children shows all children with status. Parent validation on create. >90% test coverage.")
+  --acceptance "Epic creation works. Child beads link to parent via ParentID. ry car children shows all children with status. Parent validation on create. >90% test coverage.")
 echo "  F2.3 (Hierarchy): $F2_3"
 
 T2_3_1=$(bd create --type task --silent --parent "$F2_3" \
   --title "Implement parent-child relationships and CLI" \
   -p 1 \
   -l "phase-1,bead-mgmt,hierarchy" \
-  -d "ry bead create --type epic --title '...' --track backend creates epic. ry bead create --type task --parent <epic-id> --title '...' creates child linked via ParentID. ry bead children <parent-id> lists all children with status summary (count by status). Validate parent exists on create. Children inherit track from parent if not specified." \
+  -d "ry car create --type epic --title '...' --track backend creates epic. ry car create --type task --parent <epic-id> --title '...' creates child linked via ParentID. ry car children <parent-id> lists all children with status summary (count by status). Validate parent exists on create. Children inherit track from parent if not specified." \
   --acceptance "Epic created with type=epic. Child links to parent. Children command shows summary. Invalid parent ID returns error. Track inheritance works. >90% test coverage.")
 echo "    T2.3.1: $T2_3_1"
 
@@ -613,7 +613,7 @@ T5_1_2=$(bd create --type task --silent --parent "$F5_1" \
   --title "Write yardmaster system prompt" \
   -p 0 \
   -l "phase-1,yardmaster,framework" \
-  -d "Create yardmaster system prompt (internal/yardmaster/prompt.go or yardmaster_prompt.md). Content: role definition (supervisor of all engines across all tracks for this railyard), responsibilities (monitor engine health, merge completed branches, handle stalls, manage cross-track deps, create reindex jobs), available ry commands (ry engine list, ry bead list, ry bead ready, ry bead reassign, ry switch, ry message send, ry inbox, ry status), poll interval (30s default), escalation rules (when to message human: repeated stalls, test failures after 3 retries, merge conflicts)." \
+  -d "Create yardmaster system prompt (internal/yardmaster/prompt.go or yardmaster_prompt.md). Content: role definition (supervisor of all engines across all tracks for this railyard), responsibilities (monitor engine health, merge completed branches, handle stalls, manage cross-track deps, create reindex jobs), available ry commands (ry engine list, ry car list, ry car ready, ry car reassign, ry switch, ry message send, ry inbox, ry status), poll interval (30s default), escalation rules (when to message human: repeated stalls, test failures after 3 retries, merge conflicts)." \
   --acceptance "Prompt is comprehensive and unambiguous. All ry commands listed with usage. Responsibilities clearly defined. Escalation rules explicit. >90% test coverage for prompt rendering.")
 echo "    T5.1.2: $T5_1_2"
 
@@ -637,7 +637,7 @@ T5_2_2=$(bd create --type task --silent --parent "$F5_2" \
   --title "Implement stalled engine handling and bead reassignment" \
   -p 0 \
   -l "phase-1,yardmaster,health" \
-  -d "ReassignBead(db *gorm.DB, beadID, fromEngineID, reason string) error — in transaction: update bead status=open, assignee=nil, claimed_at=nil. Write progress note 'Reassigned from {engineID}: {reason}'. Update old engine status=dead. Send broadcast message about reassignment. ry bead reassign CLI command wraps this function." \
+  -d "ReassignBead(db *gorm.DB, beadID, fromEngineID, reason string) error — in transaction: update bead status=open, assignee=nil, claimed_at=nil. Write progress note 'Reassigned from {engineID}: {reason}'. Update old engine status=dead. Send broadcast message about reassignment. ry car reassign CLI command wraps this function." \
   --acceptance "Bead unclaimed and re-queued. Progress note records reason. Old engine marked dead. Broadcast sent. CLI command works. >90% test coverage.")
 echo "    T5.2.2: $T5_2_2"
 
@@ -732,7 +732,7 @@ F6_1=$(bd create --type feature --silent --parent "$E6" \
   --title "Dispatch Agent Framework" \
   -p 0 \
   -l "phase-1,dispatch,framework" \
-  -d "Dispatch package scaffold and system prompt. Claude Code session with planner prompt. Has access to ry bead create, ry bead dep add, track config. Interactive mode — user types requests. See ARCHITECTURE.md Dispatch section." \
+  -d "Dispatch package scaffold and system prompt. Claude Code session with planner prompt. Has access to ry car create, ry car dep add, track config. Interactive mode — user types requests. See ARCHITECTURE.md Dispatch section." \
   --acceptance "Dispatch starts as Claude Code session. System prompt includes track definitions and ry commands. Interactive mode works. >90% test coverage.")
 echo "  F6.1 (Framework): $F6_1"
 
@@ -748,7 +748,7 @@ T6_1_2=$(bd create --type task --silent --parent "$F6_1" \
   --title "Write dispatch system prompt with track awareness" \
   -p 0 \
   -l "phase-1,dispatch,framework" \
-  -d "Create dispatch system prompt. Content: role (planner that decomposes user requests into beads across tracks), track definitions from config (for each track: name, language, conventions, file_patterns — so Dispatch knows what belongs where), available ry commands (ry bead create with all flags, ry bead dep add, ry bead list, ry bead ready, ry bead children), decomposition examples (from ARCHITECTURE.md Dispatch section — the auth example showing epic/task creation with cross-track deps), rules (one bead per atomic work unit, always set acceptance criteria with >90% test coverage, always set dependencies, use epic for multi-task groups, use task for atomic units)." \
+  -d "Create dispatch system prompt. Content: role (planner that decomposes user requests into beads across tracks), track definitions from config (for each track: name, language, conventions, file_patterns — so Dispatch knows what belongs where), available ry commands (ry car create with all flags, ry car dep add, ry car list, ry car ready, ry car children), decomposition examples (from ARCHITECTURE.md Dispatch section — the auth example showing epic/task creation with cross-track deps), rules (one bead per atomic work unit, always set acceptance criteria with >90% test coverage, always set dependencies, use epic for multi-task groups, use task for atomic units)." \
   --acceptance "Prompt includes track definitions, ry commands, examples, and rules. Decomposition guidance clear. >90% test coverage for prompt rendering.")
 echo "    T6.1.2: $T6_1_2"
 
@@ -772,7 +772,7 @@ T6_2_2=$(bd create --type task --silent --parent "$F6_2" \
   --title "Implement dependency chain creation with cycle detection" \
   -p 0 \
   -l "phase-1,dispatch,decomposition" \
-  -d "Dispatch creates dependencies via ry bead dep add. Prompt enforces ordering: data model before API handler, API handler before frontend consumer, migration before model. After creating all beads, Dispatch runs ry bead dep list on each to verify chain and checks for cycles. If cycles detected, resolves by removing weakest dependency." \
+  -d "Dispatch creates dependencies via ry car dep add. Prompt enforces ordering: data model before API handler, API handler before frontend consumer, migration before model. After creating all beads, Dispatch runs ry car dep list on each to verify chain and checks for cycles. If cycles detected, resolves by removing weakest dependency." \
   --acceptance "Dependencies created correctly. No cycles in output. Cross-track deps set (frontend blocked by backend). Dispatch verifies its own work. >90% test coverage.")
 echo "    T6.2.2: $T6_2_2"
 

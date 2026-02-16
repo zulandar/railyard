@@ -28,7 +28,7 @@ func newMessageSendCmd() *cobra.Command {
 		to         string
 		subject    string
 		body       string
-		beadID     string
+		carID     string
 		threadID   uint
 		priority   string
 	)
@@ -36,7 +36,7 @@ func newMessageSendCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "send",
 		Short: "Send a message to an agent",
-		Long:  "Sends a message from one agent to another, with optional bead and thread context.",
+		Long:  "Sends a message from one agent to another, with optional car and thread context.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, gormDB, err := connectFromConfig(configPath)
 			if err != nil {
@@ -44,7 +44,7 @@ func newMessageSendCmd() *cobra.Command {
 			}
 
 			opts := messaging.SendOpts{
-				BeadID:   beadID,
+				CarID:   carID,
 				Priority: priority,
 			}
 			if cmd.Flags().Changed("thread-id") {
@@ -66,7 +66,7 @@ func newMessageSendCmd() *cobra.Command {
 	cmd.Flags().StringVar(&to, "to", "", "recipient agent ID (required)")
 	cmd.Flags().StringVar(&subject, "subject", "", "message subject (required)")
 	cmd.Flags().StringVar(&body, "body", "", "message body (required)")
-	cmd.Flags().StringVar(&beadID, "bead-id", "", "associated bead ID")
+	cmd.Flags().StringVar(&carID, "car-id", "", "associated car ID")
 	cmd.Flags().UintVar(&threadID, "thread-id", 0, "thread ID to attach to")
 	cmd.Flags().StringVar(&priority, "priority", "normal", "message priority (normal, urgent)")
 	cmd.MarkFlagRequired("from")

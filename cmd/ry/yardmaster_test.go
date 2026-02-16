@@ -104,8 +104,8 @@ func TestSwitchCmd_Help(t *testing.T) {
 
 func TestSwitchCmd_Flags(t *testing.T) {
 	cmd := newSwitchCmd()
-	if cmd.Use != "switch <bead-id>" {
-		t.Errorf("Use = %q, want %q", cmd.Use, "switch <bead-id>")
+	if cmd.Use != "switch <car-id>" {
+		t.Errorf("Use = %q, want %q", cmd.Use, "switch <car-id>")
 	}
 	if cmd.Flags().Lookup("config") == nil {
 		t.Error("expected --config flag")
@@ -137,7 +137,7 @@ func TestSwitchCmd_MissingConfig(t *testing.T) {
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
-	cmd.SetArgs([]string{"switch", "be-12345", "--config", "/nonexistent/railyard.yaml"})
+	cmd.SetArgs([]string{"switch", "car-12345", "--config", "/nonexistent/railyard.yaml"})
 
 	err := cmd.Execute()
 	if err == nil {

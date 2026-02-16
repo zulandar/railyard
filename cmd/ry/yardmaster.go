@@ -44,8 +44,8 @@ func newSwitchCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "switch <bead-id>",
-		Short: "Merge a completed bead's branch to main",
+		Use:   "switch <car-id>",
+		Short: "Merge a completed car's branch to main",
 		Long:  "Runs the switch flow: fetch branch, run tests, merge to main if tests pass. Use --dry-run to run tests without merging.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -58,7 +58,7 @@ func newSwitchCmd() *cobra.Command {
 	return cmd
 }
 
-func runSwitch(cmd *cobra.Command, configPath, beadID string, dryRun bool) error {
+func runSwitch(cmd *cobra.Command, configPath, carID string, dryRun bool) error {
 	_, gormDB, err := connectFromConfig(configPath)
 	if err != nil {
 		return err
@@ -69,7 +69,7 @@ func runSwitch(cmd *cobra.Command, configPath, beadID string, dryRun bool) error
 		return fmt.Errorf("get working directory: %w", err)
 	}
 
-	result, err := yardmaster.Switch(gormDB, beadID, yardmaster.SwitchOpts{
+	result, err := yardmaster.Switch(gormDB, carID, yardmaster.SwitchOpts{
 		RepoDir: repoDir,
 		DryRun:  dryRun,
 	})
@@ -79,9 +79,9 @@ func runSwitch(cmd *cobra.Command, configPath, beadID string, dryRun bool) error
 
 	out := cmd.OutOrStdout()
 	if result.TestsPassed {
-		fmt.Fprintf(out, "Tests passed for bead %s\n", beadID)
+		fmt.Fprintf(out, "Tests passed for car %s\n", carID)
 	} else {
-		fmt.Fprintf(out, "Tests failed for bead %s:\n%s\n", beadID, result.TestOutput)
+		fmt.Fprintf(out, "Tests failed for car %s:\n%s\n", carID, result.TestOutput)
 	}
 
 	if result.Merged {

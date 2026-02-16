@@ -92,8 +92,8 @@ func TestRenderPrompt_ContainsCommands(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(prompt, "ry bead create") {
-		t.Errorf("prompt does not contain %q", "ry bead create")
+	if !strings.Contains(prompt, "ry car create") {
+		t.Errorf("prompt does not contain %q", "ry car create")
 	}
 }
 

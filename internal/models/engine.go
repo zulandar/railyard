@@ -9,7 +9,7 @@ type Engine struct {
 	Track        string    `gorm:"size:64;index"`
 	Role         string    `gorm:"size:16"`
 	Status       string    `gorm:"size:16;index"`
-	CurrentBead  string    `gorm:"size:32"`
+	CurrentCar  string    `gorm:"size:32"`
 	SessionID    string    `gorm:"size:64"`
 	StartedAt    time.Time
 	LastActivity time.Time `gorm:"index"`

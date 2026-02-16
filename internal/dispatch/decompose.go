@@ -5,8 +5,8 @@ import (
 	"strings"
 )
 
-// BeadPlan represents a planned bead in a decomposition.
-type BeadPlan struct {
+// CarPlan represents a planned car in a decomposition.
+type CarPlan struct {
 	ID          string
 	Title       string
 	Track       string
@@ -19,13 +19,13 @@ type BeadPlan struct {
 
 // DepPlan represents a planned dependency.
 type DepPlan struct {
-	BeadID    string
+	CarID    string
 	BlockedBy string
 }
 
 // DecompositionPlan represents the full output of a dispatch decomposition.
 type DecompositionPlan struct {
-	Beads []BeadPlan
+	Cars []CarPlan
 	Deps  []DepPlan
 }
 
@@ -38,35 +38,35 @@ func ValidatePlan(plan *DecompositionPlan) []string {
 
 	var errs []string
 
-	if len(plan.Beads) == 0 {
-		errs = append(errs, "plan has no beads")
+	if len(plan.Cars) == 0 {
+		errs = append(errs, "plan has no cars")
 	}
 
 	ids := make(map[string]bool)
-	for i, b := range plan.Beads {
+	for i, b := range plan.Cars {
 		if b.ID == "" {
-			errs = append(errs, fmt.Sprintf("beads[%d]: ID is required", i))
+			errs = append(errs, fmt.Sprintf("cars[%d]: ID is required", i))
 		}
 		if b.Title == "" {
-			errs = append(errs, fmt.Sprintf("beads[%d] (%s): title is required", i, b.ID))
+			errs = append(errs, fmt.Sprintf("cars[%d] (%s): title is required", i, b.ID))
 		}
 		if b.Track == "" {
-			errs = append(errs, fmt.Sprintf("beads[%d] (%s): track is required", i, b.ID))
+			errs = append(errs, fmt.Sprintf("cars[%d] (%s): track is required", i, b.ID))
 		}
 		if b.Type == "" {
-			errs = append(errs, fmt.Sprintf("beads[%d] (%s): type is required", i, b.ID))
+			errs = append(errs, fmt.Sprintf("cars[%d] (%s): type is required", i, b.ID))
 		}
 		if b.Type != "" && b.Type != "epic" && b.Type != "task" && b.Type != "spike" {
-			errs = append(errs, fmt.Sprintf("beads[%d] (%s): invalid type %q (must be epic, task, or spike)", i, b.ID, b.Type))
+			errs = append(errs, fmt.Sprintf("cars[%d] (%s): invalid type %q (must be epic, task, or spike)", i, b.ID, b.Type))
 		}
 		if b.Acceptance == "" {
-			errs = append(errs, fmt.Sprintf("beads[%d] (%s): acceptance criteria required", i, b.ID))
+			errs = append(errs, fmt.Sprintf("cars[%d] (%s): acceptance criteria required", i, b.ID))
 		}
 		if b.Priority < 0 || b.Priority > 4 {
-			errs = append(errs, fmt.Sprintf("beads[%d] (%s): priority %d out of range 0-4", i, b.ID, b.Priority))
+			errs = append(errs, fmt.Sprintf("cars[%d] (%s): priority %d out of range 0-4", i, b.ID, b.Priority))
 		}
 		if ids[b.ID] {
-			errs = append(errs, fmt.Sprintf("beads[%d]: duplicate ID %q", i, b.ID))
+			errs = append(errs, fmt.Sprintf("cars[%d]: duplicate ID %q", i, b.ID))
 		}
 		ids[b.ID] = true
 
@@ -77,28 +77,28 @@ func ValidatePlan(plan *DecompositionPlan) []string {
 	}
 
 	// Validate parent references (after collecting all IDs)
-	for i, b := range plan.Beads {
+	for i, b := range plan.Cars {
 		if b.ParentID != "" && !ids[b.ParentID] {
-			errs = append(errs, fmt.Sprintf("beads[%d] (%s): parent %q not found in plan", i, b.ID, b.ParentID))
+			errs = append(errs, fmt.Sprintf("cars[%d] (%s): parent %q not found in plan", i, b.ID, b.ParentID))
 		}
 	}
 
 	// Validate dependency references
 	for i, d := range plan.Deps {
-		if d.BeadID == "" {
-			errs = append(errs, fmt.Sprintf("deps[%d]: bead_id is required", i))
+		if d.CarID == "" {
+			errs = append(errs, fmt.Sprintf("deps[%d]: car_id is required", i))
 		}
 		if d.BlockedBy == "" {
 			errs = append(errs, fmt.Sprintf("deps[%d]: blocked_by is required", i))
 		}
-		if d.BeadID != "" && !ids[d.BeadID] {
-			errs = append(errs, fmt.Sprintf("deps[%d]: bead %q not found in plan", i, d.BeadID))
+		if d.CarID != "" && !ids[d.CarID] {
+			errs = append(errs, fmt.Sprintf("deps[%d]: car %q not found in plan", i, d.CarID))
 		}
 		if d.BlockedBy != "" && !ids[d.BlockedBy] {
 			errs = append(errs, fmt.Sprintf("deps[%d]: blocked_by %q not found in plan", i, d.BlockedBy))
 		}
-		if d.BeadID == d.BlockedBy {
-			errs = append(errs, fmt.Sprintf("deps[%d]: bead %q cannot depend on itself", i, d.BeadID))
+		if d.CarID == d.BlockedBy {
+			errs = append(errs, fmt.Sprintf("deps[%d]: car %q cannot depend on itself", i, d.CarID))
 		}
 	}
 
@@ -113,16 +113,16 @@ func ValidatePlan(plan *DecompositionPlan) []string {
 // DetectCycle checks for cycles in a dependency graph.
 // Returns the cycle path if found, nil if no cycle.
 func DetectCycle(deps []DepPlan) []string {
-	// Build adjacency list: bead -> [things it's blocked by]
+	// Build adjacency list: car -> [things it's blocked by]
 	graph := make(map[string][]string)
 	for _, d := range deps {
-		graph[d.BeadID] = append(graph[d.BeadID], d.BlockedBy)
+		graph[d.CarID] = append(graph[d.CarID], d.BlockedBy)
 	}
 
 	// Collect all nodes
 	nodes := make(map[string]bool)
 	for _, d := range deps {
-		nodes[d.BeadID] = true
+		nodes[d.CarID] = true
 		nodes[d.BlockedBy] = true
 	}
 
@@ -172,10 +172,10 @@ func DetectCycle(deps []DepPlan) []string {
 	return nil
 }
 
-// TrackSummary generates a summary of beads organized by track.
-func TrackSummary(plan *DecompositionPlan) map[string][]BeadPlan {
-	result := make(map[string][]BeadPlan)
-	for _, b := range plan.Beads {
+// TrackSummary generates a summary of cars organized by track.
+func TrackSummary(plan *DecompositionPlan) map[string][]CarPlan {
+	result := make(map[string][]CarPlan)
+	for _, b := range plan.Cars {
 		result[b.Track] = append(result[b.Track], b)
 	}
 	return result

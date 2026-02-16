@@ -19,7 +19,7 @@ func newLogsCmd() *cobra.Command {
 	var (
 		configPath string
 		engineID   string
-		beadID     string
+		carID     string
 		sessionID  string
 		follow     bool
 		lines      int
@@ -29,11 +29,11 @@ func newLogsCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "logs",
 		Short: "View agent log output",
-		Long:  "Displays agent log entries from the agent_logs table. Supports filtering by engine, bead, or session, and a --follow mode for tailing new entries.",
+		Long:  "Displays agent log entries from the agent_logs table. Supports filtering by engine, car, or session, and a --follow mode for tailing new entries.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runLogs(cmd, configPath, logsOpts{
 				engineID:  engineID,
-				beadID:    beadID,
+				carID:    carID,
 				sessionID: sessionID,
 				follow:    follow,
 				lines:     lines,
@@ -44,7 +44,7 @@ func newLogsCmd() *cobra.Command {
 
 	cmd.Flags().StringVarP(&configPath, "config", "c", "railyard.yaml", "path to Railyard config file")
 	cmd.Flags().StringVar(&engineID, "engine", "", "filter by engine ID")
-	cmd.Flags().StringVar(&beadID, "bead", "", "filter by bead ID")
+	cmd.Flags().StringVar(&carID, "car", "", "filter by car ID")
 	cmd.Flags().StringVar(&sessionID, "session", "", "filter by session ID")
 	cmd.Flags().BoolVarP(&follow, "follow", "f", false, "tail mode — poll for new entries every 2s")
 	cmd.Flags().IntVarP(&lines, "lines", "n", 50, "number of recent entries to show")
@@ -54,7 +54,7 @@ func newLogsCmd() *cobra.Command {
 
 type logsOpts struct {
 	engineID  string
-	beadID    string
+	carID    string
 	sessionID string
 	follow    bool
 	lines     int
@@ -130,8 +130,8 @@ func buildLogsQuery(db *gorm.DB, opts logsOpts) *gorm.DB {
 	if opts.engineID != "" {
 		q = q.Where("engine_id = ?", opts.engineID)
 	}
-	if opts.beadID != "" {
-		q = q.Where("bead_id = ?", opts.beadID)
+	if opts.carID != "" {
+		q = q.Where("car_id = ?", opts.carID)
 	}
 	if opts.sessionID != "" {
 		q = q.Where("session_id = ?", opts.sessionID)
@@ -142,13 +142,13 @@ func buildLogsQuery(db *gorm.DB, opts logsOpts) *gorm.DB {
 func printEntry(out io.Writer, e models.AgentLog, raw bool) {
 	if raw {
 		ts := e.CreatedAt.Format("15:04:05")
-		fmt.Fprintf(out, "--- [%s] %s %s %s ---\n", ts, shortID(e.EngineID), shortID(e.BeadID), e.Direction)
+		fmt.Fprintf(out, "--- [%s] %s %s %s ---\n", ts, shortID(e.EngineID), shortID(e.CarID), e.Direction)
 		fmt.Fprintln(out, e.Content)
 		return
 	}
 
 	ts := e.CreatedAt.Format("15:04:05")
-	prefix := fmt.Sprintf("[%s] %s %s %s", ts, shortID(e.EngineID), shortID(e.BeadID), e.Direction)
+	prefix := fmt.Sprintf("[%s] %s %s %s", ts, shortID(e.EngineID), shortID(e.CarID), e.Direction)
 
 	lines := strings.Split(strings.TrimRight(e.Content, "\n"), "\n")
 	for _, line := range lines {

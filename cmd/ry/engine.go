@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/zulandar/railyard/internal/bead"
+	"github.com/zulandar/railyard/internal/car"
 	"github.com/zulandar/railyard/internal/config"
 	"github.com/zulandar/railyard/internal/db"
 	"github.com/zulandar/railyard/internal/engine"
@@ -47,7 +47,7 @@ func newEngineStartCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "start",
 		Short: "Start the engine daemon",
-		Long:  "Starts the engine daemon loop: claims beads, spawns Claude Code, monitors subprocess, handles outcomes.",
+		Long:  "Starts the engine daemon loop: claims cars, spawns Claude Code, monitors subprocess, handles outcomes.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runEngineStart(cmd, configPath, track, pollInterval)
 		},
@@ -177,23 +177,23 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 			continue
 		}
 
-		// Handle abort instruction for current bead.
-		if eng.CurrentBead != "" && engine.ShouldAbort(instructions, eng.CurrentBead) {
-			fmt.Fprintf(out, "Abort instruction received for bead %s\n", eng.CurrentBead)
+		// Handle abort instruction for current car.
+		if eng.CurrentCar != "" && engine.ShouldAbort(instructions, eng.CurrentCar) {
+			fmt.Fprintf(out, "Abort instruction received for car %s\n", eng.CurrentCar)
 			gormDB.Model(&models.Engine{}).Where("id = ?", eng.ID).Updates(map[string]interface{}{
-				"current_bead": "",
+				"current_car": "",
 				"status":       engine.StatusIdle,
 			})
-			eng.CurrentBead = ""
+			eng.CurrentCar = ""
 			cycle = 0
 			continue
 		}
 
-		// Try to claim a bead (or re-claim current if mid-cycle).
+		// Try to claim a car (or re-claim current if mid-cycle).
 		claimed, err := claimOrReclaim(gormDB, eng, track)
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				// No ready beads — sleep and retry.
+				// No ready cars — sleep and retry.
 				sleepWithContext(ctx, pollInterval)
 				continue
 			}
@@ -203,7 +203,7 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 		}
 
 		cycle++
-		fmt.Fprintf(out, "[cycle %d] Claimed bead %s: %s\n", cycle, claimed.ID, claimed.Title)
+		fmt.Fprintf(out, "[cycle %d] Claimed car %s: %s\n", cycle, claimed.ID, claimed.Title)
 
 		// Render context.
 		progress, _ := loadProgress(gormDB, claimed.ID)
@@ -211,7 +211,7 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 		commits, _ := engine.RecentCommits(workDir, claimed.Branch, 10)
 
 		contextPayload, err := engine.RenderContext(engine.ContextInput{
-			Bead:          claimed,
+			Car:          claimed,
 			Track:         &trackModel,
 			Config:        cfg,
 			Progress:      progress,
@@ -234,7 +234,7 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 		// Spawn Claude Code.
 		sess, err := engine.SpawnAgent(ctx, gormDB, engine.SpawnOpts{
 			EngineID:       eng.ID,
-			BeadID:         claimed.ID,
+			CarID:         claimed.ID,
 			ContextPayload: contextPayload,
 			WorkDir:        workDir,
 		})
@@ -257,14 +257,14 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 
 		switch outcome.kind {
 		case outcomeCompleted:
-			fmt.Fprintf(out, "[cycle %d] Bead %s completed\n", cycle, claimed.ID)
+			fmt.Fprintf(out, "[cycle %d] Car %s completed\n", cycle, claimed.ID)
 			if err := engine.HandleCompletion(gormDB, claimed, eng, engine.CompletionOpts{
 				RepoDir:   workDir,
 				SessionID: sess.ID,
 			}); err != nil {
 				log.Printf("completion handling error: %v", err)
 			}
-			// Reset cycle for next bead.
+			// Reset cycle for next car.
 			cycle = 0
 
 		case outcomeClear:
@@ -282,7 +282,7 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 			if err := engine.HandleStall(gormDB, eng.ID, claimed.ID, outcome.stallReason); err != nil {
 				log.Printf("stall handling error: %v", err)
 			}
-			// Reset cycle — bead is now blocked, engine should move on.
+			// Reset cycle — car is now blocked, engine should move on.
 			cycle = 0
 
 		case outcomeCancelled:
@@ -304,8 +304,8 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 type outcomeKind int
 
 const (
-	outcomeCompleted  outcomeKind = iota // bead marked done
-	outcomeClear                         // agent exited, bead not done
+	outcomeCompleted  outcomeKind = iota // car marked done
+	outcomeClear                         // agent exited, car not done
 	outcomeStall                         // stall detected
 	outcomeCancelled                     // context cancelled (shutdown)
 )
@@ -335,26 +335,26 @@ func monitorSession(ctx context.Context, sess *engine.Session, sd *engine.StallD
 	}
 }
 
-// claimOrReclaim either claims a new bead or re-claims the engine's current bead.
-func claimOrReclaim(gormDB *gorm.DB, eng *models.Engine, track string) (*models.Bead, error) {
-	// Check if engine already has a bead assigned (re-claim after clear cycle).
-	if eng.CurrentBead != "" {
-		b, err := bead.Get(gormDB, eng.CurrentBead)
+// claimOrReclaim either claims a new car or re-claims the engine's current car.
+func claimOrReclaim(gormDB *gorm.DB, eng *models.Engine, track string) (*models.Car, error) {
+	// Check if engine already has a car assigned (re-claim after clear cycle).
+	if eng.CurrentCar != "" {
+		b, err := car.Get(gormDB, eng.CurrentCar)
 		if err == nil && b.Status != "done" && b.Status != "cancelled" {
 			return b, nil
 		}
-		// Clear stale current_bead.
-		gormDB.Model(&models.Engine{}).Where("id = ?", eng.ID).Update("current_bead", "")
-		eng.CurrentBead = ""
+		// Clear stale current_car.
+		gormDB.Model(&models.Engine{}).Where("id = ?", eng.ID).Update("current_car", "")
+		eng.CurrentCar = ""
 	}
 
-	return engine.ClaimBead(gormDB, eng.ID, track)
+	return engine.ClaimCar(gormDB, eng.ID, track)
 }
 
-// loadProgress retrieves progress notes for a bead.
-func loadProgress(gormDB *gorm.DB, beadID string) ([]models.BeadProgress, error) {
-	var progress []models.BeadProgress
-	err := gormDB.Where("bead_id = ?", beadID).Order("created_at ASC").Find(&progress).Error
+// loadProgress retrieves progress notes for a car.
+func loadProgress(gormDB *gorm.DB, carID string) ([]models.CarProgress, error) {
+	var progress []models.CarProgress
+	err := gormDB.Where("car_id = ?", carID).Order("created_at ASC").Find(&progress).Error
 	return progress, err
 }
 
@@ -433,7 +433,7 @@ func newEngineListCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List engines",
-		Long:  "Displays all engines with ID, track, status, current bead, last activity, and uptime.",
+		Long:  "Displays all engines with ID, track, status, current car, last activity, and uptime.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runEngineList(cmd, configPath, track, statusFilter)
 		},
@@ -467,14 +467,14 @@ func runEngineList(cmd *cobra.Command, configPath, track, statusFilter string) e
 	}
 
 	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "ID\tTRACK\tSTATUS\tCURRENT BEAD\tLAST ACTIVITY\tUPTIME")
+	fmt.Fprintln(w, "ID\tTRACK\tSTATUS\tCURRENT CAR\tLAST ACTIVITY\tUPTIME")
 	for _, e := range engines {
-		bead := e.CurrentBead
-		if bead == "" {
-			bead = "-"
+		car := e.CurrentCar
+		if car == "" {
+			car = "-"
 		}
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
-			e.ID, e.Track, e.Status, bead,
+			e.ID, e.Track, e.Status, car,
 			e.LastActivity.Format("15:04:05"),
 			formatUptime(e.Uptime))
 	}

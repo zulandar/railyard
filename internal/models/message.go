@@ -7,7 +7,7 @@ type Message struct {
 	ID           uint      `gorm:"primaryKey;autoIncrement"`
 	FromAgent    string    `gorm:"size:64;not null"`
 	ToAgent      string    `gorm:"size:64;not null;index"`
-	BeadID       string    `gorm:"size:32"`
+	CarID       string    `gorm:"size:32"`
 	ThreadID     *uint
 	Subject      string    `gorm:"size:256"`
 	Body         string    `gorm:"type:text"`

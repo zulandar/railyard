@@ -12,18 +12,18 @@ import (
 
 // ContextInput holds all data needed to render the context injection template.
 type ContextInput struct {
-	Bead          *models.Bead
+	Car          *models.Car
 	Track         *models.Track
 	Config        *config.Config
-	Progress      []models.BeadProgress
+	Progress      []models.CarProgress
 	Messages      []models.Message
 	RecentCommits []string // pre-fetched "git log --oneline" lines
 }
 
 // RenderContext produces the full markdown prompt injected into engine sessions.
 func RenderContext(input ContextInput) (string, error) {
-	if input.Bead == nil {
-		return "", fmt.Errorf("engine: bead is required")
+	if input.Car == nil {
+		return "", fmt.Errorf("engine: car is required")
 	}
 	if input.Track == nil {
 		return "", fmt.Errorf("engine: track is required")
@@ -35,7 +35,7 @@ func RenderContext(input ContextInput) (string, error) {
 	var w strings.Builder
 	writeHeader(&w, input.Track, input.Config)
 	writeConventions(&w, input.Track)
-	writeCurrentBead(&w, input.Bead)
+	writeCurrentCar(&w, input.Car)
 	writeProgress(&w, input.Progress)
 	writeMessages(&w, input.Messages)
 	writeRecentCommits(&w, input.RecentCommits)
@@ -66,22 +66,22 @@ func writeConventions(w *strings.Builder, track *models.Track) {
 	w.WriteString("or frameworks from other projects. Follow the conventions above exactly.\n\n")
 }
 
-func writeCurrentBead(w *strings.Builder, bead *models.Bead) {
-	w.WriteString("## Your Current Bead\n")
-	fmt.Fprintf(w, "Bead: %s\n", bead.ID)
-	fmt.Fprintf(w, "Title: %s\n", bead.Title)
-	fmt.Fprintf(w, "Priority: %d\n", bead.Priority)
-	fmt.Fprintf(w, "Branch: %s\n", bead.Branch)
+func writeCurrentCar(w *strings.Builder, car *models.Car) {
+	w.WriteString("## Your Current Car\n")
+	fmt.Fprintf(w, "Car: %s\n", car.ID)
+	fmt.Fprintf(w, "Title: %s\n", car.Title)
+	fmt.Fprintf(w, "Priority: %d\n", car.Priority)
+	fmt.Fprintf(w, "Branch: %s\n", car.Branch)
 	w.WriteString("\n### Description\n")
-	w.WriteString(bead.Description)
+	w.WriteString(car.Description)
 	w.WriteString("\n\n### Design Notes\n")
-	w.WriteString(bead.DesignNotes)
+	w.WriteString(car.DesignNotes)
 	w.WriteString("\n\n### Acceptance Criteria\n")
-	w.WriteString(bead.Acceptance)
+	w.WriteString(car.Acceptance)
 	w.WriteString("\n\n")
 }
 
-func writeProgress(w *strings.Builder, progress []models.BeadProgress) {
+func writeProgress(w *strings.Builder, progress []models.CarProgress) {
 	if len(progress) == 0 {
 		return
 	}
@@ -128,15 +128,15 @@ func writeRecentCommits(w *strings.Builder, commits []string) {
 func writeInstructions(w *strings.Builder) {
 	w.WriteString("## When You're Done\n")
 	w.WriteString("1. Run tests, ensure they pass\n")
-	w.WriteString("2. Update bead status: `ry bead complete <bead-id> \"summary of what was done\"`\n")
+	w.WriteString("2. Update car status: `ry car complete <car-id> \"summary of what was done\"`\n")
 	w.WriteString("3. The daemon will handle git push and /clear\n")
 	w.WriteString("\n## If You're Stuck\n")
-	w.WriteString("1. Update progress: `ry bead progress <bead-id> \"what you tried, what failed\"`\n")
+	w.WriteString("1. Update progress: `ry car progress <car-id> \"what you tried, what failed\"`\n")
 	w.WriteString("2. Send message: `ry message send --from <engine-id> --to yardmaster --subject \"help\" --body \"need help with X\"`\n")
 	w.WriteString("3. The Yardmaster will receive your message and may provide guidance\n")
 	w.WriteString("\n## If You Need to Split Work\n")
-	w.WriteString("1. Create child beads: `ry bead create --title \"sub-task\" --track <track> --parent <bead-id> --type task`\n")
-	w.WriteString("2. Continue on the current bead, children will be picked up by other engines\n")
+	w.WriteString("1. Create child cars: `ry car create --title \"sub-task\" --track <track> --parent <car-id> --type task`\n")
+	w.WriteString("2. Continue on the current car, children will be picked up by other engines\n")
 }
 
 // formatConventions parses JSON conventions into bullet points.

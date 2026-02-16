@@ -17,7 +17,7 @@ func newStatusCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show Railyard status dashboard",
-		Long:  "Displays the Railyard status dashboard: engine status, bead counts per track, and message queue depth. Use --watch for auto-refresh.",
+		Long:  "Displays the Railyard status dashboard: engine status, car counts per track, and message queue depth. Use --watch for auto-refresh.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runStatus(cmd, configPath, watch)
 		},

@@ -1,6 +1,6 @@
 //go:build integration
 
-package bead
+package car
 
 import (
 	"strings"
@@ -20,7 +20,7 @@ func setupDepsDB(t *testing.T, name string) *gorm.DB {
 	return gormDB
 }
 
-func createTestBead(t *testing.T, gormDB *gorm.DB, title, track string) string {
+func createTestCar(t *testing.T, gormDB *gorm.DB, title, track string) string {
 	t.Helper()
 	b, err := Create(gormDB, CreateOpts{
 		Title: title, Track: track, BranchPrefix: "ry/test",
@@ -33,8 +33,8 @@ func createTestBead(t *testing.T, gormDB *gorm.DB, title, track string) string {
 
 func TestIntegration_AddDep(t *testing.T) {
 	gormDB := setupDepsDB(t, "ry_dep_add")
-	a := createTestBead(t, gormDB, "Bead A", "backend")
-	b := createTestBead(t, gormDB, "Bead B", "backend")
+	a := createTestCar(t, gormDB, "Car A", "backend")
+	b := createTestCar(t, gormDB, "Car B", "backend")
 
 	if err := AddDep(gormDB, a, b, "blocks"); err != nil {
 		t.Fatalf("AddDep: %v", err)
@@ -54,8 +54,8 @@ func TestIntegration_AddDep(t *testing.T) {
 
 func TestIntegration_AddDep_DefaultType(t *testing.T) {
 	gormDB := setupDepsDB(t, "ry_dep_deftype")
-	a := createTestBead(t, gormDB, "Bead A", "backend")
-	b := createTestBead(t, gormDB, "Bead B", "backend")
+	a := createTestCar(t, gormDB, "Car A", "backend")
+	b := createTestCar(t, gormDB, "Car B", "backend")
 
 	if err := AddDep(gormDB, a, b, ""); err != nil {
 		t.Fatalf("AddDep: %v", err)
@@ -72,7 +72,7 @@ func TestIntegration_AddDep_DefaultType(t *testing.T) {
 
 func TestIntegration_AddDep_SelfDep(t *testing.T) {
 	gormDB := setupDepsDB(t, "ry_dep_self")
-	a := createTestBead(t, gormDB, "Bead A", "backend")
+	a := createTestCar(t, gormDB, "Car A", "backend")
 
 	err := AddDep(gormDB, a, a, "blocks")
 	if err == nil {
@@ -83,11 +83,11 @@ func TestIntegration_AddDep_SelfDep(t *testing.T) {
 	}
 }
 
-func TestIntegration_AddDep_BeadNotFound(t *testing.T) {
+func TestIntegration_AddDep_CarNotFound(t *testing.T) {
 	gormDB := setupDepsDB(t, "ry_dep_nf")
-	a := createTestBead(t, gormDB, "Bead A", "backend")
+	a := createTestCar(t, gormDB, "Car A", "backend")
 
-	err := AddDep(gormDB, a, "be-zzzzz", "blocks")
+	err := AddDep(gormDB, a, "car-zzzzz", "blocks")
 	if err == nil {
 		t.Fatal("expected error for non-existent blocker")
 	}
@@ -95,9 +95,9 @@ func TestIntegration_AddDep_BeadNotFound(t *testing.T) {
 		t.Errorf("error = %q, want to contain %q", err.Error(), "not found")
 	}
 
-	err = AddDep(gormDB, "be-zzzzz", a, "blocks")
+	err = AddDep(gormDB, "car-zzzzz", a, "blocks")
 	if err == nil {
-		t.Fatal("expected error for non-existent bead")
+		t.Fatal("expected error for non-existent car")
 	}
 	if !strings.Contains(err.Error(), "not found") {
 		t.Errorf("error = %q, want to contain %q", err.Error(), "not found")
@@ -106,8 +106,8 @@ func TestIntegration_AddDep_BeadNotFound(t *testing.T) {
 
 func TestIntegration_AddDep_SimpleCycle(t *testing.T) {
 	gormDB := setupDepsDB(t, "ry_dep_cycle")
-	a := createTestBead(t, gormDB, "Bead A", "backend")
-	b := createTestBead(t, gormDB, "Bead B", "backend")
+	a := createTestCar(t, gormDB, "Car A", "backend")
+	b := createTestCar(t, gormDB, "Car B", "backend")
 
 	// A blocked by B
 	if err := AddDep(gormDB, a, b, "blocks"); err != nil {
@@ -126,9 +126,9 @@ func TestIntegration_AddDep_SimpleCycle(t *testing.T) {
 
 func TestIntegration_AddDep_TransitiveCycle(t *testing.T) {
 	gormDB := setupDepsDB(t, "ry_dep_tcycle")
-	a := createTestBead(t, gormDB, "Bead A", "backend")
-	b := createTestBead(t, gormDB, "Bead B", "backend")
-	c := createTestBead(t, gormDB, "Bead C", "backend")
+	a := createTestCar(t, gormDB, "Car A", "backend")
+	b := createTestCar(t, gormDB, "Car B", "backend")
+	c := createTestCar(t, gormDB, "Car C", "backend")
 
 	// A blocked by B, B blocked by C
 	if err := AddDep(gormDB, a, b, "blocks"); err != nil {
@@ -150,9 +150,9 @@ func TestIntegration_AddDep_TransitiveCycle(t *testing.T) {
 
 func TestIntegration_ListDeps_BothDirections(t *testing.T) {
 	gormDB := setupDepsDB(t, "ry_dep_both")
-	a := createTestBead(t, gormDB, "Bead A", "backend")
-	b := createTestBead(t, gormDB, "Bead B", "backend")
-	c := createTestBead(t, gormDB, "Bead C", "backend")
+	a := createTestCar(t, gormDB, "Car A", "backend")
+	b := createTestCar(t, gormDB, "Car B", "backend")
+	c := createTestCar(t, gormDB, "Car C", "backend")
 
 	// B blocks A, C blocks A
 	if err := AddDep(gormDB, a, b, "blocks"); err != nil {
@@ -178,14 +178,14 @@ func TestIntegration_ListDeps_BothDirections(t *testing.T) {
 	if len(dependents) != 1 {
 		t.Errorf("B has %d dependents, want 1", len(dependents))
 	}
-	if dependents[0].BeadID != a {
-		t.Errorf("B's dependent = %q, want %q", dependents[0].BeadID, a)
+	if dependents[0].CarID != a {
+		t.Errorf("B's dependent = %q, want %q", dependents[0].CarID, a)
 	}
 }
 
 func TestIntegration_ListDeps_Empty(t *testing.T) {
 	gormDB := setupDepsDB(t, "ry_dep_empty")
-	a := createTestBead(t, gormDB, "Bead A", "backend")
+	a := createTestCar(t, gormDB, "Car A", "backend")
 
 	blockers, dependents, err := ListDeps(gormDB, a)
 	if err != nil {
@@ -201,8 +201,8 @@ func TestIntegration_ListDeps_Empty(t *testing.T) {
 
 func TestIntegration_RemoveDep(t *testing.T) {
 	gormDB := setupDepsDB(t, "ry_dep_rm")
-	a := createTestBead(t, gormDB, "Bead A", "backend")
-	b := createTestBead(t, gormDB, "Bead B", "backend")
+	a := createTestCar(t, gormDB, "Car A", "backend")
+	b := createTestCar(t, gormDB, "Car B", "backend")
 
 	if err := AddDep(gormDB, a, b, "blocks"); err != nil {
 		t.Fatalf("AddDep: %v", err)
@@ -223,7 +223,7 @@ func TestIntegration_RemoveDep(t *testing.T) {
 
 func TestIntegration_RemoveDep_NotFound(t *testing.T) {
 	gormDB := setupDepsDB(t, "ry_dep_rmnf")
-	err := RemoveDep(gormDB, "be-aaaaa", "be-bbbbb")
+	err := RemoveDep(gormDB, "car-aaaaa", "car-bbbbb")
 	if err == nil {
 		t.Fatal("expected error for non-existent dependency")
 	}
@@ -232,45 +232,45 @@ func TestIntegration_RemoveDep_NotFound(t *testing.T) {
 	}
 }
 
-func TestIntegration_ReadyBeads_NoDeps(t *testing.T) {
+func TestIntegration_ReadyCars_NoDeps(t *testing.T) {
 	gormDB := setupDepsDB(t, "ry_ready_nodep")
-	createTestBead(t, gormDB, "Ready bead", "backend")
+	createTestCar(t, gormDB, "Ready car", "backend")
 
-	ready, err := ReadyBeads(gormDB, "backend")
+	ready, err := ReadyCars(gormDB, "backend")
 	if err != nil {
-		t.Fatalf("ReadyBeads: %v", err)
+		t.Fatalf("ReadyCars: %v", err)
 	}
 	if len(ready) != 1 {
-		t.Errorf("expected 1 ready bead, got %d", len(ready))
+		t.Errorf("expected 1 ready car, got %d", len(ready))
 	}
 }
 
-func TestIntegration_ReadyBeads_BlockedByOpen(t *testing.T) {
+func TestIntegration_ReadyCars_BlockedByOpen(t *testing.T) {
 	gormDB := setupDepsDB(t, "ry_ready_blk")
-	a := createTestBead(t, gormDB, "Blocked bead", "backend")
-	b := createTestBead(t, gormDB, "Blocker (open)", "backend")
+	a := createTestCar(t, gormDB, "Blocked car", "backend")
+	b := createTestCar(t, gormDB, "Blocker (open)", "backend")
 
 	if err := AddDep(gormDB, a, b, "blocks"); err != nil {
 		t.Fatalf("AddDep: %v", err)
 	}
 
-	ready, err := ReadyBeads(gormDB, "backend")
+	ready, err := ReadyCars(gormDB, "backend")
 	if err != nil {
-		t.Fatalf("ReadyBeads: %v", err)
+		t.Fatalf("ReadyCars: %v", err)
 	}
 	// Only B should be ready (no deps), A is blocked by B which is still open
 	if len(ready) != 1 {
-		t.Fatalf("expected 1 ready bead, got %d", len(ready))
+		t.Fatalf("expected 1 ready car, got %d", len(ready))
 	}
 	if ready[0].ID != b {
-		t.Errorf("ready bead = %q, want %q (the one without deps)", ready[0].ID, b)
+		t.Errorf("ready car = %q, want %q (the one without deps)", ready[0].ID, b)
 	}
 }
 
-func TestIntegration_ReadyBeads_BlockerDone(t *testing.T) {
+func TestIntegration_ReadyCars_BlockerDone(t *testing.T) {
 	gormDB := setupDepsDB(t, "ry_ready_done")
-	a := createTestBead(t, gormDB, "Was blocked", "backend")
-	b := createTestBead(t, gormDB, "Blocker", "backend")
+	a := createTestCar(t, gormDB, "Was blocked", "backend")
+	b := createTestCar(t, gormDB, "Blocker", "backend")
 
 	if err := AddDep(gormDB, a, b, "blocks"); err != nil {
 		t.Fatalf("AddDep: %v", err)
@@ -287,23 +287,23 @@ func TestIntegration_ReadyBeads_BlockerDone(t *testing.T) {
 		}
 	}
 
-	ready, err := ReadyBeads(gormDB, "backend")
+	ready, err := ReadyCars(gormDB, "backend")
 	if err != nil {
-		t.Fatalf("ReadyBeads: %v", err)
+		t.Fatalf("ReadyCars: %v", err)
 	}
 	// A should now be ready since B is done
 	if len(ready) != 1 {
-		t.Fatalf("expected 1 ready bead, got %d", len(ready))
+		t.Fatalf("expected 1 ready car, got %d", len(ready))
 	}
 	if ready[0].ID != a {
-		t.Errorf("ready bead = %q, want %q", ready[0].ID, a)
+		t.Errorf("ready car = %q, want %q", ready[0].ID, a)
 	}
 }
 
-func TestIntegration_ReadyBeads_BlockerCancelled(t *testing.T) {
+func TestIntegration_ReadyCars_BlockerCancelled(t *testing.T) {
 	gormDB := setupDepsDB(t, "ry_ready_cancel")
-	a := createTestBead(t, gormDB, "Was blocked", "backend")
-	b := createTestBead(t, gormDB, "Blocker", "backend")
+	a := createTestCar(t, gormDB, "Was blocked", "backend")
+	b := createTestCar(t, gormDB, "Blocker", "backend")
 
 	if err := AddDep(gormDB, a, b, "blocks"); err != nil {
 		t.Fatalf("AddDep: %v", err)
@@ -314,23 +314,23 @@ func TestIntegration_ReadyBeads_BlockerCancelled(t *testing.T) {
 		t.Fatalf("Update B→cancelled: %v", err)
 	}
 
-	ready, err := ReadyBeads(gormDB, "backend")
+	ready, err := ReadyCars(gormDB, "backend")
 	if err != nil {
-		t.Fatalf("ReadyBeads: %v", err)
+		t.Fatalf("ReadyCars: %v", err)
 	}
 	if len(ready) != 1 {
-		t.Fatalf("expected 1 ready bead, got %d", len(ready))
+		t.Fatalf("expected 1 ready car, got %d", len(ready))
 	}
 	if ready[0].ID != a {
-		t.Errorf("ready bead = %q, want %q", ready[0].ID, a)
+		t.Errorf("ready car = %q, want %q", ready[0].ID, a)
 	}
 }
 
-func TestIntegration_ReadyBeads_PartialBlockers(t *testing.T) {
+func TestIntegration_ReadyCars_PartialBlockers(t *testing.T) {
 	gormDB := setupDepsDB(t, "ry_ready_partial")
-	a := createTestBead(t, gormDB, "Blocked by two", "backend")
-	b := createTestBead(t, gormDB, "Blocker 1", "backend")
-	c := createTestBead(t, gormDB, "Blocker 2", "backend")
+	a := createTestCar(t, gormDB, "Blocked by two", "backend")
+	b := createTestCar(t, gormDB, "Blocker 1", "backend")
+	c := createTestCar(t, gormDB, "Blocker 2", "backend")
 
 	if err := AddDep(gormDB, a, b, "blocks"); err != nil {
 		t.Fatalf("AddDep A←B: %v", err)
@@ -350,51 +350,51 @@ func TestIntegration_ReadyBeads_PartialBlockers(t *testing.T) {
 		}
 	}
 
-	ready, err := ReadyBeads(gormDB, "backend")
+	ready, err := ReadyCars(gormDB, "backend")
 	if err != nil {
-		t.Fatalf("ReadyBeads: %v", err)
+		t.Fatalf("ReadyCars: %v", err)
 	}
 	// A should NOT be ready — C is still open
 	for _, r := range ready {
 		if r.ID == a {
-			t.Errorf("bead A should not be ready; blocker C is still open")
+			t.Errorf("car A should not be ready; blocker C is still open")
 		}
 	}
 }
 
-func TestIntegration_ReadyBeads_TrackFilter(t *testing.T) {
+func TestIntegration_ReadyCars_TrackFilter(t *testing.T) {
 	gormDB := setupDepsDB(t, "ry_ready_track")
-	createTestBead(t, gormDB, "Backend bead", "backend")
-	createTestBead(t, gormDB, "Frontend bead", "frontend")
+	createTestCar(t, gormDB, "Backend car", "backend")
+	createTestCar(t, gormDB, "Frontend car", "frontend")
 
-	be, err := ReadyBeads(gormDB, "backend")
+	be, err := ReadyCars(gormDB, "backend")
 	if err != nil {
-		t.Fatalf("ReadyBeads backend: %v", err)
+		t.Fatalf("ReadyCars backend: %v", err)
 	}
 	if len(be) != 1 {
-		t.Errorf("ReadyBeads backend: got %d, want 1", len(be))
+		t.Errorf("ReadyCars backend: got %d, want 1", len(be))
 	}
 
-	fe, err := ReadyBeads(gormDB, "frontend")
+	fe, err := ReadyCars(gormDB, "frontend")
 	if err != nil {
-		t.Fatalf("ReadyBeads frontend: %v", err)
+		t.Fatalf("ReadyCars frontend: %v", err)
 	}
 	if len(fe) != 1 {
-		t.Errorf("ReadyBeads frontend: got %d, want 1", len(fe))
+		t.Errorf("ReadyCars frontend: got %d, want 1", len(fe))
 	}
 
-	all, err := ReadyBeads(gormDB, "")
+	all, err := ReadyCars(gormDB, "")
 	if err != nil {
-		t.Fatalf("ReadyBeads all: %v", err)
+		t.Fatalf("ReadyCars all: %v", err)
 	}
 	if len(all) != 2 {
-		t.Errorf("ReadyBeads all: got %d, want 2", len(all))
+		t.Errorf("ReadyCars all: got %d, want 2", len(all))
 	}
 }
 
-func TestIntegration_ReadyBeads_AssignedNotReady(t *testing.T) {
+func TestIntegration_ReadyCars_AssignedNotReady(t *testing.T) {
 	gormDB := setupDepsDB(t, "ry_ready_assigned")
-	a := createTestBead(t, gormDB, "Assigned bead", "backend")
+	a := createTestCar(t, gormDB, "Assigned car", "backend")
 
 	// Move to claimed (assigns it)
 	if err := Update(gormDB, a, map[string]interface{}{"status": "ready"}); err != nil {
@@ -404,19 +404,19 @@ func TestIntegration_ReadyBeads_AssignedNotReady(t *testing.T) {
 		t.Fatalf("claimed: %v", err)
 	}
 
-	ready, err := ReadyBeads(gormDB, "backend")
+	ready, err := ReadyCars(gormDB, "backend")
 	if err != nil {
-		t.Fatalf("ReadyBeads: %v", err)
+		t.Fatalf("ReadyCars: %v", err)
 	}
 	if len(ready) != 0 {
-		t.Errorf("assigned bead should not be ready, got %d", len(ready))
+		t.Errorf("assigned car should not be ready, got %d", len(ready))
 	}
 }
 
-func TestIntegration_ReadyBeads_PriorityOrder(t *testing.T) {
+func TestIntegration_ReadyCars_PriorityOrder(t *testing.T) {
 	gormDB := setupDepsDB(t, "ry_ready_prio")
 
-	// Create beads with different priorities (lower = higher priority)
+	// Create cars with different priorities (lower = higher priority)
 	bLow, err := Create(gormDB, CreateOpts{
 		Title: "Low priority", Track: "backend", Priority: 3, BranchPrefix: "ry/test",
 	})
@@ -430,9 +430,9 @@ func TestIntegration_ReadyBeads_PriorityOrder(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	ready, err := ReadyBeads(gormDB, "backend")
+	ready, err := ReadyCars(gormDB, "backend")
 	if err != nil {
-		t.Fatalf("ReadyBeads: %v", err)
+		t.Fatalf("ReadyCars: %v", err)
 	}
 	if len(ready) != 2 {
 		t.Fatalf("expected 2 ready, got %d", len(ready))
@@ -445,21 +445,21 @@ func TestIntegration_ReadyBeads_PriorityOrder(t *testing.T) {
 	}
 }
 
-func TestIntegration_ReadyBeads_Empty(t *testing.T) {
+func TestIntegration_ReadyCars_Empty(t *testing.T) {
 	gormDB := setupDepsDB(t, "ry_ready_empty")
 
-	ready, err := ReadyBeads(gormDB, "backend")
+	ready, err := ReadyCars(gormDB, "backend")
 	if err != nil {
-		t.Fatalf("ReadyBeads: %v", err)
+		t.Fatalf("ReadyCars: %v", err)
 	}
 	if len(ready) != 0 {
-		t.Errorf("expected 0 ready beads on empty DB, got %d", len(ready))
+		t.Errorf("expected 0 ready cars on empty DB, got %d", len(ready))
 	}
 }
 
 func TestIntegration_AddDep_DBError(t *testing.T) {
 	gormDB := closedGormDB(t)
-	err := AddDep(gormDB, "be-aaaaa", "be-bbbbb", "blocks")
+	err := AddDep(gormDB, "car-aaaaa", "car-bbbbb", "blocks")
 	if err == nil {
 		t.Fatal("expected error from AddDep with closed DB")
 	}
@@ -467,7 +467,7 @@ func TestIntegration_AddDep_DBError(t *testing.T) {
 
 func TestIntegration_ListDeps_DBError(t *testing.T) {
 	gormDB := closedGormDB(t)
-	_, _, err := ListDeps(gormDB, "be-aaaaa")
+	_, _, err := ListDeps(gormDB, "car-aaaaa")
 	if err == nil {
 		t.Fatal("expected error from ListDeps with closed DB")
 	}
@@ -475,16 +475,16 @@ func TestIntegration_ListDeps_DBError(t *testing.T) {
 
 func TestIntegration_RemoveDep_DBError(t *testing.T) {
 	gormDB := closedGormDB(t)
-	err := RemoveDep(gormDB, "be-aaaaa", "be-bbbbb")
+	err := RemoveDep(gormDB, "car-aaaaa", "car-bbbbb")
 	if err == nil {
 		t.Fatal("expected error from RemoveDep with closed DB")
 	}
 }
 
-func TestIntegration_ReadyBeads_DBError(t *testing.T) {
+func TestIntegration_ReadyCars_DBError(t *testing.T) {
 	gormDB := closedGormDB(t)
-	_, err := ReadyBeads(gormDB, "backend")
+	_, err := ReadyCars(gormDB, "backend")
 	if err == nil {
-		t.Fatal("expected error from ReadyBeads with closed DB")
+		t.Fatal("expected error from ReadyCars with closed DB")
 	}
 }

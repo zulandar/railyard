@@ -16,7 +16,7 @@ type StartOpts struct {
 }
 
 // Start launches a Claude Code session with the dispatch planner prompt.
-// It's interactive — the user types feature requests and Dispatch creates beads.
+// It's interactive — the user types feature requests and Dispatch creates cars.
 func Start(opts StartOpts) error {
 	if opts.Config == nil {
 		return fmt.Errorf("dispatch: config is required")

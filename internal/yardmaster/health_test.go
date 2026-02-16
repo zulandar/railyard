@@ -45,8 +45,8 @@ func TestDefaultStaleThreshold(t *testing.T) {
 	}
 }
 
-func TestReassignBead_NilDB(t *testing.T) {
-	err := ReassignBead(nil, "be-001", "eng-001", "stalled")
+func TestReassignCar_NilDB(t *testing.T) {
+	err := ReassignCar(nil, "car-001", "eng-001", "stalled")
 	if err == nil {
 		t.Fatal("expected error for nil db")
 	}
@@ -55,17 +55,17 @@ func TestReassignBead_NilDB(t *testing.T) {
 	}
 }
 
-func TestReassignBead_EmptyBeadID(t *testing.T) {
-	// nil db check comes first, then beadID check.
-	err := ReassignBead(nil, "", "eng-001", "stalled")
+func TestReassignCar_EmptyCarID(t *testing.T) {
+	// nil db check comes first, then carID check.
+	err := ReassignCar(nil, "", "eng-001", "stalled")
 	if err == nil {
 		t.Fatal("expected error")
 	}
 }
 
-func TestReassignBead_EmptyEngineID(t *testing.T) {
+func TestReassignCar_EmptyEngineID(t *testing.T) {
 	// nil db check comes first, then field checks.
-	err := ReassignBead(nil, "be-001", "", "stalled")
+	err := ReassignCar(nil, "car-001", "", "stalled")
 	if err == nil {
 		t.Fatal("expected error")
 	}

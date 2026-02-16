@@ -19,7 +19,7 @@ type SwitchOpts struct {
 
 // SwitchResult contains the outcome of a switch operation.
 type SwitchResult struct {
-	BeadID     string
+	CarID     string
 	Branch     string
 	TestsPassed bool
 	TestOutput string
@@ -27,35 +27,35 @@ type SwitchResult struct {
 	Error      error
 }
 
-// Switch performs the branch merge flow for a completed bead:
+// Switch performs the branch merge flow for a completed car:
 // 1. Fetch the branch
 // 2. Run the track's test suite
 // 3. If tests pass and not dry-run: merge to main
-// 4. If tests fail: set bead status to blocked, notify engine
-func Switch(db *gorm.DB, beadID string, opts SwitchOpts) (*SwitchResult, error) {
+// 4. If tests fail: set car status to blocked, notify engine
+func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 	if db == nil {
 		return nil, fmt.Errorf("yardmaster: db is required")
 	}
-	if beadID == "" {
-		return nil, fmt.Errorf("yardmaster: beadID is required")
+	if carID == "" {
+		return nil, fmt.Errorf("yardmaster: carID is required")
 	}
 	if opts.RepoDir == "" {
 		return nil, fmt.Errorf("yardmaster: repoDir is required")
 	}
 
-	// Load the bead.
-	var bead models.Bead
-	if err := db.First(&bead, "id = ?", beadID).Error; err != nil {
-		return nil, fmt.Errorf("yardmaster: load bead %s: %w", beadID, err)
+	// Load the car.
+	var car models.Car
+	if err := db.First(&car, "id = ?", carID).Error; err != nil {
+		return nil, fmt.Errorf("yardmaster: load car %s: %w", carID, err)
 	}
 
-	if bead.Branch == "" {
-		return nil, fmt.Errorf("yardmaster: bead %s has no branch", beadID)
+	if car.Branch == "" {
+		return nil, fmt.Errorf("yardmaster: car %s has no branch", carID)
 	}
 
 	result := &SwitchResult{
-		BeadID: beadID,
-		Branch: bead.Branch,
+		CarID: carID,
+		Branch: car.Branch,
 	}
 
 	// Fetch the branch.
@@ -65,17 +65,17 @@ func Switch(db *gorm.DB, beadID string, opts SwitchOpts) (*SwitchResult, error) 
 	}
 
 	// Run tests on the branch.
-	testOutput, testErr := runTests(opts.RepoDir, bead.Branch, bead.Track)
+	testOutput, testErr := runTests(opts.RepoDir, car.Branch, car.Track)
 	result.TestOutput = testOutput
 
 	if testErr != nil {
 		result.TestsPassed = false
-		// Set bead status to blocked and notify.
-		db.Model(&models.Bead{}).Where("id = ?", beadID).Update("status", "blocked")
-		if bead.Assignee != "" {
-			messaging.Send(db, "yardmaster", bead.Assignee, "test-failure",
-				fmt.Sprintf("Tests failed for bead %s on branch %s:\n%s", beadID, bead.Branch, testOutput),
-				messaging.SendOpts{BeadID: beadID, Priority: "urgent"},
+		// Set car status to blocked and notify.
+		db.Model(&models.Car{}).Where("id = ?", carID).Update("status", "blocked")
+		if car.Assignee != "" {
+			messaging.Send(db, "yardmaster", car.Assignee, "test-failure",
+				fmt.Sprintf("Tests failed for car %s on branch %s:\n%s", carID, car.Branch, testOutput),
+				messaging.SendOpts{CarID: carID, Priority: "urgent"},
 			)
 		}
 		result.Error = fmt.Errorf("tests failed: %w", testErr)
@@ -89,7 +89,7 @@ func Switch(db *gorm.DB, beadID string, opts SwitchOpts) (*SwitchResult, error) 
 	}
 
 	// Merge to main.
-	if err := gitMerge(opts.RepoDir, bead.Branch); err != nil {
+	if err := gitMerge(opts.RepoDir, car.Branch); err != nil {
 		result.Error = fmt.Errorf("merge: %w", err)
 		return result, result.Error
 	}
@@ -97,53 +97,53 @@ func Switch(db *gorm.DB, beadID string, opts SwitchOpts) (*SwitchResult, error) 
 	result.Merged = true
 
 	// Unblock cross-track dependencies.
-	unblocked, _ := UnblockDeps(db, beadID)
+	unblocked, _ := UnblockDeps(db, carID)
 	if len(unblocked) > 0 {
 		titles := make([]string, len(unblocked))
 		for i, b := range unblocked {
 			titles[i] = b.ID
 		}
 		messaging.Send(db, "yardmaster", "broadcast", "deps-unblocked",
-			fmt.Sprintf("Merged %s, unblocked: %s", beadID, strings.Join(titles, ", ")),
-			messaging.SendOpts{BeadID: beadID},
+			fmt.Sprintf("Merged %s, unblocked: %s", carID, strings.Join(titles, ", ")),
+			messaging.SendOpts{CarID: carID},
 		)
 	}
 
 	return result, nil
 }
 
-// UnblockDeps finds beads that were blocked by the given bead and transitions
-// them from blocked to open. Returns the list of unblocked beads.
-func UnblockDeps(db *gorm.DB, beadID string) ([]models.Bead, error) {
+// UnblockDeps finds cars that were blocked by the given car and transitions
+// them from blocked to open. Returns the list of unblocked cars.
+func UnblockDeps(db *gorm.DB, carID string) ([]models.Car, error) {
 	if db == nil {
 		return nil, fmt.Errorf("yardmaster: db is required")
 	}
-	if beadID == "" {
-		return nil, fmt.Errorf("yardmaster: beadID is required")
+	if carID == "" {
+		return nil, fmt.Errorf("yardmaster: carID is required")
 	}
 
-	// Find beads that depend on this bead.
-	var deps []models.BeadDep
-	if err := db.Where("blocked_by = ?", beadID).Find(&deps).Error; err != nil {
-		return nil, fmt.Errorf("yardmaster: find deps for %s: %w", beadID, err)
+	// Find cars that depend on this car.
+	var deps []models.CarDep
+	if err := db.Where("blocked_by = ?", carID).Find(&deps).Error; err != nil {
+		return nil, fmt.Errorf("yardmaster: find deps for %s: %w", carID, err)
 	}
 
-	var unblocked []models.Bead
+	var unblocked []models.Car
 	for _, dep := range deps {
 		// Check if this dependent has any OTHER unresolved blockers.
 		var otherBlockers int64
-		db.Model(&models.BeadDep{}).
-			Where("bead_id = ? AND blocked_by != ?", dep.BeadID, beadID).
-			Joins("JOIN beads ON beads.id = bead_deps.blocked_by AND beads.status != 'done'").
+		db.Model(&models.CarDep{}).
+			Where("car_id = ? AND blocked_by != ?", dep.CarID, carID).
+			Joins("JOIN cars ON cars.id = car_deps.blocked_by AND cars.status != 'done'").
 			Count(&otherBlockers)
 
 		if otherBlockers == 0 {
-			// No other blockers — unblock this bead.
-			db.Model(&models.Bead{}).Where("id = ? AND status = ?", dep.BeadID, "blocked").
+			// No other blockers — unblock this car.
+			db.Model(&models.Car{}).Where("id = ? AND status = ?", dep.CarID, "blocked").
 				Update("status", "open")
 
-			var b models.Bead
-			if err := db.First(&b, "id = ?", dep.BeadID).Error; err == nil {
+			var b models.Car
+			if err := db.First(&b, "id = ?", dep.CarID).Error; err == nil {
 				unblocked = append(unblocked, b)
 			}
 		}

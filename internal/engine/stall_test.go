@@ -59,18 +59,18 @@ func TestNewStallDetector_RegistersCallback(t *testing.T) {
 	}
 }
 
-func TestNewStallDetector_SetsEngineAndBeadID(t *testing.T) {
+func TestNewStallDetector_SetsEngineAndCarID(t *testing.T) {
 	sess := newMockSession()
 	sess.EngineID = "eng-abc"
-	sess.BeadID = "be-xyz"
+	sess.CarID = "car-xyz"
 
 	sd := NewStallDetector(sess, StallConfig{})
 
 	if sd.engineID != "eng-abc" {
 		t.Errorf("engineID = %q, want %q", sd.engineID, "eng-abc")
 	}
-	if sd.beadID != "be-xyz" {
-		t.Errorf("beadID = %q, want %q", sd.beadID, "be-xyz")
+	if sd.carID != "car-xyz" {
+		t.Errorf("carID = %q, want %q", sd.carID, "car-xyz")
 	}
 }
 
@@ -601,7 +601,7 @@ func TestDefaultConstants(t *testing.T) {
 func newMockSession() *Session {
 	return &Session{
 		EngineID: "eng-test1",
-		BeadID:   "be-test1",
+		CarID:   "car-test1",
 		stdout: &logWriter{
 			direction: "out",
 			writeFn:   func(models.AgentLog) error { return nil },

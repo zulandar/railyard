@@ -25,7 +25,7 @@ type Instruction struct {
 	MessageID uint
 	Subject   string
 	Body      string
-	BeadID    string
+	CarID    string
 }
 
 // ClassifyMessage determines the instruction type from a message subject.
@@ -68,7 +68,7 @@ func ProcessInbox(db *gorm.DB, engineID string) ([]Instruction, error) {
 			MessageID: msgs[i].ID,
 			Subject:   msgs[i].Subject,
 			Body:      msgs[i].Body,
-			BeadID:    msgs[i].BeadID,
+			CarID:    msgs[i].CarID,
 		}
 		instructions = append(instructions, inst)
 
@@ -83,10 +83,10 @@ func ProcessInbox(db *gorm.DB, engineID string) ([]Instruction, error) {
 	return instructions, nil
 }
 
-// ShouldAbort checks if any instruction is an abort for the given bead.
-func ShouldAbort(instructions []Instruction, beadID string) bool {
+// ShouldAbort checks if any instruction is an abort for the given car.
+func ShouldAbort(instructions []Instruction, carID string) bool {
 	for _, inst := range instructions {
-		if inst.Type == InstructionAbort && (inst.BeadID == beadID || inst.BeadID == "") {
+		if inst.Type == InstructionAbort && (inst.CarID == carID || inst.CarID == "") {
 			return true
 		}
 	}

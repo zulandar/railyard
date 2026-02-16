@@ -39,31 +39,31 @@ func TestProcessInbox_EmptyEngineID(t *testing.T) {
 	}
 }
 
-func TestShouldAbort_MatchingBead(t *testing.T) {
+func TestShouldAbort_MatchingCar(t *testing.T) {
 	instructions := []Instruction{
-		{Type: InstructionGuidance, BeadID: "be-123"},
-		{Type: InstructionAbort, BeadID: "be-456"},
+		{Type: InstructionGuidance, CarID: "car-123"},
+		{Type: InstructionAbort, CarID: "car-456"},
 	}
-	if !ShouldAbort(instructions, "be-456") {
-		t.Error("expected abort for matching bead")
+	if !ShouldAbort(instructions, "car-456") {
+		t.Error("expected abort for matching car")
 	}
-	if ShouldAbort(instructions, "be-999") {
-		t.Error("did not expect abort for non-matching bead")
+	if ShouldAbort(instructions, "car-999") {
+		t.Error("did not expect abort for non-matching car")
 	}
 }
 
-func TestShouldAbort_EmptyBeadID(t *testing.T) {
+func TestShouldAbort_EmptyCarID(t *testing.T) {
 	instructions := []Instruction{
-		{Type: InstructionAbort, BeadID: ""},
+		{Type: InstructionAbort, CarID: ""},
 	}
-	// Empty BeadID on abort means "abort any bead"
-	if !ShouldAbort(instructions, "be-anything") {
-		t.Error("expected abort when instruction has empty BeadID")
+	// Empty CarID on abort means "abort any car"
+	if !ShouldAbort(instructions, "car-anything") {
+		t.Error("expected abort when instruction has empty CarID")
 	}
 }
 
 func TestShouldAbort_Empty(t *testing.T) {
-	if ShouldAbort(nil, "be-123") {
+	if ShouldAbort(nil, "car-123") {
 		t.Error("expected no abort for empty instructions")
 	}
 }

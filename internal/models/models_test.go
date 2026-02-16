@@ -39,8 +39,8 @@ func assertFieldType(t *testing.T, typ reflect.Type, fieldName, expectedType str
 	}
 }
 
-func TestBead_Fields(t *testing.T) {
-	typ := reflect.TypeOf(Bead{})
+func TestCar_Fields(t *testing.T) {
+	typ := reflect.TypeOf(Car{})
 
 	assertGormTag(t, typ, "ID", "primaryKey")
 	assertGormTag(t, typ, "ID", "size:32")
@@ -68,43 +68,43 @@ func TestBead_Fields(t *testing.T) {
 	assertFieldType(t, typ, "CompletedAt", "*time.Time")
 }
 
-func TestBead_Relations(t *testing.T) {
-	typ := reflect.TypeOf(Bead{})
+func TestCar_Relations(t *testing.T) {
+	typ := reflect.TypeOf(Car{})
 
 	assertGormTag(t, typ, "Parent", "foreignKey:ParentID")
 	assertGormTag(t, typ, "Children", "foreignKey:ParentID")
-	assertGormTag(t, typ, "Deps", "foreignKey:BeadID")
-	assertGormTag(t, typ, "Progress", "foreignKey:BeadID")
+	assertGormTag(t, typ, "Deps", "foreignKey:CarID")
+	assertGormTag(t, typ, "Progress", "foreignKey:CarID")
 
-	assertFieldType(t, typ, "Parent", "*models.Bead")
-	assertFieldType(t, typ, "Children", "[]models.Bead")
-	assertFieldType(t, typ, "Deps", "[]models.BeadDep")
-	assertFieldType(t, typ, "Progress", "[]models.BeadProgress")
+	assertFieldType(t, typ, "Parent", "*models.Car")
+	assertFieldType(t, typ, "Children", "[]models.Car")
+	assertFieldType(t, typ, "Deps", "[]models.CarDep")
+	assertFieldType(t, typ, "Progress", "[]models.CarProgress")
 }
 
-func TestBeadDep_Fields(t *testing.T) {
-	typ := reflect.TypeOf(BeadDep{})
+func TestCarDep_Fields(t *testing.T) {
+	typ := reflect.TypeOf(CarDep{})
 
 	// Composite primary key
-	assertGormTag(t, typ, "BeadID", "primaryKey")
-	assertGormTag(t, typ, "BeadID", "size:32")
+	assertGormTag(t, typ, "CarID", "primaryKey")
+	assertGormTag(t, typ, "CarID", "size:32")
 	assertGormTag(t, typ, "BlockedBy", "primaryKey")
 	assertGormTag(t, typ, "BlockedBy", "size:32")
 	assertGormTag(t, typ, "DepType", "size:16")
 	assertGormTag(t, typ, "DepType", "default:blocks")
 
 	// Foreign key relations
-	assertGormTag(t, typ, "Bead", "foreignKey:BeadID")
+	assertGormTag(t, typ, "Car", "foreignKey:CarID")
 	assertGormTag(t, typ, "Blocker", "foreignKey:BlockedBy")
 }
 
-func TestBeadProgress_Fields(t *testing.T) {
-	typ := reflect.TypeOf(BeadProgress{})
+func TestCarProgress_Fields(t *testing.T) {
+	typ := reflect.TypeOf(CarProgress{})
 
 	assertGormTag(t, typ, "ID", "primaryKey")
 	assertGormTag(t, typ, "ID", "autoIncrement")
-	assertGormTag(t, typ, "BeadID", "size:32")
-	assertGormTag(t, typ, "BeadID", "index")
+	assertGormTag(t, typ, "CarID", "size:32")
+	assertGormTag(t, typ, "CarID", "index")
 	assertGormTag(t, typ, "SessionID", "size:64")
 	assertGormTag(t, typ, "EngineID", "size:64")
 	assertGormTag(t, typ, "Note", "type:text")
@@ -144,7 +144,7 @@ func TestEngine_Fields(t *testing.T) {
 	assertGormTag(t, typ, "Role", "size:16")
 	assertGormTag(t, typ, "Status", "size:16")
 	assertGormTag(t, typ, "Status", "index")
-	assertGormTag(t, typ, "CurrentBead", "size:32")
+	assertGormTag(t, typ, "CurrentCar", "size:32")
 	assertGormTag(t, typ, "SessionID", "size:64")
 	assertGormTag(t, typ, "LastActivity", "index")
 
@@ -162,7 +162,7 @@ func TestMessage_Fields(t *testing.T) {
 	assertGormTag(t, typ, "ToAgent", "size:64")
 	assertGormTag(t, typ, "ToAgent", "not null")
 	assertGormTag(t, typ, "ToAgent", "index")
-	assertGormTag(t, typ, "BeadID", "size:32")
+	assertGormTag(t, typ, "CarID", "size:32")
 	assertGormTag(t, typ, "Subject", "size:256")
 	assertGormTag(t, typ, "Body", "type:text")
 	assertGormTag(t, typ, "Priority", "size:8")
@@ -184,8 +184,8 @@ func TestAgentLog_Fields(t *testing.T) {
 	assertGormTag(t, typ, "EngineID", "idx_engine_session")
 	assertGormTag(t, typ, "SessionID", "size:64")
 	assertGormTag(t, typ, "SessionID", "idx_engine_session")
-	assertGormTag(t, typ, "BeadID", "size:32")
-	assertGormTag(t, typ, "BeadID", "index")
+	assertGormTag(t, typ, "CarID", "size:32")
+	assertGormTag(t, typ, "CarID", "index")
 	assertGormTag(t, typ, "Direction", "size:4")
 	assertGormTag(t, typ, "Content", "type:mediumtext")
 	assertGormTag(t, typ, "Model", "size:64")
@@ -234,20 +234,20 @@ func TestReindexJob_Fields(t *testing.T) {
 	assertFieldType(t, typ, "CreatedAt", "time.Time")
 }
 
-func TestBead_Instantiation(t *testing.T) {
+func TestCar_Instantiation(t *testing.T) {
 	parentID := "parent-001"
 	now := time.Now()
-	b := Bead{
-		ID:          "be-abc12",
-		Title:       "Test bead",
-		Description: "A test bead",
+	b := Car{
+		ID:          "car-abc12",
+		Title:       "Test car",
+		Description: "A test car",
 		Type:        "task",
 		Status:      "open",
 		Priority:    2,
 		Track:       "backend",
 		Assignee:    "engine-1",
 		ParentID:    &parentID,
-		Branch:      "ry/alice/backend/be-abc12",
+		Branch:      "ry/alice/backend/car-abc12",
 		DesignNotes: "design notes",
 		Acceptance:  "it works",
 		CreatedAt:   now,
@@ -255,32 +255,32 @@ func TestBead_Instantiation(t *testing.T) {
 		ClaimedAt:   &now,
 		CompletedAt: &now,
 	}
-	if b.ID != "be-abc12" {
-		t.Errorf("ID = %q, want %q", b.ID, "be-abc12")
+	if b.ID != "car-abc12" {
+		t.Errorf("ID = %q, want %q", b.ID, "car-abc12")
 	}
 	if *b.ParentID != "parent-001" {
 		t.Errorf("ParentID = %q, want %q", *b.ParentID, "parent-001")
 	}
 }
 
-func TestBeadDep_Instantiation(t *testing.T) {
-	d := BeadDep{
-		BeadID:    "be-001",
-		BlockedBy: "be-002",
+func TestCarDep_Instantiation(t *testing.T) {
+	d := CarDep{
+		CarID:    "car-001",
+		BlockedBy: "car-002",
 		DepType:   "blocks",
 	}
-	if d.BeadID != "be-001" {
-		t.Errorf("BeadID = %q, want %q", d.BeadID, "be-001")
+	if d.CarID != "car-001" {
+		t.Errorf("CarID = %q, want %q", d.CarID, "car-001")
 	}
-	if d.BlockedBy != "be-002" {
-		t.Errorf("BlockedBy = %q, want %q", d.BlockedBy, "be-002")
+	if d.BlockedBy != "car-002" {
+		t.Errorf("BlockedBy = %q, want %q", d.BlockedBy, "car-002")
 	}
 }
 
-func TestBeadProgress_Instantiation(t *testing.T) {
-	p := BeadProgress{
+func TestCarProgress_Instantiation(t *testing.T) {
+	p := CarProgress{
 		ID:           1,
-		BeadID:       "be-001",
+		CarID:       "car-001",
 		Cycle:        3,
 		SessionID:    "sess-1",
 		EngineID:     "eng-1",
@@ -319,7 +319,7 @@ func TestEngine_Instantiation(t *testing.T) {
 		Track:        "backend",
 		Role:         "engine",
 		Status:       "idle",
-		CurrentBead:  "be-001",
+		CurrentCar:  "car-001",
 		SessionID:    "sess-1",
 		StartedAt:    now,
 		LastActivity: now,
@@ -335,7 +335,7 @@ func TestMessage_Instantiation(t *testing.T) {
 		ID:           1,
 		FromAgent:    "engine-1",
 		ToAgent:      "yardmaster",
-		BeadID:       "be-001",
+		CarID:       "car-001",
 		ThreadID:     &threadID,
 		Subject:      "Need help",
 		Body:         "Stuck on merge conflict",
@@ -355,7 +355,7 @@ func TestAgentLog_Instantiation(t *testing.T) {
 		ID:         1,
 		EngineID:   "eng-001",
 		SessionID:  "sess-1",
-		BeadID:     "be-001",
+		CarID:     "car-001",
 		Direction:  "out",
 		Content:    "response content",
 		TokenCount: 500,

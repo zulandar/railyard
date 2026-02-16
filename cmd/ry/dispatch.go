@@ -14,7 +14,7 @@ func newDispatchCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "dispatch",
 		Short: "Start the Dispatch planner agent",
-		Long:  "Starts an interactive Claude Code session with the Dispatch planner prompt. Use this to decompose feature requests into structured bead plans.",
+		Long:  "Starts an interactive Claude Code session with the Dispatch planner prompt. Use this to decompose feature requests into structured car plans.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runDispatch(cmd, configPath)
 		},

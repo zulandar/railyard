@@ -9,19 +9,19 @@ import (
 	"gorm.io/gorm"
 )
 
-// CompletionOpts holds parameters for handling a successful bead completion.
+// CompletionOpts holds parameters for handling a successful car completion.
 type CompletionOpts struct {
 	RepoDir   string
 	SessionID string
 	Note      string // final completion summary
 }
 
-// HandleCompletion processes a successful bead completion. The bead must already
+// HandleCompletion processes a successful car completion. The car must already
 // be marked done (by the agent via ry complete). This function pushes the branch,
 // writes a final progress note, and returns the engine to idle.
-func HandleCompletion(db *gorm.DB, bead *models.Bead, engine *models.Engine, opts CompletionOpts) error {
-	if bead == nil {
-		return fmt.Errorf("engine: bead is required")
+func HandleCompletion(db *gorm.DB, car *models.Car, engine *models.Engine, opts CompletionOpts) error {
+	if car == nil {
+		return fmt.Errorf("engine: car is required")
 	}
 	if engine == nil {
 		return fmt.Errorf("engine: engine is required")
@@ -31,8 +31,8 @@ func HandleCompletion(db *gorm.DB, bead *models.Bead, engine *models.Engine, opt
 	}
 
 	// Push the branch.
-	if bead.Branch != "" {
-		if err := PushBranch(opts.RepoDir, bead.Branch); err != nil {
+	if car.Branch != "" {
+		if err := PushBranch(opts.RepoDir, car.Branch); err != nil {
 			return fmt.Errorf("engine: completion push: %w", err)
 		}
 	}
@@ -40,11 +40,11 @@ func HandleCompletion(db *gorm.DB, bead *models.Bead, engine *models.Engine, opt
 	// Write final progress note.
 	note := opts.Note
 	if note == "" {
-		note = "Bead completed successfully."
+		note = "Car completed successfully."
 	}
 
-	if err := db.Create(&models.BeadProgress{
-		BeadID:       bead.ID,
+	if err := db.Create(&models.CarProgress{
+		CarID:       car.ID,
 		EngineID:     engine.ID,
 		SessionID:    opts.SessionID,
 		Note:         note,
@@ -54,10 +54,10 @@ func HandleCompletion(db *gorm.DB, bead *models.Bead, engine *models.Engine, opt
 		return fmt.Errorf("engine: write completion progress: %w", err)
 	}
 
-	// Set engine back to idle, clear current bead.
+	// Set engine back to idle, clear current car.
 	if err := db.Model(&models.Engine{}).Where("id = ?", engine.ID).Updates(map[string]interface{}{
 		"status":       StatusIdle,
-		"current_bead": "",
+		"current_car": "",
 		"session_id":   "",
 	}).Error; err != nil {
 		return fmt.Errorf("engine: reset engine to idle: %w", err)
@@ -74,12 +74,12 @@ type ClearCycleOpts struct {
 	Note      string // what was done; auto-generated if empty
 }
 
-// HandleClearCycle processes a mid-task /clear. The agent exited but the bead
-// is not done. Writes a progress note with files changed and keeps the bead
+// HandleClearCycle processes a mid-task /clear. The agent exited but the car
+// is not done. Writes a progress note with files changed and keeps the car
 // assigned to this engine for re-claim on the next daemon loop iteration.
-func HandleClearCycle(db *gorm.DB, bead *models.Bead, engine *models.Engine, opts ClearCycleOpts) error {
-	if bead == nil {
-		return fmt.Errorf("engine: bead is required")
+func HandleClearCycle(db *gorm.DB, car *models.Car, engine *models.Engine, opts ClearCycleOpts) error {
+	if car == nil {
+		return fmt.Errorf("engine: car is required")
 	}
 	if engine == nil {
 		return fmt.Errorf("engine: engine is required")
@@ -100,12 +100,12 @@ func HandleClearCycle(db *gorm.DB, bead *models.Bead, engine *models.Engine, opt
 
 	note := opts.Note
 	if note == "" {
-		note = fmt.Sprintf("Clear cycle %d — agent exited, bead not yet complete.", opts.Cycle)
+		note = fmt.Sprintf("Clear cycle %d — agent exited, car not yet complete.", opts.Cycle)
 	}
 
 	// Write progress note.
-	if err := db.Create(&models.BeadProgress{
-		BeadID:       bead.ID,
+	if err := db.Create(&models.CarProgress{
+		CarID:       car.ID,
 		Cycle:        opts.Cycle,
 		EngineID:     engine.ID,
 		SessionID:    opts.SessionID,
@@ -116,9 +116,9 @@ func HandleClearCycle(db *gorm.DB, bead *models.Bead, engine *models.Engine, opt
 		return fmt.Errorf("engine: write clear cycle progress: %w", err)
 	}
 
-	// Keep bead assigned — do not release to pool.
-	// The bead stays in its current status (claimed/in_progress) with the same assignee.
-	// The daemon loop will re-spawn the agent on this bead.
+	// Keep car assigned — do not release to pool.
+	// The car stays in its current status (claimed/in_progress) with the same assignee.
+	// The daemon loop will re-spawn the agent on this car.
 
 	return nil
 }

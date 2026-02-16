@@ -82,13 +82,13 @@ func addCommit(t *testing.T, dir, msg string) {
 func TestCreateBranch(t *testing.T) {
 	dir := initTestRepo(t)
 
-	if err := CreateBranch(dir, "ry/alice/backend/be-abc12"); err != nil {
+	if err := CreateBranch(dir, "ry/alice/backend/car-abc12"); err != nil {
 		t.Fatalf("CreateBranch: %v", err)
 	}
 
 	got := currentBranch(t, dir)
-	if got != "ry/alice/backend/be-abc12" {
-		t.Errorf("branch = %q, want %q", got, "ry/alice/backend/be-abc12")
+	if got != "ry/alice/backend/car-abc12" {
+		t.Errorf("branch = %q, want %q", got, "ry/alice/backend/car-abc12")
 	}
 }
 

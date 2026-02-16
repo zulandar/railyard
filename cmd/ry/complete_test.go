@@ -27,8 +27,8 @@ func TestCompleteCmd_Help(t *testing.T) {
 
 func TestCompleteCmd_Flags(t *testing.T) {
 	cmd := newCompleteCmd()
-	if cmd.Use != "complete <bead-id> <summary>" {
-		t.Errorf("Use = %q, want %q", cmd.Use, "complete <bead-id> <summary>")
+	if cmd.Use != "complete <car-id> <summary>" {
+		t.Errorf("Use = %q, want %q", cmd.Use, "complete <car-id> <summary>")
 	}
 	if cmd.Flags().Lookup("config") == nil {
 		t.Error("expected --config flag")
@@ -53,12 +53,12 @@ func TestCompleteCmd_OneArg(t *testing.T) {
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
-	// Only bead-id, no summary
-	cmd.SetArgs([]string{"complete", "be-12345"})
+	// Only car-id, no summary
+	cmd.SetArgs([]string{"complete", "car-12345"})
 
 	err := cmd.Execute()
 	if err == nil {
-		t.Fatal("expected error for insufficient args (need bead-id and summary)")
+		t.Fatal("expected error for insufficient args (need car-id and summary)")
 	}
 }
 
@@ -98,8 +98,8 @@ func TestProgressCmd_Help(t *testing.T) {
 
 func TestProgressCmd_Flags(t *testing.T) {
 	cmd := newProgressCmd()
-	if cmd.Use != "progress <bead-id> <note>" {
-		t.Errorf("Use = %q, want %q", cmd.Use, "progress <bead-id> <note>")
+	if cmd.Use != "progress <car-id> <note>" {
+		t.Errorf("Use = %q, want %q", cmd.Use, "progress <car-id> <note>")
 	}
 	if cmd.Flags().Lookup("config") == nil {
 		t.Error("expected --config flag")
@@ -124,12 +124,12 @@ func TestProgressCmd_OneArg(t *testing.T) {
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
-	// Only bead-id, no note
-	cmd.SetArgs([]string{"progress", "be-12345"})
+	// Only car-id, no note
+	cmd.SetArgs([]string{"progress", "car-12345"})
 
 	err := cmd.Execute()
 	if err == nil {
-		t.Fatal("expected error for insufficient args (need bead-id and note)")
+		t.Fatal("expected error for insufficient args (need car-id and note)")
 	}
 }
 

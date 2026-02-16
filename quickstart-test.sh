@@ -5,7 +5,7 @@ set -euo pipefail
 #
 # Tests Railyard without modifying the source repo. Creates a fully isolated
 # environment at /tmp/railyard-test with its own Dolt server (port 3307),
-# dummy git repo, and sample beads.
+# dummy git repo, and sample cars.
 #
 # Run from the railyard source repo root:
 #   chmod +x quickstart-test.sh && ./quickstart-test.sh
@@ -173,24 +173,24 @@ ok "Dolt running on port ${DOLT_PORT}"
 info "Initializing database..."
 (cd "${PROJECT_DIR}" && ./ry db init -c railyard.yaml 2>&1)
 
-# ─── Step 8: Create sample beads ─────────────────────────────────────────────
+# ─── Step 8: Create sample cars ─────────────────────────────────────────────
 
-info "Creating sample beads with dependencies..."
+info "Creating sample cars with dependencies..."
 (
     cd "${PROJECT_DIR}"
-    B1=$(./ry bead create -c railyard.yaml --title "Add user model" --track backend --type task --priority 0 \
-        --description "Define User struct with GORM model and migrations" 2>&1 | grep -oP 'be-\w+')
-    B2=$(./ry bead create -c railyard.yaml --title "Add /users GET endpoint" --track backend --type task --priority 1 \
-        --description "REST endpoint returning all users as JSON" 2>&1 | grep -oP 'be-\w+')
-    B3=$(./ry bead create -c railyard.yaml --title "Add /users POST endpoint" --track backend --type task --priority 1 \
-        --description "REST endpoint to create a new user" 2>&1 | grep -oP 'be-\w+')
+    B1=$(./ry car create -c railyard.yaml --title "Add user model" --track backend --type task --priority 0 \
+        --description "Define User struct with GORM model and migrations" 2>&1 | grep -oP 'car-\w+')
+    B2=$(./ry car create -c railyard.yaml --title "Add /users GET endpoint" --track backend --type task --priority 1 \
+        --description "REST endpoint returning all users as JSON" 2>&1 | grep -oP 'car-\w+')
+    B3=$(./ry car create -c railyard.yaml --title "Add /users POST endpoint" --track backend --type task --priority 1 \
+        --description "REST endpoint to create a new user" 2>&1 | grep -oP 'car-\w+')
 
     # GET and POST depend on user model
-    ./ry bead dep add -c railyard.yaml "${B2}" --blocked-by "${B1}" > /dev/null 2>&1
-    ./ry bead dep add -c railyard.yaml "${B3}" --blocked-by "${B1}" > /dev/null 2>&1
+    ./ry car dep add -c railyard.yaml "${B2}" --blocked-by "${B1}" > /dev/null 2>&1
+    ./ry car dep add -c railyard.yaml "${B3}" --blocked-by "${B1}" > /dev/null 2>&1
 
     echo ""
-    echo "  Bead           Title                   Status"
+    echo "  Car            Title                   Status"
     echo "  ─────────────  ──────────────────────  ──────"
     echo "  ${B1}  Add user model          READY (no blockers)"
     echo "  ${B2}  Add /users GET          blocked by ${B1}"
@@ -204,11 +204,11 @@ info "Verifying..."
 (
     cd "${PROJECT_DIR}"
     echo ""
-    echo "── Bead List ──"
-    ./ry bead list -c railyard.yaml 2>&1
+    echo "── Car List ──"
+    ./ry car list -c railyard.yaml 2>&1
     echo ""
-    echo "── Ready Beads ──"
-    ./ry bead ready -c railyard.yaml --track backend 2>&1
+    echo "── Ready Cars ──"
+    ./ry car ready -c railyard.yaml --track backend 2>&1
     echo ""
     echo "── Status Dashboard ──"
     ./ry status -c railyard.yaml 2>&1
@@ -245,7 +245,7 @@ echo ""
 echo "  # Check on things"
 echo "  ry status -c railyard.yaml"
 echo "  ry engine list -c railyard.yaml"
-echo "  ry bead list -c railyard.yaml"
+echo "  ry car list -c railyard.yaml"
 echo ""
 echo "  # Stop"
 echo "  ry stop -c railyard.yaml"

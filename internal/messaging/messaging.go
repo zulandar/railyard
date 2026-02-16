@@ -11,7 +11,7 @@ import (
 
 // SendOpts holds optional parameters for sending a message.
 type SendOpts struct {
-	BeadID   string
+	CarID   string
 	ThreadID *uint
 	Priority string // "normal" (default), "urgent"
 }
@@ -36,7 +36,7 @@ func Send(db *gorm.DB, from, to, subject, body string, opts SendOpts) (*models.M
 	msg := models.Message{
 		FromAgent: from,
 		ToAgent:   to,
-		BeadID:    opts.BeadID,
+		CarID:    opts.CarID,
 		ThreadID:  opts.ThreadID,
 		Subject:   subject,
 		Body:      body,

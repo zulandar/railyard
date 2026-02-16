@@ -7,7 +7,7 @@ type AgentLog struct {
 	ID         uint      `gorm:"primaryKey;autoIncrement"`
 	EngineID   string    `gorm:"size:64;index:idx_engine_session"`
 	SessionID  string    `gorm:"size:64;index:idx_engine_session"`
-	BeadID     string    `gorm:"size:32;index"`
+	CarID     string    `gorm:"size:32;index"`
 	Direction  string    `gorm:"size:4"`
 	Content    string    `gorm:"type:mediumtext"`
 	TokenCount int

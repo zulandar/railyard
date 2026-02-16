@@ -8,7 +8,7 @@ import (
 // --- Switch validation tests ---
 
 func TestSwitch_NilDB(t *testing.T) {
-	_, err := Switch(nil, "be-001", SwitchOpts{RepoDir: "/tmp"})
+	_, err := Switch(nil, "car-001", SwitchOpts{RepoDir: "/tmp"})
 	if err == nil {
 		t.Fatal("expected error for nil db")
 	}
@@ -17,7 +17,7 @@ func TestSwitch_NilDB(t *testing.T) {
 	}
 }
 
-func TestSwitch_EmptyBeadID(t *testing.T) {
+func TestSwitch_EmptyCarID(t *testing.T) {
 	_, err := Switch(nil, "", SwitchOpts{RepoDir: "/tmp"})
 	if err == nil {
 		t.Fatal("expected error")
@@ -25,7 +25,7 @@ func TestSwitch_EmptyBeadID(t *testing.T) {
 }
 
 func TestSwitch_EmptyRepoDir(t *testing.T) {
-	_, err := Switch(nil, "be-001", SwitchOpts{})
+	_, err := Switch(nil, "car-001", SwitchOpts{})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -40,7 +40,7 @@ func TestSwitchOpts_ZeroValue(t *testing.T) {
 
 func TestSwitchResult_ZeroValue(t *testing.T) {
 	r := SwitchResult{}
-	if r.BeadID != "" || r.Branch != "" || r.TestsPassed || r.Merged {
+	if r.CarID != "" || r.Branch != "" || r.TestsPassed || r.Merged {
 		t.Error("zero-value SwitchResult should have empty/false fields")
 	}
 }
@@ -48,7 +48,7 @@ func TestSwitchResult_ZeroValue(t *testing.T) {
 // --- UnblockDeps validation tests ---
 
 func TestUnblockDeps_NilDB(t *testing.T) {
-	_, err := UnblockDeps(nil, "be-001")
+	_, err := UnblockDeps(nil, "car-001")
 	if err == nil {
 		t.Fatal("expected error for nil db")
 	}
@@ -57,7 +57,7 @@ func TestUnblockDeps_NilDB(t *testing.T) {
 	}
 }
 
-func TestUnblockDeps_EmptyBeadID(t *testing.T) {
+func TestUnblockDeps_EmptyCarID(t *testing.T) {
 	_, err := UnblockDeps(nil, "")
 	if err == nil {
 		t.Fatal("expected error")

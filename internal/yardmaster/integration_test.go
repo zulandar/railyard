@@ -120,17 +120,17 @@ func TestIntegration_CheckEngineHealth_ZeroThreshold(t *testing.T) {
 	}
 }
 
-func TestIntegration_ReassignBead_EmptyBeadID(t *testing.T) {
+func TestIntegration_ReassignCar_EmptyCarID(t *testing.T) {
 	gormDB := setupTestDB(t, "railyard_ym_hval2")
-	err := ReassignBead(gormDB, "", "eng-001", "stalled")
+	err := ReassignCar(gormDB, "", "eng-001", "stalled")
 	if err == nil {
-		t.Fatal("expected error for empty beadID")
+		t.Fatal("expected error for empty carID")
 	}
 }
 
-func TestIntegration_ReassignBead_EmptyEngineID(t *testing.T) {
+func TestIntegration_ReassignCar_EmptyEngineID(t *testing.T) {
 	gormDB := setupTestDB(t, "railyard_ym_hval3")
-	err := ReassignBead(gormDB, "be-001", "", "stalled")
+	err := ReassignCar(gormDB, "car-001", "", "stalled")
 	if err == nil {
 		t.Fatal("expected error for empty engineID")
 	}
@@ -247,34 +247,34 @@ func TestIntegration_CheckEngineHealth_DBError(t *testing.T) {
 	}
 }
 
-// --- ReassignBead integration tests ---
+// --- ReassignCar integration tests ---
 
-func TestIntegration_ReassignBead(t *testing.T) {
+func TestIntegration_ReassignCar(t *testing.T) {
 	gormDB := setupTestDB(t, "railyard_ym_reassign1")
 
-	// Create engine and bead.
+	// Create engine and car.
 	gormDB.Create(&models.Engine{
 		ID: "eng-001", Track: "backend", Status: "stalled",
-		CurrentBead: "be-001", LastActivity: time.Now(), StartedAt: time.Now(),
+		CurrentCar: "car-001", LastActivity: time.Now(), StartedAt: time.Now(),
 	})
-	gormDB.Create(&models.Bead{
-		ID: "be-001", Title: "Test Task", Track: "backend",
+	gormDB.Create(&models.Car{
+		ID: "car-001", Title: "Test Task", Track: "backend",
 		Status: "in_progress", Assignee: "eng-001",
 	})
 
-	err := ReassignBead(gormDB, "be-001", "eng-001", "heartbeat stale >60s")
+	err := ReassignCar(gormDB, "car-001", "eng-001", "heartbeat stale >60s")
 	if err != nil {
-		t.Fatalf("ReassignBead: %v", err)
+		t.Fatalf("ReassignCar: %v", err)
 	}
 
-	// Verify bead is open and unassigned.
-	var b models.Bead
-	gormDB.First(&b, "id = ?", "be-001")
+	// Verify car is open and unassigned.
+	var b models.Car
+	gormDB.First(&b, "id = ?", "car-001")
 	if b.Status != "open" {
-		t.Errorf("bead status = %q, want %q", b.Status, "open")
+		t.Errorf("car status = %q, want %q", b.Status, "open")
 	}
 	if b.Assignee != "" {
-		t.Errorf("bead assignee = %q, want empty", b.Assignee)
+		t.Errorf("car assignee = %q, want empty", b.Assignee)
 	}
 
 	// Verify engine is dead.
@@ -283,13 +283,13 @@ func TestIntegration_ReassignBead(t *testing.T) {
 	if eng.Status != "dead" {
 		t.Errorf("engine status = %q, want %q", eng.Status, "dead")
 	}
-	if eng.CurrentBead != "" {
-		t.Errorf("engine current_bead = %q, want empty", eng.CurrentBead)
+	if eng.CurrentCar != "" {
+		t.Errorf("engine current_car = %q, want empty", eng.CurrentCar)
 	}
 
 	// Verify progress note was written.
-	var progress []models.BeadProgress
-	gormDB.Where("bead_id = ?", "be-001").Find(&progress)
+	var progress []models.CarProgress
+	gormDB.Where("car_id = ?", "car-001").Find(&progress)
 	if len(progress) != 1 {
 		t.Fatalf("expected 1 progress note, got %d", len(progress))
 	}
@@ -305,24 +305,24 @@ func TestIntegration_ReassignBead(t *testing.T) {
 	}
 }
 
-func TestIntegration_ReassignBead_NotFound(t *testing.T) {
+func TestIntegration_ReassignCar_NotFound(t *testing.T) {
 	gormDB := setupTestDB(t, "railyard_ym_reassign2")
 
-	err := ReassignBead(gormDB, "be-nonexistent", "eng-001", "stalled")
+	err := ReassignCar(gormDB, "car-nonexistent", "eng-001", "stalled")
 	if err == nil {
-		t.Fatal("expected error for non-existent bead")
+		t.Fatal("expected error for non-existent car")
 	}
-	if err.Error() != "yardmaster: bead be-nonexistent not found" {
+	if err.Error() != "yardmaster: car car-nonexistent not found" {
 		t.Errorf("error = %q", err)
 	}
 }
 
-func TestIntegration_ReassignBead_DBError(t *testing.T) {
+func TestIntegration_ReassignCar_DBError(t *testing.T) {
 	gormDB := setupTestDB(t, "railyard_ym_reassignerr")
 	sqlDB, _ := gormDB.DB()
 	sqlDB.Close()
 
-	err := ReassignBead(gormDB, "be-001", "eng-001", "stalled")
+	err := ReassignCar(gormDB, "car-001", "eng-001", "stalled")
 	if err == nil {
 		t.Fatal("expected error for closed DB")
 	}
@@ -330,23 +330,23 @@ func TestIntegration_ReassignBead_DBError(t *testing.T) {
 
 // --- Switch integration tests ---
 
-func TestIntegration_Switch_BeadNotFound(t *testing.T) {
+func TestIntegration_Switch_CarNotFound(t *testing.T) {
 	gormDB := setupTestDB(t, "railyard_ym_switch1")
 
-	_, err := Switch(gormDB, "be-nonexistent", SwitchOpts{RepoDir: t.TempDir()})
+	_, err := Switch(gormDB, "car-nonexistent", SwitchOpts{RepoDir: t.TempDir()})
 	if err == nil {
-		t.Fatal("expected error for non-existent bead")
+		t.Fatal("expected error for non-existent car")
 	}
 }
 
 func TestIntegration_Switch_NoBranch(t *testing.T) {
 	gormDB := setupTestDB(t, "railyard_ym_switch2")
 
-	gormDB.Create(&models.Bead{
-		ID: "be-001", Title: "Test", Track: "backend", Status: "done", Branch: "",
+	gormDB.Create(&models.Car{
+		ID: "car-001", Title: "Test", Track: "backend", Status: "done", Branch: "",
 	})
 
-	_, err := Switch(gormDB, "be-001", SwitchOpts{RepoDir: t.TempDir()})
+	_, err := Switch(gormDB, "car-001", SwitchOpts{RepoDir: t.TempDir()})
 	if err == nil {
 		t.Fatal("expected error for empty branch")
 	}
@@ -357,7 +357,7 @@ func TestIntegration_Switch_DBError(t *testing.T) {
 	sqlDB, _ := gormDB.DB()
 	sqlDB.Close()
 
-	_, err := Switch(gormDB, "be-001", SwitchOpts{RepoDir: t.TempDir()})
+	_, err := Switch(gormDB, "car-001", SwitchOpts{RepoDir: t.TempDir()})
 	if err == nil {
 		t.Fatal("expected error for closed DB")
 	}
@@ -368,11 +368,11 @@ func TestIntegration_Switch_DBError(t *testing.T) {
 func TestIntegration_UnblockDeps_NoDeps(t *testing.T) {
 	gormDB := setupTestDB(t, "railyard_ym_unblock1")
 
-	gormDB.Create(&models.Bead{
-		ID: "be-001", Title: "Done Task", Track: "backend", Status: "done",
+	gormDB.Create(&models.Car{
+		ID: "car-001", Title: "Done Task", Track: "backend", Status: "done",
 	})
 
-	unblocked, err := UnblockDeps(gormDB, "be-001")
+	unblocked, err := UnblockDeps(gormDB, "car-001")
 	if err != nil {
 		t.Fatalf("UnblockDeps: %v", err)
 	}
@@ -384,63 +384,63 @@ func TestIntegration_UnblockDeps_NoDeps(t *testing.T) {
 func TestIntegration_UnblockDeps_SingleDep(t *testing.T) {
 	gormDB := setupTestDB(t, "railyard_ym_unblock2")
 
-	// be-001 (done) blocks be-002 (blocked).
-	gormDB.Create(&models.Bead{
-		ID: "be-001", Title: "Backend API", Track: "backend", Status: "done",
+	// car-001 (done) blocks car-002 (blocked).
+	gormDB.Create(&models.Car{
+		ID: "car-001", Title: "Backend API", Track: "backend", Status: "done",
 	})
-	gormDB.Create(&models.Bead{
-		ID: "be-002", Title: "Frontend Consumer", Track: "frontend", Status: "blocked",
+	gormDB.Create(&models.Car{
+		ID: "car-002", Title: "Frontend Consumer", Track: "frontend", Status: "blocked",
 	})
-	gormDB.Create(&models.BeadDep{
-		BeadID: "be-002", BlockedBy: "be-001", DepType: "blocks",
+	gormDB.Create(&models.CarDep{
+		CarID: "car-002", BlockedBy: "car-001", DepType: "blocks",
 	})
 
-	unblocked, err := UnblockDeps(gormDB, "be-001")
+	unblocked, err := UnblockDeps(gormDB, "car-001")
 	if err != nil {
 		t.Fatalf("UnblockDeps: %v", err)
 	}
 	if len(unblocked) != 1 {
 		t.Fatalf("expected 1 unblocked, got %d", len(unblocked))
 	}
-	if unblocked[0].ID != "be-002" {
-		t.Errorf("unblocked ID = %q, want %q", unblocked[0].ID, "be-002")
+	if unblocked[0].ID != "car-002" {
+		t.Errorf("unblocked ID = %q, want %q", unblocked[0].ID, "car-002")
 	}
 
-	// Verify bead status changed to open.
-	var b models.Bead
-	gormDB.First(&b, "id = ?", "be-002")
+	// Verify car status changed to open.
+	var b models.Car
+	gormDB.First(&b, "id = ?", "car-002")
 	if b.Status != "open" {
-		t.Errorf("bead status = %q, want %q", b.Status, "open")
+		t.Errorf("car status = %q, want %q", b.Status, "open")
 	}
 }
 
 func TestIntegration_UnblockDeps_MultipleBlockers(t *testing.T) {
 	gormDB := setupTestDB(t, "railyard_ym_unblock3")
 
-	// be-002 is blocked by both be-001 (done) and be-003 (in_progress).
-	gormDB.Create(&models.Bead{
-		ID: "be-001", Title: "Task A", Track: "backend", Status: "done",
+	// car-002 is blocked by both car-001 (done) and car-003 (in_progress).
+	gormDB.Create(&models.Car{
+		ID: "car-001", Title: "Task A", Track: "backend", Status: "done",
 	})
-	gormDB.Create(&models.Bead{
-		ID: "be-003", Title: "Task C", Track: "backend", Status: "in_progress",
+	gormDB.Create(&models.Car{
+		ID: "car-003", Title: "Task C", Track: "backend", Status: "in_progress",
 	})
-	gormDB.Create(&models.Bead{
-		ID: "be-002", Title: "Task B", Track: "frontend", Status: "blocked",
+	gormDB.Create(&models.Car{
+		ID: "car-002", Title: "Task B", Track: "frontend", Status: "blocked",
 	})
-	gormDB.Create(&models.BeadDep{
-		BeadID: "be-002", BlockedBy: "be-001", DepType: "blocks",
+	gormDB.Create(&models.CarDep{
+		CarID: "car-002", BlockedBy: "car-001", DepType: "blocks",
 	})
-	gormDB.Create(&models.BeadDep{
-		BeadID: "be-002", BlockedBy: "be-003", DepType: "blocks",
+	gormDB.Create(&models.CarDep{
+		CarID: "car-002", BlockedBy: "car-003", DepType: "blocks",
 	})
 
-	// Only be-001 is done — be-002 should NOT be unblocked (be-003 still blocking).
-	unblocked, err := UnblockDeps(gormDB, "be-001")
+	// Only car-001 is done — car-002 should NOT be unblocked (car-003 still blocking).
+	unblocked, err := UnblockDeps(gormDB, "car-001")
 	if err != nil {
 		t.Fatalf("UnblockDeps: %v", err)
 	}
 	if len(unblocked) != 0 {
-		t.Errorf("expected 0 unblocked (still blocked by be-003), got %d", len(unblocked))
+		t.Errorf("expected 0 unblocked (still blocked by car-003), got %d", len(unblocked))
 	}
 }
 
@@ -449,7 +449,7 @@ func TestIntegration_UnblockDeps_DBError(t *testing.T) {
 	sqlDB, _ := gormDB.DB()
 	sqlDB.Close()
 
-	_, err := UnblockDeps(gormDB, "be-001")
+	_, err := UnblockDeps(gormDB, "car-001")
 	if err == nil {
 		t.Fatal("expected error for closed DB")
 	}
@@ -562,19 +562,19 @@ func TestIntegration_Switch_FullFlow(t *testing.T) {
 		}
 	}
 
-	run("checkout", "-b", "ry/alice/backend/be-001")
+	run("checkout", "-b", "ry/alice/backend/car-001")
 	writeFile(t, repoDir, "feature.go", "package main\n// new feature\n")
 	run("add", ".")
 	run("commit", "-m", "add feature")
 	run("checkout", "main")
 
-	// Create the bead in DB.
-	gormDB.Create(&models.Bead{
-		ID: "be-001", Title: "Test Feature", Track: "backend",
-		Status: "done", Branch: "ry/alice/backend/be-001",
+	// Create the car in DB.
+	gormDB.Create(&models.Car{
+		ID: "car-001", Title: "Test Feature", Track: "backend",
+		Status: "done", Branch: "ry/alice/backend/car-001",
 	})
 
-	result, err := Switch(gormDB, "be-001", SwitchOpts{
+	result, err := Switch(gormDB, "car-001", SwitchOpts{
 		RepoDir: repoDir,
 	})
 	if err != nil {
@@ -609,18 +609,18 @@ func TestIntegration_Switch_DryRun(t *testing.T) {
 		}
 	}
 
-	run("checkout", "-b", "ry/alice/backend/be-dry")
+	run("checkout", "-b", "ry/alice/backend/car-dry")
 	writeFile(t, repoDir, "dry.go", "package main\n// dry run\n")
 	run("add", ".")
 	run("commit", "-m", "dry run feature")
 	run("checkout", "main")
 
-	gormDB.Create(&models.Bead{
-		ID: "be-dry", Title: "Dry Run", Track: "backend",
-		Status: "done", Branch: "ry/alice/backend/be-dry",
+	gormDB.Create(&models.Car{
+		ID: "car-dry", Title: "Dry Run", Track: "backend",
+		Status: "done", Branch: "ry/alice/backend/car-dry",
 	})
 
-	result, err := Switch(gormDB, "be-dry", SwitchOpts{
+	result, err := Switch(gormDB, "car-dry", SwitchOpts{
 		RepoDir: repoDir,
 		DryRun:  true,
 	})
@@ -656,26 +656,26 @@ func TestIntegration_Switch_MergeWithUnblock(t *testing.T) {
 	}
 
 	// Create feature branch.
-	run("checkout", "-b", "ry/alice/backend/be-parent")
+	run("checkout", "-b", "ry/alice/backend/car-parent")
 	writeFile(t, repoDir, "api.go", "package main\n// api\n")
 	run("add", ".")
 	run("commit", "-m", "add api")
 	run("checkout", "main")
 
-	// Create beads: be-parent (done) blocks be-child (blocked).
-	gormDB.Create(&models.Bead{
-		ID: "be-parent", Title: "Backend API", Track: "backend",
-		Status: "done", Branch: "ry/alice/backend/be-parent",
+	// Create cars: car-parent (done) blocks car-child (blocked).
+	gormDB.Create(&models.Car{
+		ID: "car-parent", Title: "Backend API", Track: "backend",
+		Status: "done", Branch: "ry/alice/backend/car-parent",
 	})
-	gormDB.Create(&models.Bead{
-		ID: "be-child", Title: "Frontend Consumer", Track: "frontend",
+	gormDB.Create(&models.Car{
+		ID: "car-child", Title: "Frontend Consumer", Track: "frontend",
 		Status: "blocked",
 	})
-	gormDB.Create(&models.BeadDep{
-		BeadID: "be-child", BlockedBy: "be-parent", DepType: "blocks",
+	gormDB.Create(&models.CarDep{
+		CarID: "car-child", BlockedBy: "car-parent", DepType: "blocks",
 	})
 
-	result, err := Switch(gormDB, "be-parent", SwitchOpts{RepoDir: repoDir})
+	result, err := Switch(gormDB, "car-parent", SwitchOpts{RepoDir: repoDir})
 	if err != nil {
 		t.Fatalf("Switch: %v", err)
 	}
@@ -683,9 +683,9 @@ func TestIntegration_Switch_MergeWithUnblock(t *testing.T) {
 		t.Error("expected merge")
 	}
 
-	// Verify be-child was unblocked.
-	var child models.Bead
-	gormDB.First(&child, "id = ?", "be-child")
+	// Verify car-child was unblocked.
+	var child models.Car
+	gormDB.First(&child, "id = ?", "car-child")
 	if child.Status != "open" {
 		t.Errorf("child status = %q, want %q", child.Status, "open")
 	}
@@ -701,13 +701,13 @@ func TestIntegration_Switch_MergeWithUnblock(t *testing.T) {
 func TestIntegration_Switch_FetchError(t *testing.T) {
 	gormDB := setupTestDB(t, "railyard_ym_switchfetcherr")
 
-	gormDB.Create(&models.Bead{
-		ID: "be-fetch", Title: "Fetch Test", Track: "backend",
-		Status: "done", Branch: "ry/alice/backend/be-fetch",
+	gormDB.Create(&models.Car{
+		ID: "car-fetch", Title: "Fetch Test", Track: "backend",
+		Status: "done", Branch: "ry/alice/backend/car-fetch",
 	})
 
 	// Use a non-git directory to cause fetch failure.
-	_, err := Switch(gormDB, "be-fetch", SwitchOpts{RepoDir: t.TempDir()})
+	_, err := Switch(gormDB, "car-fetch", SwitchOpts{RepoDir: t.TempDir()})
 	if err == nil {
 		t.Fatal("expected error for fetch in non-git dir")
 	}
@@ -733,15 +733,15 @@ func TestIntegration_Switch_TestFailure(t *testing.T) {
 		}
 	}
 
-	run("checkout", "-b", "ry/alice/backend/be-fail")
+	run("checkout", "-b", "ry/alice/backend/car-fail")
 	writeFile(t, repoDir, "main_test.go", "package main\nimport \"testing\"\nfunc TestFail(t *testing.T) { t.Fatal(\"broken\") }\n")
 	run("add", ".")
 	run("commit", "-m", "broken test")
 	run("checkout", "main")
 
-	gormDB.Create(&models.Bead{
-		ID: "be-fail", Title: "Broken", Track: "backend",
-		Status: "done", Branch: "ry/alice/backend/be-fail",
+	gormDB.Create(&models.Car{
+		ID: "car-fail", Title: "Broken", Track: "backend",
+		Status: "done", Branch: "ry/alice/backend/car-fail",
 		Assignee: "eng-001",
 	})
 	gormDB.Create(&models.Engine{
@@ -749,7 +749,7 @@ func TestIntegration_Switch_TestFailure(t *testing.T) {
 		LastActivity: time.Now(), StartedAt: time.Now(),
 	})
 
-	result, err := Switch(gormDB, "be-fail", SwitchOpts{
+	result, err := Switch(gormDB, "car-fail", SwitchOpts{
 		RepoDir: repoDir,
 	})
 	// Switch returns nil error for test failure (it's a normal outcome).
@@ -763,11 +763,11 @@ func TestIntegration_Switch_TestFailure(t *testing.T) {
 		t.Error("should not merge when tests fail")
 	}
 
-	// Verify bead was set to blocked.
-	var b models.Bead
-	gormDB.First(&b, "id = ?", "be-fail")
+	// Verify car was set to blocked.
+	var b models.Car
+	gormDB.First(&b, "id = ?", "car-fail")
 	if b.Status != "blocked" {
-		t.Errorf("bead status = %q, want %q", b.Status, "blocked")
+		t.Errorf("car status = %q, want %q", b.Status, "blocked")
 	}
 
 	// Verify test failure message was sent to the engine.

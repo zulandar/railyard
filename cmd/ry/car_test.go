@@ -6,20 +6,20 @@ import (
 	"testing"
 )
 
-func TestBeadCmd_Help(t *testing.T) {
+func TestCarCmd_Help(t *testing.T) {
 	cmd := newRootCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
-	cmd.SetArgs([]string{"bead", "--help"})
+	cmd.SetArgs([]string{"car", "--help"})
 
 	if err := cmd.Execute(); err != nil {
-		t.Fatalf("bead --help failed: %v", err)
+		t.Fatalf("car --help failed: %v", err)
 	}
 
 	out := buf.String()
-	if !strings.Contains(out, "Bead management") {
-		t.Errorf("expected help to mention 'Bead management', got: %s", out)
+	if !strings.Contains(out, "Car management") {
+		t.Errorf("expected help to mention 'Car management', got: %s", out)
 	}
 	for _, sub := range []string{"create", "list", "show", "update", "children"} {
 		if !strings.Contains(out, sub) {
@@ -28,25 +28,25 @@ func TestBeadCmd_Help(t *testing.T) {
 	}
 }
 
-func TestNewBeadCmd(t *testing.T) {
-	cmd := newBeadCmd()
-	if cmd.Use != "bead" {
-		t.Errorf("Use = %q, want %q", cmd.Use, "bead")
+func TestNewCarCmd(t *testing.T) {
+	cmd := newCarCmd()
+	if cmd.Use != "car" {
+		t.Errorf("Use = %q, want %q", cmd.Use, "car")
 	}
 	if !cmd.HasSubCommands() {
-		t.Error("bead command should have subcommands")
+		t.Error("car command should have subcommands")
 	}
 }
 
-func TestBeadCreateCmd_Help(t *testing.T) {
+func TestCarCreateCmd_Help(t *testing.T) {
 	cmd := newRootCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
-	cmd.SetArgs([]string{"bead", "create", "--help"})
+	cmd.SetArgs([]string{"car", "create", "--help"})
 
 	if err := cmd.Execute(); err != nil {
-		t.Fatalf("bead create --help failed: %v", err)
+		t.Fatalf("car create --help failed: %v", err)
 	}
 
 	out := buf.String()
@@ -67,8 +67,8 @@ func TestBeadCreateCmd_Help(t *testing.T) {
 	}
 }
 
-func TestNewBeadCreateCmd(t *testing.T) {
-	cmd := newBeadCreateCmd()
+func TestNewCarCreateCmd(t *testing.T) {
+	cmd := newCarCreateCmd()
 	if cmd.Use != "create" {
 		t.Errorf("Use = %q, want %q", cmd.Use, "create")
 	}
@@ -112,8 +112,8 @@ func TestNewBeadCreateCmd(t *testing.T) {
 	}
 }
 
-func TestBeadCreateCmd_ParentFlag(t *testing.T) {
-	cmd := newBeadCreateCmd()
+func TestCarCreateCmd_ParentFlag(t *testing.T) {
+	cmd := newCarCreateCmd()
 	flag := cmd.Flags().Lookup("parent")
 	if flag == nil {
 		t.Fatal("expected --parent flag")
@@ -123,13 +123,13 @@ func TestBeadCreateCmd_ParentFlag(t *testing.T) {
 	}
 }
 
-func TestBeadCreateCmd_MissingRequiredFlags(t *testing.T) {
+func TestCarCreateCmd_MissingRequiredFlags(t *testing.T) {
 	cmd := newRootCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
 	// Missing --title and --track
-	cmd.SetArgs([]string{"bead", "create"})
+	cmd.SetArgs([]string{"car", "create"})
 
 	err := cmd.Execute()
 	if err == nil {
@@ -137,12 +137,12 @@ func TestBeadCreateCmd_MissingRequiredFlags(t *testing.T) {
 	}
 }
 
-func TestBeadCreateCmd_MissingConfig(t *testing.T) {
+func TestCarCreateCmd_MissingConfig(t *testing.T) {
 	cmd := newRootCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
-	cmd.SetArgs([]string{"bead", "create",
+	cmd.SetArgs([]string{"car", "create",
 		"--title", "test",
 		"--track", "backend",
 		"--config", "/nonexistent/railyard.yaml",
@@ -157,15 +157,15 @@ func TestBeadCreateCmd_MissingConfig(t *testing.T) {
 	}
 }
 
-func TestBeadListCmd_Help(t *testing.T) {
+func TestCarListCmd_Help(t *testing.T) {
 	cmd := newRootCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
-	cmd.SetArgs([]string{"bead", "list", "--help"})
+	cmd.SetArgs([]string{"car", "list", "--help"})
 
 	if err := cmd.Execute(); err != nil {
-		t.Fatalf("bead list --help failed: %v", err)
+		t.Fatalf("car list --help failed: %v", err)
 	}
 
 	out := buf.String()
@@ -176,8 +176,8 @@ func TestBeadListCmd_Help(t *testing.T) {
 	}
 }
 
-func TestNewBeadListCmd(t *testing.T) {
-	cmd := newBeadListCmd()
+func TestNewCarListCmd(t *testing.T) {
+	cmd := newCarListCmd()
 	if cmd.Use != "list" {
 		t.Errorf("Use = %q, want %q", cmd.Use, "list")
 	}
@@ -188,36 +188,36 @@ func TestNewBeadListCmd(t *testing.T) {
 	}
 }
 
-func TestBeadShowCmd_Help(t *testing.T) {
+func TestCarShowCmd_Help(t *testing.T) {
 	cmd := newRootCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
-	cmd.SetArgs([]string{"bead", "show", "--help"})
+	cmd.SetArgs([]string{"car", "show", "--help"})
 
 	if err := cmd.Execute(); err != nil {
-		t.Fatalf("bead show --help failed: %v", err)
+		t.Fatalf("car show --help failed: %v", err)
 	}
 
 	out := buf.String()
-	if !strings.Contains(out, "full details of a bead") {
-		t.Errorf("expected help to mention 'full details of a bead', got: %s", out)
+	if !strings.Contains(out, "full details of a car") {
+		t.Errorf("expected help to mention 'full details of a car', got: %s", out)
 	}
 }
 
-func TestNewBeadShowCmd(t *testing.T) {
-	cmd := newBeadShowCmd()
+func TestNewCarShowCmd(t *testing.T) {
+	cmd := newCarShowCmd()
 	if cmd.Use != "show <id>" {
 		t.Errorf("Use = %q, want %q", cmd.Use, "show <id>")
 	}
 }
 
-func TestBeadShowCmd_NoArgs(t *testing.T) {
+func TestCarShowCmd_NoArgs(t *testing.T) {
 	cmd := newRootCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
-	cmd.SetArgs([]string{"bead", "show"})
+	cmd.SetArgs([]string{"car", "show"})
 
 	err := cmd.Execute()
 	if err == nil {
@@ -225,15 +225,15 @@ func TestBeadShowCmd_NoArgs(t *testing.T) {
 	}
 }
 
-func TestBeadUpdateCmd_Help(t *testing.T) {
+func TestCarUpdateCmd_Help(t *testing.T) {
 	cmd := newRootCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
-	cmd.SetArgs([]string{"bead", "update", "--help"})
+	cmd.SetArgs([]string{"car", "update", "--help"})
 
 	if err := cmd.Execute(); err != nil {
-		t.Fatalf("bead update --help failed: %v", err)
+		t.Fatalf("car update --help failed: %v", err)
 	}
 
 	out := buf.String()
@@ -244,8 +244,8 @@ func TestBeadUpdateCmd_Help(t *testing.T) {
 	}
 }
 
-func TestNewBeadUpdateCmd(t *testing.T) {
-	cmd := newBeadUpdateCmd()
+func TestNewCarUpdateCmd(t *testing.T) {
+	cmd := newCarUpdateCmd()
 	if cmd.Use != "update <id>" {
 		t.Errorf("Use = %q, want %q", cmd.Use, "update <id>")
 	}
@@ -256,12 +256,12 @@ func TestNewBeadUpdateCmd(t *testing.T) {
 	}
 }
 
-func TestBeadUpdateCmd_NoArgs(t *testing.T) {
+func TestCarUpdateCmd_NoArgs(t *testing.T) {
 	cmd := newRootCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
-	cmd.SetArgs([]string{"bead", "update"})
+	cmd.SetArgs([]string{"car", "update"})
 
 	err := cmd.Execute()
 	if err == nil {
@@ -269,12 +269,12 @@ func TestBeadUpdateCmd_NoArgs(t *testing.T) {
 	}
 }
 
-func TestBeadUpdateCmd_NoFlags(t *testing.T) {
+func TestCarUpdateCmd_NoFlags(t *testing.T) {
 	cmd := newRootCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
-	cmd.SetArgs([]string{"bead", "update", "be-12345"})
+	cmd.SetArgs([]string{"car", "update", "car-12345"})
 
 	err := cmd.Execute()
 	if err == nil {
@@ -306,15 +306,15 @@ func TestTruncate(t *testing.T) {
 
 // --- dep command tests ---
 
-func TestBeadDepCmd_Help(t *testing.T) {
+func TestCarDepCmd_Help(t *testing.T) {
 	cmd := newRootCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
-	cmd.SetArgs([]string{"bead", "dep", "--help"})
+	cmd.SetArgs([]string{"car", "dep", "--help"})
 
 	if err := cmd.Execute(); err != nil {
-		t.Fatalf("bead dep --help failed: %v", err)
+		t.Fatalf("car dep --help failed: %v", err)
 	}
 
 	out := buf.String()
@@ -325,8 +325,8 @@ func TestBeadDepCmd_Help(t *testing.T) {
 	}
 }
 
-func TestNewBeadDepCmd(t *testing.T) {
-	cmd := newBeadDepCmd()
+func TestNewCarDepCmd(t *testing.T) {
+	cmd := newCarDepCmd()
 	if cmd.Use != "dep" {
 		t.Errorf("Use = %q, want %q", cmd.Use, "dep")
 	}
@@ -335,10 +335,10 @@ func TestNewBeadDepCmd(t *testing.T) {
 	}
 }
 
-func TestBeadDepAddCmd_Flags(t *testing.T) {
-	cmd := newBeadDepAddCmd()
-	if cmd.Use != "add <bead-id>" {
-		t.Errorf("Use = %q, want %q", cmd.Use, "add <bead-id>")
+func TestCarDepAddCmd_Flags(t *testing.T) {
+	cmd := newCarDepAddCmd()
+	if cmd.Use != "add <car-id>" {
+		t.Errorf("Use = %q, want %q", cmd.Use, "add <car-id>")
 	}
 	if cmd.Flags().Lookup("blocked-by") == nil {
 		t.Error("expected --blocked-by flag")
@@ -352,12 +352,12 @@ func TestBeadDepAddCmd_Flags(t *testing.T) {
 	}
 }
 
-func TestBeadDepAddCmd_NoArgs(t *testing.T) {
+func TestCarDepAddCmd_NoArgs(t *testing.T) {
 	cmd := newRootCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
-	cmd.SetArgs([]string{"bead", "dep", "add"})
+	cmd.SetArgs([]string{"car", "dep", "add"})
 
 	err := cmd.Execute()
 	if err == nil {
@@ -365,12 +365,12 @@ func TestBeadDepAddCmd_NoArgs(t *testing.T) {
 	}
 }
 
-func TestBeadDepAddCmd_MissingBlockedBy(t *testing.T) {
+func TestCarDepAddCmd_MissingBlockedBy(t *testing.T) {
 	cmd := newRootCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
-	cmd.SetArgs([]string{"bead", "dep", "add", "be-12345"})
+	cmd.SetArgs([]string{"car", "dep", "add", "car-12345"})
 
 	err := cmd.Execute()
 	if err == nil {
@@ -378,19 +378,19 @@ func TestBeadDepAddCmd_MissingBlockedBy(t *testing.T) {
 	}
 }
 
-func TestBeadDepListCmd_Flags(t *testing.T) {
-	cmd := newBeadDepListCmd()
-	if cmd.Use != "list <bead-id>" {
-		t.Errorf("Use = %q, want %q", cmd.Use, "list <bead-id>")
+func TestCarDepListCmd_Flags(t *testing.T) {
+	cmd := newCarDepListCmd()
+	if cmd.Use != "list <car-id>" {
+		t.Errorf("Use = %q, want %q", cmd.Use, "list <car-id>")
 	}
 }
 
-func TestBeadDepListCmd_NoArgs(t *testing.T) {
+func TestCarDepListCmd_NoArgs(t *testing.T) {
 	cmd := newRootCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
-	cmd.SetArgs([]string{"bead", "dep", "list"})
+	cmd.SetArgs([]string{"car", "dep", "list"})
 
 	err := cmd.Execute()
 	if err == nil {
@@ -398,22 +398,22 @@ func TestBeadDepListCmd_NoArgs(t *testing.T) {
 	}
 }
 
-func TestBeadDepRemoveCmd_Flags(t *testing.T) {
-	cmd := newBeadDepRemoveCmd()
-	if cmd.Use != "remove <bead-id>" {
-		t.Errorf("Use = %q, want %q", cmd.Use, "remove <bead-id>")
+func TestCarDepRemoveCmd_Flags(t *testing.T) {
+	cmd := newCarDepRemoveCmd()
+	if cmd.Use != "remove <car-id>" {
+		t.Errorf("Use = %q, want %q", cmd.Use, "remove <car-id>")
 	}
 	if cmd.Flags().Lookup("blocked-by") == nil {
 		t.Error("expected --blocked-by flag")
 	}
 }
 
-func TestBeadDepRemoveCmd_NoArgs(t *testing.T) {
+func TestCarDepRemoveCmd_NoArgs(t *testing.T) {
 	cmd := newRootCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
-	cmd.SetArgs([]string{"bead", "dep", "remove"})
+	cmd.SetArgs([]string{"car", "dep", "remove"})
 
 	err := cmd.Execute()
 	if err == nil {
@@ -423,15 +423,15 @@ func TestBeadDepRemoveCmd_NoArgs(t *testing.T) {
 
 // --- ready command tests ---
 
-func TestBeadReadyCmd_Help(t *testing.T) {
+func TestCarReadyCmd_Help(t *testing.T) {
 	cmd := newRootCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
-	cmd.SetArgs([]string{"bead", "ready", "--help"})
+	cmd.SetArgs([]string{"car", "ready", "--help"})
 
 	if err := cmd.Execute(); err != nil {
-		t.Fatalf("bead ready --help failed: %v", err)
+		t.Fatalf("car ready --help failed: %v", err)
 	}
 
 	out := buf.String()
@@ -443,8 +443,8 @@ func TestBeadReadyCmd_Help(t *testing.T) {
 	}
 }
 
-func TestNewBeadReadyCmd(t *testing.T) {
-	cmd := newBeadReadyCmd()
+func TestNewCarReadyCmd(t *testing.T) {
+	cmd := newCarReadyCmd()
 	if cmd.Use != "ready" {
 		t.Errorf("Use = %q, want %q", cmd.Use, "ready")
 	}
@@ -455,15 +455,15 @@ func TestNewBeadReadyCmd(t *testing.T) {
 
 // --- children command tests ---
 
-func TestBeadChildrenCmd_Help(t *testing.T) {
+func TestCarChildrenCmd_Help(t *testing.T) {
 	cmd := newRootCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
-	cmd.SetArgs([]string{"bead", "children", "--help"})
+	cmd.SetArgs([]string{"car", "children", "--help"})
 
 	if err := cmd.Execute(); err != nil {
-		t.Fatalf("bead children --help failed: %v", err)
+		t.Fatalf("car children --help failed: %v", err)
 	}
 
 	out := buf.String()
@@ -472,8 +472,8 @@ func TestBeadChildrenCmd_Help(t *testing.T) {
 	}
 }
 
-func TestBeadChildrenCmd_Flags(t *testing.T) {
-	cmd := newBeadChildrenCmd()
+func TestCarChildrenCmd_Flags(t *testing.T) {
+	cmd := newCarChildrenCmd()
 	if cmd.Use != "children <parent-id>" {
 		t.Errorf("Use = %q, want %q", cmd.Use, "children <parent-id>")
 	}
@@ -482,12 +482,12 @@ func TestBeadChildrenCmd_Flags(t *testing.T) {
 	}
 }
 
-func TestBeadChildrenCmd_NoArgs(t *testing.T) {
+func TestCarChildrenCmd_NoArgs(t *testing.T) {
 	cmd := newRootCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
-	cmd.SetArgs([]string{"bead", "children"})
+	cmd.SetArgs([]string{"car", "children"})
 
 	err := cmd.Execute()
 	if err == nil {
@@ -495,7 +495,7 @@ func TestBeadChildrenCmd_NoArgs(t *testing.T) {
 	}
 }
 
-func TestRootCmd_HasBeadSubcommand(t *testing.T) {
+func TestRootCmd_HasCarSubcommand(t *testing.T) {
 	cmd := newRootCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
@@ -505,7 +505,7 @@ func TestRootCmd_HasBeadSubcommand(t *testing.T) {
 		t.Fatalf("root --help failed: %v", err)
 	}
 
-	if !strings.Contains(buf.String(), "bead") {
-		t.Error("root help should list 'bead' subcommand")
+	if !strings.Contains(buf.String(), "car") {
+		t.Error("root help should list 'car' subcommand")
 	}
 }
