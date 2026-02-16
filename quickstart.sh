@@ -81,6 +81,17 @@ info "Building ry binary..."
 go build -o ry ./cmd/ry/
 mkdir -p "${HOME}/.local/bin"
 ln -sf "${REPO_DIR}/ry" "${HOME}/.local/bin/ry"
+
+# Ensure ~/.local/bin is on PATH for this session and future shells.
+if [[ ":${PATH}:" != *":${HOME}/.local/bin:"* ]]; then
+    export PATH="${HOME}/.local/bin:${PATH}"
+    info "Added ~/.local/bin to current session PATH"
+fi
+if ! grep -q '\.local/bin' "${HOME}/.bashrc" 2>/dev/null; then
+    echo 'export PATH="${HOME}/.local/bin:${PATH}"' >> "${HOME}/.bashrc"
+    info "Added ~/.local/bin to ~/.bashrc"
+fi
+
 ok "Built and installed: $(./ry version 2>&1)"
 
 # ─── Step 3: Run tests ───────────────────────────────────────────────────────
@@ -102,19 +113,40 @@ if [ ! -d "${DOLT_DATA}/.dolt" ]; then
     (cd "${DOLT_DATA}" && dolt init --name "railyard" --email "railyard@local")
 fi
 
-# Start Dolt if not already running on :3306.
+# Start Dolt if not already running.
+# Check for port conflicts — if something else (e.g. MySQL) occupies 3306, use 3307.
+DOLT_PORT=3306
 DOLT_RUNNING=false
-ss -tlnp 2>/dev/null | grep -q ":3306 " && DOLT_RUNNING=true
+
+if ss -tlnp 2>/dev/null | grep -q ":3306 "; then
+    # Something is on 3306 — check if it's actually Dolt.
+    if ss -tlnp 2>/dev/null | grep ":3306 " | grep -q "dolt"; then
+        DOLT_RUNNING=true
+    else
+        warn "Port 3306 is in use by another process (MySQL/MariaDB?)."
+        warn "Switching Dolt to port 3307."
+        DOLT_PORT=3307
+        if ss -tlnp 2>/dev/null | grep -q ":3307 "; then
+            if ss -tlnp 2>/dev/null | grep ":3307 " | grep -q "dolt"; then
+                DOLT_RUNNING=true
+            else
+                fail "Ports 3306 and 3307 are both in use by non-Dolt processes. Free one and retry."
+            fi
+        fi
+    fi
+fi
+
 if ! $DOLT_RUNNING; then
-    info "Starting Dolt server on port 3306..."
+    info "Starting Dolt server on port ${DOLT_PORT}..."
     mkdir -p "${HOME}/.railyard"
-    (cd "${DOLT_DATA}" && nohup dolt sql-server --host 127.0.0.1 --port 3306 > "${HOME}/.railyard/dolt.log" 2>&1 &)
+    (cd "${DOLT_DATA}" && nohup dolt sql-server --host 127.0.0.1 --port "${DOLT_PORT}" > "${HOME}/.railyard/dolt.log" 2>&1 &)
     for i in $(seq 1 15); do
-        ss -tlnp 2>/dev/null | grep -q ":3306 " && break
+        ss -tlnp 2>/dev/null | grep -q ":${DOLT_PORT} " && break
         sleep 1
     done
+    ss -tlnp 2>/dev/null | grep -q ":${DOLT_PORT} " || fail "Dolt failed to start on port ${DOLT_PORT}. Check ~/.railyard/dolt.log"
 fi
-ok "Dolt server running on port 3306"
+ok "Dolt server running on port ${DOLT_PORT}"
 
 # ─── Step 5: Create railyard.yaml ─────────────────────────────────────────────
 
@@ -127,7 +159,7 @@ repo: ${REPO_DIR}
 
 dolt:
   host: 127.0.0.1
-  port: 3306
+  port: ${DOLT_PORT}
 
 tracks:
   - name: backend

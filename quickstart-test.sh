@@ -119,6 +119,16 @@ chmod +x "${PROJECT_DIR}/ry"
 mkdir -p "${HOME}/.local/bin"
 ln -sf "${PROJECT_DIR}/ry" "${HOME}/.local/bin/ry"
 
+# Ensure ~/.local/bin is on PATH for this session and future shells.
+if [[ ":${PATH}:" != *":${HOME}/.local/bin:"* ]]; then
+    export PATH="${HOME}/.local/bin:${PATH}"
+    info "Added ~/.local/bin to current session PATH"
+fi
+if ! grep -q '\.local/bin' "${HOME}/.bashrc" 2>/dev/null; then
+    echo 'export PATH="${HOME}/.local/bin:${PATH}"' >> "${HOME}/.bashrc"
+    info "Added ~/.local/bin to ~/.bashrc"
+fi
+
 # Init git repo.
 (cd "${PROJECT_DIR}" && git init -q && git commit --allow-empty -m "Initial commit" -q)
 ok "Git repo at ${PROJECT_DIR}"
