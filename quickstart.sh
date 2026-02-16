@@ -100,9 +100,13 @@ info "Checking prerequisites..."
 check_cmd curl || fail "curl is required but not found. Install: sudo apt-get install curl"
 
 if ! check_cmd go; then
-    warn "Go not found. Installing Go 1.25..."
-    GO_TAR="go1.25.0.linux-amd64.tar.gz"
-    curl -fsSL "https://go.dev/dl/${GO_TAR}" -o "/tmp/${GO_TAR}"
+    GO_VERSION="1.25.0"
+    GO_TAR="go${GO_VERSION}.linux-amd64.tar.gz"
+    GO_URL="https://go.dev/dl/${GO_TAR}"
+    warn "Go not found. Installing Go ${GO_VERSION}..."
+    if ! curl -fsSL "${GO_URL}" -o "/tmp/${GO_TAR}"; then
+        fail "Failed to download Go from ${GO_URL} — check that Go ${GO_VERSION} exists at https://go.dev/dl/"
+    fi
     sudo rm -rf /usr/local/go
     sudo tar -C /usr/local -xzf "/tmp/${GO_TAR}"
     rm "/tmp/${GO_TAR}"
