@@ -38,6 +38,15 @@ func ConnectAdmin(host string, port int) (*gorm.DB, error) {
 	return db, nil
 }
 
+// DropDatabase drops the named database if it exists.
+func DropDatabase(adminDB *gorm.DB, name string) error {
+	sql := fmt.Sprintf("DROP DATABASE IF EXISTS `%s`", name)
+	if err := adminDB.Exec(sql).Error; err != nil {
+		return fmt.Errorf("db: drop database %s: %w", name, err)
+	}
+	return nil
+}
+
 // CreateDatabase creates the named database if it doesn't already exist.
 func CreateDatabase(adminDB *gorm.DB, name string) error {
 	sql := fmt.Sprintf("CREATE DATABASE IF NOT EXISTS `%s`", name)
