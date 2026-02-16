@@ -1,14 +1,16 @@
 # Tutorial: Build a Todo App with Railyard
 
-This tutorial walks you through building a Go-based Todo List API using Railyard to orchestrate multiple Claude Code agents. By the end, you'll have working code written by AI agents — coordinated, tested, and merged automatically.
+This tutorial walks you through building a Todo List API using Railyard to orchestrate multiple Claude Code agents. The example uses a Dispatch session to plan the work — just describe what you want, and Railyard decomposes it into tasks, manages dependencies, and coordinates parallel agents to build it.
+
+**Railyard is language-agnostic.** This tutorial shows config examples for Go, PHP, and Node.js. Pick your stack — the workflow is the same.
 
 **What you'll learn:**
-- Setting up a project for Railyard
-- Breaking work into cars with dependencies
-- Starting engines and watching them build your app
-- Monitoring progress and handling completions
+- Configuring Railyard for any language
+- Using Dispatch to plan work through conversation
+- How engines claim cars, work in parallel, and merge results
+- Monitoring progress and verifying the build
 
-**Time:** ~15 minutes of setup, then sit back and watch.
+**Time:** ~10 minutes of setup, then sit back and watch.
 
 ---
 
@@ -20,7 +22,7 @@ Before starting, make sure you have:
 - **Dolt** running on port 3306 (or whichever port you configured)
 - **Claude Code CLI** installed (`npm install -g @anthropic-ai/claude-code`)
 - **tmux** installed
-- **Go 1.25+** installed
+- Your language toolchain installed (Go, PHP, Node.js, etc.)
 - An initialized Railyard database (`ry db init`)
 
 If you haven't done any of this yet, the fastest path is:
@@ -34,29 +36,38 @@ cd /path/to/railyard
 
 ## Step 1: Create Your Project
 
-Start by creating a new Go project for the Todo app.
+Start with an empty project and a git repo. Here are examples for different languages:
 
+**Go:**
 ```bash
-mkdir -p ~/projects/todo-app
-cd ~/projects/todo-app
-
+mkdir -p ~/projects/todo-app && cd ~/projects/todo-app
 go mod init github.com/yourname/todo-app
-git init
-git commit --allow-empty -m "Initial commit"
+git init && git commit --allow-empty -m "Initial commit"
 ```
 
-Create a basic project structure:
-
+**PHP (Laravel):**
 ```bash
-mkdir -p cmd/server internal/todo
+composer create-project laravel/laravel ~/projects/todo-app
+cd ~/projects/todo-app
+git init && git add -A && git commit -m "Initial commit"
+```
+
+**Node.js (Express):**
+```bash
+mkdir -p ~/projects/todo-app && cd ~/projects/todo-app
+npm init -y && npm install express
+git init && git commit --allow-empty -m "Initial commit"
 ```
 
 ---
 
 ## Step 2: Configure Railyard
 
-Create a `railyard.yaml` in your project root. This tells Railyard about your project structure, tracks, and conventions.
+Create a `railyard.yaml` in your project root. This tells Railyard about your project structure, language conventions, and how to run tests.
 
+Pick the config for your language:
+
+### Go
 ```yaml
 owner: yourname
 repo: ~/projects/todo-app
@@ -70,6 +81,7 @@ tracks:
     language: go
     file_patterns: ["cmd/**", "internal/**", "*.go"]
     engine_slots: 2
+    test_command: "go test ./..."
     conventions:
       go_version: "1.25"
       style: "stdlib-first, no frameworks"
@@ -77,10 +89,59 @@ tracks:
       patterns: "net/http for routing, encoding/json for serialization"
 ```
 
-Key choices here:
-- **`engine_slots: 2`** — up to 2 agents work in parallel on backend tasks
-- **`conventions`** — tells agents your preferred style. They'll follow these when writing code
-- **`file_patterns`** — scopes what files belong to this track
+### PHP (Laravel)
+```yaml
+owner: yourname
+repo: ~/projects/todo-app
+
+dolt:
+  host: 127.0.0.1
+  port: 3306
+
+tracks:
+  - name: backend
+    language: php
+    file_patterns: ["app/**", "routes/**", "database/**", "tests/**"]
+    engine_slots: 2
+    test_command: "php artisan test"
+    conventions:
+      framework: "Laravel 11"
+      style: "PSR-12, Eloquent ORM"
+      test_framework: "PHPUnit with Laravel test helpers"
+      patterns: "Resource controllers, Form Requests for validation, API Resources for responses"
+```
+
+### Node.js (Express)
+```yaml
+owner: yourname
+repo: ~/projects/todo-app
+
+dolt:
+  host: 127.0.0.1
+  port: 3306
+
+tracks:
+  - name: backend
+    language: javascript
+    file_patterns: ["src/**", "routes/**", "*.js"]
+    engine_slots: 2
+    test_command: "npm test"
+    conventions:
+      runtime: "Node.js 22"
+      framework: "Express 5"
+      style: "ES modules, async/await"
+      test_framework: "Jest with supertest"
+      patterns: "Router middleware, express-validator, JSON responses"
+```
+
+### Key fields explained
+
+| Field | Purpose |
+|---|---|
+| `engine_slots` | Max parallel agents on this track |
+| `test_command` | Shell command Yardmaster runs before merging (defaults to `go test ./...` if unset) |
+| `conventions` | Free-form metadata passed to agents as context — they follow these when writing code |
+| `file_patterns` | Scopes what files belong to this track |
 
 ---
 
@@ -102,160 +163,99 @@ You should see an empty dashboard — no cars, no engines, ready to go.
 
 ---
 
-## Step 4: Plan Your Work — Create Cars
+## Step 4: Start Railyard and Plan with Dispatch
 
-Now the fun part. Think about what a Todo API needs, then create cars (work items) for each piece. The key is structuring them with **dependencies** so Railyard builds things in the right order.
-
-Here's our plan:
-
-```
-1. Todo model & in-memory store     (no dependencies — start here)
-2. GET /todos endpoint              (depends on #1)
-3. POST /todos endpoint             (depends on #1)
-4. DELETE /todos/:id endpoint       (depends on #1)
-5. Main server entrypoint           (depends on #2, #3, #4)
-```
-
-### Create the foundation car
-
-```bash
-ry car create -c railyard.yaml \
-  --title "Add Todo model and in-memory store" \
-  --track backend \
-  --type task \
-  --priority 0 \
-  --description "Create internal/todo/model.go with a Todo struct (ID, Title, Done, CreatedAt). Create internal/todo/store.go with an in-memory Store that supports Add, List, Get, Delete, and Toggle operations. Use a sync.Mutex for thread safety. Include unit tests in store_test.go with table-driven tests for all operations."
-```
-
-The output will show the car ID (e.g., `car-a1b2c`). Save it — you'll need it for dependencies.
-
-```bash
-# Save the ID (your actual ID will differ)
-MODEL_CAR=car-a1b2c
-```
-
-### Create the endpoint cars
-
-```bash
-GET_CAR=$(ry car create -c railyard.yaml \
-  --title "Add GET /todos endpoint" \
-  --track backend \
-  --type task \
-  --priority 1 \
-  --description "Create internal/todo/handlers.go with a HandleListTodos function. It should return all todos as JSON (200 OK). Wire it to GET /todos. Include a test in handlers_test.go using httptest." \
-  2>&1 | grep -oP 'car-\w+')
-
-POST_CAR=$(ry car create -c railyard.yaml \
-  --title "Add POST /todos endpoint" \
-  --track backend \
-  --type task \
-  --priority 1 \
-  --description "Add HandleCreateTodo to internal/todo/handlers.go. Accept JSON body with a 'title' field, create the todo in the store, return 201 with the created todo as JSON. Return 400 for missing/empty title. Include tests." \
-  2>&1 | grep -oP 'car-\w+')
-
-DELETE_CAR=$(ry car create -c railyard.yaml \
-  --title "Add DELETE /todos/:id endpoint" \
-  --track backend \
-  --type task \
-  --priority 1 \
-  --description "Add HandleDeleteTodo to internal/todo/handlers.go. Parse the todo ID from the URL path, delete from the store, return 204 on success and 404 if not found. Include tests." \
-  2>&1 | grep -oP 'car-\w+')
-
-SERVER_CAR=$(ry car create -c railyard.yaml \
-  --title "Add main server entrypoint" \
-  --track backend \
-  --type task \
-  --priority 2 \
-  --description "Create cmd/server/main.go. Set up an HTTP server on :8080 with routes: GET /todos, POST /todos, DELETE /todos/{id}. Use the todo.Store and handler functions from internal/todo/. Print a startup message with the port. Include a health check at GET /health returning 200 OK." \
-  2>&1 | grep -oP 'car-\w+')
-```
-
-### Set up dependencies
-
-The endpoint cars depend on the model, and the server depends on the endpoints:
-
-```bash
-# Endpoints depend on the model
-ry car dep add -c railyard.yaml "$GET_CAR" --blocked-by "$MODEL_CAR"
-ry car dep add -c railyard.yaml "$POST_CAR" --blocked-by "$MODEL_CAR"
-ry car dep add -c railyard.yaml "$DELETE_CAR" --blocked-by "$MODEL_CAR"
-
-# Server depends on all endpoints
-ry car dep add -c railyard.yaml "$SERVER_CAR" --blocked-by "$GET_CAR"
-ry car dep add -c railyard.yaml "$SERVER_CAR" --blocked-by "$POST_CAR"
-ry car dep add -c railyard.yaml "$SERVER_CAR" --blocked-by "$DELETE_CAR"
-```
-
-### Verify the plan
-
-```bash
-ry car list -c railyard.yaml
-```
-
-You should see all 5 cars. Check what's ready to work:
-
-```bash
-ry car ready -c railyard.yaml --track backend
-```
-
-Only the model car should be ready — everything else is blocked.
-
----
-
-## Step 5: Start Railyard
-
-Launch the full orchestration:
+Instead of manually creating cars, we'll use **Dispatch** — Railyard's planning agent. Start the full orchestration:
 
 ```bash
 ry start -c railyard.yaml --engines 2
 ```
 
-This creates a tmux session with:
-- **Dispatch** pane — the planning agent (you can talk to it to add more work)
-- **Yardmaster** pane — the supervisor (monitors engines, merges branches, runs tests)
-- **Engine 0 & 1** — worker agents that claim and execute cars
+This launches a tmux session with four panes:
+- **Dispatch** — the planning agent (you talk to this one)
+- **Yardmaster** — the supervisor (monitors, tests, merges)
+- **Engine 0 & Engine 1** — worker agents (claim and execute cars)
 
-### Watch the action
+### Attach and talk to Dispatch
 
 ```bash
 tmux attach -t railyard
 ```
 
-Use `Ctrl-b` then arrow keys to switch between panes. Use `Ctrl-b d` to detach.
+Navigate to the **Dispatch pane** (use `Ctrl-b` then arrow keys). You'll see an interactive Claude Code session. Tell it what you want to build:
+
+```
+Build a Todo List API with these endpoints:
+- GET /todos (list all)
+- POST /todos (create, requires title)
+- DELETE /todos/:id (delete by ID)
+- GET /health (health check)
+
+Include an in-memory store, tests for everything, and a main entrypoint
+that starts a server on port 8080.
+```
+
+### What Dispatch does
+
+Dispatch reads your `railyard.yaml` (language, conventions, patterns) and automatically:
+
+1. **Creates an epic** for the feature
+2. **Decomposes** it into atomic tasks — typically:
+   - Data model / store (foundation)
+   - Individual endpoint handlers (can parallelize)
+   - Main entrypoint / wiring (depends on handlers)
+3. **Sets dependencies** — endpoints blocked by model, server blocked by endpoints
+4. **Sets priorities** — foundation at P0, endpoints at P1, integration at P2
+
+You'll see Dispatch run `ry car create` and `ry car dep add` commands in real time. It uses your language and conventions to tailor descriptions — a PHP decomposition will reference Eloquent models and Laravel routes, while a Go one will reference structs and net/http.
+
+### Verify the plan
+
+After Dispatch finishes, check the cars from another terminal:
+
+```bash
+# See all created cars
+ry car list -c railyard.yaml
+
+# See what's ready for engines to claim
+ry car ready -c railyard.yaml --track backend
+```
+
+Only the foundation car (model/store) should be ready — everything else is blocked by dependencies.
 
 ---
 
-## Step 6: Watch the Build Unfold
+## Step 5: Watch the Build Unfold
 
-Here's what happens automatically:
+Once Dispatch creates the cars, engines pick them up immediately. Here's the automated flow:
 
 ### Phase 1: Foundation
-1. **Engine 0** claims "Add Todo model and in-memory store" (the only ready car)
+1. **Engine 0** claims the model/store car (the only one with no blockers)
 2. Engine 1 has nothing to do yet — it polls and waits
-3. Engine 0 spawns a Claude Code session on branch `ry/yourname/backend/car-a1b2c`
-4. The agent writes `model.go`, `store.go`, and `store_test.go`
+3. Engine 0 spawns a Claude Code session on an isolated branch
+4. The agent writes the data model, store logic, and tests
 5. Agent calls `ry complete` when done
 
-### Phase 2: Merge & Unblock
+### Phase 2: Merge and Unblock
 6. **Yardmaster** notices the completed car
-7. Runs `go test ./...` on the branch
+7. Runs your `test_command` on the branch
 8. Tests pass — merges branch to main via `ry switch`
-9. Three endpoint cars are now **unblocked** and become ready
+9. Endpoint cars are now **unblocked** and become ready
 
 ### Phase 3: Parallel Work
-10. **Engine 0** claims GET endpoint, **Engine 1** claims POST endpoint
+10. **Engine 0** claims one endpoint, **Engine 1** claims another
 11. Both work in parallel on separate branches — no conflicts
-12. As each completes, Yardmaster merges them
-13. DELETE endpoint gets picked up next
+12. As each completes, Yardmaster tests and merges
+13. Remaining endpoints get picked up
 
 ### Phase 4: Final Assembly
-14. Once all three endpoints are merged, the server car unblocks
-15. An engine claims it, writes `cmd/server/main.go`
+14. Once all endpoints are merged, the server entrypoint car unblocks
+15. An engine claims it, writes the main entry point and routing
 16. Yardmaster merges the final piece
 
 ### Monitor progress
 
-While this is running, you can check on things from another terminal:
+While engines work, check on things from another terminal:
 
 ```bash
 # Dashboard view
@@ -271,44 +271,39 @@ ry engine list -c railyard.yaml
 ry car show <car-id> -c railyard.yaml
 ```
 
+Or watch the tmux panes directly — you'll see agents writing code in real time.
+
 ---
 
-## Step 7: Verify the Result
+## Step 6: Verify the Result
 
-Once all cars are done, check the final state:
+Once all cars show status `done`:
 
 ```bash
 ry car list -c railyard.yaml
 ```
 
-All 5 cars should show status `done`. Your project now has:
-
-```
-todo-app/
-  cmd/server/main.go          # HTTP server on :8080
-  internal/todo/
-    model.go                   # Todo struct
-    store.go                   # In-memory store with mutex
-    store_test.go              # Table-driven tests for store
-    handlers.go                # HTTP handlers (list, create, delete)
-    handlers_test.go           # Handler tests with httptest
-  go.mod
-  railyard.yaml
-```
-
 Run the tests yourself:
 
+**Go:**
 ```bash
 go test ./...
-```
-
-Start the server:
-
-```bash
 go run ./cmd/server/
 ```
 
-Test it:
+**PHP:**
+```bash
+php artisan test
+php artisan serve
+```
+
+**Node.js:**
+```bash
+npm test
+node src/index.js
+```
+
+Test the API:
 
 ```bash
 # Create a todo
@@ -319,13 +314,16 @@ curl -X POST http://localhost:8080/todos \
 # List all todos
 curl http://localhost:8080/todos
 
-# Delete a todo (use the ID from the create response)
+# Delete a todo
 curl -X DELETE http://localhost:8080/todos/<id>
+
+# Health check
+curl http://localhost:8080/health
 ```
 
 ---
 
-## Step 8: Stop Railyard
+## Step 7: Stop Railyard
 
 When you're done:
 
@@ -339,64 +337,70 @@ This gracefully shuts down all engines, Dispatch, and Yardmaster.
 
 ## Tips and Next Steps
 
-### Writing Good Car Descriptions
+### Dispatch vs. Manual Car Creation
 
-The quality of agent output depends heavily on your car descriptions. Good descriptions:
-- **State the goal clearly** — what should exist when the car is done?
-- **Specify the file paths** — agents work faster when they know where to put things
-- **Include conventions** — "use table-driven tests", "return JSON", "handle errors with HTTP status codes"
-- **Define edge cases** — "return 400 for empty title", "return 404 if not found"
+**Use Dispatch** (recommended for most work):
+- Describe what you want in natural language
+- Dispatch handles decomposition, dependencies, and priorities
+- Best for features, epics, and multi-step work
 
-### Dependency Strategy
+**Use manual `ry car create`** when you want precise control:
+- One-off bug fixes with specific instructions
+- Adding a single well-defined task
+- Scripted/automated workflows
 
-- **Layer dependencies by data flow** — models first, then logic, then integration
-- **Parallelize where possible** — independent endpoints can run simultaneously
-- **Keep cars focused** — one concern per car. Smaller cars complete faster and merge cleaner
+### Iterating on Completed Work
 
-### Scaling Up
+After the initial build, talk to Dispatch again:
 
-For larger projects, consider multiple tracks:
+```
+Add a PUT /todos/:id endpoint that toggles the done status.
+Also add a PATCH /todos/:id endpoint for updating the title.
+```
+
+Or create a car directly:
+
+```bash
+ry car create -c railyard.yaml \
+  --title "Add PUT /todos/:id for toggling done" \
+  --track backend \
+  --type task \
+  --priority 1 \
+  --description "Toggle the Done field. Return updated todo (200) or 404."
+```
+
+Engines pick up new cars automatically while Railyard is running.
+
+### Multi-Track Projects
+
+For full-stack apps, define multiple tracks:
 
 ```yaml
 tracks:
   - name: backend
-    language: go
-    file_patterns: ["cmd/**", "internal/**", "*.go"]
+    language: php
+    file_patterns: ["app/**", "routes/**", "database/**", "tests/**"]
     engine_slots: 2
+    test_command: "php artisan test"
+    conventions:
+      framework: "Laravel 11"
 
   - name: frontend
     language: typescript
-    file_patterns: ["web/**", "*.ts", "*.tsx"]
+    file_patterns: ["resources/js/**", "*.ts", "*.tsx", "*.vue"]
     engine_slots: 2
-
-  - name: infra
-    language: mixed
-    file_patterns: ["Dockerfile", "docker-compose.yaml", ".github/**"]
-    engine_slots: 1
+    test_command: "npm test"
+    conventions:
+      framework: "Vue 3"
+      styling: "Tailwind CSS"
 ```
 
-### Using Dispatch for Planning
+Dispatch automatically creates cross-track dependencies when needed (e.g., frontend login page blocked by backend auth endpoint).
 
-Instead of manually creating cars, you can talk to the Dispatch agent:
+### Writing Good Car Descriptions
 
-```bash
-tmux attach -t railyard
-# Switch to the Dispatch pane (Ctrl-b, arrow keys)
-```
-
-Tell Dispatch what you want to build, and it will decompose your request into structured cars with dependencies automatically.
-
-### Iterating on Completed Work
-
-After the initial build, you can create new cars for enhancements:
-
-```bash
-ry car create -c railyard.yaml \
-  --title "Add PUT /todos/:id endpoint for toggling done status" \
-  --track backend \
-  --type task \
-  --priority 1 \
-  --description "Add HandleToggleTodo to handlers.go. PUT /todos/{id} toggles the Done field. Return the updated todo as JSON (200) or 404 if not found. Include tests."
-```
-
-Engines will pick it up automatically if Railyard is still running, or on the next `ry start`.
+Whether Dispatch generates them or you write them manually, good descriptions:
+- **State the goal clearly** — what should exist when the car is done?
+- **Specify file paths** — agents work faster when they know where to put things
+- **Include conventions** — "use Eloquent", "use table-driven tests", "return JSON"
+- **Define edge cases** — "return 400 for empty title", "return 404 if not found"

@@ -209,6 +209,7 @@ tracks:
     language: go
     file_patterns: ["cmd/**", "internal/**", "pkg/**", "*.go"]
     engine_slots: 2                     # Max concurrent engines on this track
+    test_command: "go test ./..."       # Command to validate before merge (default: go test ./...)
     conventions:
       go_version: "1.25"
       style: "stdlib-first, no frameworks"
@@ -218,6 +219,7 @@ tracks:
     language: typescript
     file_patterns: ["src/**", "*.ts", "*.tsx", "*.css"]
     engine_slots: 2
+    test_command: "npm test"            # Any shell command works
     conventions:
       framework: "Next.js 15"
       styling: "Tailwind CSS"

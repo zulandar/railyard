@@ -13,8 +13,9 @@ import (
 
 // SwitchOpts holds parameters for the switch (merge) operation.
 type SwitchOpts struct {
-	RepoDir string // working directory
-	DryRun  bool   // run tests but don't merge
+	RepoDir     string // working directory
+	DryRun      bool   // run tests but don't merge
+	TestCommand string // per-track test command (e.g. "go test ./...", "phpunit", "npm test")
 }
 
 // SwitchResult contains the outcome of a switch operation.
@@ -65,7 +66,7 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 	}
 
 	// Run tests on the branch.
-	testOutput, testErr := runTests(opts.RepoDir, car.Branch, car.Track)
+	testOutput, testErr := runTests(opts.RepoDir, car.Branch, opts.TestCommand)
 	result.TestOutput = testOutput
 
 	if testErr != nil {
@@ -163,7 +164,7 @@ func gitFetch(repoDir string) error {
 }
 
 // runTests checks out the branch and runs the test suite.
-func runTests(repoDir, branch, track string) (string, error) {
+func runTests(repoDir, branch, testCommand string) (string, error) {
 	// Checkout the branch.
 	checkout := exec.Command("git", "checkout", branch)
 	checkout.Dir = repoDir
@@ -171,9 +172,11 @@ func runTests(repoDir, branch, track string) (string, error) {
 		return string(out), fmt.Errorf("git checkout %s: %w", branch, err)
 	}
 
-	// Run tests — use go test for go tracks, npm test for others.
-	var testCmd *exec.Cmd
-	testCmd = exec.Command("go", "test", "./...")
+	// Run the track's configured test command, defaulting to "go test ./...".
+	if testCommand == "" {
+		testCommand = "go test ./..."
+	}
+	testCmd := exec.Command("sh", "-c", testCommand)
 	testCmd.Dir = repoDir
 
 	out, err := testCmd.CombinedOutput()

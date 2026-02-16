@@ -39,6 +39,7 @@ type TrackConfig struct {
 	Language     string                 `yaml:"language"`
 	FilePatterns []string               `yaml:"file_patterns"`
 	EngineSlots  int                    `yaml:"engine_slots"`
+	TestCommand  string                 `yaml:"test_command"`
 	Conventions  map[string]interface{} `yaml:"conventions"`
 }
 
