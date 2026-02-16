@@ -26,11 +26,65 @@ fail()  { printf "${RED}[error]${NC} %s\n" "$1"; exit 1; }
 
 check_cmd() { command -v "$1" &>/dev/null; }
 
+# Check if a port is listening. Falls back through ss → lsof → netstat → /dev/tcp.
+check_port() {
+    local port=$1
+    if command -v ss &>/dev/null; then
+        ss -tlnp 2>/dev/null | grep -q ":${port} "
+    elif command -v lsof &>/dev/null; then
+        lsof -iTCP:"${port}" -sTCP:LISTEN &>/dev/null 2>&1
+    elif command -v netstat &>/dev/null; then
+        netstat -tlnp 2>/dev/null | grep -q ":${port} "
+    else
+        (echo > "/dev/tcp/127.0.0.1/${port}") 2>/dev/null
+    fi
+}
+
+# Check if a specific process owns a port (best-effort, needs ss -p or lsof).
+check_port_process() {
+    local port=$1 process=$2
+    if command -v ss &>/dev/null; then
+        ss -tlnp 2>/dev/null | grep ":${port} " | grep -q "${process}"
+    elif command -v lsof &>/dev/null; then
+        lsof -iTCP:"${port}" -sTCP:LISTEN 2>/dev/null | grep -q "${process}"
+    elif command -v netstat &>/dev/null; then
+        netstat -tlnp 2>/dev/null | grep ":${port} " | grep -q "${process}"
+    else
+        return 1  # Can't determine process — assume not ours.
+    fi
+}
+
+# Test that Dolt is actually query-ready, not just listening.
+check_dolt_ready() {
+    local host=$1 port=$2
+    if command -v mysql &>/dev/null; then
+        mysql -h "$host" -P "$port" -u root -e 'SELECT 1' &>/dev/null 2>&1
+    else
+        # TCP-level connect — confirms server accepts connections.
+        (echo > "/dev/tcp/$host/$port") 2>/dev/null
+    fi
+}
+
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ ! -f "${REPO_DIR}/go.mod" ]; then
     fail "Run this from the railyard repo root."
 fi
 cd "${REPO_DIR}"
+
+# ─── Cleanup trap ───────────────────────────────────────────────────────────
+# If the script fails midway, stop any Dolt we started so it doesn't orphan.
+
+SCRIPT_SUCCESS=false
+DOLT_STARTED_BY_US=false
+DOLT_PORT=3306  # May be overridden later by port conflict detection.
+
+cleanup() {
+    if ! $SCRIPT_SUCCESS && $DOLT_STARTED_BY_US; then
+        warn "Script failed — stopping Dolt server we started on port ${DOLT_PORT}..."
+        pkill -f "dolt sql-server.*--port ${DOLT_PORT}" 2>/dev/null || true
+    fi
+}
+trap cleanup EXIT
 
 echo ""
 echo "╔══════════════════════════════════════════════════════╗"
@@ -41,6 +95,9 @@ echo ""
 # ─── Step 1: Check / install prerequisites ────────────────────────────────────
 
 info "Checking prerequisites..."
+
+# curl is needed to install Go and Dolt.
+check_cmd curl || fail "curl is required but not found. Install: sudo apt-get install curl"
 
 if ! check_cmd go; then
     warn "Go not found. Installing Go 1.25..."
@@ -115,19 +172,18 @@ fi
 
 # Start Dolt if not already running.
 # Check for port conflicts — if something else (e.g. MySQL) occupies 3306, use 3307.
-DOLT_PORT=3306
 DOLT_RUNNING=false
 
-if ss -tlnp 2>/dev/null | grep -q ":3306 "; then
+if check_port 3306; then
     # Something is on 3306 — check if it's actually Dolt.
-    if ss -tlnp 2>/dev/null | grep ":3306 " | grep -q "dolt"; then
+    if check_port_process 3306 "dolt"; then
         DOLT_RUNNING=true
     else
         warn "Port 3306 is in use by another process (MySQL/MariaDB?)."
         warn "Switching Dolt to port 3307."
         DOLT_PORT=3307
-        if ss -tlnp 2>/dev/null | grep -q ":3307 "; then
-            if ss -tlnp 2>/dev/null | grep ":3307 " | grep -q "dolt"; then
+        if check_port 3307; then
+            if check_port_process 3307 "dolt"; then
                 DOLT_RUNNING=true
             else
                 fail "Ports 3306 and 3307 are both in use by non-Dolt processes. Free one and retry."
@@ -140,13 +196,18 @@ if ! $DOLT_RUNNING; then
     info "Starting Dolt server on port ${DOLT_PORT}..."
     mkdir -p "${HOME}/.railyard"
     (cd "${DOLT_DATA}" && nohup dolt sql-server --host 127.0.0.1 --port "${DOLT_PORT}" > "${HOME}/.railyard/dolt.log" 2>&1 &)
-    for i in $(seq 1 15); do
-        ss -tlnp 2>/dev/null | grep -q ":${DOLT_PORT} " && break
+    DOLT_STARTED_BY_US=true
+    READY=false
+    for i in $(seq 1 20); do
+        if check_dolt_ready 127.0.0.1 "${DOLT_PORT}"; then
+            READY=true
+            break
+        fi
         sleep 1
     done
-    ss -tlnp 2>/dev/null | grep -q ":${DOLT_PORT} " || fail "Dolt failed to start on port ${DOLT_PORT}. Check ~/.railyard/dolt.log"
+    $READY || fail "Dolt failed to become ready on port ${DOLT_PORT}. Check ~/.railyard/dolt.log"
 fi
-ok "Dolt server running on port ${DOLT_PORT}"
+ok "Dolt server running and ready on port ${DOLT_PORT}"
 
 # ─── Step 5: Create railyard.yaml ─────────────────────────────────────────────
 
@@ -182,6 +243,8 @@ info "Initializing database..."
 ok "Database ready"
 
 # ─── Done ─────────────────────────────────────────────────────────────────────
+
+SCRIPT_SUCCESS=true
 
 echo ""
 echo "╔══════════════════════════════════════════════════════╗"

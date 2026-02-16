@@ -37,11 +37,49 @@ fail()  { printf "${RED}[error]${NC} %s\n" "$1"; exit 1; }
 
 check_cmd() { command -v "$1" &>/dev/null; }
 
+# Check if a port is listening. Falls back through ss → lsof → netstat → /dev/tcp.
+check_port() {
+    local port=$1
+    if command -v ss &>/dev/null; then
+        ss -tlnp 2>/dev/null | grep -q ":${port} "
+    elif command -v lsof &>/dev/null; then
+        lsof -iTCP:"${port}" -sTCP:LISTEN &>/dev/null 2>&1
+    elif command -v netstat &>/dev/null; then
+        netstat -tlnp 2>/dev/null | grep -q ":${port} "
+    else
+        (echo > "/dev/tcp/127.0.0.1/${port}") 2>/dev/null
+    fi
+}
+
+# Test that Dolt is actually query-ready, not just listening.
+check_dolt_ready() {
+    local host=$1 port=$2
+    if command -v mysql &>/dev/null; then
+        mysql -h "$host" -P "$port" -u root -e 'SELECT 1' &>/dev/null 2>&1
+    else
+        # TCP-level connect — confirms server accepts connections.
+        (echo > "/dev/tcp/$host/$port") 2>/dev/null
+    fi
+}
+
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TEST_DIR="/tmp/railyard-test"
 PROJECT_DIR="${TEST_DIR}/project"
 DOLT_DATA="${TEST_DIR}/dolt-data"
 DOLT_PORT=3307
+
+# ─── Cleanup trap ───────────────────────────────────────────────────────────
+
+SCRIPT_SUCCESS=false
+DOLT_STARTED_BY_US=false
+
+cleanup() {
+    if ! $SCRIPT_SUCCESS && $DOLT_STARTED_BY_US; then
+        warn "Script failed — stopping Dolt server we started on port ${DOLT_PORT}..."
+        pkill -f "dolt sql-server.*--port ${DOLT_PORT}" 2>/dev/null || true
+    fi
+}
+trap cleanup EXIT
 
 # ─── Handle --clean flag ─────────────────────────────────────────────────────
 
@@ -96,7 +134,7 @@ ok "Built ry"
 
 # ─── Step 3: Clean previous test env (if any) ────────────────────────────────
 
-if pgrep -f "dolt sql-server.*--port ${DOLT_PORT}" > /dev/null 2>&1; then
+if check_port "${DOLT_PORT}"; then
     info "Stopping previous Dolt on port ${DOLT_PORT}..."
     pkill -f "dolt sql-server.*--port ${DOLT_PORT}" 2>/dev/null || true
     sleep 2
@@ -166,17 +204,18 @@ info "Initializing Dolt..."
 
 info "Starting Dolt server on port ${DOLT_PORT}..."
 (cd "${DOLT_DATA}" && nohup dolt sql-server --host 127.0.0.1 --port "${DOLT_PORT}" > "${TEST_DIR}/dolt.log" 2>&1 &)
+DOLT_STARTED_BY_US=true
 
 READY=false
 for i in $(seq 1 20); do
-    if ss -tlnp 2>/dev/null | grep -q ":${DOLT_PORT} "; then
+    if check_dolt_ready 127.0.0.1 "${DOLT_PORT}"; then
         READY=true
         break
     fi
     sleep 1
 done
-$READY || fail "Dolt failed to start. Check ${TEST_DIR}/dolt.log"
-ok "Dolt running on port ${DOLT_PORT}"
+$READY || fail "Dolt failed to become ready. Check ${TEST_DIR}/dolt.log"
+ok "Dolt running and ready on port ${DOLT_PORT}"
 
 # ─── Step 7: Initialize database ─────────────────────────────────────────────
 
@@ -235,6 +274,8 @@ else
 fi
 
 # ─── Done ─────────────────────────────────────────────────────────────────────
+
+SCRIPT_SUCCESS=true
 
 echo ""
 echo "╔══════════════════════════════════════════════════════╗"
