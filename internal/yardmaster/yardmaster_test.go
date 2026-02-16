@@ -1,6 +1,7 @@
 package yardmaster
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -19,7 +20,7 @@ func testConfig(tracks ...config.TrackConfig) *config.Config {
 // --- Start validation tests ---
 
 func TestStart_NilConfig(t *testing.T) {
-	err := Start(StartOpts{Config: nil})
+	err := Start(context.Background(), StartOpts{Config: nil})
 	if err == nil {
 		t.Fatal("expected error for nil config")
 	}
@@ -30,7 +31,7 @@ func TestStart_NilConfig(t *testing.T) {
 
 func TestStart_NoTracks(t *testing.T) {
 	cfg := testConfig()
-	err := Start(StartOpts{Config: cfg})
+	err := Start(context.Background(), StartOpts{Config: cfg})
 	if err == nil {
 		t.Fatal("expected error for no tracks")
 	}
@@ -39,17 +40,26 @@ func TestStart_NoTracks(t *testing.T) {
 	}
 }
 
-func TestStart_ValidConfig_FailsOnClaude(t *testing.T) {
-	cfg := testConfig(config.TrackConfig{
-		Name:     "backend",
-		Language: "go",
-	})
-	err := Start(StartOpts{Config: cfg})
+func TestStart_NilDB(t *testing.T) {
+	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
+	err := Start(context.Background(), StartOpts{Config: cfg, DB: nil, RepoDir: "/tmp"})
 	if err == nil {
-		t.Fatal("expected error (claude binary not available in test)")
+		t.Fatal("expected error for nil db")
 	}
-	if !strings.Contains(err.Error(), "claude session") {
-		t.Errorf("error = %q, want to contain %q", err.Error(), "claude session")
+	if !strings.Contains(err.Error(), "db is required") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "db is required")
+	}
+}
+
+func TestStart_EmptyRepoDir(t *testing.T) {
+	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
+	err := Start(context.Background(), StartOpts{Config: cfg, DB: nil, RepoDir: ""})
+	if err == nil {
+		t.Fatal("expected error for empty repoDir")
+	}
+	// DB check comes before repoDir check.
+	if !strings.Contains(err.Error(), "db is required") {
+		t.Errorf("error = %q", err)
 	}
 }
 
@@ -202,52 +212,11 @@ func TestRenderPrompt_MultipleTracksRendered(t *testing.T) {
 	}
 }
 
-// --- BuildCommand tests ---
-
-func TestBuildCommand_Args(t *testing.T) {
-	cmd := BuildCommand("test prompt")
-	if cmd.Path == "" {
-		t.Fatal("command path is empty")
-	}
-	args := cmd.Args
-
-	// Find required flags.
-	foundSkipPerms := false
-	foundSP := false
-	foundP := false
-	for i, a := range args {
-		if a == "--dangerously-skip-permissions" {
-			foundSkipPerms = true
-		}
-		if a == "--system-prompt" && i+1 < len(args) {
-			foundSP = true
-			if args[i+1] != "test prompt" {
-				t.Errorf("--system-prompt value = %q, want %q", args[i+1], "test prompt")
-			}
-		}
-		if a == "-p" && i+1 < len(args) {
-			foundP = true
-			if args[i+1] == "" {
-				t.Error("-p value should not be empty")
-			}
-		}
-	}
-	if !foundSkipPerms {
-		t.Error("--dangerously-skip-permissions flag not found in args")
-	}
-	if !foundSP {
-		t.Error("--system-prompt flag not found in args")
-	}
-	if !foundP {
-		t.Error("-p flag not found in args")
-	}
-}
-
 // --- StartOpts tests ---
 
 func TestStartOpts_ZeroValue(t *testing.T) {
 	opts := StartOpts{}
-	if opts.ConfigPath != "" || opts.Config != nil {
+	if opts.ConfigPath != "" || opts.Config != nil || opts.DB != nil || opts.RepoDir != "" {
 		t.Error("zero-value StartOpts should have empty fields")
 	}
 }

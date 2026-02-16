@@ -1,0 +1,367 @@
+package yardmaster
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"log"
+	"os/exec"
+	"strings"
+	"time"
+
+	"github.com/zulandar/railyard/internal/car"
+	"github.com/zulandar/railyard/internal/config"
+	"github.com/zulandar/railyard/internal/engine"
+	"github.com/zulandar/railyard/internal/messaging"
+	"github.com/zulandar/railyard/internal/models"
+	"gorm.io/gorm"
+)
+
+const (
+	// YardmasterID is the well-known engine ID for the yardmaster.
+	YardmasterID        = "yardmaster"
+	defaultPollInterval = 30 * time.Second
+	maxTestFailures     = 2
+)
+
+// RunDaemon runs the yardmaster daemon loop. It registers the yardmaster in the
+// engines table, starts a heartbeat, and loops through inbox processing, stale
+// engine detection, completed car switching, and blocked car unblocking.
+func RunDaemon(ctx context.Context, db *gorm.DB, cfg *config.Config, repoDir string, pollInterval time.Duration, out io.Writer) error {
+	if db == nil {
+		return fmt.Errorf("yardmaster: db is required")
+	}
+	if cfg == nil {
+		return fmt.Errorf("yardmaster: config is required")
+	}
+	if repoDir == "" {
+		return fmt.Errorf("yardmaster: repoDir is required")
+	}
+	if pollInterval <= 0 {
+		pollInterval = defaultPollInterval
+	}
+	if out == nil {
+		out = io.Discard
+	}
+
+	if err := registerYardmaster(db); err != nil {
+		return fmt.Errorf("yardmaster: register: %w", err)
+	}
+	fmt.Fprintf(out, "Yardmaster registered (id=%s)\n", YardmasterID)
+
+	hbErrCh := engine.StartHeartbeat(ctx, db, YardmasterID, engine.DefaultHeartbeatInterval)
+
+	fmt.Fprintf(out, "Yardmaster daemon starting (poll every %s)...\n", pollInterval)
+
+	defer func() {
+		fmt.Fprintf(out, "Yardmaster deregistering...\n")
+		if err := engine.Deregister(db, YardmasterID); err != nil {
+			log.Printf("yardmaster deregister error: %v", err)
+		}
+		fmt.Fprintf(out, "Yardmaster stopped.\n")
+	}()
+
+	merged := make(map[string]bool)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case err := <-hbErrCh:
+			return fmt.Errorf("yardmaster: heartbeat: %w", err)
+		default:
+		}
+
+		// Phase 1: Process inbox.
+		draining, err := processInbox(ctx, db, out)
+		if err != nil {
+			log.Printf("yardmaster inbox error: %v", err)
+		}
+		if draining {
+			fmt.Fprintf(out, "Drain received, shutting down...\n")
+			return nil
+		}
+
+		// Phase 2: Handle stale engines.
+		if err := handleStaleEngines(db, out); err != nil {
+			log.Printf("yardmaster stale engines error: %v", err)
+		}
+
+		// Phase 3: Handle completed cars.
+		if err := handleCompletedCars(ctx, db, cfg, repoDir, out, merged); err != nil {
+			log.Printf("yardmaster completed cars error: %v", err)
+		}
+
+		// Phase 4: Handle blocked cars (safety-net sweep).
+		if err := handleBlockedCars(db, out); err != nil {
+			log.Printf("yardmaster blocked cars error: %v", err)
+		}
+
+		sleepWithContext(ctx, pollInterval)
+	}
+}
+
+// registerYardmaster creates or updates the yardmaster engine record.
+func registerYardmaster(db *gorm.DB) error {
+	now := time.Now()
+	eng := models.Engine{
+		ID:           YardmasterID,
+		Track:        "*",
+		Role:         "yardmaster",
+		Status:       engine.StatusIdle,
+		StartedAt:    now,
+		LastActivity: now,
+	}
+
+	var existing models.Engine
+	result := db.Where("id = ?", YardmasterID).First(&existing)
+	if result.Error != nil {
+		return db.Create(&eng).Error
+	}
+
+	return db.Model(&models.Engine{}).Where("id = ?", YardmasterID).Updates(map[string]interface{}{
+		"status":        engine.StatusIdle,
+		"role":          "yardmaster",
+		"track":         "*",
+		"started_at":    now,
+		"last_activity": now,
+	}).Error
+}
+
+// processInbox drains the yardmaster inbox, classifying and handling each message.
+// Returns true if a drain message was received (yardmaster should shut down).
+func processInbox(ctx context.Context, db *gorm.DB, out io.Writer) (draining bool, err error) {
+	msgs, err := messaging.Inbox(db, YardmasterID)
+	if err != nil {
+		return false, err
+	}
+
+	for _, msg := range msgs {
+		subject := strings.ToLower(msg.Subject)
+
+		switch {
+		case subject == "drain":
+			ackMsg(db, msg)
+			return true, nil
+
+		case subject == "engine-stalled":
+			fmt.Fprintf(out, "Inbox: engine-stalled from %s — %s\n", msg.FromAgent, msg.Body)
+			ackMsg(db, msg)
+
+		case subject == "help" || subject == "stuck":
+			fmt.Fprintf(out, "Inbox: %s from %s (car %s) — escalating to Claude\n", subject, msg.FromAgent, msg.CarID)
+			go func(m models.Message) {
+				result, escErr := EscalateToClaude(ctx, EscalateOpts{
+					CarID:    m.CarID,
+					EngineID: m.FromAgent,
+					Reason:   m.Subject,
+					Details:  m.Body,
+					DB:       db,
+				})
+				if escErr != nil {
+					log.Printf("escalation error: %v", escErr)
+					return
+				}
+				handleEscalateResult(db, m.FromAgent, m.CarID, result, out)
+			}(msg)
+			ackMsg(db, msg)
+
+		case subject == "test-failure":
+			fmt.Fprintf(out, "Inbox: test-failure for car %s — acknowledged\n", msg.CarID)
+			ackMsg(db, msg)
+
+		case subject == "reassignment" || subject == "deps-unblocked":
+			ackMsg(db, msg)
+
+		default:
+			fmt.Fprintf(out, "Inbox: unknown subject %q from %s — acknowledged\n", msg.Subject, msg.FromAgent)
+			ackMsg(db, msg)
+		}
+	}
+
+	return false, nil
+}
+
+// ackMsg acknowledges a message, using broadcast ack for broadcast messages.
+func ackMsg(db *gorm.DB, msg models.Message) {
+	if msg.ToAgent == "broadcast" {
+		if err := messaging.AcknowledgeBroadcast(db, msg.ID, YardmasterID); err != nil {
+			log.Printf("broadcast ack error (msg %d): %v", msg.ID, err)
+		}
+	} else {
+		if err := messaging.Acknowledge(db, msg.ID); err != nil {
+			log.Printf("ack error (msg %d): %v", msg.ID, err)
+		}
+	}
+}
+
+// handleStaleEngines detects engines with stale heartbeats and reassigns their cars.
+func handleStaleEngines(db *gorm.DB, out io.Writer) error {
+	stale, err := StaleEngines(db)
+	if err != nil {
+		return err
+	}
+
+	for _, eng := range stale {
+		if eng.ID == YardmasterID {
+			continue
+		}
+
+		if eng.CurrentCar != "" {
+			fmt.Fprintf(out, "Stale engine %s has car %s — reassigning\n", eng.ID, eng.CurrentCar)
+			if err := ReassignCar(db, eng.CurrentCar, eng.ID, "stale heartbeat"); err != nil {
+				log.Printf("reassign car %s from %s: %v", eng.CurrentCar, eng.ID, err)
+			}
+		} else {
+			fmt.Fprintf(out, "Stale engine %s (idle) — marking dead\n", eng.ID)
+			db.Model(&models.Engine{}).Where("id = ?", eng.ID).Update("status", engine.StatusDead)
+		}
+	}
+
+	return nil
+}
+
+// handleCompletedCars finds cars with status "done" and runs the switch flow.
+// The merged map tracks cars already processed this session to avoid duplicates.
+func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, repoDir string, out io.Writer, merged map[string]bool) error {
+	cars, err := car.List(db, car.ListFilters{Status: "done"})
+	if err != nil {
+		return err
+	}
+
+	for _, c := range cars {
+		if merged[c.ID] {
+			continue
+		}
+
+		fmt.Fprintf(out, "Completed car %s (%s) — switching\n", c.ID, c.Title)
+
+		var testCommand string
+		for _, t := range cfg.Tracks {
+			if t.Name == c.Track {
+				testCommand = t.TestCommand
+				break
+			}
+		}
+
+		result, err := Switch(db, c.ID, SwitchOpts{
+			RepoDir:     repoDir,
+			TestCommand: testCommand,
+		})
+		if err != nil {
+			log.Printf("switch car %s: %v", c.ID, err)
+
+			failures := countRecentFailures(db, c.ID)
+			if failures >= maxTestFailures {
+				fmt.Fprintf(out, "Car %s failed tests %d times — escalating\n", c.ID, failures)
+				go func(carID string, failCount int) {
+					res, escErr := EscalateToClaude(ctx, EscalateOpts{
+						CarID:   carID,
+						Reason:  "repeated-test-failure",
+						Details: fmt.Sprintf("Car %s has failed tests %d times", carID, failCount),
+						DB:      db,
+					})
+					if escErr != nil {
+						log.Printf("escalation error for %s: %v", carID, escErr)
+						return
+					}
+					handleEscalateResult(db, "", carID, res, out)
+				}(c.ID, failures)
+			}
+			continue
+		}
+
+		if result.Merged {
+			merged[c.ID] = true
+			fmt.Fprintf(out, "Car %s merged (branch %s)\n", c.ID, result.Branch)
+
+			commitHash := getHeadCommit(repoDir)
+			if err := CreateReindexJob(db, c.Track, commitHash); err != nil {
+				log.Printf("create reindex job for %s: %v", c.Track, err)
+			}
+		} else if !result.TestsPassed {
+			fmt.Fprintf(out, "Car %s tests failed — blocked\n", c.ID)
+		}
+	}
+
+	return nil
+}
+
+// handleBlockedCars is a safety-net sweep that tries to unblock cars whose
+// dependencies may have resolved outside the normal switch flow.
+func handleBlockedCars(db *gorm.DB, out io.Writer) error {
+	doneCars, err := car.List(db, car.ListFilters{Status: "done"})
+	if err != nil {
+		return err
+	}
+
+	for _, c := range doneCars {
+		unblocked, err := UnblockDeps(db, c.ID)
+		if err != nil {
+			log.Printf("unblock deps for %s: %v", c.ID, err)
+			continue
+		}
+		for _, u := range unblocked {
+			fmt.Fprintf(out, "Unblocked car %s (dependency %s resolved)\n", u.ID, c.ID)
+		}
+	}
+
+	return nil
+}
+
+// handleEscalateResult acts on the decision returned by Claude escalation.
+func handleEscalateResult(db *gorm.DB, engineID, carID string, result *EscalateResult, out io.Writer) {
+	if result == nil {
+		return
+	}
+
+	switch result.Action {
+	case EscalateReassign:
+		fmt.Fprintf(out, "Escalation: reassigning car %s\n", carID)
+		if engineID != "" {
+			ReassignCar(db, carID, engineID, "escalation: "+result.Message)
+		}
+	case EscalateGuidance:
+		fmt.Fprintf(out, "Escalation: sending guidance to %s\n", engineID)
+		if engineID != "" {
+			messaging.Send(db, YardmasterID, engineID, "guidance", result.Message,
+				messaging.SendOpts{CarID: carID})
+		}
+	case EscalateHuman:
+		fmt.Fprintf(out, "Escalation: alerting human — %s\n", result.Message)
+		messaging.Send(db, YardmasterID, "human", "escalate", result.Message,
+			messaging.SendOpts{CarID: carID, Priority: "urgent"})
+	case EscalateRetry:
+		fmt.Fprintf(out, "Escalation: retry for car %s\n", carID)
+	case EscalateSkip:
+		fmt.Fprintf(out, "Escalation: skip for car %s\n", carID)
+	}
+}
+
+// countRecentFailures counts test-failure progress notes for a car.
+func countRecentFailures(db *gorm.DB, carID string) int {
+	var count int64
+	db.Model(&models.CarProgress{}).
+		Where("car_id = ? AND note LIKE ?", carID, "%test%fail%").
+		Count(&count)
+	return int(count)
+}
+
+// getHeadCommit returns the current HEAD commit hash, or empty string on error.
+func getHeadCommit(repoDir string) string {
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = repoDir
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// sleepWithContext sleeps for duration d, returning early if ctx is cancelled.
+func sleepWithContext(ctx context.Context, d time.Duration) {
+	select {
+	case <-ctx.Done():
+	case <-time.After(d):
+	}
+}

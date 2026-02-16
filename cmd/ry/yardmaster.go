@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/spf13/cobra"
-	"github.com/zulandar/railyard/internal/config"
 	"github.com/zulandar/railyard/internal/yardmaster"
 )
 
@@ -14,8 +16,8 @@ func newYardmasterCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "yardmaster",
-		Short: "Start the Yardmaster supervisor agent",
-		Long:  "Starts an interactive Claude Code session with the Yardmaster supervisor prompt. The Yardmaster monitors engines, merges branches, handles stalls, and manages dependencies.",
+		Short: "Start the Yardmaster supervisor daemon",
+		Long:  "Starts the yardmaster supervisor daemon loop. The yardmaster monitors engines, merges branches, handles stalls, and manages dependencies.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runYardmaster(cmd, configPath)
 		},
@@ -26,14 +28,33 @@ func newYardmasterCmd() *cobra.Command {
 }
 
 func runYardmaster(cmd *cobra.Command, configPath string) error {
-	cfg, err := config.Load(configPath)
+	cfg, gormDB, err := connectFromConfig(configPath)
 	if err != nil {
-		return fmt.Errorf("load config: %w", err)
+		return err
 	}
 
-	return yardmaster.Start(yardmaster.StartOpts{
+	repoDir, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("get working directory: %w", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		sig := <-sigCh
+		fmt.Fprintf(cmd.OutOrStdout(), "\nReceived %s, shutting down...\n", sig)
+		cancel()
+	}()
+
+	return yardmaster.Start(ctx, yardmaster.StartOpts{
 		ConfigPath: configPath,
 		Config:     cfg,
+		DB:         gormDB,
+		RepoDir:    repoDir,
+		Out:        cmd.OutOrStdout(),
 	})
 }
 
