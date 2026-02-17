@@ -3,7 +3,10 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"os"
+	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/zulandar/railyard/internal/config"
@@ -18,6 +21,7 @@ func newDBCmd() *cobra.Command {
 
 	cmd.AddCommand(newDBInitCmd())
 	cmd.AddCommand(newDBResetCmd())
+	cmd.AddCommand(newDBStartCmd())
 	return cmd
 }
 
@@ -208,6 +212,88 @@ func runDBReset(cmd *cobra.Command, configPath, dbName string, skipConfirm bool)
 
 	fmt.Fprintln(out, "\nRailyard database reset and re-initialized successfully.")
 	return nil
+}
+
+func newDBStartCmd() *cobra.Command {
+	var configPath string
+
+	cmd := &cobra.Command{
+		Use:   "start",
+		Short: "Start the Dolt SQL server",
+		Long: `Starts the Dolt SQL server using the host/port from your config.
+If Dolt is already running, reports success without starting another instance.
+Useful after a WSL reboot or system restart when the Dolt process has stopped.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runDBStart(cmd, configPath)
+		},
+	}
+
+	cmd.Flags().StringVarP(&configPath, "config", "c", "railyard.yaml", "path to Railyard config file")
+	return cmd
+}
+
+func runDBStart(cmd *cobra.Command, configPath string) error {
+	out := cmd.OutOrStdout()
+
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	host := cfg.Dolt.Host
+	port := cfg.Dolt.Port
+	dataDir := os.ExpandEnv("${HOME}/.railyard/dolt-data")
+
+	// Check if Dolt is already running.
+	_, connErr := db.ConnectAdmin(host, port)
+	if connErr == nil {
+		fmt.Fprintf(out, "Dolt is already running on %s:%d\n", host, port)
+		return nil
+	}
+
+	// Ensure data directory exists and is initialized.
+	if _, err := os.Stat(dataDir); os.IsNotExist(err) {
+		return fmt.Errorf("Dolt data directory %s does not exist — run quickstart.sh first", dataDir)
+	}
+
+	// Start Dolt in the background.
+	logFile := os.ExpandEnv("${HOME}/.railyard/dolt.log")
+	doltCmd := exec.Command("dolt", "sql-server",
+		"--host", host,
+		"--port", fmt.Sprintf("%d", port),
+	)
+	doltCmd.Dir = dataDir
+
+	lf, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return fmt.Errorf("open log file %s: %w", logFile, err)
+	}
+	doltCmd.Stdout = lf
+	doltCmd.Stderr = lf
+
+	if err := doltCmd.Start(); err != nil {
+		lf.Close()
+		return fmt.Errorf("start dolt: %w", err)
+	}
+	// Detach — don't wait for process.
+	go func() {
+		doltCmd.Wait()
+		lf.Close()
+	}()
+
+	fmt.Fprintf(out, "Starting Dolt on %s:%d (PID %d)...\n", host, port, doltCmd.Process.Pid)
+
+	// Wait for readiness.
+	for i := range 20 {
+		time.Sleep(500 * time.Millisecond)
+		if _, err := db.ConnectAdmin(host, port); err == nil {
+			fmt.Fprintf(out, "Dolt is ready (took %dms)\n", (i+1)*500)
+			fmt.Fprintf(out, "Log: %s\n", logFile)
+			return nil
+		}
+	}
+
+	return fmt.Errorf("Dolt did not become ready within 10s — check %s", logFile)
 }
 
 func confirmReset(cmd *cobra.Command, dbName string) bool {

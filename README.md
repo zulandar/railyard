@@ -107,6 +107,8 @@ tracks:
 ry db init -c railyard.yaml
 ```
 
+> **After a reboot:** Dolt doesn't survive WSL/system restarts. Run `ry db start -c railyard.yaml` to restart it.
+
 **5. Start Railyard**
 
 ```bash
