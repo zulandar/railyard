@@ -129,6 +129,8 @@ tmux attach -t railyard
 ry start -c railyard.yaml --engines 2   # Start Dispatch + Yardmaster + N engines
 ry status -c railyard.yaml              # Dashboard: engines, cars, messages
 ry status -c railyard.yaml --watch      # Auto-refresh every 5s
+ry dashboard -c railyard.yaml           # Web UI at http://localhost:8080
+ry dashboard -c railyard.yaml -p 9090   # Custom port
 ry stop -c railyard.yaml                # Graceful shutdown
 ```
 
