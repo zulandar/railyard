@@ -149,6 +149,9 @@ func processInbox(ctx context.Context, db *gorm.DB, cfg *config.Config, configPa
 
 		case subject == "engine-stalled":
 			fmt.Fprintf(out, "Inbox: engine-stalled from %s — %s\n", msg.FromAgent, msg.Body)
+			if msg.CarID != "" {
+				writeProgressNote(db, msg.CarID, msg.FromAgent, fmt.Sprintf("Engine stalled: %s", msg.Body))
+			}
 			ackMsg(db, msg)
 
 		case subject == "help" || subject == "stuck":
@@ -173,7 +176,27 @@ func processInbox(ctx context.Context, db *gorm.DB, cfg *config.Config, configPa
 			fmt.Fprintf(out, "Inbox: test-failure for car %s — acknowledged\n", msg.CarID)
 			ackMsg(db, msg)
 
-		case subject == "reassignment" || subject == "deps-unblocked":
+		case subject == "restart-engine":
+			handleRestartEngine(ctx, db, cfg, configPath, msg, out)
+			ackMsg(db, msg)
+
+		case subject == "retry-merge":
+			handleRetryMerge(db, msg, out)
+			ackMsg(db, msg)
+
+		case subject == "requeue-car":
+			handleRequeueCar(db, msg, out)
+			ackMsg(db, msg)
+
+		case subject == "nudge-engine":
+			handleNudgeEngine(db, msg, out)
+			ackMsg(db, msg)
+
+		case subject == "unblock-car":
+			handleUnblockCar(db, msg, out)
+			ackMsg(db, msg)
+
+		case subject == "reassignment" || subject == "deps-unblocked" || subject == "epic-closed":
 			ackMsg(db, msg)
 
 		default:
