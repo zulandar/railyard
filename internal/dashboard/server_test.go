@@ -358,6 +358,131 @@ func TestDashboardData_NilDB(t *testing.T) {
 	}
 }
 
+func TestCarsRoute_ContainsCarTable(t *testing.T) {
+	baseURL, cleanup := setupTestRouter(t)
+	defer cleanup()
+
+	resp, err := http.Get(baseURL + "/cars")
+	if err != nil {
+		t.Fatalf("GET /cars: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body := make([]byte, 16384)
+	n, _ := resp.Body.Read(body)
+	html := string(body[:n])
+
+	for _, want := range []string{
+		"Cars",
+		"No cars found",
+		"Track:",
+		"Status:",
+		"Type:",
+		"Showing 0 car(s)",
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("cars page missing %q", want)
+		}
+	}
+}
+
+func TestCarsRoute_WithFilters(t *testing.T) {
+	baseURL, cleanup := setupTestRouter(t)
+	defer cleanup()
+
+	// Filters should not break the page even with nil DB.
+	resp, err := http.Get(baseURL + "/cars?track=backend&status=open&type=task")
+	if err != nil {
+		t.Fatalf("GET /cars?filters: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+}
+
+func TestCarDetail_NotFound(t *testing.T) {
+	baseURL, cleanup := setupTestRouter(t)
+	defer cleanup()
+
+	resp, err := http.Get(baseURL + "/cars/nonexistent-id")
+	if err != nil {
+		t.Fatalf("GET /cars/nonexistent-id: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestCarList_NilDB(t *testing.T) {
+	result := CarList(nil, "", "", "", "")
+	if result.Cars == nil {
+		t.Error("Cars should not be nil")
+	}
+	if len(result.Cars) != 0 {
+		t.Errorf("Cars = %d, want 0", len(result.Cars))
+	}
+}
+
+func TestTruncate(t *testing.T) {
+	tests := []struct {
+		s      string
+		maxLen int
+		want   string
+	}{
+		{"hello", 10, "hello"},
+		{"hello world", 5, "he..."},
+		{"hi", 2, "hi"},
+		{"abcdef", 3, "abc"},
+		{"", 5, ""},
+	}
+	for _, tt := range tests {
+		got := Truncate(tt.s, tt.maxLen)
+		if got != tt.want {
+			t.Errorf("Truncate(%q, %d) = %q, want %q", tt.s, tt.maxLen, got, tt.want)
+		}
+	}
+}
+
+func TestDerefTime(t *testing.T) {
+	now := time.Now()
+	if got := DerefTime(&now); !got.Equal(now) {
+		t.Errorf("DerefTime(&now) = %v, want %v", got, now)
+	}
+	if got := DerefTime(nil); !got.IsZero() {
+		t.Errorf("DerefTime(nil) = %v, want zero", got)
+	}
+}
+
+func TestEmbeddedTemplates_CarsAndDetail(t *testing.T) {
+	data, err := templatesFS.ReadFile("templates/cars.html")
+	if err != nil {
+		t.Fatalf("cars.html not embedded: %v", err)
+	}
+	if !strings.Contains(string(data), "Showing") {
+		t.Error("cars.html does not contain 'Showing'")
+	}
+
+	data, err = templatesFS.ReadFile("templates/car_detail.html")
+	if err != nil {
+		t.Fatalf("car_detail.html not embedded: %v", err)
+	}
+	if !strings.Contains(string(data), "Metadata") {
+		t.Error("car_detail.html does not contain 'Metadata'")
+	}
+
+	data, err = templatesFS.ReadFile("templates/partials.html")
+	if err != nil {
+		t.Fatalf("partials.html not embedded: %v", err)
+	}
+	if !strings.Contains(string(data), "page_nav") {
+		t.Error("partials.html does not contain 'page_nav'")
+	}
+}
+
 func TestUnknownRoute_Returns404(t *testing.T) {
 	baseURL, cleanup := setupTestRouter(t)
 	defer cleanup()

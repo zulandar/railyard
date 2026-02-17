@@ -102,6 +102,50 @@ tr:hover { background: rgba(88, 166, 255, 0.04); }
 }
 #alert-banner.active { display: block; }
 
+/* Type badges */
+.badge-type-task { background: rgba(88, 166, 255, 0.15); color: var(--accent); }
+.badge-type-epic { background: rgba(188, 140, 255, 0.15); color: var(--purple); }
+.badge-type-bug { background: rgba(248, 81, 73, 0.15); color: var(--red); }
+.badge-type-spike { background: rgba(210, 153, 34, 0.15); color: var(--yellow); }
+
+/* Filters */
+.filters { margin-bottom: 1rem; }
+.filters form { display: flex; gap: 1rem; flex-wrap: wrap; }
+.filters label { color: var(--text-muted); font-size: 0.85rem; display: flex; align-items: center; gap: 0.4rem; }
+.filters select {
+    background: var(--bg-card);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.3rem 0.5rem;
+    font-size: 0.85rem;
+}
+
+/* Car detail */
+.car-header { margin-bottom: 1rem; }
+.car-header h1 { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.grid-detail { grid-template-columns: 1fr 1fr; }
+
+/* Metadata definition list */
+dl.meta { margin: 0; }
+dl.meta dt { color: var(--text-muted); font-size: 0.8rem; margin-top: 0.5rem; }
+dl.meta dd { margin-left: 0; }
+dl.meta code { background: var(--bg); padding: 0.1rem 0.4rem; border-radius: 3px; font-size: 0.85rem; }
+
+/* Text blocks */
+.text-block {
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: inherit;
+    font-size: 0.9rem;
+    margin: 0;
+    line-height: 1.6;
+}
+
+/* Dependency list */
+.dep-list { list-style: none; padding: 0; margin: 0.5rem 0; }
+.dep-list li { padding: 0.3rem 0; display: flex; align-items: center; gap: 0.5rem; }
+
 /* HTMX loading indicator */
 .htmx-indicator { opacity: 0; transition: opacity 200ms; }
 .htmx-request .htmx-indicator { opacity: 1; }

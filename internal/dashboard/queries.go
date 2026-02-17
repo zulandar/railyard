@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/zulandar/railyard/internal/models"
@@ -111,6 +112,233 @@ func MessageQueueDepth(db *gorm.DB) (int64, error) {
 		return 0, err
 	}
 	return count, nil
+}
+
+// CarRow holds car data for display in the list view.
+type CarRow struct {
+	ID        string
+	Title     string
+	Status    string
+	Type      string
+	Track     string
+	Priority  int
+	Assignee  string
+	CreatedAt time.Time
+}
+
+// CarListResult holds the car list plus metadata for filter dropdowns.
+type CarListResult struct {
+	Cars     []CarRow
+	Tracks   []string
+	Statuses []string
+	Types    []string
+}
+
+// CarList returns cars matching filters, plus distinct values for filter dropdowns.
+func CarList(db *gorm.DB, track, status, carType, parentID string) CarListResult {
+	if db == nil {
+		return CarListResult{Cars: []CarRow{}}
+	}
+
+	q := db.Model(&models.Car{})
+	if track != "" {
+		q = q.Where("track = ?", track)
+	}
+	if status != "" {
+		q = q.Where("status = ?", status)
+	}
+	if carType != "" {
+		q = q.Where("type = ?", carType)
+	}
+	if parentID != "" {
+		q = q.Where("parent_id = ?", parentID)
+	}
+
+	var cars []models.Car
+	q.Order("priority ASC, created_at ASC").Find(&cars)
+
+	rows := make([]CarRow, len(cars))
+	for i, c := range cars {
+		rows[i] = CarRow{
+			ID:        c.ID,
+			Title:     c.Title,
+			Status:    c.Status,
+			Type:      c.Type,
+			Track:     c.Track,
+			Priority:  c.Priority,
+			Assignee:  c.Assignee,
+			CreatedAt: c.CreatedAt,
+		}
+	}
+
+	// Distinct values for filter dropdowns.
+	var tracks []string
+	db.Model(&models.Car{}).Distinct("track").Order("track ASC").Pluck("track", &tracks)
+	var statuses []string
+	db.Model(&models.Car{}).Distinct("status").Order("status ASC").Pluck("status", &statuses)
+	var types []string
+	db.Model(&models.Car{}).Distinct("type").Order("type ASC").Pluck("type", &types)
+
+	return CarListResult{
+		Cars:     rows,
+		Tracks:   tracks,
+		Statuses: statuses,
+		Types:    types,
+	}
+}
+
+// DepRow holds a dependency link for display.
+type DepRow struct {
+	CarID  string
+	Title  string
+	Status string
+}
+
+// ChildRow holds a child car for display.
+type ChildRow struct {
+	ID       string
+	Title    string
+	Status   string
+	Type     string
+	Priority int
+	Assignee string
+}
+
+// ProgressRow holds a progress note for display.
+type ProgressRow struct {
+	Cycle        int
+	EngineID     string
+	Note         string
+	FilesChanged string
+	CommitHash   string
+	CreatedAt    time.Time
+}
+
+// CarDetail holds full car detail data for the detail view.
+type CarDetail struct {
+	ID          string
+	Title       string
+	Description string
+	Type        string
+	Status      string
+	Priority    int
+	Track       string
+	Branch      string
+	Assignee    string
+	DesignNotes string
+	Acceptance  string
+	SkipTests   bool
+	ParentID    string
+	ParentTitle string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	ClaimedAt   *time.Time
+	CompletedAt *time.Time
+
+	Children []ChildRow
+	BlockedBy []DepRow
+	Blocks    []DepRow
+	Progress  []ProgressRow
+}
+
+// GetCarDetail returns full car detail data for the detail page.
+func GetCarDetail(db *gorm.DB, id string) (*CarDetail, error) {
+	if db == nil {
+		return nil, fmt.Errorf("no database connection")
+	}
+
+	var c models.Car
+	if err := db.Preload("Deps").Preload("Progress", func(tx *gorm.DB) *gorm.DB {
+		return tx.Order("created_at ASC")
+	}).Where("id = ?", id).First(&c).Error; err != nil {
+		return nil, err
+	}
+
+	detail := &CarDetail{
+		ID:          c.ID,
+		Title:       c.Title,
+		Description: c.Description,
+		Type:        c.Type,
+		Status:      c.Status,
+		Priority:    c.Priority,
+		Track:       c.Track,
+		Branch:      c.Branch,
+		Assignee:    c.Assignee,
+		DesignNotes: c.DesignNotes,
+		Acceptance:  c.Acceptance,
+		SkipTests:   c.SkipTests,
+		CreatedAt:   c.CreatedAt,
+		UpdatedAt:   c.UpdatedAt,
+		ClaimedAt:   c.ClaimedAt,
+		CompletedAt: c.CompletedAt,
+	}
+
+	// Parent info.
+	if c.ParentID != nil && *c.ParentID != "" {
+		detail.ParentID = *c.ParentID
+		var parent models.Car
+		if err := db.Select("id, title").Where("id = ?", *c.ParentID).First(&parent).Error; err == nil {
+			detail.ParentTitle = parent.Title
+		}
+	}
+
+	// Children (if epic).
+	if c.Type == "epic" {
+		var children []models.Car
+		db.Where("parent_id = ?", c.ID).Order("priority ASC, created_at ASC").Find(&children)
+		detail.Children = make([]ChildRow, len(children))
+		for i, ch := range children {
+			detail.Children[i] = ChildRow{
+				ID:       ch.ID,
+				Title:    ch.Title,
+				Status:   ch.Status,
+				Type:     ch.Type,
+				Priority: ch.Priority,
+				Assignee: ch.Assignee,
+			}
+		}
+	}
+
+	// Blocked by (dependencies).
+	for _, dep := range c.Deps {
+		var blocker models.Car
+		if err := db.Select("id, title, status").Where("id = ?", dep.BlockedBy).First(&blocker).Error; err == nil {
+			detail.BlockedBy = append(detail.BlockedBy, DepRow{
+				CarID:  blocker.ID,
+				Title:  blocker.Title,
+				Status: blocker.Status,
+			})
+		}
+	}
+
+	// Blocks (reverse deps — what does this car block?).
+	var reverseDeps []models.CarDep
+	db.Where("blocked_by = ?", c.ID).Find(&reverseDeps)
+	for _, dep := range reverseDeps {
+		var blocked models.Car
+		if err := db.Select("id, title, status").Where("id = ?", dep.CarID).First(&blocked).Error; err == nil {
+			detail.Blocks = append(detail.Blocks, DepRow{
+				CarID:  blocked.ID,
+				Title:  blocked.Title,
+				Status: blocked.Status,
+			})
+		}
+	}
+
+	// Progress notes.
+	detail.Progress = make([]ProgressRow, len(c.Progress))
+	for i, p := range c.Progress {
+		detail.Progress[i] = ProgressRow{
+			Cycle:        p.Cycle,
+			EngineID:     p.EngineID,
+			Note:         p.Note,
+			FilesChanged: p.FilesChanged,
+			CommitHash:   p.CommitHash,
+			CreatedAt:    p.CreatedAt,
+		}
+	}
+
+	return detail, nil
 }
 
 // Escalation holds a recent escalation message for display.

@@ -69,8 +69,29 @@ func Start(ctx context.Context, opts StartOpts) error {
 // templateFuncs returns the FuncMap used by dashboard templates.
 func templateFuncs() template.FuncMap {
 	return template.FuncMap{
-		"timeAgo": TimeAgo,
+		"timeAgo":  TimeAgo,
+		"truncate": Truncate,
+		"deref":    DerefTime,
 	}
+}
+
+// Truncate shortens a string to maxLen characters, appending "..." if truncated.
+func Truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	if maxLen <= 3 {
+		return s[:maxLen]
+	}
+	return s[:maxLen-3] + "..."
+}
+
+// DerefTime dereferences a *time.Time for use in templates.
+func DerefTime(t *time.Time) time.Time {
+	if t == nil {
+		return time.Time{}
+	}
+	return *t
 }
 
 // parseTemplates loads the embedded HTML templates with custom functions.

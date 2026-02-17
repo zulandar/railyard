@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
@@ -96,17 +97,38 @@ func handlePartialsAlerts(db *gorm.DB) gin.HandlerFunc {
 
 func handleCarList(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		c.HTML(http.StatusOK, "layout.html", gin.H{
-			"page": "cars",
+		track := c.Query("track")
+		status := c.Query("status")
+		carType := c.Query("type")
+		parentID := c.Query("parent")
+
+		result := CarList(db, track, status, carType, parentID)
+
+		c.HTML(http.StatusOK, "cars.html", gin.H{
+			"Cars":         result.Cars,
+			"Tracks":       result.Tracks,
+			"Statuses":     result.Statuses,
+			"Types":        result.Types,
+			"ActiveTrack":  track,
+			"ActiveStatus": status,
+			"ActiveType":   carType,
 		})
 	}
 }
 
 func handleCarDetail(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		c.HTML(http.StatusOK, "layout.html", gin.H{
-			"page":  "car-detail",
-			"carID": c.Param("id"),
+		id := c.Param("id")
+		detail, err := GetCarDetail(db, id)
+		if err != nil {
+			c.HTML(http.StatusNotFound, "layout.html", gin.H{
+				"Error": fmt.Sprintf("Car not found: %s", id),
+			})
+			return
+		}
+
+		c.HTML(http.StatusOK, "car_detail.html", gin.H{
+			"Car": detail,
 		})
 	}
 }

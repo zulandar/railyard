@@ -1,0 +1,75 @@
+{{define "cars.html"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    {{template "page_head"}}
+    <title>Cars — Railyard</title>
+</head>
+<body>
+    {{template "page_nav"}}
+    <div class="container">
+
+<h1>Cars</h1>
+
+<div class="filters">
+    <form method="get" action="/cars">
+        <label>Track:
+            <select name="track" onchange="this.form.submit()">
+                <option value="">All</option>
+                {{range .Tracks}}<option value="{{.}}"{{if eq . $.ActiveTrack}} selected{{end}}>{{.}}</option>{{end}}
+            </select>
+        </label>
+        <label>Status:
+            <select name="status" onchange="this.form.submit()">
+                <option value="">All</option>
+                {{range .Statuses}}<option value="{{.}}"{{if eq . $.ActiveStatus}} selected{{end}}>{{.}}</option>{{end}}
+            </select>
+        </label>
+        <label>Type:
+            <select name="type" onchange="this.form.submit()">
+                <option value="">All</option>
+                {{range .Types}}<option value="{{.}}"{{if eq . $.ActiveType}} selected{{end}}>{{.}}</option>{{end}}
+            </select>
+        </label>
+    </form>
+</div>
+
+<p style="color: var(--text-muted); font-size: 0.85rem;">Showing {{len .Cars}} car(s)</p>
+
+<div class="card">
+<table>
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>Title</th>
+            <th>Status</th>
+            <th>Type</th>
+            <th>Track</th>
+            <th>Pri</th>
+            <th>Assignee</th>
+            <th>Created</th>
+        </tr>
+    </thead>
+    <tbody>
+    {{range .Cars}}
+        <tr>
+            <td><a href="/cars/{{.ID}}">{{.ID}}</a></td>
+            <td>{{truncate .Title 50}}</td>
+            <td><span class="badge badge-{{.Status}}">{{.Status}}</span></td>
+            <td><span class="badge badge-type-{{.Type}}">{{.Type}}</span></td>
+            <td>{{.Track}}</td>
+            <td><span class="priority-{{.Priority}}">P{{.Priority}}</span></td>
+            <td>{{if .Assignee}}{{.Assignee}}{{else}}—{{end}}</td>
+            <td>{{timeAgo .CreatedAt}}</td>
+        </tr>
+    {{else}}
+        <tr><td colspan="8" style="color: var(--text-muted);">No cars found</td></tr>
+    {{end}}
+    </tbody>
+</table>
+</div>
+
+    </div>
+</body>
+</html>
+{{end}}

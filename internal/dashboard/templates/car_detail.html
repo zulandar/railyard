@@ -1,0 +1,153 @@
+{{define "car_detail.html"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    {{template "page_head"}}
+    <title>{{.Car.ID}} — Railyard</title>
+</head>
+<body>
+    {{template "page_nav"}}
+    <div class="container">
+
+<p><a href="/cars">&larr; Back to cars</a></p>
+
+<div class="car-header">
+    <h1>
+        {{.Car.Title}}
+        <span class="badge badge-{{.Car.Status}}">{{.Car.Status}}</span>
+        <span class="badge badge-type-{{.Car.Type}}">{{.Car.Type}}</span>
+    </h1>
+    <p style="color: var(--text-muted); font-size: 0.85rem;">
+        {{.Car.ID}} · <span class="priority-{{.Car.Priority}}">P{{.Car.Priority}}</span> · Track: {{.Car.Track}}
+        {{if .Car.SkipTests}} · <span style="color: var(--yellow);">skip-tests</span>{{end}}
+    </p>
+</div>
+
+<div class="grid grid-detail">
+    <div class="card">
+        <h3>Metadata</h3>
+        <dl class="meta">
+            <dt>Branch</dt>
+            <dd>{{if .Car.Branch}}<code>{{.Car.Branch}}</code>{{else}}—{{end}}</dd>
+            <dt>Assignee</dt>
+            <dd>{{if .Car.Assignee}}{{.Car.Assignee}}{{else}}—{{end}}</dd>
+            <dt>Created</dt>
+            <dd>{{timeAgo .Car.CreatedAt}}</dd>
+            <dt>Updated</dt>
+            <dd>{{timeAgo .Car.UpdatedAt}}</dd>
+            {{if .Car.ClaimedAt}}<dt>Claimed</dt>
+            <dd>{{timeAgo (deref .Car.ClaimedAt)}}</dd>{{end}}
+            {{if .Car.CompletedAt}}<dt>Completed</dt>
+            <dd>{{timeAgo (deref .Car.CompletedAt)}}</dd>{{end}}
+            {{if .Car.ParentID}}
+            <dt>Parent</dt>
+            <dd><a href="/cars/{{.Car.ParentID}}">{{.Car.ParentID}}</a> {{.Car.ParentTitle}}</dd>
+            {{end}}
+        </dl>
+    </div>
+
+    {{if .Car.Children}}
+    <div class="card">
+        <h3>Children ({{len .Car.Children}})</h3>
+        <table>
+            <thead>
+                <tr><th>ID</th><th>Title</th><th>Status</th><th>Type</th></tr>
+            </thead>
+            <tbody>
+            {{range .Car.Children}}
+                <tr>
+                    <td><a href="/cars/{{.ID}}">{{.ID}}</a></td>
+                    <td>{{truncate .Title 40}}</td>
+                    <td><span class="badge badge-{{.Status}}">{{.Status}}</span></td>
+                    <td>{{.Type}}</td>
+                </tr>
+            {{end}}
+            </tbody>
+        </table>
+    </div>
+    {{end}}
+</div>
+
+{{if .Car.Description}}
+<div class="card">
+    <h3>Description</h3>
+    <pre class="text-block">{{.Car.Description}}</pre>
+</div>
+{{end}}
+
+{{if .Car.DesignNotes}}
+<div class="card">
+    <h3>Design Notes</h3>
+    <pre class="text-block">{{.Car.DesignNotes}}</pre>
+</div>
+{{end}}
+
+{{if .Car.Acceptance}}
+<div class="card">
+    <h3>Acceptance Criteria</h3>
+    <pre class="text-block">{{.Car.Acceptance}}</pre>
+</div>
+{{end}}
+
+{{if or .Car.BlockedBy .Car.Blocks}}
+<div class="card">
+    <h3>Dependencies</h3>
+    {{if .Car.BlockedBy}}
+    <h4 style="color: var(--text-muted); font-size: 0.85rem;">Blocked by</h4>
+    <ul class="dep-list">
+        {{range .Car.BlockedBy}}
+        <li>
+            <a href="/cars/{{.CarID}}">{{.CarID}}</a>
+            <span class="badge badge-{{.Status}}">{{.Status}}</span>
+            {{.Title}}
+        </li>
+        {{end}}
+    </ul>
+    {{end}}
+    {{if .Car.Blocks}}
+    <h4 style="color: var(--text-muted); font-size: 0.85rem;">Blocks</h4>
+    <ul class="dep-list">
+        {{range .Car.Blocks}}
+        <li>
+            <a href="/cars/{{.CarID}}">{{.CarID}}</a>
+            <span class="badge badge-{{.Status}}">{{.Status}}</span>
+            {{.Title}}
+        </li>
+        {{end}}
+    </ul>
+    {{end}}
+</div>
+{{end}}
+
+{{if .Car.Progress}}
+<div class="card">
+    <h3>Progress History</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>Cycle</th>
+                <th>Engine</th>
+                <th>Note</th>
+                <th>Commit</th>
+                <th>When</th>
+            </tr>
+        </thead>
+        <tbody>
+        {{range .Car.Progress}}
+            <tr>
+                <td>{{.Cycle}}</td>
+                <td>{{if .EngineID}}<a href="/engines/{{.EngineID}}">{{.EngineID}}</a>{{else}}—{{end}}</td>
+                <td>{{truncate .Note 80}}</td>
+                <td>{{if .CommitHash}}<code>{{truncate .CommitHash 7}}</code>{{else}}—{{end}}</td>
+                <td>{{timeAgo .CreatedAt}}</td>
+            </tr>
+        {{end}}
+        </tbody>
+    </table>
+</div>
+{{end}}
+
+    </div>
+</body>
+</html>
+{{end}}
