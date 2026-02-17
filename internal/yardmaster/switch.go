@@ -240,6 +240,16 @@ func gitMerge(repoDir, branch string) error {
 	return nil
 }
 
+// gitPush pushes the current branch to the remote.
+func gitPush(repoDir string) error {
+	cmd := exec.Command("git", "push", "origin", "main")
+	cmd.Dir = repoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git push: %s: %w", string(out), err)
+	}
+	return nil
+}
+
 // detachEngineWorktree detaches HEAD in the engine's worktree so the branch
 // can be checked out elsewhere. This is a best-effort operation — if the
 // worktree doesn't exist or is already detached, the error is silently ignored.

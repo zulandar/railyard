@@ -86,6 +86,80 @@ func TestCreateReindexJob_EmptyTrack(t *testing.T) {
 	}
 }
 
+// --- gitPush tests ---
+
+func TestGitPush_NoRemote(t *testing.T) {
+	// gitPush should return an error when there's no remote configured.
+	repoDir := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = repoDir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("%v failed: %s: %v", args, out, err)
+		}
+	}
+
+	run("git", "init")
+	run("git", "config", "user.email", "test@test.com")
+	run("git", "config", "user.name", "test")
+	run("git", "commit", "--allow-empty", "-m", "init")
+
+	err := gitPush(repoDir)
+	if err == nil {
+		t.Fatal("expected error when no remote is configured")
+	}
+	if !strings.Contains(err.Error(), "git push") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "git push")
+	}
+}
+
+func TestGitPush_WithRemote(t *testing.T) {
+	// Set up a bare remote and a local clone, then verify push works.
+	bareDir := t.TempDir()
+	run := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("%v failed: %s: %v", args, out, err)
+		}
+	}
+
+	// Create bare remote repo.
+	run(bareDir, "git", "init", "--bare")
+
+	// Clone it to get a local repo with origin set up.
+	parentDir := t.TempDir()
+	run(parentDir, "git", "clone", bareDir, "repo")
+	repoDir := filepath.Join(parentDir, "repo")
+	run(repoDir, "git", "config", "user.email", "test@test.com")
+	run(repoDir, "git", "config", "user.name", "test")
+	run(repoDir, "git", "commit", "--allow-empty", "-m", "init")
+	run(repoDir, "git", "push", "origin", "main")
+
+	// Make a local commit.
+	run(repoDir, "git", "commit", "--allow-empty", "-m", "feature work")
+
+	// Push using our helper.
+	if err := gitPush(repoDir); err != nil {
+		t.Fatalf("gitPush failed: %v", err)
+	}
+
+	// Verify the remote has the new commit.
+	cmd := exec.Command("git", "log", "--oneline", "main")
+	cmd.Dir = bareDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git log on bare failed: %s: %v", out, err)
+	}
+	if !strings.Contains(string(out), "feature work") {
+		t.Errorf("remote missing pushed commit, got: %s", out)
+	}
+}
+
 // --- detachEngineWorktree tests ---
 
 func TestDetachEngineWorktree_NoWorktreeDir(t *testing.T) {
