@@ -4,6 +4,7 @@ package orchestration
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -18,10 +19,24 @@ func (RealTmux) SessionExists(name string) bool {
 
 func (RealTmux) CreateSession(name string) error {
 	cmd := exec.Command("tmux", "new-session", "-d", "-s", name, "-x", "200", "-y", "50")
+	// Unset TMUX so this works when invoked from inside an existing tmux session.
+	cmd.Env = envWithoutTMUX()
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("create tmux session %q: %s: %w", name, strings.TrimSpace(string(out)), err)
 	}
 	return nil
+}
+
+// envWithoutTMUX returns the current environment with the TMUX variable removed,
+// allowing tmux new-session to work when called from inside an existing session.
+func envWithoutTMUX() []string {
+	var env []string
+	for _, e := range os.Environ() {
+		if !strings.HasPrefix(e, "TMUX=") {
+			env = append(env, e)
+		}
+	}
+	return env
 }
 
 func (RealTmux) NewPane(session string) (string, error) {
