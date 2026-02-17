@@ -1,0 +1,120 @@
+# Railyard configuration template
+#
+# Copy this file to railyard.yaml and edit to match your project.
+#
+# Quick start:
+#   cp railyard.example.yaml railyard.yaml
+#   ry db init -c railyard.yaml
+#   ry start -c railyard.yaml --engines 2
+
+# ---------------------------------------------------------------------------
+# Required
+# ---------------------------------------------------------------------------
+
+# Your name or username — used to derive branch prefixes and DB name.
+owner: yourname
+
+# Git remote URL for your project.
+repo: git@github.com:org/myproject.git
+
+# ---------------------------------------------------------------------------
+# Optional — general settings
+# ---------------------------------------------------------------------------
+
+# Branch prefix for Railyard-managed branches (default: ry/{owner}).
+# branch_prefix: ry/yourname
+
+# Default acceptance criteria appended to every new car if the car doesn't
+# define its own. Useful for org-wide standards like "all tests pass".
+# default_acceptance: "All tests pass. No lint warnings."
+
+# When true, completed cars create draft PRs instead of merging directly
+# to main. The PR includes a rich description with summary, acceptance
+# criteria, design notes, diff stats, and progress notes.
+# require_pr: false
+
+# ---------------------------------------------------------------------------
+# Dolt database connection (optional — defaults shown)
+# ---------------------------------------------------------------------------
+
+# dolt:
+#   host: 127.0.0.1
+#   port: 3306
+#   database: railyard_yourname    # default: railyard_{owner}
+
+# ---------------------------------------------------------------------------
+# Stall detection (optional — defaults shown)
+# ---------------------------------------------------------------------------
+
+# stall:
+#   stdout_timeout_sec: 120    # no stdout for N seconds = engine stall
+#   repeated_error_max: 3      # same error N times = engine stall
+#   max_clear_cycles: 5        # more than N /clear cycles = engine stall
+
+# ---------------------------------------------------------------------------
+# Notifications (optional)
+# ---------------------------------------------------------------------------
+
+# Send desktop notifications when the yardmaster escalates to a human.
+# The command is a shell template with {{.Subject}} and {{.Body}} available.
+# notifications:
+#   command: "notify-send 'Railyard' '{{.Subject}}: {{.Body}}'"
+
+# ---------------------------------------------------------------------------
+# Tracks — at least one is required
+# ---------------------------------------------------------------------------
+#
+# Each track defines an area of concern. Engines are assigned to tracks and
+# only work on cars belonging to their track. The yardmaster rebalances idle
+# engines across tracks automatically.
+#
+# Fields:
+#   name          (required) — unique track identifier
+#   language      (required) — primary language (go, typescript, python, etc.)
+#   file_patterns (optional) — glob patterns for files this track owns
+#   engine_slots  (optional) — max engines on this track (default: 3)
+#   test_command  (optional) — shell command to run tests (default: "go test ./...")
+#   conventions   (optional) — key/value pairs injected into engine prompts
+
+tracks:
+  - name: backend
+    language: go
+    file_patterns: ["cmd/**", "internal/**", "pkg/**", "*.go"]
+    engine_slots: 3
+    test_command: "go test ./..."
+    conventions:
+      style: "stdlib-first, no frameworks"
+      test_framework: "stdlib table-driven"
+
+  # - name: frontend
+  #   language: typescript
+  #   file_patterns: ["src/**", "*.ts", "*.tsx", "*.css"]
+  #   engine_slots: 2
+  #   test_command: "npm test"
+  #   conventions:
+  #     framework: "Next.js 15"
+  #     styling: "Tailwind CSS"
+
+  # - name: api
+  #   language: python
+  #   file_patterns: ["api/**", "*.py"]
+  #   engine_slots: 2
+  #   test_command: "pytest"
+  #   conventions:
+  #     framework: "FastAPI"
+  #     style: "PEP 8, type hints required"
+
+  # - name: infra
+  #   language: mixed
+  #   file_patterns: ["terraform/**", "docker/**", ".github/**", "Makefile"]
+  #   engine_slots: 1
+  #   test_command: "make lint"
+
+  # - name: mobile
+  #   language: swift
+  #   file_patterns: ["ios/**", "*.swift"]
+  #   engine_slots: 2
+  #   test_command: "xcodebuild test -scheme MyApp"
+  #   conventions:
+  #     min_ios: "17.0"
+  #     architecture: "MVVM with Combine"
