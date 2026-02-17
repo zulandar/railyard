@@ -78,8 +78,8 @@ func runDoctor(cmd *cobra.Command, configPath string) error {
 		results = append(results, checkResult{"Tracks", "FAIL", "skipped (no config)"})
 	}
 
-	// 7. tmux session
-	results = append(results, checkTmuxSession())
+	// 7. tmux sessions
+	results = append(results, checkTmuxSession()...)
 
 	// 8. Git repo
 	results = append(results, checkGitRepo())
@@ -233,14 +233,22 @@ func checkTracks(cfg *config.Config) checkResult {
 	return checkResult{"Tracks", "PASS", fmt.Sprintf("%d configured, %d seeded", configured, count)}
 }
 
-func checkTmuxSession() checkResult {
+func checkTmuxSession() []checkResult {
 	if orchestration.DefaultTmux == nil {
-		return checkResult{"tmux session", "WARN", "tmux interface not available"}
+		return []checkResult{{"tmux session", "WARN", "tmux interface not available"}}
 	}
+	var results []checkResult
 	if orchestration.DefaultTmux.SessionExists(orchestration.SessionName) {
-		return checkResult{"tmux session", "PASS", fmt.Sprintf("%q running", orchestration.SessionName)}
+		results = append(results, checkResult{"tmux session (main)", "PASS", fmt.Sprintf("%q running", orchestration.SessionName)})
+	} else {
+		results = append(results, checkResult{"tmux session (main)", "FAIL", fmt.Sprintf("%q not running", orchestration.SessionName)})
 	}
-	return checkResult{"tmux session", "FAIL", fmt.Sprintf("%q not running", orchestration.SessionName)}
+	if orchestration.DefaultTmux.SessionExists(orchestration.DispatchSessionName) {
+		results = append(results, checkResult{"tmux session (dispatch)", "PASS", fmt.Sprintf("%q running", orchestration.DispatchSessionName)})
+	} else {
+		results = append(results, checkResult{"tmux session (dispatch)", "FAIL", fmt.Sprintf("%q not running", orchestration.DispatchSessionName)})
+	}
+	return results
 }
 
 func checkGitRepo() checkResult {

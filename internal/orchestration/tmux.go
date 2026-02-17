@@ -1,6 +1,7 @@
 package orchestration
 
 const SessionName = "railyard"
+const DispatchSessionName = "railyard-dispatch"
 
 // Tmux abstracts tmux operations for testability.
 type Tmux interface {

@@ -22,10 +22,11 @@ type StartOpts struct {
 
 // StartResult holds the result of starting the railyard.
 type StartResult struct {
-	Session        string
-	DispatchPane   string
-	YardmasterPane string
-	EnginePanes    []EnginePane
+	Session         string
+	DispatchSession string
+	DispatchPane    string
+	YardmasterPane  string
+	EnginePanes     []EnginePane
 }
 
 // EnginePane maps a tmux pane to a track assignment.
@@ -58,7 +59,7 @@ func Start(opts StartOpts) (*StartResult, error) {
 	}
 
 	// Check if already running.
-	if opts.Tmux.SessionExists(SessionName) {
+	if opts.Tmux.SessionExists(SessionName) || opts.Tmux.SessionExists(DispatchSessionName) {
 		return nil, fmt.Errorf("orchestration: railyard session already running (use 'ry stop' first)")
 	}
 
@@ -76,57 +77,70 @@ func Start(opts StartOpts) (*StartResult, error) {
 	// Assign tracks to engines.
 	assignment := AssignTracks(opts.Config, totalEngines)
 
-	// Create tmux session (first pane is dispatch).
-	if err := opts.Tmux.CreateSession(SessionName); err != nil {
+	// Create dispatch session (separate from engines/yardmaster).
+	if err := opts.Tmux.CreateSession(DispatchSessionName); err != nil {
 		return nil, err
 	}
 
-	result := &StartResult{Session: SessionName}
-
-	// Pane 0 (initial pane): dispatch.
-	panes, err := opts.Tmux.ListPanes(SessionName)
-	if err != nil {
-		_ = opts.Tmux.KillSession(SessionName)
-		return nil, fmt.Errorf("orchestration: list initial panes: %w", err)
+	result := &StartResult{
+		Session:         SessionName,
+		DispatchSession: DispatchSessionName,
 	}
-	result.DispatchPane = panes[0]
+
+	// Dispatch pane (initial pane of dispatch session).
+	dispatchPanes, err := opts.Tmux.ListPanes(DispatchSessionName)
+	if err != nil {
+		_ = opts.Tmux.KillSession(DispatchSessionName)
+		return nil, fmt.Errorf("orchestration: list dispatch panes: %w", err)
+	}
+	result.DispatchPane = dispatchPanes[0]
 	dispatchCmd := fmt.Sprintf("ry dispatch --config %s", opts.ConfigPath)
 	if err := opts.Tmux.SendKeys(result.DispatchPane, dispatchCmd); err != nil {
-		_ = opts.Tmux.KillSession(SessionName)
+		_ = opts.Tmux.KillSession(DispatchSessionName)
 		return nil, fmt.Errorf("orchestration: start dispatch: %w", err)
 	}
 
-	// Pane 1: yardmaster.
-	ymPane, err := opts.Tmux.NewPane(SessionName)
+	// Create main session (yardmaster + engines).
+	if err := opts.Tmux.CreateSession(SessionName); err != nil {
+		_ = opts.Tmux.KillSession(DispatchSessionName)
+		return nil, err
+	}
+
+	// Pane 0 of main session: yardmaster.
+	mainPanes, err := opts.Tmux.ListPanes(SessionName)
 	if err != nil {
 		_ = opts.Tmux.KillSession(SessionName)
-		return nil, fmt.Errorf("orchestration: create yardmaster pane: %w", err)
+		_ = opts.Tmux.KillSession(DispatchSessionName)
+		return nil, fmt.Errorf("orchestration: list main panes: %w", err)
 	}
-	result.YardmasterPane = ymPane
+	result.YardmasterPane = mainPanes[0]
 	ymCmd := fmt.Sprintf("ry yardmaster --config %s", opts.ConfigPath)
-	if err := opts.Tmux.SendKeys(ymPane, ymCmd); err != nil {
+	if err := opts.Tmux.SendKeys(result.YardmasterPane, ymCmd); err != nil {
 		_ = opts.Tmux.KillSession(SessionName)
+		_ = opts.Tmux.KillSession(DispatchSessionName)
 		return nil, fmt.Errorf("orchestration: start yardmaster: %w", err)
 	}
 
-	// Panes 2..N+1: engines.
+	// Engine panes in main session.
 	for trackName, count := range assignment {
 		for i := 0; i < count; i++ {
 			pane, err := opts.Tmux.NewPane(SessionName)
 			if err != nil {
 				_ = opts.Tmux.KillSession(SessionName)
+				_ = opts.Tmux.KillSession(DispatchSessionName)
 				return nil, fmt.Errorf("orchestration: create engine pane: %w", err)
 			}
 			engineCmd := fmt.Sprintf("ry engine start --config %s --track %s", opts.ConfigPath, trackName)
 			if err := opts.Tmux.SendKeys(pane, engineCmd); err != nil {
 				_ = opts.Tmux.KillSession(SessionName)
+				_ = opts.Tmux.KillSession(DispatchSessionName)
 				return nil, fmt.Errorf("orchestration: start engine on %s: %w", trackName, err)
 			}
 			result.EnginePanes = append(result.EnginePanes, EnginePane{PaneID: pane, Track: trackName})
 		}
 	}
 
-	// Tile the layout for visibility.
+	// Tile the main session layout for visibility.
 	_ = opts.Tmux.TileLayout(SessionName)
 
 	return result, nil
@@ -151,7 +165,9 @@ func Stop(opts StopOpts) error {
 		opts.Tmux = DefaultTmux
 	}
 
-	if !opts.Tmux.SessionExists(SessionName) {
+	mainRunning := opts.Tmux.SessionExists(SessionName)
+	dispatchRunning := opts.Tmux.SessionExists(DispatchSessionName)
+	if !mainRunning && !dispatchRunning {
 		return fmt.Errorf("orchestration: no railyard session running")
 	}
 
@@ -172,19 +188,36 @@ func Stop(opts StopOpts) error {
 		time.Sleep(2 * time.Second)
 	}
 
-	// Step 3: Send C-c to all panes.
-	panes, err := opts.Tmux.ListPanes(SessionName)
-	if err == nil {
-		for _, p := range panes {
-			_ = opts.Tmux.SendSignal(p, "C-c")
+	// Step 3: Send C-c to all panes in both sessions.
+	if mainRunning {
+		panes, err := opts.Tmux.ListPanes(SessionName)
+		if err == nil {
+			for _, p := range panes {
+				_ = opts.Tmux.SendSignal(p, "C-c")
+			}
 		}
-		// Brief pause for processes to exit.
-		time.Sleep(2 * time.Second)
 	}
+	if dispatchRunning {
+		panes, err := opts.Tmux.ListPanes(DispatchSessionName)
+		if err == nil {
+			for _, p := range panes {
+				_ = opts.Tmux.SendSignal(p, "C-c")
+			}
+		}
+	}
+	// Brief pause for processes to exit.
+	time.Sleep(2 * time.Second)
 
-	// Step 4: Kill the tmux session.
-	if err := opts.Tmux.KillSession(SessionName); err != nil {
-		return err
+	// Step 4: Kill both tmux sessions.
+	if mainRunning {
+		if err := opts.Tmux.KillSession(SessionName); err != nil {
+			return err
+		}
+	}
+	if dispatchRunning {
+		if err := opts.Tmux.KillSession(DispatchSessionName); err != nil {
+			return err
+		}
 	}
 
 	// Step 5: Mark all non-dead engines as dead.
@@ -197,10 +230,11 @@ func Stop(opts StopOpts) error {
 
 // StatusInfo holds dashboard information.
 type StatusInfo struct {
-	SessionRunning bool
-	Engines        []EngineInfo
-	TrackSummary   []TrackSummary
-	MessageDepth   int64
+	SessionRunning  bool
+	DispatchRunning bool
+	Engines         []EngineInfo
+	TrackSummary    []TrackSummary
+	MessageDepth    int64
 }
 
 // EngineInfo holds per-engine dashboard data.
@@ -233,7 +267,8 @@ func Status(db *gorm.DB, tmux Tmux) (*StatusInfo, error) {
 	}
 
 	info := &StatusInfo{
-		SessionRunning: tmux.SessionExists(SessionName),
+		SessionRunning:  tmux.SessionExists(SessionName),
+		DispatchRunning: tmux.SessionExists(DispatchSessionName),
 	}
 
 	// Gather engine info.
@@ -287,8 +322,10 @@ func Status(db *gorm.DB, tmux Tmux) (*StatusInfo, error) {
 func FormatStatus(info *StatusInfo) string {
 	var b strings.Builder
 
-	if info.SessionRunning {
+	if info.SessionRunning && info.DispatchRunning {
 		b.WriteString("Railyard: RUNNING\n")
+	} else if info.SessionRunning || info.DispatchRunning {
+		b.WriteString("Railyard: PARTIAL\n")
 	} else {
 		b.WriteString("Railyard: STOPPED\n")
 	}

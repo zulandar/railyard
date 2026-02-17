@@ -30,6 +30,10 @@ type mockTmux struct {
 	listPanesErr   error
 	tileErr        error
 
+	// Per-session overrides (take precedence over flat fields above).
+	sessionExistsFunc func(name string) bool
+	listPanesFunc     func(session string) ([]string, error)
+
 	// Recording.
 	createdSessions []string
 	sentKeys        []string
@@ -39,7 +43,12 @@ type mockTmux struct {
 	panesCreated    int
 }
 
-func (m *mockTmux) SessionExists(name string) bool { return m.sessionExists }
+func (m *mockTmux) SessionExists(name string) bool {
+	if m.sessionExistsFunc != nil {
+		return m.sessionExistsFunc(name)
+	}
+	return m.sessionExists
+}
 func (m *mockTmux) CreateSession(name string) error {
 	m.createdSessions = append(m.createdSessions, name)
 	return m.createErr
@@ -69,6 +78,9 @@ func (m *mockTmux) KillSession(name string) error {
 	return m.killSessionErr
 }
 func (m *mockTmux) ListPanes(session string) ([]string, error) {
+	if m.listPanesFunc != nil {
+		return m.listPanesFunc(session)
+	}
 	return m.listPanes, m.listPanesErr
 }
 func (m *mockTmux) TileLayout(session string) error { return m.tileErr }
@@ -431,10 +443,10 @@ func TestStart_ListPanesError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for list panes failure")
 	}
-	if !strings.Contains(err.Error(), "list initial panes") {
-		t.Errorf("error = %q, want to contain 'list initial panes'", err.Error())
+	if !strings.Contains(err.Error(), "list dispatch panes") {
+		t.Errorf("error = %q, want to contain 'list dispatch panes'", err.Error())
 	}
-	// Should have attempted to kill session on failure.
+	// Should have attempted to kill dispatch session on failure.
 	if len(m.killedSessions) != 1 {
 		t.Errorf("killedSessions = %d, want 1", len(m.killedSessions))
 	}
@@ -461,12 +473,16 @@ func TestStart_DispatchSendKeysError(t *testing.T) {
 	}
 }
 
-func TestStart_YardmasterPaneError(t *testing.T) {
+func TestStart_MainListPanesError(t *testing.T) {
 	db := testDB(t)
 	m := &mockTmux{
 		sessionExists: false,
-		listPanes:     []string{"%0"},
-		newPaneErr:    fmt.Errorf("pane create failed"),
+		listPanesFunc: func(session string) ([]string, error) {
+			if session == DispatchSessionName {
+				return []string{"%d0"}, nil
+			}
+			return nil, fmt.Errorf("list panes failed")
+		},
 	}
 	_, err := Start(StartOpts{
 		Config:     &config.Config{Tracks: []config.TrackConfig{{Name: "a", EngineSlots: 1}}},
@@ -475,13 +491,14 @@ func TestStart_YardmasterPaneError(t *testing.T) {
 		Tmux:       m,
 	})
 	if err == nil {
-		t.Fatal("expected error for yardmaster pane creation failure")
+		t.Fatal("expected error for main session list panes failure")
 	}
-	if !strings.Contains(err.Error(), "create yardmaster pane") {
-		t.Errorf("error = %q, want to contain 'create yardmaster pane'", err.Error())
+	if !strings.Contains(err.Error(), "list main panes") {
+		t.Errorf("error = %q, want to contain 'list main panes'", err.Error())
 	}
-	if len(m.killedSessions) != 1 {
-		t.Errorf("killedSessions = %d, want 1", len(m.killedSessions))
+	// Should kill both sessions on failure.
+	if len(m.killedSessions) != 2 {
+		t.Errorf("killedSessions = %d, want 2", len(m.killedSessions))
 	}
 }
 
@@ -508,8 +525,15 @@ func TestStart_Success(t *testing.T) {
 	if result.Session != SessionName {
 		t.Errorf("session = %q, want %q", result.Session, SessionName)
 	}
+	if result.DispatchSession != DispatchSessionName {
+		t.Errorf("dispatch session = %q, want %q", result.DispatchSession, DispatchSessionName)
+	}
 	if result.DispatchPane != "%0" {
 		t.Errorf("dispatch pane = %q, want %%0", result.DispatchPane)
+	}
+	if result.YardmasterPane == "%0" {
+		// Yardmaster gets its own pane via ListPanes on main session (also %0 from mock).
+		// This is fine — it's a different session's %0.
 	}
 	if result.YardmasterPane == "" {
 		t.Error("yardmaster pane should not be empty")
@@ -517,19 +541,25 @@ func TestStart_Success(t *testing.T) {
 	if len(result.EnginePanes) != 2 {
 		t.Errorf("engine panes = %d, want 2", len(result.EnginePanes))
 	}
-	// 1 session created.
-	if len(m.createdSessions) != 1 {
-		t.Errorf("created sessions = %d, want 1", len(m.createdSessions))
+	// 2 sessions created (dispatch + main).
+	if len(m.createdSessions) != 2 {
+		t.Errorf("created sessions = %d, want 2", len(m.createdSessions))
+	}
+	if m.createdSessions[0] != DispatchSessionName {
+		t.Errorf("first session = %q, want %q", m.createdSessions[0], DispatchSessionName)
+	}
+	if m.createdSessions[1] != SessionName {
+		t.Errorf("second session = %q, want %q", m.createdSessions[1], SessionName)
 	}
 	// 1 dispatch + 1 yardmaster + 2 engines = 4 send-keys calls.
 	if len(m.sentKeys) != 4 {
 		t.Errorf("sent keys = %d, want 4", len(m.sentKeys))
 	}
-	// Verify dispatch command was sent.
+	// Verify dispatch command was sent first.
 	if !strings.Contains(m.sentKeys[0], "ry dispatch") {
 		t.Errorf("first send-keys = %q, want to contain 'ry dispatch'", m.sentKeys[0])
 	}
-	// Verify yardmaster command was sent.
+	// Verify yardmaster command was sent second.
 	if !strings.Contains(m.sentKeys[1], "ry yardmaster") {
 		t.Errorf("second send-keys = %q, want to contain 'ry yardmaster'", m.sentKeys[1])
 	}
@@ -591,31 +621,26 @@ func TestStart_EngineCount_Custom(t *testing.T) {
 
 func TestStart_EnginePaneError(t *testing.T) {
 	db := testDB(t)
-	callCount := 0
 	m := &mockTmux{
 		sessionExists: false,
 		listPanes:     []string{"%0"},
-	}
-	// Override NewPane to fail on the second call (first is yardmaster, second is engine).
-	origNewPane := m.NewPane
-	_ = origNewPane
-	// Use a custom mock that fails on the 2nd NewPane call.
-	cm := &conditionalMockTmux{
-		mockTmux:      m,
-		newPaneFailAt: 2,
-		callCount:     &callCount,
+		newPaneErr:    fmt.Errorf("pane create failed"),
 	}
 	_, err := Start(StartOpts{
 		Config:     &config.Config{Tracks: []config.TrackConfig{{Name: "a", EngineSlots: 1}}},
 		ConfigPath: "/tmp/test.yaml",
 		DB:         db,
-		Tmux:       cm,
+		Tmux:       m,
 	})
 	if err == nil {
 		t.Fatal("expected error for engine pane creation failure")
 	}
 	if !strings.Contains(err.Error(), "create engine pane") {
 		t.Errorf("error = %q, want to contain 'create engine pane'", err.Error())
+	}
+	// Both sessions should be cleaned up.
+	if len(m.killedSessions) != 2 {
+		t.Errorf("killedSessions = %d, want 2", len(m.killedSessions))
 	}
 }
 
@@ -754,19 +779,24 @@ func TestStop_Success(t *testing.T) {
 
 	m := &mockTmux{
 		sessionExists: true,
-		listPanes:     []string{"%0", "%1", "%2"},
+		listPanesFunc: func(session string) ([]string, error) {
+			if session == SessionName {
+				return []string{"%0", "%1", "%2"}, nil
+			}
+			return []string{"%d0"}, nil // dispatch has 1 pane
+		},
 	}
 	err := Stop(StopOpts{DB: db, Timeout: 1 * time.Millisecond, Tmux: m})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// Should have sent C-c to all 3 panes.
-	if len(m.sentSignals) != 3 {
-		t.Errorf("sent signals = %d, want 3", len(m.sentSignals))
+	// Should have sent C-c to 3 main panes + 1 dispatch pane = 4.
+	if len(m.sentSignals) != 4 {
+		t.Errorf("sent signals = %d, want 4", len(m.sentSignals))
 	}
-	// Session should have been killed.
-	if len(m.killedSessions) != 1 {
-		t.Errorf("killed sessions = %d, want 1", len(m.killedSessions))
+	// Both sessions should have been killed.
+	if len(m.killedSessions) != 2 {
+		t.Errorf("killed sessions = %d, want 2", len(m.killedSessions))
 	}
 	// All engines should be marked dead.
 	var count int64
@@ -792,23 +822,44 @@ func TestStop_KillSessionError(t *testing.T) {
 	}
 }
 
+func TestStop_OnlyDispatchRunning(t *testing.T) {
+	db := testDB(t)
+	m := &mockTmux{
+		sessionExistsFunc: func(name string) bool {
+			return name == DispatchSessionName
+		},
+		listPanes: []string{"%d0"},
+	}
+	err := Stop(StopOpts{DB: db, Timeout: 1 * time.Millisecond, Tmux: m})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Only dispatch session should be killed.
+	if len(m.killedSessions) != 1 {
+		t.Errorf("killed sessions = %d, want 1", len(m.killedSessions))
+	}
+	if m.killedSessions[0] != DispatchSessionName {
+		t.Errorf("killed session = %q, want %q", m.killedSessions[0], DispatchSessionName)
+	}
+}
+
 func TestStop_ListPanesError(t *testing.T) {
 	db := testDB(t)
 	m := &mockTmux{
 		sessionExists: true,
 		listPanesErr:  fmt.Errorf("list failed"),
 	}
-	// Even if list panes fails, stop should continue and kill session.
+	// Even if list panes fails, stop should continue and kill sessions.
 	err := Stop(StopOpts{DB: db, Timeout: 1 * time.Millisecond, Tmux: m})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// No signals sent (list panes failed), but session should be killed.
+	// No signals sent (list panes failed), but both sessions should be killed.
 	if len(m.sentSignals) != 0 {
 		t.Errorf("sent signals = %d, want 0", len(m.sentSignals))
 	}
-	if len(m.killedSessions) != 1 {
-		t.Errorf("killed sessions = %d, want 1", len(m.killedSessions))
+	if len(m.killedSessions) != 2 {
+		t.Errorf("killed sessions = %d, want 2", len(m.killedSessions))
 	}
 }
 
@@ -823,6 +874,10 @@ func TestStop_DefaultTimeout(t *testing.T) {
 	err := Stop(StopOpts{DB: db, Tmux: m})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	// Both sessions killed (main + dispatch).
+	if len(m.killedSessions) != 2 {
+		t.Errorf("killed sessions = %d, want 2", len(m.killedSessions))
 	}
 }
 
@@ -1326,7 +1381,8 @@ func TestRestartEngine_SendKeysError(t *testing.T) {
 
 func TestFormatStatus_Running(t *testing.T) {
 	info := &StatusInfo{
-		SessionRunning: true,
+		SessionRunning:  true,
+		DispatchRunning: true,
 		Engines: []EngineInfo{
 			{
 				ID:           "eng-abcd1234",
@@ -1390,7 +1446,7 @@ func TestFormatStatus_EmptyCar(t *testing.T) {
 }
 
 func TestFormatStatus_NoTracks(t *testing.T) {
-	info := &StatusInfo{SessionRunning: true}
+	info := &StatusInfo{SessionRunning: true, DispatchRunning: true}
 	out := FormatStatus(info)
 	if !strings.Contains(out, "no active tracks") {
 		t.Errorf("expected 'no active tracks', got: %s", out)
