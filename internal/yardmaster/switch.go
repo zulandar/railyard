@@ -2,7 +2,9 @@ package yardmaster
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -63,6 +65,11 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 	if err := gitFetch(opts.RepoDir); err != nil {
 		result.Error = fmt.Errorf("fetch: %w", err)
 		return result, result.Error
+	}
+
+	// Detach the engine worktree so the branch can be checked out in the main repo.
+	if car.Assignee != "" {
+		detachEngineWorktree(opts.RepoDir, car.Assignee)
 	}
 
 	// Run tests on the branch (unless skip_tests is set on the car).
@@ -231,6 +238,19 @@ func gitMerge(repoDir, branch string) error {
 	}
 
 	return nil
+}
+
+// detachEngineWorktree detaches HEAD in the engine's worktree so the branch
+// can be checked out elsewhere. This is a best-effort operation — if the
+// worktree doesn't exist or is already detached, the error is silently ignored.
+func detachEngineWorktree(repoDir, engineID string) {
+	wtDir := filepath.Join(repoDir, "engines", engineID)
+	if _, err := os.Stat(wtDir); err != nil {
+		return // worktree directory doesn't exist
+	}
+	cmd := exec.Command("git", "checkout", "--detach", "HEAD")
+	cmd.Dir = wtDir
+	cmd.CombinedOutput() // ignore errors — already detached, empty repo, etc.
 }
 
 // TryCloseEpic checks if all children of an epic are done/cancelled and, if so,
