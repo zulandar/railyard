@@ -176,6 +176,65 @@ func TestRenderPrompt_MultipleTracksRendered(t *testing.T) {
 	}
 }
 
+func TestRenderPrompt_ContainsTestCommand(t *testing.T) {
+	cfg := testConfig(config.TrackConfig{
+		Name:        "backend",
+		Language:    "go",
+		TestCommand: "go test ./...",
+	})
+
+	prompt, err := RenderPrompt(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(prompt, "go test ./...") {
+		t.Errorf("prompt does not contain test command")
+	}
+}
+
+func TestRenderPrompt_ContainsConventions(t *testing.T) {
+	cfg := testConfig(config.TrackConfig{
+		Name:     "backend",
+		Language: "go",
+		Conventions: map[string]interface{}{
+			"framework": "Laravel 11",
+			"style":     "PSR-12",
+		},
+	})
+
+	prompt, err := RenderPrompt(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(prompt, "framework=") {
+		t.Errorf("prompt does not contain conventions")
+	}
+}
+
+func TestRenderPrompt_ContainsNewSections(t *testing.T) {
+	cfg := testConfig(config.TrackConfig{
+		Name:     "api",
+		Language: "go",
+	})
+
+	prompt, err := RenderPrompt(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, want := range []string{
+		"Writing Good Car Descriptions",
+		"Engine Capabilities",
+		"Split work",
+		"File bugs",
+		"--type bug",
+		"Spikes",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("prompt missing %q", want)
+		}
+	}
+}
+
 func TestStart_ValidConfig_FailsOnClaude(t *testing.T) {
 	cfg := testConfig(config.TrackConfig{
 		Name:     "backend",

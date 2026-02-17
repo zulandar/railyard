@@ -137,6 +137,20 @@ func writeInstructions(w *strings.Builder) {
 	w.WriteString("\n## If You Need to Split Work\n")
 	w.WriteString("1. Create child cars: `ry car create --title \"sub-task\" --track <track> --parent <car-id> --type task`\n")
 	w.WriteString("2. Continue on the current car, children will be picked up by other engines\n")
+
+	w.WriteString("\n## If You Discover a Bug\n")
+	w.WriteString("If you find a bug or issue **outside** your car's scope (code you didn't write, ")
+	w.WriteString("a different module, a broken dependency, a security issue, or a previously completed car ")
+	w.WriteString("whose acceptance criteria weren't met), file a bug car:\n")
+	w.WriteString("```\n")
+	w.WriteString("ry car create --title \"Bug: <short description>\" --track <track> --type bug --priority 1 --description \"<what is broken, where, and how to reproduce>\" --acceptance \"<what 'fixed' looks like>\"\n")
+	w.WriteString("```\n")
+	w.WriteString("Then notify the Yardmaster:\n")
+	w.WriteString("```\n")
+	w.WriteString("ry message send --from <engine-id> --to yardmaster --subject \"bug-filed\" --car-id <new-bug-car-id> --body \"Found bug while working on <your-car-id>: <brief summary>\"\n")
+	w.WriteString("```\n")
+	w.WriteString("**Scope rule**: Fix issues that are **inside** your car's scope directly — don't file bugs for your own work. ")
+	w.WriteString("Only file bugs for problems that belong to a different car or track.\n")
 }
 
 // formatConventions parses JSON conventions into bullet points.

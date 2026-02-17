@@ -271,6 +271,10 @@ func TestRenderContext_Instructions(t *testing.T) {
 		"ry message send",
 		"## If You Need to Split Work",
 		"ry car create",
+		"## If You Discover a Bug",
+		"--type bug",
+		"bug-filed",
+		"Scope rule",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("instructions missing %q", want)
@@ -304,6 +308,7 @@ func TestRenderContext_FullTemplate(t *testing.T) {
 		"## When You're Done",
 		"## If You're Stuck",
 		"## If You Need to Split Work",
+		"## If You Discover a Bug",
 	}
 	lastIdx := -1
 	for _, s := range sections {
