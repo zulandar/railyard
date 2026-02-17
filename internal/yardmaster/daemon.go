@@ -62,6 +62,8 @@ func RunDaemon(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath,
 		fmt.Fprintf(out, "Yardmaster stopped.\n")
 	}()
 
+	rbState := &rebalanceState{lastTrackMoveAt: make(map[string]time.Time)}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -99,6 +101,11 @@ func RunDaemon(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath,
 		// Phase 5: Reconcile stale cars whose branches are already merged.
 		if err := reconcileStaleCars(db, repoDir, out); err != nil {
 			log.Printf("yardmaster reconcile error: %v", err)
+		}
+
+		// Phase 6: Rebalance idle engines to busy tracks.
+		if err := rebalanceEngines(db, cfg, configPath, rbState, out); err != nil {
+			log.Printf("yardmaster rebalance error: %v", err)
 		}
 
 		sleepWithContext(ctx, pollInterval)
