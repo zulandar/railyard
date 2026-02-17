@@ -156,13 +156,15 @@ func UnblockDeps(db *gorm.DB, carID string) ([]models.Car, error) {
 			Count(&otherBlockers)
 
 		if otherBlockers == 0 {
-			// No other blockers — unblock this car.
-			db.Model(&models.Car{}).Where("id = ? AND status = ?", dep.CarID, "blocked").
+			// No other blockers — unblock this car (only if it's actually blocked).
+			result := db.Model(&models.Car{}).Where("id = ? AND status = ?", dep.CarID, "blocked").
 				Update("status", "open")
 
-			var b models.Car
-			if err := db.First(&b, "id = ?", dep.CarID).Error; err == nil {
-				unblocked = append(unblocked, b)
+			if result.RowsAffected > 0 {
+				var b models.Car
+				if err := db.First(&b, "id = ?", dep.CarID).Error; err == nil {
+					unblocked = append(unblocked, b)
+				}
 			}
 		}
 	}
