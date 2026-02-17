@@ -1,12 +1,14 @@
 package yardmaster
 
 import (
+	"bytes"
 	"context"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/zulandar/railyard/internal/config"
+	"github.com/zulandar/railyard/internal/models"
 )
 
 func TestRunDaemon_NilDB(t *testing.T) {
@@ -83,5 +85,77 @@ func TestSleepWithContext_ShortDuration(t *testing.T) {
 func TestMaxTestFailures(t *testing.T) {
 	if maxTestFailures != 2 {
 		t.Errorf("maxTestFailures = %d, want 2", maxTestFailures)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// processInbox drain tests
+// ---------------------------------------------------------------------------
+
+func TestProcessInbox_StaleDrainIgnored(t *testing.T) {
+	db := testDB(t)
+
+	// Simulate a drain broadcast sent 10 minutes ago (before yardmaster started).
+	staleDrain := models.Message{
+		FromAgent: "orchestrator",
+		ToAgent:   "broadcast",
+		Subject:   "drain",
+		Body:      "Railyard shutting down.",
+	}
+	db.Create(&staleDrain)
+	// Backdate the CreatedAt to before startup.
+	db.Model(&models.Message{}).Where("id = ?", staleDrain.ID).
+		Update("created_at", time.Now().Add(-10*time.Minute))
+
+	startedAt := time.Now()
+	var buf bytes.Buffer
+	draining, err := processInbox(context.Background(), db, nil, "", "", startedAt, &buf)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if draining {
+		t.Fatal("should NOT drain on stale message")
+	}
+	if !strings.Contains(buf.String(), "stale drain message") {
+		t.Errorf("output = %q, want to mention stale drain", buf.String())
+	}
+}
+
+func TestProcessInbox_FreshDrainHonored(t *testing.T) {
+	db := testDB(t)
+
+	// Yardmaster started 5 minutes ago.
+	startedAt := time.Now().Add(-5 * time.Minute)
+
+	// Fresh drain sent just now (after startup).
+	freshDrain := models.Message{
+		FromAgent: "orchestrator",
+		ToAgent:   "broadcast",
+		Subject:   "drain",
+		Body:      "Railyard shutting down.",
+	}
+	db.Create(&freshDrain)
+
+	var buf bytes.Buffer
+	draining, err := processInbox(context.Background(), db, nil, "", "", startedAt, &buf)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !draining {
+		t.Fatal("should drain on fresh message")
+	}
+}
+
+func TestProcessInbox_EmptyInbox(t *testing.T) {
+	db := testDB(t)
+
+	startedAt := time.Now()
+	var buf bytes.Buffer
+	draining, err := processInbox(context.Background(), db, nil, "", "", startedAt, &buf)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if draining {
+		t.Fatal("should NOT drain on empty inbox")
 	}
 }

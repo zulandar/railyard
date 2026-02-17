@@ -45,6 +45,7 @@ func RunDaemon(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath,
 		out = io.Discard
 	}
 
+	startedAt := time.Now()
 	if err := registerYardmaster(db); err != nil {
 		return fmt.Errorf("yardmaster: register: %w", err)
 	}
@@ -74,7 +75,7 @@ func RunDaemon(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath,
 		}
 
 		// Phase 1: Process inbox.
-		draining, err := processInbox(ctx, db, cfg, configPath, repoDir, out)
+		draining, err := processInbox(ctx, db, cfg, configPath, repoDir, startedAt, out)
 		if err != nil {
 			log.Printf("yardmaster inbox error: %v", err)
 		}
@@ -141,7 +142,9 @@ func registerYardmaster(db *gorm.DB) error {
 
 // processInbox drains the yardmaster inbox, classifying and handling each message.
 // Returns true if a drain message was received (yardmaster should shut down).
-func processInbox(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath, repoDir string, out io.Writer) (draining bool, err error) {
+// startedAt is when this yardmaster instance started; drain messages older than
+// this are stale leftovers from a previous shutdown and are silently acked.
+func processInbox(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath, repoDir string, startedAt time.Time, out io.Writer) (draining bool, err error) {
 	msgs, err := messaging.Inbox(db, YardmasterID)
 	if err != nil {
 		return false, err
@@ -152,6 +155,11 @@ func processInbox(ctx context.Context, db *gorm.DB, cfg *config.Config, configPa
 
 		switch {
 		case subject == "drain":
+			if msg.CreatedAt.Before(startedAt) {
+				fmt.Fprintf(out, "Inbox: stale drain message (from %s) — ignoring\n", msg.CreatedAt.Format(time.RFC3339))
+				ackMsg(db, msg)
+				continue
+			}
 			ackMsg(db, msg)
 			return true, nil
 

@@ -29,6 +29,7 @@ func testDB(t *testing.T) *gorm.DB {
 		&models.Car{},
 		&models.CarDep{},
 		&models.Message{},
+		&models.BroadcastAck{},
 		&models.Track{},
 	); err != nil {
 		t.Fatalf("migrate test db: %v", err)
