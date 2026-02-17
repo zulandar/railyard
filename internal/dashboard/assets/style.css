@@ -1,0 +1,107 @@
+/* Railyard Dashboard — minimal classless styling */
+:root {
+    --bg: #0d1117;
+    --bg-card: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-muted: #8b949e;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --yellow: #d29922;
+    --red: #f85149;
+    --orange: #db6d28;
+    --purple: #bc8cff;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    margin: 0;
+    padding: 0;
+    line-height: 1.5;
+}
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* Layout */
+.container { max-width: 1200px; margin: 0 auto; padding: 0 1rem; }
+
+nav {
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+    padding: 0.75rem 0;
+    margin-bottom: 1.5rem;
+}
+nav .container { display: flex; align-items: center; gap: 1.5rem; }
+nav .brand { font-weight: 600; font-size: 1.1rem; color: var(--text); }
+nav a { color: var(--text-muted); font-size: 0.9rem; }
+nav a:hover { color: var(--text); text-decoration: none; }
+
+h1, h2, h3 { margin-top: 0; }
+h1 { font-size: 1.5rem; }
+h2 { font-size: 1.2rem; color: var(--text-muted); }
+
+/* Cards */
+.card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+}
+
+/* Tables */
+table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border); }
+th { color: var(--text-muted); font-weight: 600; font-size: 0.8rem; text-transform: uppercase; }
+tr:hover { background: rgba(88, 166, 255, 0.04); }
+
+/* Status badges */
+.badge {
+    display: inline-block;
+    padding: 0.15rem 0.5rem;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+.badge-open { background: rgba(63, 185, 80, 0.15); color: var(--green); }
+.badge-in_progress, .badge-claimed { background: rgba(88, 166, 255, 0.15); color: var(--accent); }
+.badge-done, .badge-merged { background: rgba(188, 140, 255, 0.15); color: var(--purple); }
+.badge-blocked { background: rgba(248, 81, 73, 0.15); color: var(--red); }
+.badge-draft { background: rgba(139, 148, 158, 0.15); color: var(--text-muted); }
+.badge-idle { background: rgba(63, 185, 80, 0.15); color: var(--green); }
+.badge-working { background: rgba(88, 166, 255, 0.15); color: var(--accent); }
+.badge-stalled, .badge-dead { background: rgba(248, 81, 73, 0.15); color: var(--red); }
+
+/* Grid */
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
+.stat { text-align: center; }
+.stat .value { font-size: 2rem; font-weight: 700; }
+.stat .label { color: var(--text-muted); font-size: 0.85rem; }
+
+/* Priority */
+.priority-0, .priority-1 { color: var(--red); }
+.priority-2 { color: var(--yellow); }
+.priority-3 { color: var(--text-muted); }
+.priority-4 { color: var(--text-muted); opacity: 0.7; }
+
+/* Alert banner */
+#alert-banner {
+    display: none;
+    background: rgba(248, 81, 73, 0.15);
+    border: 1px solid var(--red);
+    color: var(--red);
+    padding: 0.75rem 1rem;
+    border-radius: 6px;
+    margin-bottom: 1rem;
+    font-weight: 600;
+}
+#alert-banner.active { display: block; }
+
+/* HTMX loading indicator */
+.htmx-indicator { opacity: 0; transition: opacity 200ms; }
+.htmx-request .htmx-indicator { opacity: 1; }
