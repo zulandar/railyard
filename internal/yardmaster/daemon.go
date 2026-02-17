@@ -14,6 +14,7 @@ import (
 	"github.com/zulandar/railyard/internal/engine"
 	"github.com/zulandar/railyard/internal/messaging"
 	"github.com/zulandar/railyard/internal/models"
+	"github.com/zulandar/railyard/internal/orchestration"
 	"gorm.io/gorm"
 )
 
@@ -81,7 +82,7 @@ func RunDaemon(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath,
 		}
 
 		// Phase 2: Handle stale engines.
-		if err := handleStaleEngines(db, out); err != nil {
+		if err := handleStaleEngines(db, configPath, out); err != nil {
 			log.Printf("yardmaster stale engines error: %v", err)
 		}
 
@@ -151,6 +152,15 @@ func processInbox(ctx context.Context, db *gorm.DB, cfg *config.Config, configPa
 			fmt.Fprintf(out, "Inbox: engine-stalled from %s — %s\n", msg.FromAgent, msg.Body)
 			if msg.CarID != "" {
 				writeProgressNote(db, msg.CarID, msg.FromAgent, fmt.Sprintf("Engine stalled: %s", msg.Body))
+			}
+			// Restart the stalled engine to spawn a replacement.
+			if msg.FromAgent != "" && msg.FromAgent != YardmasterID {
+				if err := orchestration.RestartEngine(db, configPath, msg.FromAgent, nil); err != nil {
+					log.Printf("restart stalled engine %s: %v", msg.FromAgent, err)
+					fmt.Fprintf(out, "Failed to restart stalled engine %s: %v\n", msg.FromAgent, err)
+				} else {
+					fmt.Fprintf(out, "Restarted stalled engine %s\n", msg.FromAgent)
+				}
 			}
 			ackMsg(db, msg)
 
@@ -225,8 +235,9 @@ func ackMsg(db *gorm.DB, msg models.Message) {
 	}
 }
 
-// handleStaleEngines detects engines with stale heartbeats and reassigns their cars.
-func handleStaleEngines(db *gorm.DB, out io.Writer) error {
+// handleStaleEngines detects engines with stale heartbeats, reassigns their cars,
+// and restarts the engines.
+func handleStaleEngines(db *gorm.DB, configPath string, out io.Writer) error {
 	stale, err := StaleEngines(db)
 	if err != nil {
 		return err
@@ -238,13 +249,19 @@ func handleStaleEngines(db *gorm.DB, out io.Writer) error {
 		}
 
 		if eng.CurrentCar != "" {
-			fmt.Fprintf(out, "Stale engine %s has car %s — reassigning\n", eng.ID, eng.CurrentCar)
+			fmt.Fprintf(out, "Stale engine %s has car %s — reassigning and restarting\n", eng.ID, eng.CurrentCar)
 			if err := ReassignCar(db, eng.CurrentCar, eng.ID, "stale heartbeat"); err != nil {
 				log.Printf("reassign car %s from %s: %v", eng.CurrentCar, eng.ID, err)
 			}
 		} else {
-			fmt.Fprintf(out, "Stale engine %s (idle) — marking dead\n", eng.ID)
+			fmt.Fprintf(out, "Stale engine %s (idle) — restarting\n", eng.ID)
 			db.Model(&models.Engine{}).Where("id = ?", eng.ID).Update("status", engine.StatusDead)
+		}
+
+		// Restart the engine to spawn a replacement on the same track.
+		if err := orchestration.RestartEngine(db, configPath, eng.ID, nil); err != nil {
+			log.Printf("restart stale engine %s: %v", eng.ID, err)
+			fmt.Fprintf(out, "Failed to restart engine %s: %v\n", eng.ID, err)
 		}
 	}
 
