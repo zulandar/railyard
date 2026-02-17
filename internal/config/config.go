@@ -11,12 +11,18 @@ import (
 
 // Config is the top-level Railyard configuration, loaded from config.yaml.
 type Config struct {
-	Owner        string        `yaml:"owner"`
-	Repo         string        `yaml:"repo"`
-	BranchPrefix string        `yaml:"branch_prefix"`
-	Dolt         DoltConfig    `yaml:"dolt"`
-	Stall        StallConfig   `yaml:"stall"`
-	Tracks       []TrackConfig `yaml:"tracks"`
+	Owner         string              `yaml:"owner"`
+	Repo          string              `yaml:"repo"`
+	BranchPrefix  string              `yaml:"branch_prefix"`
+	Dolt          DoltConfig          `yaml:"dolt"`
+	Stall         StallConfig         `yaml:"stall"`
+	Tracks        []TrackConfig       `yaml:"tracks"`
+	Notifications NotificationsConfig `yaml:"notifications"`
+}
+
+// NotificationsConfig controls push notifications for human-targeted messages.
+type NotificationsConfig struct {
+	Command string `yaml:"command"` // shell command template, e.g. "notify-send 'Railyard' '{{.Subject}}'"
 }
 
 // StallConfig holds thresholds for engine stall detection.

@@ -11,9 +11,10 @@ import (
 
 // SendOpts holds optional parameters for sending a message.
 type SendOpts struct {
-	CarID   string
-	ThreadID *uint
-	Priority string // "normal" (default), "urgent"
+	CarID        string
+	ThreadID     *uint
+	Priority     string        // "normal" (default), "urgent"
+	NotifyConfig *NotifyConfig // if set, fires notification for human/urgent messages
 }
 
 // Send creates a new message from one agent to another.
@@ -46,6 +47,10 @@ func Send(db *gorm.DB, from, to, subject, body string, opts SendOpts) (*models.M
 
 	if err := db.Create(&msg).Error; err != nil {
 		return nil, fmt.Errorf("messaging: send: %w", err)
+	}
+
+	if opts.NotifyConfig != nil && shouldNotify(&msg) {
+		go Notify(&msg, *opts.NotifyConfig)
 	}
 
 	return &msg, nil
