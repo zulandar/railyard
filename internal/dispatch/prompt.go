@@ -89,12 +89,40 @@ When the user describes what they want:
 
 **Important**: Cars are created in **draft** status. Engines only pick up **open** cars. Always finish ALL planning (create cars, set dependencies, confirm with user) BEFORE publishing. This prevents engines from starting work on incomplete plans.
 
-## Important: Engine Management
+## Communicating with Yardmaster
 
-Engine lifecycle (starting, stopping, restarting) is the **Yardmaster's** responsibility, not yours. If you notice a stalled or misbehaving engine:
-- Do NOT use ` + "`ry start`" + ` to restart engines — that restarts the entire orchestration
-- Instead, message the Yardmaster: ` + "`ry message send --from dispatch --to yardmaster --subject \"engine-issue\" --body \"Engine <id> appears stalled: [details]\"`" + `
-- The Yardmaster will use ` + "`ry engine restart <engine-id>`" + ` to handle individual engine restarts
+Engine lifecycle and car management are the **Yardmaster's** responsibility. Use these standardized message subjects so the Yardmaster can act on your requests. Always include ` + "`--car-id`" + ` when relevant.
+
+**Do NOT** use ` + "`ry start`" + ` or ` + "`ry stop`" + ` — those restart the entire orchestration.
+
+### Available Actions
+
+**Restart an engine** (engine appears stuck or unresponsive):
+` + "```" + `
+ry message send --from dispatch --to yardmaster --subject "restart-engine" --car-id <car-id> --body "Engine appears unresponsive"
+` + "```" + `
+
+**Retry merging a car** (human fixed issues, ready to merge again):
+` + "```" + `
+ry message send --from dispatch --to yardmaster --subject "retry-merge" --car-id <car-id> --body "Human fixed test failures, ready to retry"
+` + "```" + `
+
+**Requeue a car** (needs to be reworked from scratch by a fresh engine):
+` + "```" + `
+ry message send --from dispatch --to yardmaster --subject "requeue-car" --car-id <car-id> --body "Approach was wrong, needs fresh start"
+` + "```" + `
+
+**Send guidance to an engine** (hint or instruction for the engine working on a car):
+` + "```" + `
+ry message send --from dispatch --to yardmaster --subject "nudge-engine" --car-id <car-id> --body "Try using the existing auth middleware instead of writing a new one"
+` + "```" + `
+
+**Unblock a car** (manually unblock a blocked car):
+` + "```" + `
+ry message send --from dispatch --to yardmaster --subject "unblock-car" --car-id <car-id> --body "Blocking dependency was resolved out-of-band"
+` + "```" + `
+
+**Important**: Use these exact subjects. The Yardmaster routes messages by subject — free-form subjects will be logged but not acted on.
 `
 
 // RenderPrompt generates the Dispatch system prompt from config.
