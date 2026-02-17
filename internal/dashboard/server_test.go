@@ -483,6 +483,180 @@ func TestEmbeddedTemplates_CarsAndDetail(t *testing.T) {
 	}
 }
 
+func TestEngineDetail_NotFound(t *testing.T) {
+	baseURL, cleanup := setupTestRouter(t)
+	defer cleanup()
+
+	resp, err := http.Get(baseURL + "/engines/nonexistent-id")
+	if err != nil {
+		t.Fatalf("GET /engines/nonexistent-id: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestGetEngineActivity_NilDB(t *testing.T) {
+	activity := GetEngineActivity(nil, "test-engine")
+	if activity == nil {
+		t.Error("activity should not be nil")
+	}
+	if len(activity) != 0 {
+		t.Errorf("activity = %d, want 0", len(activity))
+	}
+}
+
+func TestFormatDuration(t *testing.T) {
+	tests := []struct {
+		d    time.Duration
+		want string
+	}{
+		{30 * time.Second, "30s"},
+		{5 * time.Minute, "5m"},
+		{2*time.Hour + 15*time.Minute, "2h 15m"},
+		{25 * time.Hour, "1d 1h"},
+		{48*time.Hour + 30*time.Minute, "2d 0h"},
+	}
+	for _, tt := range tests {
+		got := formatDuration(tt.d)
+		if got != tt.want {
+			t.Errorf("formatDuration(%v) = %q, want %q", tt.d, got, tt.want)
+		}
+	}
+}
+
+func TestEmbeddedTemplates_EngineDetail(t *testing.T) {
+	data, err := templatesFS.ReadFile("templates/engine_detail.html")
+	if err != nil {
+		t.Fatalf("engine_detail.html not embedded: %v", err)
+	}
+	if !strings.Contains(string(data), "Current Car") {
+		t.Error("engine_detail.html does not contain 'Current Car'")
+	}
+}
+
+func TestMessagesRoute_ContainsMessageTable(t *testing.T) {
+	baseURL, cleanup := setupTestRouter(t)
+	defer cleanup()
+
+	resp, err := http.Get(baseURL + "/messages")
+	if err != nil {
+		t.Fatalf("GET /messages: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body := make([]byte, 16384)
+	n, _ := resp.Body.Read(body)
+	html := string(body[:n])
+
+	for _, want := range []string{
+		"Messages",
+		"No messages found",
+		"Agent:",
+		"Priority:",
+		"Showing 0 message(s)",
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("messages page missing %q", want)
+		}
+	}
+}
+
+func TestMessagesRoute_WithFilters(t *testing.T) {
+	baseURL, cleanup := setupTestRouter(t)
+	defer cleanup()
+
+	resp, err := http.Get(baseURL + "/messages?agent=yardmaster&priority=urgent&unacked=true")
+	if err != nil {
+		t.Fatalf("GET /messages?filters: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+}
+
+func TestListMessages_NilDB(t *testing.T) {
+	result := ListMessages(nil, MessageFilters{})
+	if result.Messages == nil {
+		t.Error("Messages should not be nil")
+	}
+	if len(result.Messages) != 0 {
+		t.Errorf("Messages = %d, want 0", len(result.Messages))
+	}
+}
+
+func TestPendingEscalationCount_NilDB(t *testing.T) {
+	count := PendingEscalationCount(nil)
+	if count != 0 {
+		t.Errorf("count = %d, want 0", count)
+	}
+}
+
+func TestEmbeddedTemplates_Messages(t *testing.T) {
+	data, err := templatesFS.ReadFile("templates/messages.html")
+	if err != nil {
+		t.Fatalf("messages.html not embedded: %v", err)
+	}
+	if !strings.Contains(string(data), "Escalations") {
+		t.Error("messages.html does not contain 'Escalations'")
+	}
+}
+
+func TestSSEEndpoint_SendsConnectedEvent(t *testing.T) {
+	baseURL, cleanup := setupTestRouter(t)
+	defer cleanup()
+
+	resp, err := http.Get(baseURL + "/api/events")
+	if err != nil {
+		t.Fatalf("GET /api/events: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+
+	ct := resp.Header.Get("Content-Type")
+	if !strings.Contains(ct, "text/event-stream") {
+		t.Errorf("content-type = %q, want text/event-stream", ct)
+	}
+
+	// Read the connected event.
+	body := make([]byte, 4096)
+	n, _ := resp.Body.Read(body)
+	content := string(body[:n])
+
+	if !strings.Contains(content, "event: connected") {
+		t.Errorf("response missing 'event: connected', got: %q", content)
+	}
+	if !strings.Contains(content, "\"type\":\"connected\"") {
+		t.Errorf("response missing connected data, got: %q", content)
+	}
+}
+
+func TestSSEWriteEvent(t *testing.T) {
+	var buf strings.Builder
+	writeSSE(&buf, "test-event", map[string]string{"key": "value"})
+	got := buf.String()
+
+	if !strings.Contains(got, "event: test-event\n") {
+		t.Errorf("missing event line in: %q", got)
+	}
+	if !strings.Contains(got, "data: ") {
+		t.Errorf("missing data line in: %q", got)
+	}
+	if !strings.Contains(got, "\"key\":\"value\"") {
+		t.Errorf("missing JSON data in: %q", got)
+	}
+	if !strings.HasSuffix(got, "\n\n") {
+		t.Errorf("should end with double newline: %q", got)
+	}
+}
+
 func TestUnknownRoute_Returns404(t *testing.T) {
 	baseURL, cleanup := setupTestRouter(t)
 	defer cleanup()

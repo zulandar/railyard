@@ -341,6 +341,120 @@ func GetCarDetail(db *gorm.DB, id string) (*CarDetail, error) {
 	return detail, nil
 }
 
+// EngineDetail holds full engine data for the detail view.
+type EngineDetail struct {
+	ID            string
+	Track         string
+	Status        string
+	Role          string
+	SessionID     string
+	CurrentCar    string
+	CurrentTitle  string
+	CurrentStatus string
+	LastActivity  time.Time
+	StartedAt     time.Time
+	Uptime        string
+}
+
+// ActivityRow holds a progress note for engine activity display.
+type ActivityRow struct {
+	CarID        string
+	CarTitle     string
+	Cycle        int
+	Note         string
+	FilesChanged string
+	CommitHash   string
+	CreatedAt    time.Time
+}
+
+// GetEngineDetail returns full engine data for the detail page.
+func GetEngineDetail(db *gorm.DB, id string) (*EngineDetail, error) {
+	if db == nil {
+		return nil, fmt.Errorf("no database connection")
+	}
+
+	var e models.Engine
+	if err := db.Where("id = ?", id).First(&e).Error; err != nil {
+		return nil, err
+	}
+
+	detail := &EngineDetail{
+		ID:           e.ID,
+		Track:        e.Track,
+		Status:       e.Status,
+		Role:         e.Role,
+		SessionID:    e.SessionID,
+		CurrentCar:   e.CurrentCar,
+		LastActivity: e.LastActivity,
+		StartedAt:    e.StartedAt,
+	}
+
+	// Compute uptime.
+	if !e.StartedAt.IsZero() {
+		detail.Uptime = formatDuration(time.Since(e.StartedAt))
+	}
+
+	// Get current car title/status if assigned.
+	if e.CurrentCar != "" {
+		var car models.Car
+		if err := db.Select("id, title, status").Where("id = ?", e.CurrentCar).First(&car).Error; err == nil {
+			detail.CurrentTitle = car.Title
+			detail.CurrentStatus = car.Status
+		}
+	}
+
+	return detail, nil
+}
+
+// GetEngineActivity returns recent progress notes from this engine.
+func GetEngineActivity(db *gorm.DB, engineID string) []ActivityRow {
+	if db == nil {
+		return []ActivityRow{}
+	}
+
+	var notes []models.CarProgress
+	db.Where("engine_id = ?", engineID).
+		Order("created_at DESC").
+		Limit(50).
+		Find(&notes)
+
+	rows := make([]ActivityRow, len(notes))
+	for i, n := range notes {
+		rows[i] = ActivityRow{
+			CarID:        n.CarID,
+			Cycle:        n.Cycle,
+			Note:         n.Note,
+			FilesChanged: n.FilesChanged,
+			CommitHash:   n.CommitHash,
+			CreatedAt:    n.CreatedAt,
+		}
+		// Look up car title.
+		var car models.Car
+		if err := db.Select("title").Where("id = ?", n.CarID).First(&car).Error; err == nil {
+			rows[i].CarTitle = car.Title
+		}
+	}
+	return rows
+}
+
+// formatDuration formats a duration as a human-readable string like "2h 15m".
+func formatDuration(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	}
+	h := int(d.Hours())
+	m := int(d.Minutes()) % 60
+	if h >= 24 {
+		days := h / 24
+		h = h % 24
+		return fmt.Sprintf("%dd %dh", days, h)
+	}
+	return fmt.Sprintf("%dh %dm", h, m)
+}
+
 // Escalation holds a recent escalation message for display.
 type Escalation struct {
 	ID        uint
@@ -354,6 +468,9 @@ type Escalation struct {
 
 // RecentEscalations returns unacknowledged messages sent to "human".
 func RecentEscalations(db *gorm.DB) ([]Escalation, error) {
+	if db == nil {
+		return []Escalation{}, nil
+	}
 	var msgs []models.Message
 	if err := db.Where("to_agent = ? AND acknowledged = ?", "human", false).
 		Order("created_at DESC").
@@ -375,4 +492,91 @@ func RecentEscalations(db *gorm.DB) ([]Escalation, error) {
 		}
 	}
 	return result, nil
+}
+
+// MessageFilters holds optional filters for the messages list.
+type MessageFilters struct {
+	Agent    string
+	Priority string
+	Unacked  bool
+}
+
+// MessageRow holds a message for display in the list.
+type MessageRow struct {
+	ID           uint
+	FromAgent    string
+	ToAgent      string
+	Subject      string
+	Body         string
+	CarID        string
+	Priority     string
+	Acknowledged bool
+	CreatedAt    time.Time
+}
+
+// MessageListResult holds the message list plus metadata for filter dropdowns.
+type MessageListResult struct {
+	Messages   []MessageRow
+	Agents     []string
+	Priorities []string
+}
+
+// ListMessages returns messages matching filters, newest first.
+func ListMessages(db *gorm.DB, filters MessageFilters) MessageListResult {
+	if db == nil {
+		return MessageListResult{Messages: []MessageRow{}}
+	}
+
+	q := db.Model(&models.Message{})
+	if filters.Agent != "" {
+		q = q.Where("from_agent = ? OR to_agent = ?", filters.Agent, filters.Agent)
+	}
+	if filters.Priority != "" {
+		q = q.Where("priority = ?", filters.Priority)
+	}
+	if filters.Unacked {
+		q = q.Where("acknowledged = ?", false)
+	}
+
+	var msgs []models.Message
+	q.Order("created_at DESC").Limit(200).Find(&msgs)
+
+	rows := make([]MessageRow, len(msgs))
+	for i, m := range msgs {
+		rows[i] = MessageRow{
+			ID:           m.ID,
+			FromAgent:    m.FromAgent,
+			ToAgent:      m.ToAgent,
+			Subject:      m.Subject,
+			Body:         m.Body,
+			CarID:        m.CarID,
+			Priority:     m.Priority,
+			Acknowledged: m.Acknowledged,
+			CreatedAt:    m.CreatedAt,
+		}
+	}
+
+	// Distinct values for filter dropdowns.
+	var agents []string
+	db.Model(&models.Message{}).Distinct("from_agent").Order("from_agent ASC").Pluck("from_agent", &agents)
+	var priorities []string
+	db.Model(&models.Message{}).Distinct("priority").Order("priority ASC").Pluck("priority", &priorities)
+
+	return MessageListResult{
+		Messages:   rows,
+		Agents:     agents,
+		Priorities: priorities,
+	}
+}
+
+// PendingEscalationCount returns the number of unacked messages to "human".
+func PendingEscalationCount(db *gorm.DB) int64 {
+	if db == nil {
+		return 0
+	}
+	var count int64
+	db.Model(&models.Message{}).
+		Where("to_agent = ? AND acknowledged = ?", "human", false).
+		Count(&count)
+	return count
 }

@@ -146,6 +146,21 @@ dl.meta code { background: var(--bg); padding: 0.1rem 0.4rem; border-radius: 3px
 .dep-list { list-style: none; padding: 0; margin: 0.5rem 0; }
 .dep-list li { padding: 0.3rem 0; display: flex; align-items: center; gap: 0.5rem; }
 
+/* Priority badges */
+.badge-priority-urgent { background: rgba(248, 81, 73, 0.15); color: var(--red); }
+.badge-priority-normal { background: rgba(139, 148, 158, 0.15); color: var(--text-muted); }
+.badge-priority-low { background: rgba(139, 148, 158, 0.1); color: var(--text-muted); opacity: 0.7; }
+
+/* Escalation banner on messages page */
+.escalation-banner {
+    background: rgba(248, 81, 73, 0.1);
+    border: 1px solid var(--red);
+    border-radius: 6px;
+    padding: 1rem;
+    margin-bottom: 1.5rem;
+}
+.escalation-banner h3 { color: var(--red); margin-bottom: 0.5rem; }
+
 /* HTMX loading indicator */
 .htmx-indicator { opacity: 0; transition: opacity 200ms; }
 .htmx-request .htmx-indicator { opacity: 1; }

@@ -1,0 +1,95 @@
+{{define "engine_detail.html"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    {{template "page_head"}}
+    <title>{{.Engine.ID}} — Railyard</title>
+</head>
+<body>
+    {{template "page_nav"}}
+    <div class="container">
+
+<p><a href="/">&larr; Back to dashboard</a></p>
+
+<div class="car-header">
+    <h1>
+        {{.Engine.ID}}
+        <span class="badge badge-{{.Engine.Status}}">{{.Engine.Status}}</span>
+    </h1>
+    <p style="color: var(--text-muted); font-size: 0.85rem;">
+        Track: {{.Engine.Track}}
+        {{if .Engine.Role}} · Role: {{.Engine.Role}}{{end}}
+    </p>
+</div>
+
+<div class="grid grid-detail">
+    <div class="card">
+        <h3>Metadata</h3>
+        <dl class="meta">
+            <dt>Status</dt>
+            <dd><span class="badge badge-{{.Engine.Status}}">{{.Engine.Status}}</span></dd>
+            <dt>Track</dt>
+            <dd>{{.Engine.Track}}</dd>
+            {{if .Engine.Role}}<dt>Role</dt>
+            <dd>{{.Engine.Role}}</dd>{{end}}
+            {{if .Engine.SessionID}}<dt>Session</dt>
+            <dd><code>{{truncate .Engine.SessionID 20}}</code></dd>{{end}}
+            <dt>Started</dt>
+            <dd>{{timeAgo .Engine.StartedAt}}</dd>
+            {{if .Engine.Uptime}}<dt>Uptime</dt>
+            <dd>{{.Engine.Uptime}}</dd>{{end}}
+            <dt>Last Activity</dt>
+            <dd>{{timeAgo .Engine.LastActivity}}</dd>
+        </dl>
+    </div>
+
+    <div class="card">
+        <h3>Current Car</h3>
+        {{if .Engine.CurrentCar}}
+        <p>
+            <a href="/cars/{{.Engine.CurrentCar}}">{{.Engine.CurrentCar}}</a>
+            <span class="badge badge-{{.Engine.CurrentStatus}}">{{.Engine.CurrentStatus}}</span>
+        </p>
+        <p>{{.Engine.CurrentTitle}}</p>
+        {{else}}
+        <p style="color: var(--text-muted);">Idle — no car claimed</p>
+        {{end}}
+    </div>
+</div>
+
+{{if .Activity}}
+<div class="card">
+    <h3>Recent Activity</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>Car</th>
+                <th>Cycle</th>
+                <th>Note</th>
+                <th>Commit</th>
+                <th>When</th>
+            </tr>
+        </thead>
+        <tbody>
+        {{range .Activity}}
+            <tr>
+                <td><a href="/cars/{{.CarID}}">{{.CarID}}</a></td>
+                <td>{{.Cycle}}</td>
+                <td>{{truncate .Note 80}}</td>
+                <td>{{if .CommitHash}}<code>{{truncate .CommitHash 7}}</code>{{else}}—{{end}}</td>
+                <td>{{timeAgo .CreatedAt}}</td>
+            </tr>
+        {{end}}
+        </tbody>
+    </table>
+</div>
+{{else}}
+<div class="card">
+    <p style="color: var(--text-muted);">No activity recorded</p>
+</div>
+{{end}}
+
+    </div>
+</body>
+</html>
+{{end}}

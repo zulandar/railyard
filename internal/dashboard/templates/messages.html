@@ -1,0 +1,97 @@
+{{define "messages.html"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    {{template "page_head"}}
+    <title>Messages — Railyard</title>
+</head>
+<body>
+    {{template "page_nav"}}
+    <div class="container">
+
+<h1>Messages</h1>
+
+{{if .Escalations}}
+<div class="escalation-banner">
+    <h3>Escalations ({{len .Escalations}})</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>From</th>
+                <th>Subject</th>
+                <th>Car</th>
+                <th>Priority</th>
+                <th>When</th>
+            </tr>
+        </thead>
+        <tbody>
+        {{range .Escalations}}
+            <tr>
+                <td>{{.FromAgent}}</td>
+                <td>{{.Subject}}</td>
+                <td>{{if .CarID}}<a href="/cars/{{.CarID}}">{{.CarID}}</a>{{else}}—{{end}}</td>
+                <td><span class="badge badge-priority-{{.Priority}}">{{.Priority}}</span></td>
+                <td>{{timeAgo .CreatedAt}}</td>
+            </tr>
+        {{end}}
+        </tbody>
+    </table>
+</div>
+{{end}}
+
+<div class="filters">
+    <form method="get" action="/messages">
+        <label>Agent:
+            <select name="agent" onchange="this.form.submit()">
+                <option value="">All</option>
+                {{range .Agents}}<option value="{{.}}"{{if eq . $.ActiveAgent}} selected{{end}}>{{.}}</option>{{end}}
+            </select>
+        </label>
+        <label>Priority:
+            <select name="priority" onchange="this.form.submit()">
+                <option value="">All</option>
+                {{range .Priorities}}<option value="{{.}}"{{if eq . $.ActivePriority}} selected{{end}}>{{.}}</option>{{end}}
+            </select>
+        </label>
+        <label>
+            <input type="checkbox" name="unacked" value="true"{{if .ActiveUnacked}} checked{{end}} onchange="this.form.submit()">
+            Unacknowledged only
+        </label>
+    </form>
+</div>
+
+<p style="color: var(--text-muted); font-size: 0.85rem;">Showing {{len .Messages}} message(s)</p>
+
+<div class="card">
+<table>
+    <thead>
+        <tr>
+            <th>Time</th>
+            <th>From → To</th>
+            <th>Subject</th>
+            <th>Priority</th>
+            <th>Acked</th>
+            <th>Car</th>
+        </tr>
+    </thead>
+    <tbody>
+    {{range .Messages}}
+        <tr>
+            <td>{{timeAgo .CreatedAt}}</td>
+            <td>{{.FromAgent}} → {{.ToAgent}}</td>
+            <td title="{{.Body}}">{{truncate .Subject 40}}</td>
+            <td><span class="badge badge-priority-{{.Priority}}">{{.Priority}}</span></td>
+            <td>{{if .Acknowledged}}✓{{else}}—{{end}}</td>
+            <td>{{if .CarID}}<a href="/cars/{{.CarID}}">{{.CarID}}</a>{{else}}—{{end}}</td>
+        </tr>
+    {{else}}
+        <tr><td colspan="6" style="color: var(--text-muted);">No messages found</td></tr>
+    {{end}}
+    </tbody>
+</table>
+</div>
+
+    </div>
+</body>
+</html>
+{{end}}

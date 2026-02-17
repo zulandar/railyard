@@ -28,8 +28,8 @@ func registerRoutes(router *gin.Engine, db *gorm.DB) {
 	router.GET("/partials/tracks", handlePartialsTracks(db))
 	router.GET("/partials/alerts", handlePartialsAlerts(db))
 
-	// SSE endpoint (stub for now — implemented in later task).
-	router.GET("/api/events", handleSSEStub())
+	// SSE endpoint for real-time escalation alerts.
+	router.GET("/api/events", handleSSE(db))
 }
 
 // dashboardData gathers all data needed for the dashboard page.
@@ -135,26 +135,48 @@ func handleCarDetail(db *gorm.DB) gin.HandlerFunc {
 
 func handleEngineDetail(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		c.HTML(http.StatusOK, "layout.html", gin.H{
-			"page":     "engine-detail",
-			"engineID": c.Param("id"),
+		id := c.Param("id")
+		engine, err := GetEngineDetail(db, id)
+		if err != nil {
+			c.HTML(http.StatusNotFound, "layout.html", gin.H{
+				"Error": fmt.Sprintf("Engine not found: %s", id),
+			})
+			return
+		}
+
+		activity := GetEngineActivity(db, id)
+
+		c.HTML(http.StatusOK, "engine_detail.html", gin.H{
+			"Engine":   engine,
+			"Activity": activity,
 		})
 	}
 }
 
 func handleMessages(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		c.HTML(http.StatusOK, "layout.html", gin.H{
-			"page": "messages",
-		})
-	}
-}
+		agent := c.Query("agent")
+		priority := c.Query("priority")
+		unacked := c.Query("unacked") == "true"
 
-func handleSSEStub() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		c.Header("Content-Type", "text/event-stream")
-		c.Header("Cache-Control", "no-cache")
-		c.Header("Connection", "keep-alive")
-		c.String(http.StatusOK, "data: {\"type\":\"connected\"}\n\n")
+		filters := MessageFilters{
+			Agent:    agent,
+			Priority: priority,
+			Unacked:  unacked,
+		}
+		result := ListMessages(db, filters)
+
+		// Get pending escalations separately for the top section.
+		escalations, _ := RecentEscalations(db)
+
+		c.HTML(http.StatusOK, "messages.html", gin.H{
+			"Messages":       result.Messages,
+			"Agents":         result.Agents,
+			"Priorities":     result.Priorities,
+			"Escalations":    escalations,
+			"ActiveAgent":    agent,
+			"ActivePriority": priority,
+			"ActiveUnacked":  unacked,
+		})
 	}
 }
