@@ -455,6 +455,34 @@ tracks:
 	}
 }
 
+func TestParse_RequirePR(t *testing.T) {
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+require_pr: true
+tracks:
+  - name: backend
+    language: go
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !cfg.RequirePR {
+		t.Error("RequirePR = false, want true")
+	}
+}
+
+func TestParse_RequirePR_DefaultFalse(t *testing.T) {
+	cfg, err := Parse([]byte(minimalYAML))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.RequirePR {
+		t.Error("RequirePR should default to false")
+	}
+}
+
 func TestParse_EmptyFilePatterns(t *testing.T) {
 	yaml := `
 owner: alice

@@ -15,6 +15,7 @@ type Config struct {
 	Repo               string              `yaml:"repo"`
 	BranchPrefix       string              `yaml:"branch_prefix"`
 	DefaultAcceptance  string              `yaml:"default_acceptance"`
+	RequirePR          bool                `yaml:"require_pr"`
 	Dolt               DoltConfig          `yaml:"dolt"`
 	Stall              StallConfig         `yaml:"stall"`
 	Tracks             []TrackConfig       `yaml:"tracks"`

@@ -307,6 +307,7 @@ func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, r
 		result, err := Switch(db, c.ID, SwitchOpts{
 			RepoDir:     repoDir,
 			TestCommand: testCommand,
+			RequirePR:   cfg.RequirePR,
 		})
 		if err != nil {
 			log.Printf("switch car %s: %v", c.ID, err)
@@ -331,7 +332,9 @@ func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, r
 			continue
 		}
 
-		if result.Merged {
+		if result.PRCreated {
+			fmt.Fprintf(out, "Car %s draft PR created: %s\n", c.ID, result.PRUrl)
+		} else if result.Merged {
 			anyMerged = true
 			fmt.Fprintf(out, "Car %s merged (branch %s)\n", c.ID, result.Branch)
 

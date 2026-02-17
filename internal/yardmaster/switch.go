@@ -18,16 +18,19 @@ type SwitchOpts struct {
 	RepoDir     string // working directory
 	DryRun      bool   // run tests but don't merge
 	TestCommand string // per-track test command (e.g. "go test ./...", "phpunit", "npm test")
+	RequirePR   bool   // create a draft PR instead of direct merge
 }
 
 // SwitchResult contains the outcome of a switch operation.
 type SwitchResult struct {
-	CarID     string
-	Branch     string
+	CarID       string
+	Branch      string
 	TestsPassed bool
-	TestOutput string
-	Merged     bool
-	Error      error
+	TestOutput  string
+	Merged      bool
+	PRCreated   bool
+	PRUrl       string
+	Error       error
 }
 
 // Switch performs the branch merge flow for a completed car:
@@ -98,6 +101,35 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 	}
 
 	if opts.DryRun {
+		return result, nil
+	}
+
+	if opts.RequirePR {
+		// Push the branch to origin so a PR can reference it.
+		if err := gitPushBranch(opts.RepoDir, car.Branch); err != nil {
+			result.Error = fmt.Errorf("push branch: %w", err)
+			return result, result.Error
+		}
+
+		// Build the PR body from the car record and progress notes.
+		prBody := buildPRBody(db, &car, opts.RepoDir)
+
+		prURL, err := createDraftPR(opts.RepoDir, car.Title, prBody, car.Branch)
+		if err != nil {
+			result.Error = fmt.Errorf("create PR: %w", err)
+			return result, result.Error
+		}
+
+		result.PRCreated = true
+		result.PRUrl = prURL
+
+		// Mark car as pr_open — not merged yet, waiting for human review.
+		now := time.Now()
+		db.Model(&models.Car{}).Where("id = ?", carID).Updates(map[string]interface{}{
+			"status":       "pr_open",
+			"completed_at": now,
+		})
+
 		return result, nil
 	}
 
@@ -305,6 +337,106 @@ func TryCloseEpic(db *gorm.DB, epicID string) {
 	if epic.ParentID != nil && *epic.ParentID != "" {
 		TryCloseEpic(db, *epic.ParentID)
 	}
+}
+
+// gitPushBranch pushes a specific branch to the remote.
+func gitPushBranch(repoDir, branch string) error {
+	cmd := exec.Command("git", "push", "-u", "origin", branch)
+	cmd.Dir = repoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git push %s: %s: %w", branch, string(out), err)
+	}
+	return nil
+}
+
+// buildPRBody assembles a rich PR description from the car record and progress notes.
+func buildPRBody(db *gorm.DB, car *models.Car, repoDir string) string {
+	var b strings.Builder
+
+	// Summary.
+	b.WriteString("## Summary\n")
+	if car.Description != "" {
+		b.WriteString(car.Description)
+	} else {
+		b.WriteString(car.Title)
+	}
+	b.WriteString("\n\n")
+
+	// Acceptance Criteria.
+	if car.Acceptance != "" {
+		b.WriteString("## Acceptance Criteria\n")
+		b.WriteString(car.Acceptance)
+		b.WriteString("\n\n")
+	}
+
+	// Design Notes.
+	if car.DesignNotes != "" {
+		b.WriteString("## Design Notes\n")
+		b.WriteString(car.DesignNotes)
+		b.WriteString("\n\n")
+	}
+
+	// What Changed — git diff --stat.
+	diffStat := gitDiffStat(repoDir, car.Branch)
+	if diffStat != "" {
+		b.WriteString("## What Changed\n```\n")
+		b.WriteString(diffStat)
+		b.WriteString("```\n\n")
+	}
+
+	// Progress Notes.
+	var progress []models.CarProgress
+	if db != nil {
+		db.Where("car_id = ?", car.ID).Order("created_at ASC").Find(&progress)
+	}
+	if len(progress) > 0 {
+		b.WriteString("## Progress\n")
+		for _, p := range progress {
+			eng := p.EngineID
+			if eng == "" {
+				eng = p.SessionID
+			}
+			b.WriteString(fmt.Sprintf("- [%s] %s\n", eng, p.Note))
+		}
+		b.WriteString("\n")
+	}
+
+	// Metadata footer.
+	b.WriteString("---\n")
+	b.WriteString(fmt.Sprintf("Car: %s | Track: %s | Priority: P%d", car.ID, car.Track, car.Priority))
+	if car.Assignee != "" {
+		b.WriteString(fmt.Sprintf(" | Engine: %s", car.Assignee))
+	}
+	b.WriteString(fmt.Sprintf(" | Branch: %s\n", car.Branch))
+
+	return b.String()
+}
+
+// gitDiffStat returns the diff --stat between main and the given branch.
+func gitDiffStat(repoDir, branch string) string {
+	cmd := exec.Command("git", "diff", "--stat", "main..."+branch)
+	cmd.Dir = repoDir
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// createDraftPR creates a draft pull request using the gh CLI and returns the PR URL.
+func createDraftPR(repoDir, title, body, branch string) (string, error) {
+	cmd := exec.Command("gh", "pr", "create",
+		"--draft",
+		"--title", title,
+		"--body", body,
+		"--head", branch,
+	)
+	cmd.Dir = repoDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("gh pr create: %s: %w", string(out), err)
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 // CreateReindexJob inserts a reindex_jobs row after a successful merge.

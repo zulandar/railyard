@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/zulandar/railyard/internal/models"
 )
 
 // --- Switch validation tests ---
@@ -36,14 +38,14 @@ func TestSwitch_EmptyRepoDir(t *testing.T) {
 
 func TestSwitchOpts_ZeroValue(t *testing.T) {
 	opts := SwitchOpts{}
-	if opts.RepoDir != "" || opts.DryRun {
+	if opts.RepoDir != "" || opts.DryRun || opts.RequirePR {
 		t.Error("zero-value SwitchOpts should have empty fields")
 	}
 }
 
 func TestSwitchResult_ZeroValue(t *testing.T) {
 	r := SwitchResult{}
-	if r.CarID != "" || r.Branch != "" || r.TestsPassed || r.Merged {
+	if r.CarID != "" || r.Branch != "" || r.TestsPassed || r.Merged || r.PRCreated || r.PRUrl != "" {
 		t.Error("zero-value SwitchResult should have empty/false fields")
 	}
 }
@@ -258,6 +260,149 @@ func TestDetachEngineWorktree_AlreadyDetached(t *testing.T) {
 	detachEngineWorktree(repoDir, engineID)
 
 	exec.Command("git", "worktree", "remove", "--force", wtDir).Run()
+}
+
+// --- buildPRBody tests ---
+
+func TestBuildPRBody_FullCar(t *testing.T) {
+	db := testDB(t)
+	c := models.Car{
+		ID:          "car-pr1",
+		Title:       "Add JWT middleware",
+		Description: "Add JWT middleware for protected routes.",
+		Track:       "backend",
+		Branch:      "ry/alice/backend/car-pr1",
+		Priority:    1,
+		Assignee:    "eng-abc",
+		Acceptance:  "- Rejects expired tokens\n- Valid tokens populate context",
+		DesignNotes: "Uses existing auth package.",
+	}
+	db.Create(&c)
+
+	db.Create(&models.CarProgress{
+		CarID:    "car-pr1",
+		EngineID: "eng-abc",
+		Note:     "Created middleware with token extraction",
+	})
+	db.Create(&models.CarProgress{
+		CarID:    "car-pr1",
+		EngineID: "eng-abc",
+		Note:     "Added test coverage for all token states",
+	})
+
+	body := buildPRBody(db, &c, "/nonexistent") // repoDir doesn't matter — git diff will fail gracefully
+
+	// Summary section.
+	if !strings.Contains(body, "## Summary") {
+		t.Error("missing Summary section")
+	}
+	if !strings.Contains(body, "Add JWT middleware for protected routes.") {
+		t.Error("missing car description in summary")
+	}
+
+	// Acceptance.
+	if !strings.Contains(body, "## Acceptance Criteria") {
+		t.Error("missing Acceptance Criteria section")
+	}
+	if !strings.Contains(body, "Rejects expired tokens") {
+		t.Error("missing acceptance content")
+	}
+
+	// Design Notes.
+	if !strings.Contains(body, "## Design Notes") {
+		t.Error("missing Design Notes section")
+	}
+	if !strings.Contains(body, "Uses existing auth package.") {
+		t.Error("missing design notes content")
+	}
+
+	// Progress.
+	if !strings.Contains(body, "## Progress") {
+		t.Error("missing Progress section")
+	}
+	if !strings.Contains(body, "[eng-abc] Created middleware") {
+		t.Error("missing progress note")
+	}
+	if !strings.Contains(body, "[eng-abc] Added test coverage") {
+		t.Error("missing second progress note")
+	}
+
+	// Metadata footer.
+	if !strings.Contains(body, "Car: car-pr1") {
+		t.Error("missing car ID in metadata")
+	}
+	if !strings.Contains(body, "Track: backend") {
+		t.Error("missing track in metadata")
+	}
+	if !strings.Contains(body, "Engine: eng-abc") {
+		t.Error("missing engine in metadata")
+	}
+	if !strings.Contains(body, "Branch: ry/alice/backend/car-pr1") {
+		t.Error("missing branch in metadata")
+	}
+}
+
+func TestBuildPRBody_MinimalCar(t *testing.T) {
+	db := testDB(t)
+	c := models.Car{
+		ID:       "car-pr2",
+		Title:    "Fix typo",
+		Track:    "docs",
+		Branch:   "ry/alice/docs/car-pr2",
+		Priority: 3,
+	}
+	db.Create(&c)
+
+	body := buildPRBody(db, &c, "/nonexistent")
+
+	// Should use title as summary when description is empty.
+	if !strings.Contains(body, "Fix typo") {
+		t.Error("missing title in summary")
+	}
+
+	// Should NOT have acceptance or design sections.
+	if strings.Contains(body, "## Acceptance Criteria") {
+		t.Error("should not have acceptance section for empty acceptance")
+	}
+	if strings.Contains(body, "## Design Notes") {
+		t.Error("should not have design section for empty design notes")
+	}
+
+	// Should NOT have progress section.
+	if strings.Contains(body, "## Progress") {
+		t.Error("should not have progress section with no notes")
+	}
+
+	// Should have metadata.
+	if !strings.Contains(body, "Car: car-pr2") {
+		t.Error("missing car ID in metadata")
+	}
+	if !strings.Contains(body, "Priority: P3") {
+		t.Error("missing priority in metadata")
+	}
+
+	// No engine assigned.
+	if strings.Contains(body, "Engine:") {
+		t.Error("should not have engine when no assignee")
+	}
+}
+
+func TestBuildPRBody_NilDB(t *testing.T) {
+	c := models.Car{
+		ID:     "car-pr3",
+		Title:  "Something",
+		Track:  "backend",
+		Branch: "ry/alice/backend/car-pr3",
+	}
+
+	// Should not panic with nil DB — just no progress section.
+	body := buildPRBody(nil, &c, "/nonexistent")
+	if !strings.Contains(body, "## Summary") {
+		t.Error("missing Summary section")
+	}
+	if strings.Contains(body, "## Progress") {
+		t.Error("should not have progress with nil db")
+	}
 }
 
 // --- TryCloseEpic validation tests ---

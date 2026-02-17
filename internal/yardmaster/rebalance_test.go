@@ -28,6 +28,7 @@ func testDB(t *testing.T) *gorm.DB {
 		&models.Engine{},
 		&models.Car{},
 		&models.CarDep{},
+		&models.CarProgress{},
 		&models.Message{},
 		&models.BroadcastAck{},
 		&models.Track{},
