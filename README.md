@@ -81,7 +81,14 @@ cd -
 
 **3. Configure**
 
-Create a `railyard.yaml` in your repo root:
+Copy the example config and edit it for your project:
+
+```bash
+cp railyard.example.yaml railyard.yaml
+# Edit owner, repo, tracks to match your project
+```
+
+Or create a `railyard.yaml` manually in your repo root:
 
 ```yaml
 owner: yourname
@@ -100,6 +107,8 @@ tracks:
       go_version: "1.25"
       style: "stdlib-first, no frameworks"
 ```
+
+See [`railyard.example.yaml`](railyard.example.yaml) for a fully documented template with all available options.
 
 **4. Initialize the database**
 
@@ -198,11 +207,14 @@ ry inbox                                # Check messages for current engine
 
 ## Configuration Reference
 
+See [`railyard.example.yaml`](railyard.example.yaml) for a copy-paste ready template.
+
 ```yaml
 owner: alice                            # Your identity (branch prefix: ry/alice/...)
 repo: git@github.com:org/repo.git       # Target repository
 # branch_prefix: ry/alice               # Override default ry/{owner}
 # default_acceptance: "Tests pass, code reviewed"  # Default acceptance criteria for Dispatch
+# require_pr: true                      # Create draft PRs instead of direct merge to main
 
 dolt:
   host: 127.0.0.1
