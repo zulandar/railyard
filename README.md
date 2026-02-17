@@ -135,9 +135,13 @@ ry stop -c railyard.yaml                # Graceful shutdown
 ### Car Management
 
 ```bash
-# Create work items
+# Create work items (created in draft status — engines won't pick them up yet)
 ry car create -c railyard.yaml --title "Add auth middleware" --track backend --type task
 ry car create -c railyard.yaml --title "Auth epic" --track backend --type epic
+
+# Publish cars so engines can claim them (draft → open)
+ry car publish <car-id>                # Single car
+ry car publish <epic-id> --recursive   # Epic + all draft children
 
 # List and inspect
 ry car list -c railyard.yaml --track backend --status open

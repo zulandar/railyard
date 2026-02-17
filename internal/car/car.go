@@ -43,6 +43,7 @@ type StatusCount struct {
 // ValidTransitions maps each status to its valid next statuses.
 // The special case "any → blocked" is handled in isValidTransition.
 var ValidTransitions = map[string][]string{
+	"draft":       {"open"},
 	"open":        {"ready", "cancelled", "blocked"},
 	"ready":       {"claimed", "blocked"},
 	"claimed":     {"in_progress", "blocked"},
@@ -106,7 +107,7 @@ func Create(db *gorm.DB, opts CreateOpts) (*models.Car, error) {
 		Title:       opts.Title,
 		Description: opts.Description,
 		Type:        opts.Type,
-		Status:      "open",
+		Status:      "draft",
 		Priority:    opts.Priority,
 		Track:       opts.Track,
 		DesignNotes: opts.DesignNotes,
@@ -242,6 +243,46 @@ func ChildrenSummary(db *gorm.DB, parentID string) ([]StatusCount, error) {
 		return nil, fmt.Errorf("car: children summary of %s: %w", parentID, err)
 	}
 	return results, nil
+}
+
+// Publish transitions a car from draft to open. If recursive is true and the
+// car is an epic, all draft children are also published. Returns the count of
+// cars published.
+func Publish(db *gorm.DB, id string, recursive bool) (int, error) {
+	var c models.Car
+	if err := db.Where("id = ?", id).First(&c).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return 0, fmt.Errorf("car: not found: %s", id)
+		}
+		return 0, fmt.Errorf("car: get %s for publish: %w", id, err)
+	}
+
+	count := 0
+
+	// Publish the car itself if it's in draft.
+	if c.Status == "draft" {
+		if err := db.Model(&models.Car{}).Where("id = ?", id).Update("status", "open").Error; err != nil {
+			return 0, fmt.Errorf("car: publish %s: %w", id, err)
+		}
+		count++
+	}
+
+	// Recursively publish draft children.
+	if recursive {
+		var children []models.Car
+		if err := db.Where("parent_id = ? AND status = ?", id, "draft").Find(&children).Error; err != nil {
+			return count, fmt.Errorf("car: list draft children of %s: %w", id, err)
+		}
+		for _, child := range children {
+			n, err := Publish(db, child.ID, true)
+			if err != nil {
+				return count, err
+			}
+			count += n
+		}
+	}
+
+	return count, nil
 }
 
 // generateUniqueID generates an ID and retries once on collision.

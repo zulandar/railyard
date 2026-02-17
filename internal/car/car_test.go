@@ -74,6 +74,12 @@ func TestIsValidTransition(t *testing.T) {
 		to   string
 		want bool
 	}{
+		// Draft transitions
+		{"draft", "open", true},
+		{"draft", "ready", false},
+		{"draft", "claimed", false},
+		{"draft", "done", false},
+
 		// Valid forward transitions
 		{"open", "ready", true},
 		{"ready", "claimed", true},
@@ -115,7 +121,7 @@ func TestIsValidTransition(t *testing.T) {
 }
 
 func TestValidTransitions_AllStatusesPresent(t *testing.T) {
-	expected := []string{"open", "ready", "claimed", "in_progress", "blocked"}
+	expected := []string{"draft", "open", "ready", "claimed", "in_progress", "blocked"}
 	for _, status := range expected {
 		if _, ok := ValidTransitions[status]; !ok {
 			t.Errorf("ValidTransitions missing key %q", status)

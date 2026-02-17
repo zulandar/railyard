@@ -25,6 +25,7 @@ func newCarCmd() *cobra.Command {
 	cmd.AddCommand(newCarDepCmd())
 	cmd.AddCommand(newCarReadyCmd())
 	cmd.AddCommand(newCarChildrenCmd())
+	cmd.AddCommand(newCarPublishCmd())
 	return cmd
 }
 
@@ -555,6 +556,44 @@ func runCarChildren(cmd *cobra.Command, configPath, parentID string) error {
 	}
 	fmt.Fprintf(out, "\nSummary: %s\n", strings.Join(parts, ", "))
 	return nil
+}
+
+func newCarPublishCmd() *cobra.Command {
+	var (
+		configPath string
+		recursive  bool
+	)
+
+	cmd := &cobra.Command{
+		Use:   "publish <id>",
+		Short: "Publish a draft car (transition draft → open)",
+		Long: `Publishes a car by transitioning it from draft to open status.
+With --recursive, also publishes all draft children (useful for epics).`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, gormDB, err := connectFromConfig(configPath)
+			if err != nil {
+				return err
+			}
+
+			count, err := car.Publish(gormDB, args[0], recursive)
+			if err != nil {
+				return err
+			}
+
+			out := cmd.OutOrStdout()
+			if count == 0 {
+				fmt.Fprintf(out, "No draft cars to publish for %s\n", args[0])
+			} else {
+				fmt.Fprintf(out, "Published %d car(s) starting from %s\n", count, args[0])
+			}
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVarP(&configPath, "config", "c", "railyard.yaml", "path to Railyard config file")
+	cmd.Flags().BoolVarP(&recursive, "recursive", "r", false, "also publish all draft children (for epics)")
+	return cmd
 }
 
 // truncate shortens a string to maxLen, adding "..." if truncated.

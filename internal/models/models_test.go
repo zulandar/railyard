@@ -49,7 +49,7 @@ func TestCar_Fields(t *testing.T) {
 	assertGormTag(t, typ, "Type", "size:16")
 	assertGormTag(t, typ, "Type", "default:task")
 	assertGormTag(t, typ, "Status", "size:16")
-	assertGormTag(t, typ, "Status", "default:open")
+	assertGormTag(t, typ, "Status", "default:draft")
 	assertGormTag(t, typ, "Status", "index")
 	assertGormTag(t, typ, "Priority", "default:2")
 	assertGormTag(t, typ, "Track", "size:64")

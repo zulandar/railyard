@@ -8,7 +8,7 @@ type Car struct {
 	Title       string     `gorm:"not null"`
 	Description string     `gorm:"type:text"`
 	Type        string     `gorm:"size:16;default:task"`
-	Status      string     `gorm:"size:16;default:open;index"`
+	Status      string     `gorm:"size:16;default:draft;index"`
 	Priority    int        `gorm:"default:2"`
 	Track       string     `gorm:"size:64;index"`
 	Assignee    string     `gorm:"size:64"`

@@ -95,6 +95,30 @@ func TestRenderPrompt_ContainsCommands(t *testing.T) {
 	if !strings.Contains(prompt, "ry car create") {
 		t.Errorf("prompt does not contain %q", "ry car create")
 	}
+	if !strings.Contains(prompt, "ry car publish") {
+		t.Errorf("prompt does not contain %q", "ry car publish")
+	}
+}
+
+func TestRenderPrompt_ContainsDraftWorkflow(t *testing.T) {
+	cfg := testConfig(config.TrackConfig{
+		Name:     "api",
+		Language: "go",
+	})
+
+	prompt, err := RenderPrompt(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(prompt, "draft") {
+		t.Errorf("prompt does not mention draft status")
+	}
+	if !strings.Contains(prompt, "--recursive") {
+		t.Errorf("prompt does not contain %q", "--recursive")
+	}
+	if !strings.Contains(prompt, "Publish all cars") {
+		t.Errorf("prompt does not contain publish workflow step")
+	}
 }
 
 func TestRenderPrompt_ContainsRules(t *testing.T) {
