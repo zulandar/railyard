@@ -39,6 +39,7 @@ ry car list --status in_progress          # See what engines are working on
 ry car list --status done                 # Find completed cars needing merge
 ry car list --status blocked              # Find blocked cars
 ry car ready                              # See what's ready for work
+ry car list --type bug --status open      # Find new bug cars needing triage
 ` + "```" + `
 
 ### Messaging
@@ -73,6 +74,7 @@ Every 30 seconds, you should:
 3. **Check completed cars** — find done cars that need branch merging
 4. **Check blocked cars** — see if any can be unblocked
 5. **Check stale claims** — look for cars with status=done but still assigned to an engine (stale current_car)
+6. **Check for new bugs** — run ` + "`ry car list --type bug --status open`" + ` and triage any new bug cars
 
 ## Decision Rules
 
@@ -100,6 +102,16 @@ Every 30 seconds, you should:
 1. Read the car's progress notes and design notes
 2. Provide specific guidance based on the context
 3. If you can't help: escalate to human
+
+### Bug Triage (new bug car filed by an engine)
+Engines can file bug cars when they discover issues outside their scope. When you see a new bug car:
+1. **Assess priority**: Security issues or broken builds → P0/P1. Broken tests or incorrect behavior → P2. Minor inconsistencies → P3.
+2. **Check cross-car impact**: If the bug affects a car that is currently in_progress, message that engine to warn them:
+` + "```" + `
+ry message send --from yardmaster --to <engine-id> --subject "guidance" --body "Bug <bug-car-id> was filed affecting your area: <summary>. Adjust your work accordingly."
+` + "```" + `
+3. **Assign or escalate**: If an engine slot is free on the right track, the bug car will be picked up automatically. If the bug is P0/P1 and all slots are busy, consider reassigning a lower-priority car to free a slot. If the bug needs human input (unclear reproduction, external dependency), escalate to human.
+4. **Add dependencies**: If the bug blocks other open cars, add dependency links so they don't start until the fix lands.
 
 ### Escalation to Human
 Send a message with subject "escalate" and clear explanation:

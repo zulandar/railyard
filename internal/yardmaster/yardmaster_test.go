@@ -178,6 +178,29 @@ func TestRenderPrompt_ContainsDecisionRules(t *testing.T) {
 	}
 }
 
+func TestRenderPrompt_ContainsBugTriage(t *testing.T) {
+	cfg := testConfig(config.TrackConfig{
+		Name:     "api",
+		Language: "go",
+	})
+
+	prompt, err := RenderPrompt(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, want := range []string{
+		"Bug Triage",
+		"Assess priority",
+		"cross-car impact",
+		"ry car list --type bug",
+		"Check for new bugs",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("prompt missing %q", want)
+		}
+	}
+}
+
 func TestRenderPrompt_MultipleTracksRendered(t *testing.T) {
 	cfg := testConfig(
 		config.TrackConfig{
