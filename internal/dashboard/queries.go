@@ -21,7 +21,8 @@ type EngineRow struct {
 // EngineSummary returns all non-yardmaster engines.
 func EngineSummary(db *gorm.DB) ([]EngineRow, error) {
 	var engines []models.Engine
-	if err := db.Where("role != ? OR role IS NULL", "yardmaster").
+	deadCutoff := time.Now().Add(-1 * time.Hour)
+	if err := db.Where("(role != ? OR role IS NULL) AND NOT (status = ? AND last_activity < ?)", "yardmaster", "dead", deadCutoff).
 		Order("track ASC, id ASC").Find(&engines).Error; err != nil {
 		return nil, err
 	}
