@@ -44,5 +44,5 @@ func Start(ctx context.Context, opts StartOpts) error {
 		out = os.Stdout
 	}
 
-	return RunDaemon(ctx, opts.DB, opts.Config, opts.RepoDir, opts.PollInterval, out)
+	return RunDaemon(ctx, opts.DB, opts.Config, opts.ConfigPath, opts.RepoDir, opts.PollInterval, out)
 }

@@ -11,7 +11,7 @@ import (
 
 func TestRunDaemon_NilDB(t *testing.T) {
 	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
-	err := RunDaemon(context.Background(), nil, cfg, "/tmp", time.Second, nil)
+	err := RunDaemon(context.Background(), nil, cfg, "railyard.yaml", "/tmp", time.Second, nil)
 	if err == nil {
 		t.Fatal("expected error for nil db")
 	}
@@ -21,7 +21,7 @@ func TestRunDaemon_NilDB(t *testing.T) {
 }
 
 func TestRunDaemon_NilConfig(t *testing.T) {
-	err := RunDaemon(context.Background(), nil, nil, "/tmp", time.Second, nil)
+	err := RunDaemon(context.Background(), nil, nil, "railyard.yaml", "/tmp", time.Second, nil)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -32,7 +32,7 @@ func TestRunDaemon_NilConfig(t *testing.T) {
 }
 
 func TestRunDaemon_EmptyRepoDir(t *testing.T) {
-	err := RunDaemon(context.Background(), nil, nil, "", time.Second, nil)
+	err := RunDaemon(context.Background(), nil, nil, "railyard.yaml", "", time.Second, nil)
 	if err == nil {
 		t.Fatal("expected error")
 	}

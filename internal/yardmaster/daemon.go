@@ -27,7 +27,7 @@ const (
 // RunDaemon runs the yardmaster daemon loop. It registers the yardmaster in the
 // engines table, starts a heartbeat, and loops through inbox processing, stale
 // engine detection, completed car switching, and blocked car unblocking.
-func RunDaemon(ctx context.Context, db *gorm.DB, cfg *config.Config, repoDir string, pollInterval time.Duration, out io.Writer) error {
+func RunDaemon(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath, repoDir string, pollInterval time.Duration, out io.Writer) error {
 	if db == nil {
 		return fmt.Errorf("yardmaster: db is required")
 	}
@@ -71,7 +71,7 @@ func RunDaemon(ctx context.Context, db *gorm.DB, cfg *config.Config, repoDir str
 		}
 
 		// Phase 1: Process inbox.
-		draining, err := processInbox(ctx, db, out)
+		draining, err := processInbox(ctx, db, cfg, configPath, repoDir, out)
 		if err != nil {
 			log.Printf("yardmaster inbox error: %v", err)
 		}
@@ -133,7 +133,7 @@ func registerYardmaster(db *gorm.DB) error {
 
 // processInbox drains the yardmaster inbox, classifying and handling each message.
 // Returns true if a drain message was received (yardmaster should shut down).
-func processInbox(ctx context.Context, db *gorm.DB, out io.Writer) (draining bool, err error) {
+func processInbox(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath, repoDir string, out io.Writer) (draining bool, err error) {
 	msgs, err := messaging.Inbox(db, YardmasterID)
 	if err != nil {
 		return false, err
