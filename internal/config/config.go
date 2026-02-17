@@ -11,13 +11,14 @@ import (
 
 // Config is the top-level Railyard configuration, loaded from config.yaml.
 type Config struct {
-	Owner         string              `yaml:"owner"`
-	Repo          string              `yaml:"repo"`
-	BranchPrefix  string              `yaml:"branch_prefix"`
-	Dolt          DoltConfig          `yaml:"dolt"`
-	Stall         StallConfig         `yaml:"stall"`
-	Tracks        []TrackConfig       `yaml:"tracks"`
-	Notifications NotificationsConfig `yaml:"notifications"`
+	Owner              string              `yaml:"owner"`
+	Repo               string              `yaml:"repo"`
+	BranchPrefix       string              `yaml:"branch_prefix"`
+	DefaultAcceptance  string              `yaml:"default_acceptance"`
+	Dolt               DoltConfig          `yaml:"dolt"`
+	Stall              StallConfig         `yaml:"stall"`
+	Tracks             []TrackConfig       `yaml:"tracks"`
+	Notifications      NotificationsConfig `yaml:"notifications"`
 }
 
 // NotificationsConfig controls push notifications for human-targeted messages.

@@ -22,6 +22,7 @@ type CreateOpts struct {
 	ParentID     string
 	DesignNotes  string
 	Acceptance   string
+	SkipTests    bool
 	BranchPrefix string // e.g., "ry/alice"
 }
 
@@ -112,6 +113,7 @@ func Create(db *gorm.DB, opts CreateOpts) (*models.Car, error) {
 		Track:       opts.Track,
 		DesignNotes: opts.DesignNotes,
 		Acceptance:  opts.Acceptance,
+		SkipTests:   opts.SkipTests,
 		Branch:      ComputeBranch(opts.BranchPrefix, opts.Track, id),
 	}
 

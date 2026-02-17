@@ -152,6 +152,7 @@ ry car children <epic-id>              # Children of an epic with status summary
 # Update
 ry car update <car-id> --status in_progress
 ry car update <car-id> --priority 0 --description "Updated scope"
+ry car update <car-id> --skip-tests       # Skip test gate during merge
 
 # Dependencies
 ry car dep add <car-id> --blocked-by <blocker-id>
@@ -199,6 +200,7 @@ ry inbox                                # Check messages for current engine
 owner: alice                            # Your identity (branch prefix: ry/alice/...)
 repo: git@github.com:org/repo.git       # Target repository
 # branch_prefix: ry/alice               # Override default ry/{owner}
+# default_acceptance: "Tests pass, code reviewed"  # Default acceptance criteria for Dispatch
 
 dolt:
   host: 127.0.0.1

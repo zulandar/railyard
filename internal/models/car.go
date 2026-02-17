@@ -16,6 +16,7 @@ type Car struct {
 	Branch      string     `gorm:"size:128"`
 	DesignNotes string     `gorm:"type:text"`
 	Acceptance  string     `gorm:"type:text"`
+	SkipTests   bool       `gorm:"default:false"`
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 	ClaimedAt   *time.Time

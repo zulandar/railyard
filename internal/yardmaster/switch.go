@@ -65,25 +65,30 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 		return result, result.Error
 	}
 
-	// Run tests on the branch.
-	testOutput, testErr := runTests(opts.RepoDir, car.Branch, opts.TestCommand)
-	result.TestOutput = testOutput
+	// Run tests on the branch (unless skip_tests is set on the car).
+	if car.SkipTests {
+		result.TestsPassed = true
+		result.TestOutput = "tests skipped (skip_tests=true on car)"
+	} else {
+		testOutput, testErr := runTests(opts.RepoDir, car.Branch, opts.TestCommand)
+		result.TestOutput = testOutput
 
-	if testErr != nil {
-		result.TestsPassed = false
-		// Set car status to blocked and notify.
-		db.Model(&models.Car{}).Where("id = ?", carID).Update("status", "blocked")
-		if car.Assignee != "" {
-			messaging.Send(db, "yardmaster", car.Assignee, "test-failure",
-				fmt.Sprintf("Tests failed for car %s on branch %s:\n%s", carID, car.Branch, testOutput),
-				messaging.SendOpts{CarID: carID, Priority: "urgent"},
-			)
+		if testErr != nil {
+			result.TestsPassed = false
+			// Set car status to blocked and notify.
+			db.Model(&models.Car{}).Where("id = ?", carID).Update("status", "blocked")
+			if car.Assignee != "" {
+				messaging.Send(db, "yardmaster", car.Assignee, "test-failure",
+					fmt.Sprintf("Tests failed for car %s on branch %s:\n%s", carID, car.Branch, testOutput),
+					messaging.SendOpts{CarID: carID, Priority: "urgent"},
+				)
+			}
+			result.Error = fmt.Errorf("tests failed: %w", testErr)
+			return result, nil // return result without error — test failure is a normal outcome
 		}
-		result.Error = fmt.Errorf("tests failed: %w", testErr)
-		return result, nil // return result without error — test failure is a normal outcome
-	}
 
-	result.TestsPassed = true
+		result.TestsPassed = true
+	}
 
 	if opts.DryRun {
 		return result, nil

@@ -40,6 +40,7 @@ func newCarCreateCmd() *cobra.Command {
 		acceptance  string
 		design      string
 		parentID    string
+		skipTests   bool
 	)
 
 	cmd := &cobra.Command{
@@ -56,6 +57,7 @@ func newCarCreateCmd() *cobra.Command {
 				Acceptance:  acceptance,
 				DesignNotes: design,
 				ParentID:    parentID,
+				SkipTests:   skipTests,
 			})
 		},
 	}
@@ -69,6 +71,7 @@ func newCarCreateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&acceptance, "acceptance", "", "acceptance criteria")
 	cmd.Flags().StringVar(&design, "design", "", "design notes")
 	cmd.Flags().StringVar(&parentID, "parent", "", "parent epic car ID")
+	cmd.Flags().BoolVar(&skipTests, "skip-tests", false, "skip test gate during merge")
 	cmd.MarkFlagRequired("title")
 	return cmd
 }
@@ -258,6 +261,7 @@ func newCarUpdateCmd() *cobra.Command {
 		description string
 		acceptance  string
 		design      string
+		skipTests   bool
 	)
 
 	cmd := &cobra.Command{
@@ -286,9 +290,12 @@ func newCarUpdateCmd() *cobra.Command {
 			if cmd.Flags().Changed("design") {
 				updates["design_notes"] = design
 			}
+			if cmd.Flags().Changed("skip-tests") {
+				updates["skip_tests"] = skipTests
+			}
 
 			if len(updates) == 0 {
-				return fmt.Errorf("no fields to update; use --status, --assignee, --priority, --description, --acceptance, or --design")
+				return fmt.Errorf("no fields to update; use --status, --assignee, --priority, --description, --acceptance, --design, or --skip-tests")
 			}
 
 			return runCarUpdate(cmd, configPath, args[0], updates)
@@ -302,6 +309,7 @@ func newCarUpdateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&description, "description", "", "new description")
 	cmd.Flags().StringVar(&acceptance, "acceptance", "", "new acceptance criteria")
 	cmd.Flags().StringVar(&design, "design", "", "new design notes")
+	cmd.Flags().BoolVar(&skipTests, "skip-tests", false, "skip test gate during merge")
 	return cmd
 }
 
