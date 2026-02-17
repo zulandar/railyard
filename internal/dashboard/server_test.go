@@ -242,6 +242,122 @@ func TestSSEEndpoint_Returns200(t *testing.T) {
 	}
 }
 
+func TestIndex_ContainsDashboardContent(t *testing.T) {
+	baseURL, cleanup := setupTestRouter(t)
+	defer cleanup()
+
+	resp, err := http.Get(baseURL + "/")
+	if err != nil {
+		t.Fatalf("GET /: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body := make([]byte, 8192)
+	n, _ := resp.Body.Read(body)
+	html := string(body[:n])
+
+	for _, want := range []string{
+		"Dashboard",
+		"Engines",
+		"Tracks",
+		"hx-get",
+		"hx-trigger",
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("index page missing %q", want)
+		}
+	}
+}
+
+func TestPartialsEngines_Returns200(t *testing.T) {
+	baseURL, cleanup := setupTestRouter(t)
+	defer cleanup()
+
+	resp, err := http.Get(baseURL + "/partials/engines")
+	if err != nil {
+		t.Fatalf("GET /partials/engines: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+}
+
+func TestPartialsTracks_Returns200(t *testing.T) {
+	baseURL, cleanup := setupTestRouter(t)
+	defer cleanup()
+
+	resp, err := http.Get(baseURL + "/partials/tracks")
+	if err != nil {
+		t.Fatalf("GET /partials/tracks: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+}
+
+func TestPartialsAlerts_Returns200(t *testing.T) {
+	baseURL, cleanup := setupTestRouter(t)
+	defer cleanup()
+
+	resp, err := http.Get(baseURL + "/partials/alerts")
+	if err != nil {
+		t.Fatalf("GET /partials/alerts: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+}
+
+func TestTimeAgo(t *testing.T) {
+	tests := []struct {
+		name string
+		when time.Time
+		want string
+	}{
+		{"zero", time.Time{}, "—"},
+		{"seconds", time.Now().Add(-30 * time.Second), "30s ago"},
+		{"minutes", time.Now().Add(-5 * time.Minute), "5m ago"},
+		{"hours", time.Now().Add(-3 * time.Hour), "3h ago"},
+		{"days", time.Now().Add(-48 * time.Hour), "2d ago"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := TimeAgo(tt.when)
+			if !strings.Contains(got, strings.TrimSuffix(tt.want, " ago")) && tt.want != "—" {
+				// Allow small timing variance for seconds.
+				if tt.name != "seconds" {
+					t.Errorf("TimeAgo = %q, want to contain %q", got, tt.want)
+				}
+			}
+			if tt.want == "—" && got != "—" {
+				t.Errorf("TimeAgo(zero) = %q, want %q", got, "—")
+			}
+		})
+	}
+}
+
+func TestDashboardData_NilDB(t *testing.T) {
+	data := dashboardData(nil)
+	if data["Engines"] == nil {
+		t.Error("Engines should not be nil")
+	}
+	if data["Tracks"] == nil {
+		t.Error("Tracks should not be nil")
+	}
+	if data["Escalations"] == nil {
+		t.Error("Escalations should not be nil")
+	}
+	if data["QueueDepth"] != int64(0) {
+		t.Errorf("QueueDepth = %v, want 0", data["QueueDepth"])
+	}
+}
+
 func TestUnknownRoute_Returns404(t *testing.T) {
 	baseURL, cleanup := setupTestRouter(t)
 	defer cleanup()

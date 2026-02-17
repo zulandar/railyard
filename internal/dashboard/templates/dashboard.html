@@ -1,0 +1,81 @@
+{{define "title"}}Dashboard — Railyard{{end}}
+{{define "content"}}
+<h1>Dashboard</h1>
+
+<div id="alerts" hx-get="/partials/alerts" hx-trigger="every 3s" hx-swap="innerHTML">
+    {{template "alerts_fragment" .}}
+</div>
+
+<h2>Engines</h2>
+<div class="card" id="engines-table" hx-get="/partials/engines" hx-trigger="every 3s" hx-swap="innerHTML">
+    {{template "engines_fragment" .}}
+</div>
+
+<h2>Tracks</h2>
+<div id="track-cards" hx-get="/partials/tracks" hx-trigger="every 3s" hx-swap="innerHTML">
+    {{template "tracks_fragment" .}}
+</div>
+
+<p style="color: var(--text-muted); font-size: 0.8rem; margin-top: 2rem;">
+    Messages in queue: {{.QueueDepth}} | Auto-refreshing every 3s
+</p>
+{{end}}
+
+{{define "alerts_fragment"}}
+{{if .Escalations}}
+<div id="alert-banner" class="active">
+    {{len .Escalations}} escalation(s) need attention —
+    <a href="/messages">View messages</a>
+</div>
+{{end}}
+{{end}}
+
+{{define "engines_fragment"}}
+<table>
+    <thead>
+        <tr>
+            <th>Engine</th>
+            <th>Track</th>
+            <th>Status</th>
+            <th>Current Car</th>
+            <th>Last Activity</th>
+        </tr>
+    </thead>
+    <tbody>
+    {{range .Engines}}
+        <tr>
+            <td><a href="/engines/{{.ID}}">{{.ID}}</a></td>
+            <td>{{.Track}}</td>
+            <td><span class="badge badge-{{.Status}}">{{.Status}}</span></td>
+            <td>
+                {{if .CurrentCar}}<a href="/cars/{{.CurrentCar}}">{{.CurrentCar}}</a>{{else}}—{{end}}
+            </td>
+            <td>{{timeAgo .LastActivity}}</td>
+        </tr>
+    {{else}}
+        <tr><td colspan="5" style="color: var(--text-muted);">No engines running</td></tr>
+    {{end}}
+    </tbody>
+</table>
+{{end}}
+
+{{define "tracks_fragment"}}
+<div class="grid">
+{{range .Tracks}}
+    <div class="card">
+        <h3>{{.Track}}</h3>
+        <div style="display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.5rem;">
+            {{if .Open}}<span class="badge badge-open">{{.Open}} open</span>{{end}}
+            {{if .InProgress}}<span class="badge badge-in_progress">{{.InProgress}} active</span>{{end}}
+            {{if .Blocked}}<span class="badge badge-blocked">{{.Blocked}} blocked</span>{{end}}
+            {{if .Done}}<span class="badge badge-done">{{.Done}} done</span>{{end}}
+            {{if .Merged}}<span class="badge badge-done">{{.Merged}} merged</span>{{end}}
+            {{if .Draft}}<span class="badge badge-draft">{{.Draft}} draft</span>{{end}}
+        </div>
+        <p style="color: var(--text-muted); font-size: 0.8rem; margin-top: 0.5rem;">{{.Total}} total cars</p>
+    </div>
+{{else}}
+    <p style="color: var(--text-muted);">No tracks configured</p>
+{{end}}
+</div>
+{{end}}

@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"math"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -64,11 +66,36 @@ func Start(ctx context.Context, opts StartOpts) error {
 	return nil
 }
 
-// parseTemplates loads the embedded HTML templates.
+// templateFuncs returns the FuncMap used by dashboard templates.
+func templateFuncs() template.FuncMap {
+	return template.FuncMap{
+		"timeAgo": TimeAgo,
+	}
+}
+
+// parseTemplates loads the embedded HTML templates with custom functions.
 func parseTemplates() (*template.Template, error) {
-	tmpl, err := template.ParseFS(templatesFS, "templates/*.html")
+	tmpl, err := template.New("").Funcs(templateFuncs()).ParseFS(templatesFS, "templates/*.html")
 	if err != nil {
 		return nil, fmt.Errorf("parse templates: %w", err)
 	}
 	return tmpl, nil
+}
+
+// TimeAgo formats a time as a human-readable relative duration.
+func TimeAgo(t time.Time) string {
+	if t.IsZero() {
+		return "—"
+	}
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%ds ago", int(math.Round(d.Seconds())))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+	}
 }
