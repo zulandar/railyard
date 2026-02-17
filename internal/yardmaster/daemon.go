@@ -199,6 +199,10 @@ func processInbox(ctx context.Context, db *gorm.DB, cfg *config.Config, configPa
 		case subject == "reassignment" || subject == "deps-unblocked" || subject == "epic-closed":
 			ackMsg(db, msg)
 
+		case strings.Contains(subject, "done") || strings.Contains(subject, "complete"):
+			fmt.Fprintf(out, "Inbox: engine %s sent %q — engines should use `ry complete`, not messages. Acknowledged.\n", msg.FromAgent, msg.Subject)
+			ackMsg(db, msg)
+
 		default:
 			fmt.Fprintf(out, "Inbox: unknown subject %q from %s — acknowledged\n", msg.Subject, msg.FromAgent)
 			ackMsg(db, msg)

@@ -128,8 +128,12 @@ func writeRecentCommits(w *strings.Builder, commits []string) {
 func writeInstructions(w *strings.Builder) {
 	w.WriteString("## When You're Done\n")
 	w.WriteString("1. Run tests, ensure they pass\n")
-	w.WriteString("2. Update car status: `ry car complete <car-id> \"summary of what was done\"`\n")
+	w.WriteString("2. Mark the car complete by running this command:\n")
+	w.WriteString("```\n")
+	w.WriteString("ry complete <car-id> \"summary of what was done\"\n")
+	w.WriteString("```\n")
 	w.WriteString("3. The daemon will handle git push and /clear\n")
+	w.WriteString("\n**IMPORTANT**: Use the `ry complete` command above — do NOT send a message to the Yardmaster to report completion. Messages are for help requests only.\n")
 	w.WriteString("\n## If You're Stuck\n")
 	w.WriteString("1. Update progress: `ry car progress <car-id> \"what you tried, what failed\"`\n")
 	w.WriteString("2. Send message: `ry message send --from <engine-id> --to yardmaster --subject \"help\" --body \"need help with X\"`\n")

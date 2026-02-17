@@ -265,7 +265,8 @@ func TestRenderContext_Instructions(t *testing.T) {
 	}
 	for _, want := range []string{
 		"## When You're Done",
-		"ry car complete",
+		"ry complete",
+		"do NOT send a message",
 		"## If You're Stuck",
 		"ry car progress",
 		"ry message send",
