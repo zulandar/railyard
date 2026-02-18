@@ -10,8 +10,10 @@ type AgentLog struct {
 	CarID     string    `gorm:"size:32;index"`
 	Direction  string    `gorm:"size:4"`
 	Content    string    `gorm:"type:mediumtext"`
-	TokenCount int
-	Model      string    `gorm:"size:64"`
-	LatencyMs  int
+	TokenCount   int
+	InputTokens  int
+	OutputTokens int
+	Model        string `gorm:"size:64"`
+	LatencyMs    int
 	CreatedAt  time.Time
 }

@@ -230,11 +230,14 @@ func Stop(opts StopOpts) error {
 
 // StatusInfo holds dashboard information.
 type StatusInfo struct {
-	SessionRunning  bool
-	DispatchRunning bool
-	Engines         []EngineInfo
-	TrackSummary    []TrackSummary
-	MessageDepth    int64
+	SessionRunning   bool
+	DispatchRunning  bool
+	Engines          []EngineInfo
+	TrackSummary     []TrackSummary
+	MessageDepth     int64
+	TotalInputTokens  int64
+	TotalOutputTokens int64
+	TotalTokens       int64
 }
 
 // EngineInfo holds per-engine dashboard data.
@@ -315,6 +318,20 @@ func Status(db *gorm.DB, tmux Tmux) (*StatusInfo, error) {
 		Where("acknowledged = ? AND to_agent != ?", false, "broadcast").
 		Count(&info.MessageDepth)
 
+	// Aggregate token usage across all stdout logs.
+	var tokenRow struct {
+		InputTokens  int64
+		OutputTokens int64
+		TotalTokens  int64
+	}
+	db.Model(&models.AgentLog{}).
+		Select("COALESCE(SUM(input_tokens),0) as input_tokens, COALESCE(SUM(output_tokens),0) as output_tokens, COALESCE(SUM(token_count),0) as total_tokens").
+		Where("direction = ?", "out").
+		Scan(&tokenRow)
+	info.TotalInputTokens = tokenRow.InputTokens
+	info.TotalOutputTokens = tokenRow.OutputTokens
+	info.TotalTokens = tokenRow.TotalTokens
+
 	return info, nil
 }
 
@@ -366,6 +383,34 @@ func FormatStatus(info *StatusInfo) string {
 	// Message depth.
 	b.WriteString(fmt.Sprintf("Message queue: %d unacknowledged\n", info.MessageDepth))
 
+	// Token usage.
+	if info.TotalTokens > 0 {
+		b.WriteString("\nTOKENS\n")
+		b.WriteString(fmt.Sprintf("  Input:     %s\n", formatTokens(info.TotalInputTokens)))
+		b.WriteString(fmt.Sprintf("  Output:    %s\n", formatTokens(info.TotalOutputTokens)))
+		b.WriteString(fmt.Sprintf("  Total:     %s\n", formatTokens(info.TotalTokens)))
+	}
+
+	return b.String()
+}
+
+// formatTokens formats an int64 with comma separators.
+func formatTokens(n int64) string {
+	s := fmt.Sprintf("%d", n)
+	if len(s) <= 3 {
+		return s
+	}
+	var b strings.Builder
+	remainder := len(s) % 3
+	if remainder > 0 {
+		b.WriteString(s[:remainder])
+	}
+	for i := remainder; i < len(s); i += 3 {
+		if b.Len() > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteString(s[i : i+3])
+	}
 	return b.String()
 }
 

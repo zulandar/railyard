@@ -194,6 +194,8 @@ func TestAgentLog_Fields(t *testing.T) {
 
 	assertFieldType(t, typ, "ID", "uint")
 	assertFieldType(t, typ, "TokenCount", "int")
+	assertFieldType(t, typ, "InputTokens", "int")
+	assertFieldType(t, typ, "OutputTokens", "int")
 	assertFieldType(t, typ, "LatencyMs", "int")
 	assertFieldType(t, typ, "CreatedAt", "time.Time")
 }
@@ -354,18 +356,26 @@ func TestMessage_Instantiation(t *testing.T) {
 
 func TestAgentLog_Instantiation(t *testing.T) {
 	a := AgentLog{
-		ID:         1,
-		EngineID:   "eng-001",
-		SessionID:  "sess-1",
-		CarID:     "car-001",
-		Direction:  "out",
-		Content:    "response content",
-		TokenCount: 500,
-		Model:      "claude-opus-4-6",
-		LatencyMs:  1200,
+		ID:           1,
+		EngineID:     "eng-001",
+		SessionID:    "sess-1",
+		CarID:       "car-001",
+		Direction:    "out",
+		Content:      "response content",
+		TokenCount:   500,
+		InputTokens:  300,
+		OutputTokens: 200,
+		Model:        "claude-opus-4-6",
+		LatencyMs:    1200,
 	}
 	if a.Direction != "out" {
 		t.Errorf("Direction = %q, want %q", a.Direction, "out")
+	}
+	if a.InputTokens != 300 {
+		t.Errorf("InputTokens = %d, want 300", a.InputTokens)
+	}
+	if a.OutputTokens != 200 {
+		t.Errorf("OutputTokens = %d, want 200", a.OutputTokens)
 	}
 }
 

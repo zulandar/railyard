@@ -206,14 +206,26 @@ func (w *logWriter) Flush() error {
 	content := w.buf.String()
 	w.buf.Reset()
 
-	return w.writeFn(models.AgentLog{
+	log := models.AgentLog{
 		EngineID:  w.engineID,
 		SessionID: w.sessionID,
 		CarID:    w.carID,
 		Direction: w.direction,
 		Content:   content,
 		CreatedAt: time.Now(),
-	})
+	}
+
+	if w.direction == "out" {
+		usage := ParseUsageFromContent(content)
+		log.InputTokens = usage.InputTokens
+		log.OutputTokens = usage.OutputTokens
+		log.TokenCount = usage.InputTokens + usage.OutputTokens
+		if usage.Model != "" {
+			log.Model = usage.Model
+		}
+	}
+
+	return w.writeFn(log)
 }
 
 // Close performs a final flush.

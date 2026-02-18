@@ -281,6 +281,76 @@ func TestLogWriter_Close(t *testing.T) {
 	}
 }
 
+// --- Flush token population tests ---
+
+func TestLogWriter_FlushPopulatesTokenUsage(t *testing.T) {
+	var captured models.AgentLog
+	w := &logWriter{
+		engineID:  "eng-tok",
+		sessionID: "sess-tok",
+		carID:    "car-tok",
+		direction: "out",
+		writeFn: func(log models.AgentLog) error {
+			captured = log
+			return nil
+		},
+	}
+
+	content := `{"type":"assistant","message":{"model":"claude-sonnet-4-5-20250514"}}
+{"type":"content_block_delta","index":0,"delta":{"text":"hello"}}
+{"type":"result","subtype":"success","usage":{"input_tokens":1000,"output_tokens":250}}`
+	w.Write([]byte(content))
+
+	if err := w.Flush(); err != nil {
+		t.Fatalf("Flush: %v", err)
+	}
+
+	if captured.InputTokens != 1000 {
+		t.Errorf("InputTokens = %d, want 1000", captured.InputTokens)
+	}
+	if captured.OutputTokens != 250 {
+		t.Errorf("OutputTokens = %d, want 250", captured.OutputTokens)
+	}
+	if captured.TokenCount != 1250 {
+		t.Errorf("TokenCount = %d, want 1250", captured.TokenCount)
+	}
+	if captured.Model != "claude-sonnet-4-5-20250514" {
+		t.Errorf("Model = %q, want %q", captured.Model, "claude-sonnet-4-5-20250514")
+	}
+}
+
+func TestLogWriter_FlushStderrNoTokens(t *testing.T) {
+	var captured models.AgentLog
+	w := &logWriter{
+		engineID:  "eng-err",
+		sessionID: "sess-err",
+		carID:    "car-err",
+		direction: "err",
+		writeFn: func(log models.AgentLog) error {
+			captured = log
+			return nil
+		},
+	}
+
+	// Even if stderr contains JSON that looks like stream-json, it should not be parsed.
+	content := `{"type":"result","subtype":"success","usage":{"input_tokens":999,"output_tokens":111}}`
+	w.Write([]byte(content))
+
+	if err := w.Flush(); err != nil {
+		t.Fatalf("Flush: %v", err)
+	}
+
+	if captured.InputTokens != 0 {
+		t.Errorf("InputTokens = %d, want 0 (stderr should not parse tokens)", captured.InputTokens)
+	}
+	if captured.OutputTokens != 0 {
+		t.Errorf("OutputTokens = %d, want 0 (stderr should not parse tokens)", captured.OutputTokens)
+	}
+	if captured.TokenCount != 0 {
+		t.Errorf("TokenCount = %d, want 0 (stderr should not parse tokens)", captured.TokenCount)
+	}
+}
+
 // --- Validation tests ---
 
 func TestSpawnAgent_EmptyEngineID(t *testing.T) {
