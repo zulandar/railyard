@@ -1196,6 +1196,296 @@ GPU time is the main cost driver. Strategies:
 4. **CPU fallback for small models** — `all-MiniLM-L6-v2` is only 22M params and runs fine on CPU. Use GPU only for the bigger language-specific models.
 5. **Query embedding on CPU** — single query embedding is fast even on CPU (~10ms for MiniLM). Only batch indexing needs GPU.
 
+### Branch-Overlay Index — Semantic Search for Engine Branches
+
+#### Motivation
+
+Railyard's primary value proposition over alternative approaches is **lower token usage**. The biggest token burn in multi-agent workflows is codebase exploration — agents calling Glob, Grep, and Read repeatedly, hitting dead ends, and re-reading files after every `/clear` cycle. CocoIndex integration via the Roundhouse already provides semantic search over the `main` branch, but engines work on feature branches that diverge from `main`. Without branch awareness, an engine modifying `internal/auth/handler.go` would find the **old** version of that file in search results, leading to confusion and wasted tokens.
+
+The branch-overlay index solves this with a two-tier architecture: a shared main index for the bulk of the codebase, plus a small per-engine overlay index covering only the files that differ on the engine's branch.
+
+**Estimated token savings:**
+
+| Scenario | Exploration tokens/cycle | Savings |
+|---|---|---|
+| Without CocoIndex | 10,000–60,000 | — |
+| Main index only | 3,000–10,000 | ~70% |
+| Main + overlay | 3,000–10,000 + own branch code | 70%+ |
+
+Over 2–5 `/clear` cycles per car: **10,000–200,000 tokens saved per car**.
+
+#### Two-Tier Architecture
+
+```
+Engine claims car
+    |
+    v
+CreateBranch(workDir, branch)           -- existing (cmd/ry/engine.go)
+    |
+    v
+BuildOverlayIndex(workDir, engineID)    -- NEW: git diff main...HEAD -> parse -> embed -> pgvector
+    |
+    v
+WriteMCPConfig(workDir, engineID)       -- NEW: .mcp.json with engine-specific env vars
+    |
+    v
+SpawnAgent(ctx, db, opts)               -- existing; Claude Code finds .mcp.json in worktree
+    |
+    v
+Agent calls search_code("auth handler")
+    |
+    +---> Query main table (main_backend_embeddings)     ~100ms
+    +---> Query overlay table (ovl_eng_a1b2c3d4)         ~15ms
+    |
+    v
+Merge results (overlay wins on filename+location conflict)
+    |
+    v
+Return top_k results to agent
+```
+
+- **Main index**: Shared, authoritative index of the `main` branch. One pgvector table per track (e.g., `main_backend_embeddings`, `main_frontend_embeddings`). Rebuilt incrementally after each switch (merge) via `CreateReindexJob`. All engines on the same track share the same main index.
+- **Overlay index**: Small, ephemeral, per-engine index of ONLY the files that differ between the engine's branch and `main`. Created at engine startup (after `CreateBranch`), naturally refreshed each `/clear` cycle (the engine daemon loop restarts), and deleted after switch (merge) or engine deregistration.
+
+#### Per-Track Main Indexes
+
+Each track gets its own main index table in pgvector, scoped by the track's `file_patterns` from `railyard.yaml`. This replaces the current single-table approach with per-track isolation.
+
+The CocoIndex flow in `cocoindex/main.py` accepts `--track` and `--file-patterns` CLI args to create tables named `main_{track}_embeddings`. The `code_to_embedding` transform must remain importable so that `overlay.py` can reuse it for vector space consistency (both indexes must use the same embedding model for cosine similarity scores to be directly comparable).
+
+A build script iterates all tracks defined in `railyard.yaml`, maps each track's `file_patterns` to CocoIndex included patterns, and runs the flow. Output: one pgvector table per track with IVFFlat index.
+
+#### Overlay Indexer — `cocoindex/overlay.py`
+
+A Python script invoked as a one-shot subprocess by the Go engine daemon. Stateless — no long-running process, no state between invocations. Reuses `code_to_embedding` from `main.py` for vector space consistency.
+
+**Subcommands:**
+- `build --engine-id X --worktree /path --track backend` — index changed files
+- `cleanup --engine-id X` — drop overlay table + metadata
+- `status --engine-id X` — print overlay freshness info as JSON
+
+**Build algorithm:**
+1. `git diff --name-only main...HEAD` to get changed files
+2. `git diff --name-only --diff-filter=D main...HEAD` to get deleted files
+3. Filter changed files by the track's `file_patterns` (from config)
+4. Parse and chunk with Tree-sitter, embed with SentenceTransformer (same model as main index)
+5. `CREATE TABLE IF NOT EXISTS ovl_{engine_id}` with `vector(384)` column
+6. Truncate and insert embeddings (full rebuild of the small overlay each time)
+7. Upsert `overlay_meta` row with file counts, last commit, and deleted files list
+
+**Expected runtime:** 5–15 seconds for 5–20 files on CPU. The overlay is intentionally small — it only contains files that differ from `main`, not the full codebase.
+
+**Cleanup:** `DROP TABLE IF EXISTS ovl_{engine_id}`, `DELETE FROM overlay_meta WHERE engine_id = X`. Both are idempotent and non-fatal on missing data.
+
+#### MCP Server Changes — `cocoindex/mcp_server.py`
+
+The MCP server accepts engine identity via environment variables:
+- `COCOINDEX_ENGINE_ID` — engine ID (e.g., `eng-a1b2c3d4`)
+- `COCOINDEX_MAIN_TABLE` — main index table name (e.g., `main_backend_embeddings`)
+- `COCOINDEX_OVERLAY_TABLE` — overlay table name (e.g., `ovl_eng_a1b2c3d4`; empty if none)
+- `COCOINDEX_TRACK` — track name
+- `COCOINDEX_WORKTREE` — worktree path
+
+When env vars are absent, the server falls back to current single-table behavior (backward compatible for human interactive use with `.mcp.json`).
+
+**Modified `search_code()`:** Queries both the main table and overlay table (in parallel for latency), then merges results with overlay-wins-on-conflict deduplication (see merge algorithm below).
+
+**New MCP tools:**
+- `overlay_status()` — returns `{engine_id, track, branch, last_commit, files_indexed, chunks_indexed, is_stale}` by querying `overlay_meta`
+- `refresh_overlay()` — calls `overlay.py build` as subprocess and returns `{files_indexed, chunks_indexed, duration_ms}`. Rate-limited to max once per 30 seconds to prevent excessive rebuilds.
+
+#### Search Merge Algorithm
+
+```
+merge_results(main_results, overlay_results):
+  1. Index overlay results by (filename, location) — these take precedence
+  2. Load deleted_files from overlay_meta
+  3. Add all overlay results to the merged set
+  4. For each main result:
+     - Skip if (filename, location) already in merged set (overlay wins)
+     - Skip if filename is in deleted_files list
+     - Otherwise add to merged set
+  5. Sort merged set by cosine similarity score descending
+  6. Filter by min_score, return top_k
+```
+
+Both tables use the identical embedding model (same `code_to_embedding` transform), so cosine similarity scores are directly comparable across main and overlay results.
+
+#### Per-Engine MCP Config — `internal/engine/overlay.go`
+
+New Go file with three functions:
+
+- `BuildOverlay(workDir, engineID, track string, cfg *config.Config) error` — shells out to `overlay.py build` with timeout from `cfg.CocoIndex.Overlay.BuildTimeoutSec`
+- `CleanupOverlay(engineID string) error` — shells out to `overlay.py cleanup`
+- `WriteMCPConfig(workDir, engineID, track string, cfg *config.Config) error` — writes `.mcp.json` into the engine's worktree
+
+The `.mcp.json` written to each worktree:
+```json
+{
+  "mcpServers": {
+    "railyard_cocoindex": {
+      "command": "<venv>/bin/python",
+      "args": ["<scripts>/mcp_server.py"],
+      "env": {
+        "COCOINDEX_DATABASE_URL": "postgresql://...",
+        "COCOINDEX_ENGINE_ID": "eng-a1b2c3d4",
+        "COCOINDEX_MAIN_TABLE": "main_backend_embeddings",
+        "COCOINDEX_OVERLAY_TABLE": "ovl_eng_a1b2c3d4",
+        "COCOINDEX_TRACK": "backend",
+        "COCOINDEX_WORKTREE": "/path/to/engines/eng-a1b2c3d4"
+      }
+    }
+  }
+}
+```
+
+Where `<venv>` and `<scripts>` are resolved from `cfg.CocoIndex.VenvPath` and `cfg.CocoIndex.ScriptsPath`.
+
+#### pgvector Schema
+
+**Per-track main index tables** (one per track, created by CocoIndex flow):
+```sql
+CREATE TABLE main_backend_embeddings (
+    filename    TEXT NOT NULL,
+    location    TEXT,
+    code        TEXT NOT NULL,
+    embedding   vector(384),
+    PRIMARY KEY (filename, location)
+);
+CREATE INDEX ON main_backend_embeddings
+    USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+
+-- Similarly: main_frontend_embeddings, main_infra_embeddings, etc.
+```
+
+**Overlay table** (per engine, created by `overlay.py build`):
+```sql
+CREATE TABLE ovl_eng_a1b2c3d4 (
+    filename    TEXT NOT NULL,
+    location    TEXT,
+    code        TEXT NOT NULL,
+    embedding   vector(384),
+    PRIMARY KEY (filename, location)
+);
+CREATE INDEX ON ovl_eng_a1b2c3d4
+    USING ivfflat (embedding vector_cosine_ops) WITH (lists = 10);
+```
+
+Overlay tables use `lists = 10` (vs 100 for main) because they're small — typically tens to hundreds of rows.
+
+**Overlay metadata** (shared, one row per engine):
+```sql
+CREATE TABLE overlay_meta (
+    engine_id       TEXT PRIMARY KEY,
+    track           TEXT NOT NULL,
+    branch          TEXT NOT NULL,
+    last_commit     TEXT,
+    files_indexed   INTEGER DEFAULT 0,
+    chunks_indexed  INTEGER DEFAULT 0,
+    deleted_files   TEXT DEFAULT '[]',   -- JSON array of filenames deleted on branch
+    created_at      TIMESTAMP DEFAULT NOW(),
+    updated_at      TIMESTAMP DEFAULT NOW()
+);
+```
+
+#### Engine Model Change
+
+Add `OverlayTable` field to `internal/models/engine.go`:
+```go
+OverlayTable string `gorm:"size:128"` // pgvector overlay table name (e.g., ovl_eng_a1b2c3d4)
+```
+
+Set when `BuildOverlay` succeeds, cleared when `CleanupOverlay` runs. Enables Yardmaster to find and clean up overlay tables for dead engines.
+
+#### Engine Lifecycle Integration Points
+
+**Engine daemon loop** (`cmd/ry/engine.go` — after `CreateBranch`, before `SpawnAgent`):
+```go
+if cfg.CocoIndex.Overlay.Enabled {
+    if err := overlay.Build(workDir, eng.ID, track, cfg); err != nil {
+        log.Printf("overlay build warning: %v", err)  // non-fatal
+    }
+    if err := overlay.WriteMCPConfig(workDir, eng.ID, track, cfg); err != nil {
+        log.Printf("mcp config warning: %v", err)  // non-fatal
+    }
+}
+```
+
+On `/clear` cycle, the overlay is naturally refreshed when the engine daemon loop restarts and calls `BuildOverlay` again.
+
+**Yardmaster switch flow** (`internal/yardmaster/switch.go` / `daemon.go` — after `CreateReindexJob`):
+```go
+if car.Assignee != "" {
+    overlay.Cleanup(car.Assignee)  // non-fatal; drop the completing engine's overlay
+}
+```
+
+**Engine deregistration** (`internal/engine/engine.go` — in `Deregister()`):
+```go
+overlay.Cleanup(engineID)  // non-fatal
+```
+
+**Stale engine handling** (`internal/yardmaster/daemon.go` — in `handleStaleEngines()`):
+Clean up dead engine's overlay before restart.
+
+#### Error Handling
+
+All overlay operations are **non-fatal**. If overlay build fails, the engine works with the main index only — no degradation of core functionality, just slightly less accurate search results for branch-modified files. If cleanup fails, `ry overlay gc` handles eventual cleanup of orphaned tables.
+
+#### Configuration — `railyard.yaml` Additions
+
+```yaml
+cocoindex:
+  database_url: "postgresql://cocoindex:cocoindex@localhost:5481/cocoindex"
+  venv_path: "cocoindex/.venv"
+  scripts_path: "cocoindex"
+  overlay:
+    enabled: true           # master switch for overlay indexing
+    max_chunks: 5000        # safety limit per overlay
+    auto_refresh: true      # rebuild overlay on each /clear cycle
+    build_timeout_sec: 60   # timeout for overlay.py build subprocess
+```
+
+Config loaded into `internal/config/config.go` as `CocoIndexConfig` struct with nested `OverlayConfig`. Defaults: `enabled=true`, `max_chunks=5000`, `auto_refresh=true`, `build_timeout_sec=60`.
+
+#### CLI Commands — `cmd/ry/overlay.go`
+
+```bash
+ry overlay build --engine <id>     # Manual overlay build (runs overlay.py build)
+ry overlay status [--engine <id>]  # Show overlay status (queries overlay_meta)
+ry overlay cleanup --engine <id>   # Drop overlay table + metadata
+ry overlay gc                      # Clean up orphaned overlays (cross-ref with engines table)
+```
+
+`ry overlay gc` cross-references `overlay_meta` with the engines table in Dolt. Any overlay whose `engine_id` doesn't correspond to an active engine gets cleaned up.
+
+#### Implementation Phases
+
+**Phase 1: Per-Track Main Indexes + Overlay Indexer Foundation**
+- Modify `cocoindex/main.py` to accept track name and `file_patterns` as parameters
+- Create per-track CocoIndex flow definitions (one pgvector table per track)
+- Create `cocoindex/overlay.py` (build, cleanup, status) as subprocess model
+- Create `overlay_meta` table in pgvector
+- Create `internal/engine/overlay.go` (Go wrappers)
+- Add `OverlayTable` to Engine model
+- Integration test
+
+**Phase 2: MCP Server Integration**
+- Modify `mcp_server.py` for dual-table search (per-track main + overlay) with env vars
+- Implement merge algorithm with overlay-wins dedup
+- Add `overlay_status()` and `refresh_overlay()` tools
+- Add `WriteMCPConfig()` to generate per-engine `.mcp.json`
+
+**Phase 3: Engine Lifecycle Integration**
+- Hook `BuildOverlay` + `WriteMCPConfig` into engine daemon loop
+- Hook `CleanupOverlay` into Yardmaster switch flow
+- Hook cleanup into deregistration and stale engine handling
+
+**Phase 4: CLI and Observability**
+- Create `cmd/ry/overlay.go` with build/status/cleanup/gc commands
+- Add `cocoindex` section to config schema
+- Add overlay info to `ry engine list` and `ry status`
+
 ---
 
 ## Yardmaster (Agent2)
