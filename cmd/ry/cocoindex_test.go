@@ -335,6 +335,65 @@ tracks:
 	}
 }
 
+func TestEnsureDockerFiles_CreatesFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+	dockerDir := filepath.Join(tmpDir, "docker")
+
+	err := ensureDockerFiles(dockerDir)
+	if err != nil {
+		t.Fatalf("ensureDockerFiles() error: %v", err)
+	}
+
+	// Check compose file was created with expected content.
+	composeData, err := os.ReadFile(filepath.Join(dockerDir, "docker-compose.pgvector.yaml"))
+	if err != nil {
+		t.Fatalf("read docker-compose: %v", err)
+	}
+	if !strings.Contains(string(composeData), "pgvector") {
+		t.Error("docker-compose.pgvector.yaml missing pgvector content")
+	}
+	if !strings.Contains(string(composeData), "railyard-pgvector") {
+		t.Error("docker-compose.pgvector.yaml missing container_name")
+	}
+
+	// Check init SQL was created with expected content.
+	sqlData, err := os.ReadFile(filepath.Join(dockerDir, "init-pgvector.sql"))
+	if err != nil {
+		t.Fatalf("read init-pgvector.sql: %v", err)
+	}
+	if !strings.Contains(string(sqlData), "CREATE EXTENSION") {
+		t.Error("init-pgvector.sql missing CREATE EXTENSION")
+	}
+}
+
+func TestEnsureDockerFiles_SkipsExisting(t *testing.T) {
+	tmpDir := t.TempDir()
+	dockerDir := filepath.Join(tmpDir, "docker")
+	os.MkdirAll(dockerDir, 0755)
+
+	// Write custom files that should not be overwritten.
+	customCompose := "# custom compose\n"
+	customSQL := "-- custom sql\n"
+	os.WriteFile(filepath.Join(dockerDir, "docker-compose.pgvector.yaml"), []byte(customCompose), 0644)
+	os.WriteFile(filepath.Join(dockerDir, "init-pgvector.sql"), []byte(customSQL), 0644)
+
+	err := ensureDockerFiles(dockerDir)
+	if err != nil {
+		t.Fatalf("ensureDockerFiles() error: %v", err)
+	}
+
+	// Verify files were not overwritten.
+	composeData, _ := os.ReadFile(filepath.Join(dockerDir, "docker-compose.pgvector.yaml"))
+	if string(composeData) != customCompose {
+		t.Error("docker-compose.pgvector.yaml should not be overwritten")
+	}
+
+	sqlData, _ := os.ReadFile(filepath.Join(dockerDir, "init-pgvector.sql"))
+	if string(sqlData) != customSQL {
+		t.Error("init-pgvector.sql should not be overwritten")
+	}
+}
+
 func TestUpdateRailyardYAML_FileNotFound(t *testing.T) {
 	err := updateRailyardYAML(filepath.Join(t.TempDir(), "nonexistent.yaml"), "postgresql://x")
 	if err == nil {

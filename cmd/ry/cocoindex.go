@@ -20,6 +20,12 @@ import (
 //go:embed cocoindex_requirements.txt
 var embeddedRequirements string
 
+//go:embed cocoindex_docker_compose.yaml
+var embeddedDockerCompose string
+
+//go:embed cocoindex_init_pgvector.sql
+var embeddedInitPGVector string
+
 const (
 	defaultPGPort     = 5481
 	fallbackPGPort    = 5482
@@ -167,6 +173,30 @@ func ensureRequirementsTxt(requirementsPath string) error {
 		return fmt.Errorf("create cocoindex dir: %w", err)
 	}
 	return os.WriteFile(requirementsPath, []byte(embeddedRequirements), 0644)
+}
+
+// ensureDockerFiles writes the docker compose and init SQL files to the project's
+// docker/ directory if they don't already exist, using copies embedded in the ry binary.
+func ensureDockerFiles(dockerDir string) error {
+	if err := os.MkdirAll(dockerDir, 0755); err != nil {
+		return fmt.Errorf("create docker dir: %w", err)
+	}
+
+	composePath := filepath.Join(dockerDir, "docker-compose.pgvector.yaml")
+	if _, err := os.Stat(composePath); err != nil {
+		if err := os.WriteFile(composePath, []byte(embeddedDockerCompose), 0644); err != nil {
+			return fmt.Errorf("write docker-compose: %w", err)
+		}
+	}
+
+	initSQLPath := filepath.Join(dockerDir, "init-pgvector.sql")
+	if _, err := os.Stat(initSQLPath); err != nil {
+		if err := os.WriteFile(initSQLPath, []byte(embeddedInitPGVector), 0644); err != nil {
+			return fmt.Errorf("write init-pgvector.sql: %w", err)
+		}
+	}
+
+	return nil
 }
 
 // ensureCocoIndexVenv creates the Python venv and installs dependencies if needed.
@@ -361,7 +391,11 @@ func isPortInUse(port int) bool {
 
 // startPGVector runs docker compose up for the pgvector service.
 func startPGVector(port int) error {
-	composeFile := filepath.Join("docker", "docker-compose.pgvector.yaml")
+	dockerDir := "docker"
+	if err := ensureDockerFiles(dockerDir); err != nil {
+		return fmt.Errorf("ensure docker files: %w", err)
+	}
+	composeFile := filepath.Join(dockerDir, "docker-compose.pgvector.yaml")
 	cmd := exec.Command("docker", "compose", "-f", composeFile, "up", "-d")
 	cmd.Env = append(os.Environ(), fmt.Sprintf("COCOINDEX_PG_PORT=%d", port))
 	out, err := cmd.CombinedOutput()

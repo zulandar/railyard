@@ -1,0 +1,43 @@
+# Railyard — pgvector for CocoIndex semantic search
+#
+# Starts a PostgreSQL 16 instance with the pgvector extension for
+# per-track main indexes and per-engine overlay indexes.
+#
+# Usage:
+#   docker compose -f docker/docker-compose.pgvector.yaml up -d
+#
+# Override port (default 5481):
+#   COCOINDEX_PG_PORT=5482 docker compose -f docker/docker-compose.pgvector.yaml up -d
+#
+# Connect:
+#   psql -h localhost -p 5481 -U cocoindex -d cocoindex
+#
+# Tear down (preserves data volume):
+#   docker compose -f docker/docker-compose.pgvector.yaml down
+#
+# Tear down AND delete data:
+#   docker compose -f docker/docker-compose.pgvector.yaml down -v
+
+services:
+  pgvector:
+    image: pgvector/pgvector:pg16
+    container_name: railyard-pgvector
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: cocoindex
+      POSTGRES_PASSWORD: cocoindex
+      POSTGRES_DB: cocoindex
+    ports:
+      - "${COCOINDEX_PG_PORT:-5481}:5432"
+    volumes:
+      - pgvector-data:/var/lib/postgresql/data
+      - ./init-pgvector.sql:/docker-entrypoint-initdb.d/01-init-pgvector.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cocoindex -d cocoindex"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  pgvector-data:
