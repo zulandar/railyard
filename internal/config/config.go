@@ -60,12 +60,13 @@ type DoltConfig struct {
 
 // TrackConfig defines an area of concern within the repo.
 type TrackConfig struct {
-	Name         string                 `yaml:"name"`
-	Language     string                 `yaml:"language"`
-	FilePatterns []string               `yaml:"file_patterns"`
-	EngineSlots  int                    `yaml:"engine_slots"`
-	TestCommand  string                 `yaml:"test_command"`
-	Conventions  map[string]interface{} `yaml:"conventions"`
+	Name           string                 `yaml:"name"`
+	Language       string                 `yaml:"language"`
+	FilePatterns   []string               `yaml:"file_patterns"`
+	EngineSlots    int                    `yaml:"engine_slots"`
+	PreTestCommand string                 `yaml:"pre_test_command"`
+	TestCommand    string                 `yaml:"test_command"`
+	Conventions    map[string]interface{} `yaml:"conventions"`
 }
 
 // Load reads a YAML config file from path and returns a validated Config.

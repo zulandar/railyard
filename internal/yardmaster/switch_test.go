@@ -45,7 +45,7 @@ func TestSwitchOpts_ZeroValue(t *testing.T) {
 
 func TestSwitchResult_ZeroValue(t *testing.T) {
 	r := SwitchResult{}
-	if r.CarID != "" || r.Branch != "" || r.TestsPassed || r.Merged || r.PRCreated || r.PRUrl != "" {
+	if r.CarID != "" || r.Branch != "" || r.TestsPassed || r.Merged || r.AlreadyMerged || r.PRCreated || r.PRUrl != "" {
 		t.Error("zero-value SwitchResult should have empty/false fields")
 	}
 }
@@ -469,5 +469,226 @@ func TestTryCloseEpic_ClosesBlockedEpicWhenAllChildrenDone(t *testing.T) {
 	db.First(&epic, "id = ?", epicID)
 	if epic.Status != "done" {
 		t.Errorf("epic status = %q, want %q", epic.Status, "done")
+	}
+}
+
+// --- isAncestor tests ---
+
+// initTestRepo creates a git repo with an initial commit on main and returns
+// its path. The run helper executes git commands in that repo.
+func initTestRepo(t *testing.T) (string, func(args ...string)) {
+	t.Helper()
+	repoDir := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = repoDir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("%v failed: %s: %v", args, out, err)
+		}
+	}
+	run("git", "init", "-b", "main")
+	run("git", "config", "user.email", "test@test.com")
+	run("git", "config", "user.name", "test")
+	run("git", "commit", "--allow-empty", "-m", "init")
+	return repoDir, run
+}
+
+func TestIsAncestor_TrueWhenBranchBehindMain(t *testing.T) {
+	repoDir, run := initTestRepo(t)
+
+	// Create a feature branch at the current commit.
+	run("git", "checkout", "-b", "feature")
+	run("git", "checkout", "main")
+
+	// Advance main past the feature branch.
+	run("git", "commit", "--allow-empty", "-m", "main advance")
+
+	if !isAncestor(repoDir, "feature") {
+		t.Error("isAncestor should be true when feature is behind main")
+	}
+}
+
+func TestIsAncestor_FalseWhenBranchAhead(t *testing.T) {
+	repoDir, run := initTestRepo(t)
+
+	// Create a feature branch with a new commit.
+	run("git", "checkout", "-b", "feature")
+	run("git", "commit", "--allow-empty", "-m", "feature work")
+	run("git", "checkout", "main")
+
+	if isAncestor(repoDir, "feature") {
+		t.Error("isAncestor should be false when feature has commits not in main")
+	}
+}
+
+func TestIsAncestor_TrueWhenSameCommit(t *testing.T) {
+	repoDir, run := initTestRepo(t)
+
+	// Branch at same point as main, no divergence.
+	run("git", "checkout", "-b", "feature")
+	run("git", "checkout", "main")
+
+	if !isAncestor(repoDir, "feature") {
+		t.Error("isAncestor should be true when feature and main are at the same commit")
+	}
+}
+
+// --- Switch ancestor skip integration test ---
+
+func TestSwitch_SkipsMergeWhenAlreadyAncestor(t *testing.T) {
+	// Set up: a parent car whose branch is already merged into main
+	// (simulating a child car that included parent's commits merging first).
+	repoDir, run := initTestRepo(t)
+
+	// Create a feature branch with a commit.
+	run("git", "checkout", "-b", "ry/alice/backend/parent-001")
+	run("git", "commit", "--allow-empty", "-m", "parent feature work")
+	run("git", "checkout", "main")
+
+	// Merge the branch into main (simulating the child's merge including it).
+	run("git", "merge", "--no-ff", "ry/alice/backend/parent-001", "-m", "merge child (includes parent)")
+
+	// Set up DB with the car.
+	db := testDB(t)
+	db.Create(&models.Car{
+		ID:     "parent-001",
+		Title:  "Parent feature",
+		Track:  "backend",
+		Branch: "ry/alice/backend/parent-001",
+		Status: "done",
+	})
+
+	result, err := Switch(db, "parent-001", SwitchOpts{
+		RepoDir:     repoDir,
+		TestCommand: "true", // always passes
+	})
+	if err != nil {
+		t.Fatalf("Switch returned error: %v", err)
+	}
+
+	if !result.Merged {
+		t.Error("expected Merged=true")
+	}
+	if !result.AlreadyMerged {
+		t.Error("expected AlreadyMerged=true")
+	}
+	if !result.TestsPassed {
+		t.Error("expected TestsPassed=true")
+	}
+
+	// Verify the car was marked as merged in the DB.
+	var car models.Car
+	db.First(&car, "id = ?", "parent-001")
+	if car.Status != "merged" {
+		t.Errorf("car status = %q, want %q", car.Status, "merged")
+	}
+	if car.CompletedAt == nil {
+		t.Error("car completed_at should be set")
+	}
+}
+
+// --- runTests pre-test and no-test-files tests ---
+
+func TestRunTests_PreTestCommand(t *testing.T) {
+	repoDir, run := initTestRepo(t)
+
+	run("git", "checkout", "-b", "feature")
+	run("git", "checkout", "main")
+
+	// Pre-test creates a marker file; test command checks it exists.
+	markerPath := filepath.Join(repoDir, "marker.txt")
+	preTest := "echo pre-test-ran > " + markerPath
+	testCmd := "test -f " + markerPath
+
+	output, err := runTests(repoDir, "feature", preTest, testCmd)
+	if err != nil {
+		t.Fatalf("runTests failed: %v\noutput: %s", err, output)
+	}
+
+	// Verify we're back on main.
+	cmd := exec.Command("git", "symbolic-ref", "--short", "HEAD")
+	cmd.Dir = repoDir
+	out, _ := cmd.Output()
+	if strings.TrimSpace(string(out)) != "main" {
+		t.Errorf("not on main after runTests, on %q", strings.TrimSpace(string(out)))
+	}
+}
+
+func TestRunTests_PreTestFailure(t *testing.T) {
+	repoDir, run := initTestRepo(t)
+
+	run("git", "checkout", "-b", "feature")
+	run("git", "checkout", "main")
+
+	// Pre-test fails; test command should never run.
+	_, err := runTests(repoDir, "feature", "false", "echo should-not-run")
+	if err == nil {
+		t.Fatal("expected error when pre-test fails")
+	}
+	if !strings.Contains(err.Error(), "pre-test command failed") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "pre-test command failed")
+	}
+
+	// Verify we're back on main despite the failure.
+	cmd := exec.Command("git", "symbolic-ref", "--short", "HEAD")
+	cmd.Dir = repoDir
+	out, _ := cmd.Output()
+	if strings.TrimSpace(string(out)) != "main" {
+		t.Errorf("not on main after pre-test failure, on %q", strings.TrimSpace(string(out)))
+	}
+}
+
+func TestRunTests_NoTestFilesPattern(t *testing.T) {
+	repoDir, run := initTestRepo(t)
+
+	run("git", "checkout", "-b", "feature")
+	run("git", "checkout", "main")
+
+	// Simulate "no test files" by echoing the pattern and exiting non-zero.
+	testCmd := `echo "no test files" && exit 1`
+
+	output, err := runTests(repoDir, "feature", "", testCmd)
+	if err != nil {
+		t.Fatalf("runTests should treat 'no test files' as pass, got error: %v", err)
+	}
+	if !strings.Contains(output, "no test files") {
+		t.Errorf("output should contain the pattern, got: %s", output)
+	}
+}
+
+func TestRunTests_NoTestsFoundPattern(t *testing.T) {
+	repoDir, run := initTestRepo(t)
+
+	run("git", "checkout", "-b", "feature")
+	run("git", "checkout", "main")
+
+	testCmd := `echo "No tests found" && exit 1`
+
+	output, err := runTests(repoDir, "feature", "", testCmd)
+	if err != nil {
+		t.Fatalf("runTests should treat 'No tests found' as pass, got error: %v", err)
+	}
+	if !strings.Contains(output, "No tests found") {
+		t.Errorf("output should contain the pattern, got: %s", output)
+	}
+}
+
+func TestRunTests_RealTestFailure(t *testing.T) {
+	repoDir, run := initTestRepo(t)
+
+	run("git", "checkout", "-b", "feature")
+	run("git", "checkout", "main")
+
+	// A real failure that doesn't match any no-test patterns.
+	testCmd := `echo "FAIL: TestSomething" && exit 1`
+
+	_, err := runTests(repoDir, "feature", "", testCmd)
+	if err == nil {
+		t.Fatal("expected error for real test failure")
+	}
+	if !strings.Contains(err.Error(), "tests failed") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "tests failed")
 	}
 }

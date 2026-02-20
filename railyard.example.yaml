@@ -75,12 +75,13 @@ repo: git@github.com:org/myproject.git
 # engines across tracks automatically.
 #
 # Fields:
-#   name          (required) — unique track identifier
-#   language      (required) — primary language (go, typescript, python, etc.)
-#   file_patterns (optional) — glob patterns for files this track owns
-#   engine_slots  (optional) — max engines on this track (default: 3)
-#   test_command  (optional) — shell command to run tests (default: "go test ./...")
-#   conventions   (optional) — key/value pairs injected into engine prompts
+#   name             (required) — unique track identifier
+#   language         (required) — primary language (go, typescript, python, etc.)
+#   file_patterns    (optional) — glob patterns for files this track owns
+#   engine_slots     (optional) — max engines on this track (default: 3)
+#   pre_test_command (optional) — shell command run before tests (e.g. "go mod vendor", "npm install")
+#   test_command     (optional) — shell command to run tests (default: "go test ./...")
+#   conventions      (optional) — key/value pairs injected into engine prompts
 
 tracks:
   - name: backend
@@ -96,6 +97,7 @@ tracks:
   #   language: typescript
   #   file_patterns: ["src/**", "*.ts", "*.tsx", "*.css"]
   #   engine_slots: 2
+  #   pre_test_command: "npm install"
   #   test_command: "npm test"
   #   conventions:
   #     framework: "Next.js 15"

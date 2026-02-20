@@ -90,12 +90,13 @@ func runSwitch(cmd *cobra.Command, configPath, carID string, dryRun bool) error 
 		return fmt.Errorf("get working directory: %w", err)
 	}
 
-	// Look up the car's track to get the configured test command.
-	var testCommand string
+	// Look up the car's track to get the configured test commands.
+	var testCommand, preTestCommand string
 	var car struct{ Track string }
 	if err := gormDB.Table("cars").Select("track").Where("id = ?", carID).Scan(&car).Error; err == nil {
 		for _, t := range cfg.Tracks {
 			if t.Name == car.Track {
+				preTestCommand = t.PreTestCommand
 				testCommand = t.TestCommand
 				break
 			}
@@ -103,9 +104,10 @@ func runSwitch(cmd *cobra.Command, configPath, carID string, dryRun bool) error 
 	}
 
 	result, err := yardmaster.Switch(gormDB, carID, yardmaster.SwitchOpts{
-		RepoDir:     repoDir,
-		DryRun:      dryRun,
-		TestCommand: testCommand,
+		RepoDir:        repoDir,
+		DryRun:         dryRun,
+		PreTestCommand: preTestCommand,
+		TestCommand:    testCommand,
 	})
 	if err != nil {
 		return err

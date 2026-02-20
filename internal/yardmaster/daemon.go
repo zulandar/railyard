@@ -310,18 +310,20 @@ func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, r
 	for _, c := range cars {
 		fmt.Fprintf(out, "Completed car %s (%s) — switching\n", c.ID, c.Title)
 
-		var testCommand string
+		var testCommand, preTestCommand string
 		for _, t := range cfg.Tracks {
 			if t.Name == c.Track {
+				preTestCommand = t.PreTestCommand
 				testCommand = t.TestCommand
 				break
 			}
 		}
 
 		result, err := Switch(db, c.ID, SwitchOpts{
-			RepoDir:     repoDir,
-			TestCommand: testCommand,
-			RequirePR:   cfg.RequirePR,
+			RepoDir:        repoDir,
+			PreTestCommand: preTestCommand,
+			TestCommand:    testCommand,
+			RequirePR:      cfg.RequirePR,
 		})
 		if err != nil {
 			log.Printf("switch car %s: %v", c.ID, err)
@@ -349,8 +351,12 @@ func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, r
 		if result.PRCreated {
 			fmt.Fprintf(out, "Car %s draft PR created: %s\n", c.ID, result.PRUrl)
 		} else if result.Merged {
-			anyMerged = true
-			fmt.Fprintf(out, "Car %s merged (branch %s)\n", c.ID, result.Branch)
+			if result.AlreadyMerged {
+				fmt.Fprintf(out, "Car %s already merged (branch %s was ancestor of main)\n", c.ID, result.Branch)
+			} else {
+				anyMerged = true
+				fmt.Fprintf(out, "Car %s merged (branch %s)\n", c.ID, result.Branch)
+			}
 
 			// Clean up the completing engine's overlay (non-fatal).
 			if c.Assignee != "" {

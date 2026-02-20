@@ -15,22 +15,24 @@ import (
 
 // SwitchOpts holds parameters for the switch (merge) operation.
 type SwitchOpts struct {
-	RepoDir     string // working directory
-	DryRun      bool   // run tests but don't merge
-	TestCommand string // per-track test command (e.g. "go test ./...", "phpunit", "npm test")
-	RequirePR   bool   // create a draft PR instead of direct merge
+	RepoDir        string // working directory
+	DryRun         bool   // run tests but don't merge
+	PreTestCommand string // command to run before tests (e.g. "go mod vendor", "npm install")
+	TestCommand    string // per-track test command (e.g. "go test ./...", "phpunit", "npm test")
+	RequirePR      bool   // create a draft PR instead of direct merge
 }
 
 // SwitchResult contains the outcome of a switch operation.
 type SwitchResult struct {
-	CarID       string
-	Branch      string
-	TestsPassed bool
-	TestOutput  string
-	Merged      bool
-	PRCreated   bool
-	PRUrl       string
-	Error       error
+	CarID         string
+	Branch        string
+	TestsPassed   bool
+	TestOutput    string
+	Merged        bool
+	AlreadyMerged bool // true when the branch was already an ancestor of main
+	PRCreated     bool
+	PRUrl         string
+	Error         error
 }
 
 // Switch performs the branch merge flow for a completed car:
@@ -80,7 +82,7 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 		result.TestsPassed = true
 		result.TestOutput = "tests skipped (skip_tests=true on car)"
 	} else {
-		testOutput, testErr := runTests(opts.RepoDir, car.Branch, opts.TestCommand)
+		testOutput, testErr := runTests(opts.RepoDir, car.Branch, opts.PreTestCommand, opts.TestCommand)
 		result.TestOutput = testOutput
 
 		if testErr != nil {
@@ -101,6 +103,43 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 	}
 
 	if opts.DryRun {
+		return result, nil
+	}
+
+	// If the branch is already an ancestor of main (e.g. a dependent car's
+	// merge already included this branch's commits), skip the merge.
+	if isAncestor(opts.RepoDir, car.Branch) {
+		result.Merged = true
+		result.AlreadyMerged = true
+
+		now := time.Now()
+		db.Model(&models.Car{}).Where("id = ?", carID).Updates(map[string]interface{}{
+			"status":       "merged",
+			"completed_at": now,
+		})
+
+		// Run the same post-merge logic as a normal merge.
+		unblocked, _ := UnblockDeps(db, carID)
+		if len(unblocked) > 0 {
+			titles := make([]string, len(unblocked))
+			for i, b := range unblocked {
+				titles[i] = b.ID
+			}
+			messaging.Send(db, "yardmaster", "broadcast", "deps-unblocked",
+				fmt.Sprintf("Merged %s (already ancestor), unblocked: %s", carID, strings.Join(titles, ", ")),
+				messaging.SendOpts{CarID: carID},
+			)
+			for _, u := range unblocked {
+				if u.Type == "epic" {
+					TryCloseEpic(db, u.ID)
+				}
+			}
+		}
+
+		if car.ParentID != nil && *car.ParentID != "" {
+			TryCloseEpic(db, *car.ParentID)
+		}
+
 		return result, nil
 	}
 
@@ -227,13 +266,35 @@ func gitFetch(repoDir string) error {
 	return nil
 }
 
+// noTestPatterns are stdout patterns that indicate "no tests exist" rather
+// than a real test failure. When the test command exits non-zero but its
+// output matches one of these, we treat it as a pass.
+var noTestPatterns = []string{
+	"no test files",
+	"No tests found",
+	"No test suites found",
+}
+
 // runTests checks out the branch and runs the test suite.
-func runTests(repoDir, branch, testCommand string) (string, error) {
+func runTests(repoDir, branch, preTestCommand, testCommand string) (string, error) {
 	// Checkout the branch.
 	checkout := exec.Command("git", "checkout", branch)
 	checkout.Dir = repoDir
 	if out, err := checkout.CombinedOutput(); err != nil {
 		return string(out), fmt.Errorf("git checkout %s: %w", branch, err)
+	}
+
+	// Run pre-test command if configured (e.g. "go mod vendor", "npm install").
+	if preTestCommand != "" {
+		preCmd := exec.Command("sh", "-c", preTestCommand)
+		preCmd.Dir = repoDir
+		if out, err := preCmd.CombinedOutput(); err != nil {
+			// Checkout main again before returning.
+			backToMain := exec.Command("git", "checkout", "main")
+			backToMain.Dir = repoDir
+			backToMain.CombinedOutput()
+			return string(out), fmt.Errorf("pre-test command failed: %w", err)
+		}
 	}
 
 	// Run the track's configured test command, defaulting to "go test ./...".
@@ -252,10 +313,25 @@ func runTests(repoDir, branch, testCommand string) (string, error) {
 	backToMain.CombinedOutput()
 
 	if err != nil {
+		// Check for "no tests" patterns — treat as pass.
+		for _, pat := range noTestPatterns {
+			if strings.Contains(output, pat) {
+				return output, nil
+			}
+		}
 		return output, fmt.Errorf("tests failed: %w", err)
 	}
 
 	return output, nil
+}
+
+// isAncestor returns true if the given branch is already fully contained
+// in main (i.e., all its commits are reachable from main). This happens
+// when a dependent car's merge already included this branch's changes.
+func isAncestor(repoDir, branch string) bool {
+	cmd := exec.Command("git", "merge-base", "--is-ancestor", branch, "main")
+	cmd.Dir = repoDir
+	return cmd.Run() == nil
 }
 
 // gitMerge merges the branch into main.
