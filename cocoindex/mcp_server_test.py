@@ -141,6 +141,26 @@ class TestLoadServerConfig:
         assert cfg.engine_id is None
         assert cfg.overlay_table is None
 
+    def test_comma_separated_main_tables(self):
+        env = {
+            "COCOINDEX_DATABASE_URL": "postgresql://localhost/db",
+            "COCOINDEX_MAIN_TABLE": "main_backend_embeddings,main_frontend_embeddings",
+        }
+        with mock.patch.dict(os.environ, env, clear=True):
+            cfg = load_server_config()
+        assert cfg.main_tables == ["main_backend_embeddings", "main_frontend_embeddings"]
+        assert cfg.main_table == "main_backend_embeddings"  # first table as fallback
+
+    def test_single_table_no_main_tables(self):
+        env = {
+            "COCOINDEX_DATABASE_URL": "postgresql://localhost/db",
+            "COCOINDEX_MAIN_TABLE": "main_backend_embeddings",
+        }
+        with mock.patch.dict(os.environ, env, clear=True):
+            cfg = load_server_config()
+        assert cfg.main_table == "main_backend_embeddings"
+        assert cfg.main_tables is None
+
 
 # ===================================================================
 # merge_results
@@ -382,6 +402,62 @@ class TestSearch:
         cfg = self._make_config(main_table=None)
         results = search(cfg, "query")
         assert results == []
+
+    @mock.patch("mcp_server.query_table")
+    @mock.patch("mcp_server.embed_query", return_value=[0.1] * 384)
+    def test_multi_table_search_dispatcher(self, mock_embed, mock_query):
+        """Dispatcher mode: search across multiple main tables."""
+        mock_query.side_effect = [
+            [{"filename": "a.go", "location": "0:0", "code": "backend", "score": 0.9}],
+            [{"filename": "b.ts", "location": "0:0", "code": "frontend", "score": 0.85}],
+        ]
+        cfg = self._make_config(
+            main_table="main_backend_embeddings",
+            main_tables=["main_backend_embeddings", "main_frontend_embeddings"],
+            overlay_table=None,
+            engine_id=None,
+        )
+        results = search(cfg, "authentication")
+        assert len(results) == 2
+        assert mock_query.call_count == 2
+        # Results should be sorted by score
+        assert results[0]["score"] >= results[1]["score"]
+
+    @mock.patch("mcp_server.query_table")
+    @mock.patch("mcp_server.embed_query", return_value=[0.1] * 384)
+    def test_multi_table_dedup_by_filename_location(self, mock_embed, mock_query):
+        """Same file/location across tables should be deduped (highest score wins)."""
+        mock_query.side_effect = [
+            [{"filename": "shared.go", "location": "0:0", "code": "v1", "score": 0.7}],
+            [{"filename": "shared.go", "location": "0:0", "code": "v2", "score": 0.9}],
+        ]
+        cfg = self._make_config(
+            main_table="t1",
+            main_tables=["t1", "t2"],
+            overlay_table=None,
+            engine_id=None,
+        )
+        results = search(cfg, "query")
+        assert len(results) == 1
+        assert results[0]["score"] == 0.9
+
+    @mock.patch("mcp_server.query_table")
+    @mock.patch("mcp_server.embed_query", return_value=[0.1] * 384)
+    def test_multi_table_tolerates_missing_table(self, mock_embed, mock_query):
+        """If one table doesn't exist, others still return results."""
+        mock_query.side_effect = [
+            Exception("relation does not exist"),
+            [{"filename": "b.ts", "location": "0:0", "code": "ok", "score": 0.8}],
+        ]
+        cfg = self._make_config(
+            main_table="t1",
+            main_tables=["t1", "t2"],
+            overlay_table=None,
+            engine_id=None,
+        )
+        results = search(cfg, "query")
+        assert len(results) == 1
+        assert results[0]["filename"] == "b.ts"
 
 
 # ===================================================================

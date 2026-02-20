@@ -48,21 +48,37 @@ class ServerConfig:
     database_url: str
     engine_id: str | None = None
     main_table: str | None = None
+    main_tables: list[str] | None = None  # comma-separated COCOINDEX_MAIN_TABLE
     overlay_table: str | None = None
     track: str | None = None
     worktree: str | None = None
 
 
 def load_server_config() -> ServerConfig:
-    """Load server configuration from environment variables."""
+    """Load server configuration from environment variables.
+
+    COCOINDEX_MAIN_TABLE can be a single table name or comma-separated list
+    (e.g. "main_backend_embeddings,main_frontend_embeddings") for cross-track
+    search in the dispatcher.
+    """
     database_url = os.environ.get("COCOINDEX_DATABASE_URL", "")
     if not database_url:
         raise ValueError("COCOINDEX_DATABASE_URL environment variable is required")
 
+    raw_tables = os.environ.get("COCOINDEX_MAIN_TABLE") or None
+    main_table = None
+    main_tables = None
+    if raw_tables and "," in raw_tables:
+        main_tables = [t.strip() for t in raw_tables.split(",") if t.strip()]
+        main_table = main_tables[0] if main_tables else None
+    else:
+        main_table = raw_tables
+
     return ServerConfig(
         database_url=database_url,
         engine_id=os.environ.get("COCOINDEX_ENGINE_ID") or None,
-        main_table=os.environ.get("COCOINDEX_MAIN_TABLE") or None,
+        main_table=main_table,
+        main_tables=main_tables,
         overlay_table=os.environ.get("COCOINDEX_OVERLAY_TABLE") or None,
         track=os.environ.get("COCOINDEX_TRACK") or None,
         worktree=os.environ.get("COCOINDEX_WORKTREE") or None,
@@ -214,13 +230,41 @@ def search(
 
     If overlay_table is configured, queries both tables in parallel and
     merges with overlay-wins deduplication. Otherwise queries main only.
+
+    Supports multiple main tables (e.g. for cross-track dispatcher search):
+    queries all tables in parallel and merges results by score.
     """
     embedding = embed_query(query)
 
-    if not config.main_table:
+    if not config.main_table and not config.main_tables:
         return []
 
-    # If no overlay, just query main
+    # Multi-table search (dispatcher mode): query all main tables in parallel.
+    if config.main_tables and not config.overlay_table:
+        with ThreadPoolExecutor(max_workers=len(config.main_tables)) as pool:
+            futures = [
+                pool.submit(
+                    query_table, config.database_url, table,
+                    embedding, top_k, min_score,
+                )
+                for table in config.main_tables
+            ]
+            all_results = []
+            for f in futures:
+                try:
+                    all_results.extend(f.result())
+                except Exception:
+                    pass  # skip tables that don't exist yet
+        # Deduplicate by (filename, location), keep highest score.
+        seen = {}
+        for r in all_results:
+            key = (r["filename"], r["location"])
+            if key not in seen or r["score"] > seen[key]["score"]:
+                seen[key] = r
+        sorted_results = sorted(seen.values(), key=lambda r: r["score"], reverse=True)
+        return [r for r in sorted_results if r["score"] >= min_score][:top_k]
+
+    # Single-table, no overlay: just query main.
     if not config.overlay_table:
         results = query_table(
             config.database_url, config.main_table, embedding, top_k, min_score,

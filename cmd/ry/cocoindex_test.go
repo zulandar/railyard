@@ -242,3 +242,105 @@ func TestBootstrapPip_MissingVenv(t *testing.T) {
 		t.Error("expected error when venv python doesn't exist")
 	}
 }
+
+func TestUpdateRailyardYAML_AddsCocoindexSection(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "railyard.yaml")
+
+	// Write a minimal railyard.yaml without cocoindex.
+	existing := `owner: testuser
+repo: git@github.com:test/repo.git
+
+tracks:
+  - name: backend
+    language: go
+`
+	os.WriteFile(configPath, []byte(existing), 0644)
+
+	dbURL := "postgresql://cocoindex:cocoindex@localhost:5481/cocoindex"
+	err := updateRailyardYAML(configPath, dbURL)
+	if err != nil {
+		t.Fatalf("updateRailyardYAML() error: %v", err)
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read railyard.yaml: %v", err)
+	}
+
+	content := string(data)
+	if !strings.Contains(content, "cocoindex:") {
+		t.Error("railyard.yaml missing cocoindex section")
+	}
+	if !strings.Contains(content, dbURL) {
+		t.Errorf("railyard.yaml missing database_url %q", dbURL)
+	}
+	if !strings.Contains(content, "venv_path:") {
+		t.Error("railyard.yaml missing venv_path")
+	}
+	if !strings.Contains(content, "scripts_path:") {
+		t.Error("railyard.yaml missing scripts_path")
+	}
+	// Should preserve existing content.
+	if !strings.Contains(content, "owner: testuser") {
+		t.Error("railyard.yaml lost owner field")
+	}
+	if !strings.Contains(content, "tracks:") {
+		t.Error("railyard.yaml lost tracks section")
+	}
+}
+
+func TestUpdateRailyardYAML_UpdatesExistingSection(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "railyard.yaml")
+
+	// Write a railyard.yaml with an existing cocoindex section.
+	existing := `owner: testuser
+repo: git@github.com:test/repo.git
+
+cocoindex:
+  database_url: "postgresql://old:old@localhost:9999/old"
+  venv_path: "old/.venv"
+  scripts_path: "old"
+
+tracks:
+  - name: backend
+    language: go
+`
+	os.WriteFile(configPath, []byte(existing), 0644)
+
+	newURL := "postgresql://cocoindex:cocoindex@localhost:5481/cocoindex"
+	err := updateRailyardYAML(configPath, newURL)
+	if err != nil {
+		t.Fatalf("updateRailyardYAML() error: %v", err)
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read railyard.yaml: %v", err)
+	}
+
+	content := string(data)
+	if strings.Contains(content, "old") {
+		t.Errorf("railyard.yaml still contains old values: %s", content)
+	}
+	if !strings.Contains(content, newURL) {
+		t.Errorf("railyard.yaml missing new URL %q", newURL)
+	}
+	if !strings.Contains(content, "cocoindex/.venv") {
+		t.Error("railyard.yaml missing updated venv_path")
+	}
+	if !strings.Contains(content, "owner: testuser") {
+		t.Error("railyard.yaml lost owner field")
+	}
+}
+
+func TestUpdateRailyardYAML_FileNotFound(t *testing.T) {
+	err := updateRailyardYAML(filepath.Join(t.TempDir(), "nonexistent.yaml"), "postgresql://x")
+	if err == nil {
+		t.Error("expected error for missing file")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("error should mention 'not found': %v", err)
+	}
+}

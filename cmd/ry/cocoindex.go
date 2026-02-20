@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 )
 
 //go:embed cocoindex_requirements.txt
@@ -55,7 +56,8 @@ func newCocoIndexInitCmd() *cobra.Command {
   2. Creates Python venv and installs dependencies
   3. Starts postgres+pgvector via Docker Compose
   4. Runs schema migrations
-  5. Creates/updates cocoindex.yaml with the database URL`,
+  5. Creates/updates cocoindex.yaml with the database URL
+  6. Updates the cocoindex section in railyard.yaml (-c flag)`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runCocoIndexInit(cmd, configPath, port, skipMigrations, skipVenv)
 		},
@@ -133,6 +135,12 @@ func runCocoIndexInit(cmd *cobra.Command, configPath string, port int, skipMigra
 		return fmt.Errorf("update cocoindex.yaml: %w", err)
 	}
 	fmt.Fprintln(out, "Updated cocoindex/cocoindex.yaml with database_url")
+
+	// Step 9: Update railyard.yaml cocoindex section.
+	if err := updateRailyardYAML(configPath, databaseURL); err != nil {
+		return fmt.Errorf("update %s: %w", configPath, err)
+	}
+	fmt.Fprintf(out, "Updated %s cocoindex section\n", configPath)
 
 	// Print summary.
 	fmt.Fprintln(out, "")
@@ -392,6 +400,87 @@ func runMigrations(databaseURL string) error {
 		return fmt.Errorf("%s: %w", strings.TrimSpace(string(out)), err)
 	}
 	return nil
+}
+
+// updateRailyardYAML adds or updates the cocoindex section in railyard.yaml.
+// Uses yaml.Node to preserve comments and formatting in the rest of the file.
+func updateRailyardYAML(configPath, databaseURL string) error {
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("%s not found — create it first or specify the correct path with -c", configPath)
+		}
+		return fmt.Errorf("read %s: %w", configPath, err)
+	}
+
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return fmt.Errorf("parse %s: %w", configPath, err)
+	}
+
+	// doc.Content[0] is the root mapping node.
+	if len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
+		return fmt.Errorf("%s: expected a YAML mapping at the root", configPath)
+	}
+	root := doc.Content[0]
+
+	// Find existing cocoindex key in the root mapping.
+	var cocoNode *yaml.Node
+	for i := 0; i < len(root.Content)-1; i += 2 {
+		if root.Content[i].Value == "cocoindex" {
+			cocoNode = root.Content[i+1]
+			break
+		}
+	}
+
+	if cocoNode != nil && cocoNode.Kind == yaml.MappingNode {
+		// Update existing cocoindex mapping — set database_url, venv_path, scripts_path.
+		setNodeValue(cocoNode, "database_url", databaseURL)
+		setNodeValue(cocoNode, "venv_path", "cocoindex/.venv")
+		setNodeValue(cocoNode, "scripts_path", "cocoindex")
+	} else {
+		// Append a new cocoindex section.
+		keyNode := &yaml.Node{Kind: yaml.ScalarNode, Value: "cocoindex"}
+		valNode := &yaml.Node{
+			Kind: yaml.MappingNode,
+			Content: []*yaml.Node{
+				{Kind: yaml.ScalarNode, Value: "database_url"},
+				{Kind: yaml.ScalarNode, Value: databaseURL, Style: yaml.DoubleQuotedStyle},
+				{Kind: yaml.ScalarNode, Value: "venv_path"},
+				{Kind: yaml.ScalarNode, Value: "cocoindex/.venv", Style: yaml.DoubleQuotedStyle},
+				{Kind: yaml.ScalarNode, Value: "scripts_path"},
+				{Kind: yaml.ScalarNode, Value: "cocoindex", Style: yaml.DoubleQuotedStyle},
+				{Kind: yaml.ScalarNode, Value: "overlay"},
+				{Kind: yaml.MappingNode, Content: []*yaml.Node{
+					{Kind: yaml.ScalarNode, Value: "enabled"},
+					{Kind: yaml.ScalarNode, Value: "true", Tag: "!!bool"},
+				}},
+			},
+		}
+		root.Content = append(root.Content, keyNode, valNode)
+	}
+
+	out, err := yaml.Marshal(&doc)
+	if err != nil {
+		return fmt.Errorf("marshal %s: %w", configPath, err)
+	}
+	return os.WriteFile(configPath, out, 0644)
+}
+
+// setNodeValue sets or creates a key-value pair in a YAML mapping node.
+func setNodeValue(mapping *yaml.Node, key, value string) {
+	for i := 0; i < len(mapping.Content)-1; i += 2 {
+		if mapping.Content[i].Value == key {
+			mapping.Content[i+1].Value = value
+			mapping.Content[i+1].Style = yaml.DoubleQuotedStyle
+			return
+		}
+	}
+	// Key not found — append it.
+	mapping.Content = append(mapping.Content,
+		&yaml.Node{Kind: yaml.ScalarNode, Value: key},
+		&yaml.Node{Kind: yaml.ScalarNode, Value: value, Style: yaml.DoubleQuotedStyle},
+	)
 }
 
 // updateCocoIndexYAML creates or updates cocoindex/cocoindex.yaml with the database_url.

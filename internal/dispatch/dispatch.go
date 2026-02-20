@@ -3,6 +3,7 @@ package dispatch
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 
@@ -28,6 +29,15 @@ func Start(opts StartOpts) error {
 	prompt, err := RenderPrompt(opts.Config)
 	if err != nil {
 		return fmt.Errorf("dispatch: render prompt: %w", err)
+	}
+
+	// Write cocoindex MCP config so the dispatcher can search the codebase.
+	// Non-fatal: dispatcher works without it, just no semantic search.
+	if opts.Config.CocoIndex.DatabaseURL != "" {
+		cwd, _ := os.Getwd()
+		if err := WriteDispatchMCPConfig(cwd, opts.Config); err != nil {
+			log.Printf("dispatch: write MCP config warning: %v", err)
+		}
 	}
 
 	// Launch claude interactively — user attaches to tmux pane and converses.
