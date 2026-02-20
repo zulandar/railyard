@@ -216,10 +216,10 @@ func runCocoIndexIndex(cmd *cobra.Command, configPath string, tracks []string, r
 // needed by the index command without importing internal/config (which would
 // pull in GORM and other dependencies into the CLI binary).
 type ryConfigForIndex struct {
-	cocoindexDatabaseURL  string
-	cocoindexVenvPath     string
-	cocoindexScriptsPath  string
-	tracks                []ryTrackForIndex
+	cocoindexDatabaseURL string
+	cocoindexVenvPath    string
+	cocoindexScriptsPath string
+	tracks               []ryTrackForIndex
 }
 
 type ryTrackForIndex struct {
