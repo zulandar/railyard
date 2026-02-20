@@ -46,9 +46,10 @@ type NotificationsConfig struct {
 
 // StallConfig holds thresholds for engine stall detection.
 type StallConfig struct {
-	StdoutTimeoutSec int `yaml:"stdout_timeout_sec"` // no stdout for N seconds = stall (default 120)
-	RepeatedErrorMax int `yaml:"repeated_error_max"` // same error N times = stall (default 3)
-	MaxClearCycles   int `yaml:"max_clear_cycles"`   // more than N cycles = stall (default 5)
+	StdoutTimeoutSec  int `yaml:"stdout_timeout_sec"`  // no stdout for N seconds = stall (default 120)
+	RepeatedErrorMax  int `yaml:"repeated_error_max"`  // same error N times = stall (default 3)
+	MaxClearCycles    int `yaml:"max_clear_cycles"`    // more than N cycles = stall (default 5)
+	MaxSwitchFailures int `yaml:"max_switch_failures"` // repeated switch failures before escalation (default 3)
 }
 
 // DoltConfig holds connection settings for the Dolt SQL server.
@@ -113,6 +114,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Stall.MaxClearCycles == 0 {
 		c.Stall.MaxClearCycles = 5
+	}
+	if c.Stall.MaxSwitchFailures == 0 {
+		c.Stall.MaxSwitchFailures = 3
 	}
 	for i := range c.Tracks {
 		if c.Tracks[i].EngineSlots == 0 {

@@ -223,3 +223,123 @@ func TestProcessInbox_EmptyInbox(t *testing.T) {
 		t.Fatal("should NOT drain on empty inbox")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// countRecentSwitchFailures tests
+// ---------------------------------------------------------------------------
+
+func TestCountRecentSwitchFailures_Empty(t *testing.T) {
+	db := testDB(t)
+	db.Create(&models.Car{ID: "car-csf1", Track: "backend"})
+
+	count := countRecentSwitchFailures(db, "car-csf1")
+	if count != 0 {
+		t.Errorf("count = %d, want 0", count)
+	}
+}
+
+func TestCountRecentSwitchFailures_CountsCategorized(t *testing.T) {
+	db := testDB(t)
+	db.Create(&models.Car{ID: "car-csf2", Track: "backend"})
+
+	// Write various categorized progress notes.
+	writeProgressNote(db, "car-csf2", "yardmaster", "switch:merge-conflict: git merge failed")
+	writeProgressNote(db, "car-csf2", "yardmaster", "switch:fetch-failed: network error")
+	writeProgressNote(db, "car-csf2", "yardmaster", "switch:test-failed: FAIL TestFoo")
+
+	count := countRecentSwitchFailures(db, "car-csf2")
+	if count != 3 {
+		t.Errorf("count = %d, want 3", count)
+	}
+}
+
+func TestCountRecentSwitchFailures_IgnoresNonSwitch(t *testing.T) {
+	db := testDB(t)
+	db.Create(&models.Car{ID: "car-csf3", Track: "backend"})
+
+	// Non-switch progress notes should be ignored.
+	writeProgressNote(db, "car-csf3", "eng-001", "Implemented feature X")
+	writeProgressNote(db, "car-csf3", "eng-001", "Engine stalled: timeout")
+	// One switch note.
+	writeProgressNote(db, "car-csf3", "yardmaster", "switch:push-failed: auth error")
+
+	count := countRecentSwitchFailures(db, "car-csf3")
+	if count != 1 {
+		t.Errorf("count = %d, want 1", count)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// switchFailureReason tests
+// ---------------------------------------------------------------------------
+
+func TestSwitchFailureReason_AllCategories(t *testing.T) {
+	tests := []struct {
+		cat  SwitchFailureCategory
+		want string
+	}{
+		{SwitchFailFetch, "repeated-fetch-failure"},
+		{SwitchFailPreTest, "repeated-pre-test-failure"},
+		{SwitchFailTest, "repeated-test-failure"},
+		{SwitchFailMerge, "repeated-merge-conflict"},
+		{SwitchFailPush, "repeated-push-failure"},
+		{SwitchFailPR, "repeated-pr-failure"},
+		{SwitchFailNone, "repeated-switch-failure"},
+	}
+
+	for _, tt := range tests {
+		got := switchFailureReason(tt.cat)
+		if got != tt.want {
+			t.Errorf("switchFailureReason(%q) = %q, want %q", tt.cat, got, tt.want)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// maybeSwitchEscalate tests (threshold behavior only — no real Claude call)
+// ---------------------------------------------------------------------------
+
+func TestMaybeSwitchEscalate_BelowThreshold(t *testing.T) {
+	db := testDB(t)
+	db.Create(&models.Car{ID: "car-esc1", Track: "backend"})
+
+	// Only 2 failures, threshold is 3.
+	writeProgressNote(db, "car-esc1", "yardmaster", "switch:merge-conflict: conflict 1")
+	writeProgressNote(db, "car-esc1", "yardmaster", "switch:merge-conflict: conflict 2")
+
+	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
+	cfg.Stall.MaxSwitchFailures = 3
+
+	var buf bytes.Buffer
+	// This should NOT escalate (below threshold), so no "escalating" in output.
+	maybeSwitchEscalate(context.Background(), db, cfg, "car-esc1", SwitchFailMerge, nil, &buf)
+
+	if strings.Contains(buf.String(), "escalating") {
+		t.Errorf("should not escalate below threshold, got: %s", buf.String())
+	}
+}
+
+func TestMaybeSwitchEscalate_AtThreshold(t *testing.T) {
+	db := testDB(t)
+	db.Create(&models.Car{ID: "car-esc2", Track: "backend"})
+
+	// 3 failures, threshold is 3.
+	writeProgressNote(db, "car-esc2", "yardmaster", "switch:fetch-failed: err 1")
+	writeProgressNote(db, "car-esc2", "yardmaster", "switch:fetch-failed: err 2")
+	writeProgressNote(db, "car-esc2", "yardmaster", "switch:fetch-failed: err 3")
+
+	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
+	cfg.Stall.MaxSwitchFailures = 3
+
+	var buf bytes.Buffer
+	// Escalation will fire (at threshold). The actual Claude call will fail
+	// since there's no `claude` binary in CI, but we can verify the log output.
+	maybeSwitchEscalate(context.Background(), db, cfg, "car-esc2", SwitchFailFetch, nil, &buf)
+
+	if !strings.Contains(buf.String(), "escalating") {
+		t.Errorf("should escalate at threshold, got: %s", buf.String())
+	}
+	if !strings.Contains(buf.String(), "repeated-fetch-failure") {
+		t.Errorf("output should mention failure reason, got: %s", buf.String())
+	}
+}

@@ -22,7 +22,7 @@ const (
 	// YardmasterID is the well-known engine ID for the yardmaster.
 	YardmasterID        = "yardmaster"
 	defaultPollInterval = 30 * time.Second
-	maxTestFailures     = 2
+	maxTestFailures     = 2 // deprecated: use cfg.Stall.MaxSwitchFailures instead
 )
 
 // RunDaemon runs the yardmaster daemon loop. It registers the yardmaster in the
@@ -325,27 +325,31 @@ func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, r
 			TestCommand:    testCommand,
 			RequirePR:      cfg.RequirePR,
 		})
+
+		// Handle any failure — write a categorized progress note and check
+		// whether we've hit the escalation threshold.
+		failCategory := SwitchFailNone
+		if result != nil {
+			failCategory = result.FailureCategory
+		}
+
 		if err != nil {
 			log.Printf("switch car %s: %v", c.ID, err)
 
-			failures := countRecentFailures(db, c.ID)
-			if failures >= maxTestFailures {
-				fmt.Fprintf(out, "Car %s failed tests %d times — escalating\n", c.ID, failures)
-				go func(carID string, failCount int) {
-					res, escErr := EscalateToClaude(ctx, EscalateOpts{
-						CarID:   carID,
-						Reason:  "repeated-test-failure",
-						Details: fmt.Sprintf("Car %s has failed tests %d times", carID, failCount),
-						DB:      db,
-					})
-					if escErr != nil {
-						log.Printf("escalation error for %s: %v", carID, escErr)
-						return
-					}
-					handleEscalateResult(db, "", carID, res, out)
-				}(c.ID, failures)
+			if failCategory != SwitchFailNone {
+				writeProgressNote(db, c.ID, YardmasterID,
+					fmt.Sprintf("switch:%s: %v", failCategory, err))
 			}
+
+			maybeSwitchEscalate(ctx, db, cfg, c.ID, failCategory, err, out)
 			continue
+		}
+
+		// Test failures return result with nil error but FailureCategory set.
+		if failCategory != SwitchFailNone {
+			writeProgressNote(db, c.ID, YardmasterID,
+				fmt.Sprintf("switch:%s: %v", failCategory, result.Error))
+			maybeSwitchEscalate(ctx, db, cfg, c.ID, failCategory, result.Error, out)
 		}
 
 		if result.PRCreated {
@@ -517,12 +521,75 @@ func handleEscalateResult(db *gorm.DB, engineID, carID string, result *EscalateR
 }
 
 // countRecentFailures counts test-failure progress notes for a car.
+// Deprecated: use countRecentSwitchFailures for the generalized counter.
 func countRecentFailures(db *gorm.DB, carID string) int {
 	var count int64
 	db.Model(&models.CarProgress{}).
 		Where("car_id = ? AND note LIKE ?", carID, "%test%fail%").
 		Count(&count)
 	return int(count)
+}
+
+// countRecentSwitchFailures counts all switch-categorized failure progress
+// notes for a car. Each note has the form "switch:<category>: <details>".
+func countRecentSwitchFailures(db *gorm.DB, carID string) int {
+	var count int64
+	db.Model(&models.CarProgress{}).
+		Where("car_id = ? AND note LIKE ?", carID, "switch:%").
+		Count(&count)
+	return int(count)
+}
+
+// switchFailureReason maps a failure category to a human-readable escalation
+// reason string for the Claude prompt.
+func switchFailureReason(cat SwitchFailureCategory) string {
+	switch cat {
+	case SwitchFailFetch:
+		return "repeated-fetch-failure"
+	case SwitchFailPreTest:
+		return "repeated-pre-test-failure"
+	case SwitchFailTest:
+		return "repeated-test-failure"
+	case SwitchFailMerge:
+		return "repeated-merge-conflict"
+	case SwitchFailPush:
+		return "repeated-push-failure"
+	case SwitchFailPR:
+		return "repeated-pr-failure"
+	default:
+		return "repeated-switch-failure"
+	}
+}
+
+// maybeSwitchEscalate checks whether a car has exceeded the switch failure
+// threshold and, if so, escalates to Claude with the failure category.
+func maybeSwitchEscalate(ctx context.Context, db *gorm.DB, cfg *config.Config, carID string, cat SwitchFailureCategory, switchErr error, out io.Writer) {
+	maxFailures := cfg.Stall.MaxSwitchFailures
+	if maxFailures <= 0 {
+		maxFailures = 3
+	}
+
+	failures := countRecentSwitchFailures(db, carID)
+	if failures < maxFailures {
+		return
+	}
+
+	reason := switchFailureReason(cat)
+	fmt.Fprintf(out, "Car %s has %d switch failures (%s) — escalating\n", carID, failures, reason)
+
+	go func(carID string, failCount int, reason string) {
+		res, escErr := EscalateToClaude(ctx, EscalateOpts{
+			CarID:   carID,
+			Reason:  reason,
+			Details: fmt.Sprintf("Car %s has failed %d times. Latest: %v", carID, failCount, switchErr),
+			DB:      db,
+		})
+		if escErr != nil {
+			log.Printf("escalation error for %s: %v", carID, escErr)
+			return
+		}
+		handleEscalateResult(db, "", carID, res, out)
+	}(carID, failures, reason)
 }
 
 // getHeadCommit returns the current HEAD commit hash, or empty string on error.

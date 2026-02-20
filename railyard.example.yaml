@@ -56,6 +56,7 @@ repo: git@github.com:org/myproject.git
 #   stdout_timeout_sec: 120    # no stdout for N seconds = engine stall
 #   repeated_error_max: 3      # same error N times = engine stall
 #   max_clear_cycles: 5        # more than N /clear cycles = engine stall
+#   max_switch_failures: 3     # repeated switch (merge/test/push) failures before Claude escalation
 
 # ---------------------------------------------------------------------------
 # Notifications (optional)

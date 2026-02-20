@@ -22,17 +22,32 @@ type SwitchOpts struct {
 	RequirePR      bool   // create a draft PR instead of direct merge
 }
 
+// SwitchFailureCategory categorizes Switch errors so the daemon can track and
+// escalate repeated failures by type.
+type SwitchFailureCategory string
+
+const (
+	SwitchFailNone       SwitchFailureCategory = ""
+	SwitchFailFetch      SwitchFailureCategory = "fetch-failed"
+	SwitchFailPreTest    SwitchFailureCategory = "pre-test-failed"
+	SwitchFailTest       SwitchFailureCategory = "test-failed"
+	SwitchFailMerge      SwitchFailureCategory = "merge-conflict"
+	SwitchFailPush       SwitchFailureCategory = "push-failed"
+	SwitchFailPR         SwitchFailureCategory = "pr-failed"
+)
+
 // SwitchResult contains the outcome of a switch operation.
 type SwitchResult struct {
-	CarID         string
-	Branch        string
-	TestsPassed   bool
-	TestOutput    string
-	Merged        bool
-	AlreadyMerged bool // true when the branch was already an ancestor of main
-	PRCreated     bool
-	PRUrl         string
-	Error         error
+	CarID           string
+	Branch          string
+	TestsPassed     bool
+	TestOutput      string
+	Merged          bool
+	AlreadyMerged   bool // true when the branch was already an ancestor of main
+	PRCreated       bool
+	PRUrl           string
+	FailureCategory SwitchFailureCategory // set on error for categorized escalation
+	Error           error
 }
 
 // Switch performs the branch merge flow for a completed car:
@@ -68,6 +83,7 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 
 	// Fetch the branch.
 	if err := gitFetch(opts.RepoDir); err != nil {
+		result.FailureCategory = SwitchFailFetch
 		result.Error = fmt.Errorf("fetch: %w", err)
 		return result, result.Error
 	}
@@ -94,6 +110,11 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 					fmt.Sprintf("Tests failed for car %s on branch %s:\n%s", carID, car.Branch, testOutput),
 					messaging.SendOpts{CarID: carID, Priority: "urgent"},
 				)
+			}
+			if strings.Contains(testErr.Error(), "pre-test command failed") {
+				result.FailureCategory = SwitchFailPreTest
+			} else {
+				result.FailureCategory = SwitchFailTest
 			}
 			result.Error = fmt.Errorf("tests failed: %w", testErr)
 			return result, nil // return result without error — test failure is a normal outcome
@@ -146,6 +167,7 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 	if opts.RequirePR {
 		// Push the branch to origin so a PR can reference it.
 		if err := gitPushBranch(opts.RepoDir, car.Branch); err != nil {
+			result.FailureCategory = SwitchFailPush
 			result.Error = fmt.Errorf("push branch: %w", err)
 			return result, result.Error
 		}
@@ -155,6 +177,7 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 
 		prURL, err := createDraftPR(opts.RepoDir, car.Title, prBody, car.Branch)
 		if err != nil {
+			result.FailureCategory = SwitchFailPR
 			result.Error = fmt.Errorf("create PR: %w", err)
 			return result, result.Error
 		}
@@ -174,6 +197,7 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 
 	// Merge to main.
 	if err := gitMerge(opts.RepoDir, car.Branch); err != nil {
+		result.FailureCategory = SwitchFailMerge
 		result.Error = fmt.Errorf("merge: %w", err)
 		return result, result.Error
 	}

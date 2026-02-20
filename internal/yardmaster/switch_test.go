@@ -45,7 +45,7 @@ func TestSwitchOpts_ZeroValue(t *testing.T) {
 
 func TestSwitchResult_ZeroValue(t *testing.T) {
 	r := SwitchResult{}
-	if r.CarID != "" || r.Branch != "" || r.TestsPassed || r.Merged || r.AlreadyMerged || r.PRCreated || r.PRUrl != "" {
+	if r.CarID != "" || r.Branch != "" || r.TestsPassed || r.Merged || r.AlreadyMerged || r.PRCreated || r.PRUrl != "" || r.FailureCategory != SwitchFailNone {
 		t.Error("zero-value SwitchResult should have empty/false fields")
 	}
 }
@@ -469,6 +469,53 @@ func TestTryCloseEpic_ClosesBlockedEpicWhenAllChildrenDone(t *testing.T) {
 	db.First(&epic, "id = ?", epicID)
 	if epic.Status != "done" {
 		t.Errorf("epic status = %q, want %q", epic.Status, "done")
+	}
+}
+
+// --- SwitchFailureCategory tests ---
+
+func TestSwitchFailureCategory_Values(t *testing.T) {
+	tests := []struct {
+		cat  SwitchFailureCategory
+		want string
+	}{
+		{SwitchFailNone, ""},
+		{SwitchFailFetch, "fetch-failed"},
+		{SwitchFailPreTest, "pre-test-failed"},
+		{SwitchFailTest, "test-failed"},
+		{SwitchFailMerge, "merge-conflict"},
+		{SwitchFailPush, "push-failed"},
+		{SwitchFailPR, "pr-failed"},
+	}
+
+	for _, tt := range tests {
+		if string(tt.cat) != tt.want {
+			t.Errorf("category %q != %q", tt.cat, tt.want)
+		}
+	}
+}
+
+func TestSwitch_FetchFailureSetsCategory(t *testing.T) {
+	// Switch with a valid DB and car but a nonexistent repoDir triggers
+	// a git fetch failure, which should set FailureCategory.
+	db := testDB(t)
+	db.Create(&models.Car{
+		ID:     "car-fc1",
+		Title:  "Test",
+		Track:  "backend",
+		Branch: "ry/alice/backend/car-fc1",
+		Status: "done",
+	})
+
+	result, err := Switch(db, "car-fc1", SwitchOpts{
+		RepoDir:     "/nonexistent/repo/path",
+		TestCommand: "true",
+	})
+	if err == nil {
+		t.Fatal("expected error from fetch failure")
+	}
+	if result.FailureCategory != SwitchFailFetch {
+		t.Errorf("FailureCategory = %q, want %q", result.FailureCategory, SwitchFailFetch)
 	}
 }
 
