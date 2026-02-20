@@ -141,6 +141,11 @@ def query_table(
     results = []
     for filename, code, location, score in rows:
         if score >= min_score:
+            # location is a PostgreSQL numrange — convert to string for JSON.
+            if hasattr(location, "lower") and hasattr(location, "upper"):
+                location = f"[{location.lower}, {location.upper})"
+            else:
+                location = str(location) if location is not None else None
             results.append({
                 "filename": filename,
                 "code": code,
