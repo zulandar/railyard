@@ -542,27 +542,30 @@ func TestEnsureCocoIndexScripts_CreatesFiles(t *testing.T) {
 	}
 }
 
-func TestEnsureCocoIndexScripts_SkipsExisting(t *testing.T) {
+func TestEnsureCocoIndexScripts_OverwritesExisting(t *testing.T) {
 	tmpDir := t.TempDir()
 	scriptsDir := filepath.Join(tmpDir, "cocoindex")
 	os.MkdirAll(scriptsDir, 0755)
 
-	// Write a custom migrate.py that should not be overwritten.
-	customContent := "# custom migrate\n"
-	os.WriteFile(filepath.Join(scriptsDir, "migrate.py"), []byte(customContent), 0644)
+	// Write a stale migrate.py that should be overwritten with the embedded version.
+	staleContent := "# stale migrate\n"
+	os.WriteFile(filepath.Join(scriptsDir, "migrate.py"), []byte(staleContent), 0644)
 
 	err := ensureCocoIndexScripts(scriptsDir)
 	if err != nil {
 		t.Fatalf("ensureCocoIndexScripts() error: %v", err)
 	}
 
-	// Verify custom file was preserved.
+	// Verify file was overwritten with embedded content.
 	data, _ := os.ReadFile(filepath.Join(scriptsDir, "migrate.py"))
-	if string(data) != customContent {
-		t.Error("migrate.py should not be overwritten")
+	if string(data) == staleContent {
+		t.Error("migrate.py should have been overwritten with embedded version")
+	}
+	if !strings.Contains(string(data), "run_migrations") {
+		t.Error("migrate.py should contain embedded content")
 	}
 
-	// But other files should have been created.
+	// Other files should also exist.
 	if _, err := os.Stat(filepath.Join(scriptsDir, "config.py")); err != nil {
 		t.Error("config.py should have been created")
 	}

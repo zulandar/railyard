@@ -388,13 +388,11 @@ func ensureDockerFiles(dockerDir string) error {
 }
 
 // ensureCocoIndexScripts writes the embedded Python scripts and migration SQL
-// into scriptsDir (typically "cocoindex") if they don't already exist.
+// into scriptsDir (typically "cocoindex"). Always overwrites to keep scripts
+// in sync with the ry binary version.
 func ensureCocoIndexScripts(scriptsDir string) error {
 	for _, s := range embeddedScripts {
 		dest := filepath.Join(scriptsDir, s.path)
-		if _, err := os.Stat(dest); err == nil {
-			continue // already exists
-		}
 		if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
 			return fmt.Errorf("create dir for %s: %w", s.path, err)
 		}
