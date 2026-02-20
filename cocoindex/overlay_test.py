@@ -344,7 +344,8 @@ class TestBuild:
                     tolist=mock.MagicMock(return_value=[0.1] * 384)
                 )
                 st_cls = mock.MagicMock(return_value=model_mock)
-                _st.SentenceTransformer = st_cls
+                # Use sys.modules directly in case another test file replaced it
+                sys.modules["sentence_transformers"].SentenceTransformer = st_cls
 
                 # Configure psycopg2 stub in sys.modules
                 cursor_mock = mock.MagicMock()
@@ -353,7 +354,7 @@ class TestBuild:
                 conn_mock = mock.MagicMock()
                 conn_mock.cursor.return_value = cursor_mock
                 pg_connect = mock.MagicMock(return_value=conn_mock)
-                _psycopg2.connect = pg_connect
+                sys.modules["psycopg2"].connect = pg_connect
 
                 # Mock file reads
                 def fake_open(path, *a, **kw):
