@@ -85,6 +85,11 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 		return fmt.Errorf("connect to %s: %w", cfg.Dolt.Database, err)
 	}
 
+	// Ensure schema is up to date (adds any new columns from model changes).
+	if err := db.AutoMigrate(gormDB); err != nil {
+		return fmt.Errorf("auto-migrate: %w", err)
+	}
+
 	// Load the track model from DB for context rendering.
 	var trackModel models.Track
 	if err := gormDB.Where("name = ?", track).First(&trackModel).Error; err != nil {
