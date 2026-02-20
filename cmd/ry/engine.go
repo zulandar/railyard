@@ -140,6 +140,9 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 		select {
 		case <-ctx.Done():
 			fmt.Fprintf(out, "Engine %s deregistering...\n", eng.ID)
+			if err := engine.CleanupOverlay(eng.ID, cfg); err != nil {
+				log.Printf("overlay cleanup warning: %v", err)
+			}
 			if err := engine.Deregister(gormDB, eng.ID); err != nil {
 				log.Printf("deregister error: %v", err)
 			}
@@ -231,6 +234,19 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 			continue
 		}
 
+		// Build overlay index and write MCP config (non-fatal).
+		if cfg.CocoIndex.Overlay.Enabled {
+			if overlayTable, err := engine.BuildOverlay(workDir, eng.ID, track, cfg); err != nil {
+				log.Printf("overlay build warning: %v", err)
+			} else if overlayTable != "" {
+				gormDB.Model(&models.Engine{}).Where("id = ?", eng.ID).Update("overlay_table", overlayTable)
+				eng.OverlayTable = overlayTable
+			}
+			if err := engine.WriteMCPConfig(workDir, eng.ID, track, cfg); err != nil {
+				log.Printf("mcp config warning: %v", err)
+			}
+		}
+
 		// Spawn Claude Code.
 		sess, err := engine.SpawnAgent(ctx, gormDB, engine.SpawnOpts{
 			EngineID:       eng.ID,
@@ -290,6 +306,9 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 
 		case outcomeCancelled:
 			fmt.Fprintf(out, "[cycle %d] Cancelled, shutting down\n", cycle)
+			if err := engine.CleanupOverlay(eng.ID, cfg); err != nil {
+				log.Printf("overlay cleanup warning: %v", err)
+			}
 			if err := engine.Deregister(gormDB, eng.ID); err != nil {
 				log.Printf("deregister error: %v", err)
 			}

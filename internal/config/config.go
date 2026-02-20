@@ -20,6 +20,23 @@ type Config struct {
 	Stall              StallConfig         `yaml:"stall"`
 	Tracks             []TrackConfig       `yaml:"tracks"`
 	Notifications      NotificationsConfig `yaml:"notifications"`
+	CocoIndex          CocoIndexConfig     `yaml:"cocoindex"`
+}
+
+// CocoIndexConfig holds settings for the CocoIndex semantic search integration.
+type CocoIndexConfig struct {
+	DatabaseURL string              `yaml:"database_url"`
+	VenvPath    string              `yaml:"venv_path"`
+	ScriptsPath string              `yaml:"scripts_path"`
+	Overlay     OverlayConfig       `yaml:"overlay"`
+}
+
+// OverlayConfig holds settings for per-engine overlay indexing.
+type OverlayConfig struct {
+	Enabled         bool `yaml:"enabled"`
+	MaxChunks       int  `yaml:"max_chunks"`
+	AutoRefresh     bool `yaml:"auto_refresh"`
+	BuildTimeoutSec int  `yaml:"build_timeout_sec"`
 }
 
 // NotificationsConfig controls push notifications for human-targeted messages.
@@ -100,6 +117,25 @@ func (c *Config) applyDefaults() {
 		if c.Tracks[i].EngineSlots == 0 {
 			c.Tracks[i].EngineSlots = 3
 		}
+	}
+	if c.CocoIndex.VenvPath == "" {
+		c.CocoIndex.VenvPath = "cocoindex/.venv"
+	}
+	if c.CocoIndex.ScriptsPath == "" {
+		c.CocoIndex.ScriptsPath = "cocoindex"
+	}
+	// Overlay defaults: enabled=true unless explicitly set to false via YAML.
+	// Since Go zero-values bools as false, we use a pragmatic approach:
+	// if the entire cocoindex section is absent (DatabaseURL empty), overlay stays disabled.
+	// If cocoindex section is present, overlay defaults to enabled.
+	if c.CocoIndex.DatabaseURL != "" && !c.CocoIndex.Overlay.Enabled {
+		c.CocoIndex.Overlay.Enabled = true
+	}
+	if c.CocoIndex.Overlay.MaxChunks == 0 {
+		c.CocoIndex.Overlay.MaxChunks = 5000
+	}
+	if c.CocoIndex.Overlay.BuildTimeoutSec == 0 {
+		c.CocoIndex.Overlay.BuildTimeoutSec = 60
 	}
 }
 

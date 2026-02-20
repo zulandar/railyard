@@ -85,7 +85,7 @@ func RunDaemon(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath,
 		}
 
 		// Phase 2: Handle stale engines.
-		if err := handleStaleEngines(db, configPath, out); err != nil {
+		if err := handleStaleEngines(db, cfg, configPath, out); err != nil {
 			log.Printf("yardmaster stale engines error: %v", err)
 		}
 
@@ -252,7 +252,7 @@ func ackMsg(db *gorm.DB, msg models.Message) {
 
 // handleStaleEngines detects engines with stale heartbeats, reassigns their cars,
 // and restarts the engines.
-func handleStaleEngines(db *gorm.DB, configPath string, out io.Writer) error {
+func handleStaleEngines(db *gorm.DB, cfg *config.Config, configPath string, out io.Writer) error {
 	stale, err := StaleEngines(db)
 	if err != nil {
 		return err
@@ -261,6 +261,11 @@ func handleStaleEngines(db *gorm.DB, configPath string, out io.Writer) error {
 	for _, eng := range stale {
 		if eng.ID == YardmasterID {
 			continue
+		}
+
+		// Clean up dead engine's overlay before restart (non-fatal).
+		if err := engine.CleanupOverlay(eng.ID, cfg); err != nil {
+			log.Printf("overlay cleanup for stale engine %s: %v", eng.ID, err)
 		}
 
 		if eng.CurrentCar != "" {
@@ -337,6 +342,13 @@ func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, r
 		} else if result.Merged {
 			anyMerged = true
 			fmt.Fprintf(out, "Car %s merged (branch %s)\n", c.ID, result.Branch)
+
+			// Clean up the completing engine's overlay (non-fatal).
+			if c.Assignee != "" {
+				if err := engine.CleanupOverlay(c.Assignee, cfg); err != nil {
+					log.Printf("overlay cleanup for %s: %v", c.Assignee, err)
+				}
+			}
 
 			commitHash := getHeadCommit(repoDir)
 			if err := CreateReindexJob(db, c.Track, commitHash); err != nil {

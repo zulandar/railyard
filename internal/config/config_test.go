@@ -499,3 +499,85 @@ tracks:
 		t.Errorf("FilePatterns = %v, want nil when not specified", cfg.Tracks[0].FilePatterns)
 	}
 }
+
+func TestParse_CocoIndexDefaults(t *testing.T) {
+	cfg, err := Parse([]byte(minimalYAML))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.CocoIndex.VenvPath != "cocoindex/.venv" {
+		t.Errorf("CocoIndex.VenvPath = %q, want default %q", cfg.CocoIndex.VenvPath, "cocoindex/.venv")
+	}
+	if cfg.CocoIndex.ScriptsPath != "cocoindex" {
+		t.Errorf("CocoIndex.ScriptsPath = %q, want default %q", cfg.CocoIndex.ScriptsPath, "cocoindex")
+	}
+	// Without database_url, overlay should not be auto-enabled.
+	if cfg.CocoIndex.Overlay.Enabled {
+		t.Error("CocoIndex.Overlay.Enabled should be false without database_url")
+	}
+	if cfg.CocoIndex.Overlay.MaxChunks != 5000 {
+		t.Errorf("CocoIndex.Overlay.MaxChunks = %d, want 5000", cfg.CocoIndex.Overlay.MaxChunks)
+	}
+	if cfg.CocoIndex.Overlay.BuildTimeoutSec != 60 {
+		t.Errorf("CocoIndex.Overlay.BuildTimeoutSec = %d, want 60", cfg.CocoIndex.Overlay.BuildTimeoutSec)
+	}
+}
+
+func TestParse_CocoIndexWithDatabaseURL(t *testing.T) {
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+cocoindex:
+  database_url: "postgresql://localhost:5432/cocoindex"
+tracks:
+  - name: backend
+    language: go
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.CocoIndex.DatabaseURL != "postgresql://localhost:5432/cocoindex" {
+		t.Errorf("CocoIndex.DatabaseURL = %q", cfg.CocoIndex.DatabaseURL)
+	}
+	if !cfg.CocoIndex.Overlay.Enabled {
+		t.Error("CocoIndex.Overlay.Enabled should default to true when database_url is set")
+	}
+}
+
+func TestParse_CocoIndexCustomValues(t *testing.T) {
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+cocoindex:
+  database_url: "postgresql://localhost:5432/cocoindex"
+  venv_path: "/custom/venv"
+  scripts_path: "/custom/scripts"
+  overlay:
+    enabled: true
+    max_chunks: 10000
+    build_timeout_sec: 120
+tracks:
+  - name: backend
+    language: go
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.CocoIndex.VenvPath != "/custom/venv" {
+		t.Errorf("CocoIndex.VenvPath = %q, want /custom/venv", cfg.CocoIndex.VenvPath)
+	}
+	if cfg.CocoIndex.ScriptsPath != "/custom/scripts" {
+		t.Errorf("CocoIndex.ScriptsPath = %q, want /custom/scripts", cfg.CocoIndex.ScriptsPath)
+	}
+	if !cfg.CocoIndex.Overlay.Enabled {
+		t.Error("CocoIndex.Overlay.Enabled should be true")
+	}
+	if cfg.CocoIndex.Overlay.MaxChunks != 10000 {
+		t.Errorf("CocoIndex.Overlay.MaxChunks = %d, want 10000", cfg.CocoIndex.Overlay.MaxChunks)
+	}
+	if cfg.CocoIndex.Overlay.BuildTimeoutSec != 120 {
+		t.Errorf("CocoIndex.Overlay.BuildTimeoutSec = %d, want 120", cfg.CocoIndex.Overlay.BuildTimeoutSec)
+	}
+}
