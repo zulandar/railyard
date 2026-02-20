@@ -168,6 +168,15 @@ func TestNewCocoIndexCmd_Structure(t *testing.T) {
 	if indexCmd.Use != "index" {
 		t.Errorf("index subcommand Use = %q, want %q", indexCmd.Use, "index")
 	}
+
+	// Should have sync subcommand.
+	syncCmd, _, err := cmd.Find([]string{"sync"})
+	if err != nil {
+		t.Fatalf("find sync subcommand: %v", err)
+	}
+	if syncCmd.Use != "sync" {
+		t.Errorf("sync subcommand Use = %q, want %q", syncCmd.Use, "sync")
+	}
 }
 
 func TestNewCocoIndexIndexCmd_Flags(t *testing.T) {

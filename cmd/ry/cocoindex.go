@@ -85,6 +85,7 @@ func newCocoIndexCmd() *cobra.Command {
 
 	cmd.AddCommand(newCocoIndexInitCmd())
 	cmd.AddCommand(newCocoIndexIndexCmd())
+	cmd.AddCommand(newCocoIndexSyncCmd())
 	return cmd
 }
 
@@ -147,6 +148,33 @@ Examples:
 	cmd.Flags().StringSliceVar(&tracks, "tracks", nil, "specific tracks to index (default: all)")
 	cmd.Flags().StringVar(&repoPath, "repo-path", ".", "path to the repository root")
 	cmd.Flags().BoolVar(&force, "force", false, "force reprocessing even if data appears up-to-date")
+	return cmd
+}
+
+func newCocoIndexSyncCmd() *cobra.Command {
+	var scriptsDir string
+
+	cmd := &cobra.Command{
+		Use:   "sync",
+		Short: "Deploy embedded CocoIndex scripts to disk",
+		Long: `Writes the Python scripts and SQL migrations bundled in the ry binary
+to the scripts directory. Run this after upgrading ry to update the
+MCP server and indexing scripts in any repo.
+
+Examples:
+  ry cocoindex sync                        # Write to cocoindex/
+  ry cocoindex sync --dir /path/to/scripts # Custom directory`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			out := cmd.OutOrStdout()
+			if err := ensureCocoIndexScripts(scriptsDir); err != nil {
+				return fmt.Errorf("sync scripts: %w", err)
+			}
+			fmt.Fprintf(out, "Synced %d embedded scripts to %s/\n", len(embeddedScripts), scriptsDir)
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&scriptsDir, "dir", "cocoindex", "target directory for scripts")
 	return cmd
 }
 
