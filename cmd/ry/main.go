@@ -40,6 +40,7 @@ func newRootCmd() *cobra.Command {
 	cmd.AddCommand(newDoctorCmd())
 	cmd.AddCommand(newDashboardCmd())
 	cmd.AddCommand(newCocoIndexCmd())
+	cmd.AddCommand(newOverlayCmd())
 	return cmd
 }
 

@@ -5,7 +5,7 @@ set -euo pipefail
 #
 # For a FRESH WSL container where you've cloned the repo.
 # Installs prerequisites, builds ry, starts Dolt, initializes the DB,
-# and gets you ready to run `ry start`.
+# optionally sets up pgvector for CocoIndex, and gets you ready to run `ry start`.
 #
 # Usage:
 #   git clone <repo> && cd railyard
@@ -76,12 +76,19 @@ cd "${REPO_DIR}"
 
 SCRIPT_SUCCESS=false
 DOLT_STARTED_BY_US=false
+PGVECTOR_STARTED_BY_US=false
 DOLT_PORT=3306  # May be overridden later by port conflict detection.
 
 cleanup() {
-    if ! $SCRIPT_SUCCESS && $DOLT_STARTED_BY_US; then
-        warn "Script failed — stopping Dolt server we started on port ${DOLT_PORT}..."
-        pkill -f "dolt sql-server.*--port ${DOLT_PORT}" 2>/dev/null || true
+    if ! $SCRIPT_SUCCESS; then
+        if $DOLT_STARTED_BY_US; then
+            warn "Script failed — stopping Dolt server we started on port ${DOLT_PORT}..."
+            pkill -f "dolt sql-server.*--port ${DOLT_PORT}" 2>/dev/null || true
+        fi
+        if $PGVECTOR_STARTED_BY_US; then
+            warn "Script failed — stopping pgvector container..."
+            docker compose -f docker/docker-compose.pgvector.yaml down 2>/dev/null || true
+        fi
     fi
 }
 trap cleanup EXIT
@@ -246,6 +253,122 @@ info "Initializing database..."
 ./ry db init -c railyard.yaml 2>&1
 ok "Database ready"
 
+# ─── Step 7: Setup pgvector for CocoIndex (optional) ────────────────────────
+# Requires Docker. Non-fatal — if Docker is missing, skip and continue.
+
+PGVECTOR_STATUS="skipped"
+
+if check_cmd docker && docker compose version &>/dev/null 2>&1; then
+    info "Setting up pgvector for CocoIndex semantic search..."
+
+    PG_PORT=5481
+    PGVECTOR_RUNNING=false
+
+    # Check if railyard-pgvector container is already running.
+    if docker inspect --format '{{.State.Running}}' railyard-pgvector 2>/dev/null | grep -q "true"; then
+        RUNNING_PORT=$(docker inspect --format '{{(index (index .NetworkSettings.Ports "5432/tcp") 0).HostPort}}' railyard-pgvector 2>/dev/null || echo "")
+        if [ -n "${RUNNING_PORT}" ]; then
+            PG_PORT="${RUNNING_PORT}"
+            PGVECTOR_RUNNING=true
+            ok "pgvector already running on port ${PG_PORT}"
+        fi
+    fi
+
+    if ! $PGVECTOR_RUNNING; then
+        # Port conflict detection.
+        if check_port ${PG_PORT}; then
+            PG_PORT=5482
+            if check_port ${PG_PORT}; then
+                warn "Ports 5481 and 5482 both in use — skipping pgvector setup."
+                warn "Run 'ry cocoindex init --port <free-port>' manually."
+                PGVECTOR_STATUS="port-conflict"
+            fi
+        fi
+
+        if [ "${PGVECTOR_STATUS}" != "port-conflict" ]; then
+            info "Starting pgvector on port ${PG_PORT}..."
+            COCOINDEX_PG_PORT=${PG_PORT} docker compose -f docker/docker-compose.pgvector.yaml up -d 2>&1
+            PGVECTOR_STARTED_BY_US=true
+
+            # Wait for health check.
+            PG_READY=false
+            for i in $(seq 1 30); do
+                if docker exec railyard-pgvector pg_isready -U cocoindex -d cocoindex &>/dev/null 2>&1; then
+                    PG_READY=true
+                    break
+                fi
+                sleep 1
+            done
+
+            if $PG_READY; then
+                ok "pgvector ready on port ${PG_PORT}"
+            else
+                warn "pgvector not ready after 30s — skipping migrations."
+                warn "Run 'ry cocoindex init' manually to complete setup."
+                PGVECTOR_STATUS="not-ready"
+            fi
+        fi
+    fi
+
+    # Run migrations if pgvector is ready.
+    if [ "${PGVECTOR_STATUS}" = "skipped" ]; then
+        PG_DATABASE_URL="postgresql://cocoindex:cocoindex@localhost:${PG_PORT}/cocoindex"
+
+        # Try venv python, fall back to system python3.
+        PYTHON_PATH="cocoindex/.venv/bin/python"
+        if [ ! -x "${PYTHON_PATH}" ]; then
+            PYTHON_PATH="python3"
+        fi
+
+        if check_cmd "${PYTHON_PATH}"; then
+            info "Running pgvector migrations..."
+            if "${PYTHON_PATH}" cocoindex/migrate.py --database-url "${PG_DATABASE_URL}" 2>&1; then
+                ok "Migrations applied"
+            else
+                warn "Migrations failed — run 'ry cocoindex init' manually."
+                PGVECTOR_STATUS="migration-failed"
+            fi
+        else
+            warn "Python not found — skipping migrations."
+            warn "Run 'ry cocoindex init' manually to complete setup."
+            PGVECTOR_STATUS="no-python"
+        fi
+    fi
+
+    # Create/update cocoindex.yaml if migrations succeeded.
+    if [ "${PGVECTOR_STATUS}" = "skipped" ]; then
+        mkdir -p cocoindex
+        if [ ! -f cocoindex/cocoindex.yaml ]; then
+            cat > cocoindex/cocoindex.yaml <<COCOEOF
+# CocoIndex configuration — per-track index settings
+#
+# database_url is set by quickstart.sh / "ry cocoindex init".
+database_url: "${PG_DATABASE_URL}"
+
+main_table_template: "main_{track}_embeddings"
+overlay_table_prefix: "ovl_"
+
+# Default exclusion patterns applied to all tracks unless overridden per-track.
+excluded_patterns:
+  - ".*"
+  - vendor
+  - node_modules
+  - dist
+  - __pycache__
+  - .git
+COCOEOF
+            ok "Created cocoindex/cocoindex.yaml"
+        else
+            ok "cocoindex/cocoindex.yaml already exists"
+        fi
+        PGVECTOR_STATUS="ready"
+    fi
+else
+    warn "Docker not found — skipping pgvector setup for CocoIndex."
+    warn "CocoIndex provides semantic code search for engines."
+    warn "To set up later: install Docker and run 'ry cocoindex init'"
+fi
+
 # ─── Done ─────────────────────────────────────────────────────────────────────
 
 SCRIPT_SUCCESS=true
@@ -272,6 +395,14 @@ echo "  ry stop -c railyard.yaml"
 echo ""
 info "Dolt log: ~/.railyard/dolt.log"
 info "Stop Dolt: pkill -f 'dolt sql-server'"
+if [ "${PGVECTOR_STATUS}" = "ready" ]; then
+    echo ""
+    info "pgvector: running on port ${PG_PORT} (container: railyard-pgvector)"
+    info "Stop pgvector: docker compose -f docker/docker-compose.pgvector.yaml down"
+elif [ "${PGVECTOR_STATUS}" != "skipped" ]; then
+    echo ""
+    warn "pgvector: ${PGVECTOR_STATUS} — run 'ry cocoindex init' to set up"
+fi
 echo ""
 warn "NOTE: Dolt does not survive WSL/system reboots."
 echo "  After a reboot, restart it with:"
