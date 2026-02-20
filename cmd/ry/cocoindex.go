@@ -26,6 +26,47 @@ var embeddedDockerCompose string
 //go:embed cocoindex_init_pgvector.sql
 var embeddedInitPGVector string
 
+//go:embed cocoindex_pkg_init.py
+var embeddedPkgInit string
+
+//go:embed cocoindex_migrate.py
+var embeddedMigrate string
+
+//go:embed cocoindex_config.py
+var embeddedConfig string
+
+//go:embed cocoindex_main.py
+var embeddedMain string
+
+//go:embed cocoindex_build_all.py
+var embeddedBuildAll string
+
+//go:embed cocoindex_overlay.py
+var embeddedOverlay string
+
+//go:embed cocoindex_mcp_server.py
+var embeddedMCPServer string
+
+//go:embed cocoindex_migration_001.sql
+var embeddedMigration001 string
+
+// embeddedScript maps a relative file path (under the scripts directory) to
+// its embedded content.  Used by ensureCocoIndexScripts to materialise the
+// Python package on first run.
+var embeddedScripts = []struct {
+	path    string
+	content *string
+}{
+	{"__init__.py", &embeddedPkgInit},
+	{"migrate.py", &embeddedMigrate},
+	{"config.py", &embeddedConfig},
+	{"main.py", &embeddedMain},
+	{"build_all.py", &embeddedBuildAll},
+	{"overlay.py", &embeddedOverlay},
+	{"mcp_server.py", &embeddedMCPServer},
+	{filepath.Join("migrations", "001_create_overlay_meta.sql"), &embeddedMigration001},
+}
+
 const (
 	defaultPGPort     = 5481
 	fallbackPGPort    = 5482
@@ -89,6 +130,11 @@ func runCocoIndexInit(cmd *cobra.Command, configPath string, port int, skipMigra
 		return fmt.Errorf("docker compose is required but not found.\n  Install: https://docs.docker.com/compose/install/")
 	}
 	fmt.Fprintln(out, "Docker and docker compose found")
+
+	// Ensure embedded Python scripts and migration SQL exist on disk.
+	if err := ensureCocoIndexScripts("cocoindex"); err != nil {
+		return fmt.Errorf("ensure cocoindex scripts: %w", err)
+	}
 
 	// Step 2: Set up Python venv with dependencies.
 	if !skipVenv {
@@ -196,6 +242,24 @@ func ensureDockerFiles(dockerDir string) error {
 		}
 	}
 
+	return nil
+}
+
+// ensureCocoIndexScripts writes the embedded Python scripts and migration SQL
+// into scriptsDir (typically "cocoindex") if they don't already exist.
+func ensureCocoIndexScripts(scriptsDir string) error {
+	for _, s := range embeddedScripts {
+		dest := filepath.Join(scriptsDir, s.path)
+		if _, err := os.Stat(dest); err == nil {
+			continue // already exists
+		}
+		if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
+			return fmt.Errorf("create dir for %s: %w", s.path, err)
+		}
+		if err := os.WriteFile(dest, []byte(*s.content), 0644); err != nil {
+			return fmt.Errorf("write %s: %w", s.path, err)
+		}
+	}
 	return nil
 }
 

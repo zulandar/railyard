@@ -394,6 +394,69 @@ func TestEnsureDockerFiles_SkipsExisting(t *testing.T) {
 	}
 }
 
+func TestEnsureCocoIndexScripts_CreatesFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+	scriptsDir := filepath.Join(tmpDir, "cocoindex")
+
+	err := ensureCocoIndexScripts(scriptsDir)
+	if err != nil {
+		t.Fatalf("ensureCocoIndexScripts() error: %v", err)
+	}
+
+	// Verify all expected files exist.
+	expectedFiles := []struct {
+		path     string
+		contains string
+	}{
+		{"__init__.py", ""},
+		{"migrate.py", "run_migrations"},
+		{"config.py", "CocoIndexConfig"},
+		{"main.py", "code_to_embedding"},
+		{"build_all.py", "build_track"},
+		{"overlay.py", "overlay_table_name"},
+		{"mcp_server.py", "search_code"},
+		{filepath.Join("migrations", "001_create_overlay_meta.sql"), "overlay_meta"},
+	}
+
+	for _, ef := range expectedFiles {
+		fullPath := filepath.Join(scriptsDir, ef.path)
+		data, err := os.ReadFile(fullPath)
+		if err != nil {
+			t.Errorf("expected file %s to exist: %v", ef.path, err)
+			continue
+		}
+		if ef.contains != "" && !strings.Contains(string(data), ef.contains) {
+			t.Errorf("%s missing expected content %q", ef.path, ef.contains)
+		}
+	}
+}
+
+func TestEnsureCocoIndexScripts_SkipsExisting(t *testing.T) {
+	tmpDir := t.TempDir()
+	scriptsDir := filepath.Join(tmpDir, "cocoindex")
+	os.MkdirAll(scriptsDir, 0755)
+
+	// Write a custom migrate.py that should not be overwritten.
+	customContent := "# custom migrate\n"
+	os.WriteFile(filepath.Join(scriptsDir, "migrate.py"), []byte(customContent), 0644)
+
+	err := ensureCocoIndexScripts(scriptsDir)
+	if err != nil {
+		t.Fatalf("ensureCocoIndexScripts() error: %v", err)
+	}
+
+	// Verify custom file was preserved.
+	data, _ := os.ReadFile(filepath.Join(scriptsDir, "migrate.py"))
+	if string(data) != customContent {
+		t.Error("migrate.py should not be overwritten")
+	}
+
+	// But other files should have been created.
+	if _, err := os.Stat(filepath.Join(scriptsDir, "config.py")); err != nil {
+		t.Error("config.py should have been created")
+	}
+}
+
 func TestUpdateRailyardYAML_FileNotFound(t *testing.T) {
 	err := updateRailyardYAML(filepath.Join(t.TempDir(), "nonexistent.yaml"), "postgresql://x")
 	if err == nil {
