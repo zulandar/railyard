@@ -143,6 +143,28 @@ func handleUnblockCar(db *gorm.DB, msg models.Message, out io.Writer) {
 	writeProgressNote(db, msg.CarID, "dispatch", fmt.Sprintf("Manually unblocked: %s", msg.Body))
 }
 
+// handleCloseEpic attempts to auto-close an epic whose children are all complete.
+func handleCloseEpic(db *gorm.DB, msg models.Message, out io.Writer) {
+	if msg.CarID == "" {
+		fmt.Fprintf(out, "Action close-epic: no car-id provided, skipping\n")
+		return
+	}
+
+	var car models.Car
+	if err := db.Where("id = ?", msg.CarID).First(&car).Error; err != nil {
+		fmt.Fprintf(out, "Action close-epic: car %s not found\n", msg.CarID)
+		return
+	}
+	if car.Type != "epic" {
+		fmt.Fprintf(out, "Action close-epic: car %s is %q (not an epic), skipping\n", msg.CarID, car.Type)
+		return
+	}
+
+	fmt.Fprintf(out, "Action close-epic: attempting auto-close for epic %s — %s\n", msg.CarID, msg.Body)
+	TryCloseEpic(db, msg.CarID)
+	writeProgressNote(db, msg.CarID, "dispatch", fmt.Sprintf("Close epic requested: %s", msg.Body))
+}
+
 // writeProgressNote creates a CarProgress record documenting an action.
 func writeProgressNote(db *gorm.DB, carID, engineID, note string) {
 	db.Create(&models.CarProgress{

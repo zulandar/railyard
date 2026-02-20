@@ -146,6 +146,11 @@ ry message send --from dispatch --to yardmaster --subject "nudge-engine" --car-i
 ry message send --from dispatch --to yardmaster --subject "unblock-car" --car-id <car-id> --body "Blocking dependency was resolved out-of-band"
 ` + "```" + `
 
+**Close an epic** (all children are done/merged, trigger auto-close):
+` + "```" + `
+ry message send --from dispatch --to yardmaster --subject "close-epic" --car-id <epic-id> --body "All children merged, close the epic"
+` + "```" + `
+
 **Important**: Use these exact subjects. The Yardmaster routes messages by subject — free-form subjects will be logged but not acted on.
 `
 

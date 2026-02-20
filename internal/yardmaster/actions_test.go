@@ -161,6 +161,55 @@ func TestHandleUnblockCar_OutputPrefix(t *testing.T) {
 	}
 }
 
+// --- handleCloseEpic ---
+
+func TestHandleCloseEpic_NoCarID(t *testing.T) {
+	var buf bytes.Buffer
+	msg := models.Message{Subject: "close-epic", Body: "close it"}
+	handleCloseEpic(nil, msg, &buf)
+
+	if !strings.Contains(buf.String(), "no car-id provided") {
+		t.Errorf("output = %q, want to contain %q", buf.String(), "no car-id provided")
+	}
+}
+
+func TestHandleCloseEpic_ClosesEpic(t *testing.T) {
+	db := testDB(t)
+
+	epicID := "epic-close-act1"
+	db.Create(&models.Car{ID: epicID, Type: "epic", Status: "open", Track: "backend"})
+	db.Create(&models.Car{ID: "child-ca1", Type: "task", Status: "merged", Track: "backend", ParentID: &epicID})
+	db.Create(&models.Car{ID: "child-ca2", Type: "task", Status: "merged", Track: "backend", ParentID: &epicID})
+
+	var buf bytes.Buffer
+	msg := models.Message{Subject: "close-epic", CarID: epicID, Body: "all children merged"}
+	handleCloseEpic(db, msg, &buf)
+
+	if !strings.Contains(buf.String(), "auto-close") {
+		t.Errorf("output = %q, want to mention auto-close", buf.String())
+	}
+
+	var epic models.Car
+	db.First(&epic, "id = ?", epicID)
+	if epic.Status != "done" {
+		t.Errorf("epic status = %q, want %q", epic.Status, "done")
+	}
+}
+
+func TestHandleCloseEpic_SkipsNonEpic(t *testing.T) {
+	db := testDB(t)
+
+	db.Create(&models.Car{ID: "task-ce1", Type: "task", Status: "open", Track: "backend"})
+
+	var buf bytes.Buffer
+	msg := models.Message{Subject: "close-epic", CarID: "task-ce1", Body: "try closing"}
+	handleCloseEpic(db, msg, &buf)
+
+	if !strings.Contains(buf.String(), "not an epic") {
+		t.Errorf("output = %q, want to mention not an epic", buf.String())
+	}
+}
+
 // --- All handlers skip on empty CarID ---
 
 func TestAllHandlers_SkipOnEmptyCarID(t *testing.T) {
@@ -175,6 +224,7 @@ func TestAllHandlers_SkipOnEmptyCarID(t *testing.T) {
 		{"requeue-car", func(m models.Message, b *bytes.Buffer) { handleRequeueCar(nil, m, b) }},
 		{"nudge-engine", func(m models.Message, b *bytes.Buffer) { handleNudgeEngine(nil, m, b) }},
 		{"unblock-car", func(m models.Message, b *bytes.Buffer) { handleUnblockCar(nil, m, b) }},
+		{"close-epic", func(m models.Message, b *bytes.Buffer) { handleCloseEpic(nil, m, b) }},
 	}
 
 	for _, h := range handlers {

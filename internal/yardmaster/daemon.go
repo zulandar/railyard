@@ -221,6 +221,10 @@ func processInbox(ctx context.Context, db *gorm.DB, cfg *config.Config, configPa
 			handleUnblockCar(db, msg, out)
 			ackMsg(db, msg)
 
+		case subject == "close-epic":
+			handleCloseEpic(db, msg, out)
+			ackMsg(db, msg)
+
 		case subject == "reassignment" || subject == "deps-unblocked" || subject == "epic-closed":
 			ackMsg(db, msg)
 
