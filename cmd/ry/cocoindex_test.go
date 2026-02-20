@@ -159,6 +159,114 @@ func TestNewCocoIndexCmd_Structure(t *testing.T) {
 	if initCmd.Use != "init" {
 		t.Errorf("init subcommand Use = %q, want %q", initCmd.Use, "init")
 	}
+
+	// Should have index subcommand.
+	indexCmd, _, err := cmd.Find([]string{"index"})
+	if err != nil {
+		t.Fatalf("find index subcommand: %v", err)
+	}
+	if indexCmd.Use != "index" {
+		t.Errorf("index subcommand Use = %q, want %q", indexCmd.Use, "index")
+	}
+}
+
+func TestNewCocoIndexIndexCmd_Flags(t *testing.T) {
+	cmd := newCocoIndexIndexCmd()
+
+	if f := cmd.Flags().Lookup("config"); f == nil {
+		t.Error("index command missing --config flag")
+	}
+	if f := cmd.Flags().Lookup("tracks"); f == nil {
+		t.Error("index command missing --tracks flag")
+	}
+	if f := cmd.Flags().Lookup("repo-path"); f == nil {
+		t.Error("index command missing --repo-path flag")
+	}
+}
+
+func TestLoadRailyardConfig_ParsesTracks(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "railyard.yaml")
+
+	content := `owner: alice
+repo: git@github.com:org/app.git
+cocoindex:
+  database_url: "postgresql://localhost:5481/cocoindex"
+  venv_path: "cocoindex/.venv"
+  scripts_path: "cocoindex"
+tracks:
+  - name: backend
+    language: go
+  - name: frontend
+    language: typescript
+`
+	os.WriteFile(configPath, []byte(content), 0644)
+
+	cfg, err := loadRailyardConfig(configPath)
+	if err != nil {
+		t.Fatalf("loadRailyardConfig() error: %v", err)
+	}
+
+	if cfg.cocoindexDatabaseURL != "postgresql://localhost:5481/cocoindex" {
+		t.Errorf("database_url = %q", cfg.cocoindexDatabaseURL)
+	}
+	if cfg.cocoindexVenvPath != "cocoindex/.venv" {
+		t.Errorf("venv_path = %q", cfg.cocoindexVenvPath)
+	}
+	if len(cfg.tracks) != 2 {
+		t.Fatalf("tracks count = %d, want 2", len(cfg.tracks))
+	}
+	if cfg.tracks[0].Name != "backend" || cfg.tracks[1].Name != "frontend" {
+		t.Errorf("tracks = %+v", cfg.tracks)
+	}
+}
+
+func TestLoadRailyardConfig_MissingFile(t *testing.T) {
+	_, err := loadRailyardConfig(filepath.Join(t.TempDir(), "nonexistent.yaml"))
+	if err == nil {
+		t.Error("expected error for missing file")
+	}
+}
+
+func TestLoadRailyardConfig_NoDatabaseURL(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "railyard.yaml")
+
+	content := `owner: alice
+tracks:
+  - name: backend
+`
+	os.WriteFile(configPath, []byte(content), 0644)
+
+	cfg, err := loadRailyardConfig(configPath)
+	if err != nil {
+		t.Fatalf("loadRailyardConfig() error: %v", err)
+	}
+	if cfg.cocoindexDatabaseURL != "" {
+		t.Errorf("expected empty database_url, got %q", cfg.cocoindexDatabaseURL)
+	}
+}
+
+func TestRunCocoIndexIndex_NoDatabaseURL(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "railyard.yaml")
+
+	content := `owner: alice
+tracks:
+  - name: backend
+`
+	os.WriteFile(configPath, []byte(content), 0644)
+
+	cmd := newCocoIndexIndexCmd()
+	cmd.SetArgs([]string{"--config", configPath})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when database_url not configured")
+	}
+	if !strings.Contains(err.Error(), "database_url not configured") {
+		t.Errorf("error = %q, want mention of database_url", err)
+	}
 }
 
 func TestNewCocoIndexInitCmd_HasSkipVenvFlag(t *testing.T) {

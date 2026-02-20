@@ -84,6 +84,7 @@ func newCocoIndexCmd() *cobra.Command {
 	}
 
 	cmd.AddCommand(newCocoIndexInitCmd())
+	cmd.AddCommand(newCocoIndexIndexCmd())
 	return cmd
 }
 
@@ -115,6 +116,141 @@ func newCocoIndexInitCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&skipMigrations, "skip-migrations", false, "skip running schema migrations")
 	cmd.Flags().BoolVar(&skipVenv, "skip-venv", false, "skip Python venv creation")
 	return cmd
+}
+
+func newCocoIndexIndexCmd() *cobra.Command {
+	var (
+		configPath string
+		tracks     []string
+		repoPath   string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "index",
+		Short: "Build main semantic search indexes for all tracks",
+		Long: `Builds per-track CocoIndex pgvector indexes by reading track definitions
+from railyard.yaml and running the embedded build_all.py script.
+
+Examples:
+  ry cocoindex index                           # Index all tracks
+  ry cocoindex index --tracks backend          # Index only backend
+  ry cocoindex index --tracks backend frontend # Index specific tracks
+  ry cocoindex index --repo-path /path/to/repo # Custom repo path`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runCocoIndexIndex(cmd, configPath, tracks, repoPath)
+		},
+	}
+
+	cmd.Flags().StringVarP(&configPath, "config", "c", "railyard.yaml", "path to Railyard config file")
+	cmd.Flags().StringSliceVar(&tracks, "tracks", nil, "specific tracks to index (default: all)")
+	cmd.Flags().StringVar(&repoPath, "repo-path", ".", "path to the repository root")
+	return cmd
+}
+
+func runCocoIndexIndex(cmd *cobra.Command, configPath string, tracks []string, repoPath string) error {
+	out := cmd.OutOrStdout()
+
+	// Load config to get database URL and track definitions.
+	cfg, err := loadRailyardConfig(configPath)
+	if err != nil {
+		return err
+	}
+
+	databaseURL := cfg.cocoindexDatabaseURL
+	if databaseURL == "" {
+		return fmt.Errorf("cocoindex.database_url not configured in %s\n  Run 'ry cocoindex init' first", configPath)
+	}
+
+	if len(cfg.tracks) == 0 {
+		return fmt.Errorf("no tracks defined in %s", configPath)
+	}
+
+	// Ensure embedded Python scripts exist on disk.
+	scriptsDir := cfg.cocoindexScriptsPath
+	if scriptsDir == "" {
+		scriptsDir = "cocoindex"
+	}
+	if err := ensureCocoIndexScripts(scriptsDir); err != nil {
+		return fmt.Errorf("ensure cocoindex scripts: %w", err)
+	}
+
+	// Find Python in the venv.
+	venvPath := cfg.cocoindexVenvPath
+	if venvPath == "" {
+		venvPath = filepath.Join("cocoindex", ".venv")
+	}
+	pythonPath := filepath.Join(venvPath, "bin", "python")
+	if _, err := os.Stat(pythonPath); err != nil {
+		return fmt.Errorf("python venv not found at %s\n  Run 'ry cocoindex init' first", pythonPath)
+	}
+
+	// Build the command: python build_all.py --railyard-config <path> --repo-path <path>
+	buildAllPath := filepath.Join(scriptsDir, "build_all.py")
+	argv := []string{buildAllPath, "--railyard-config", configPath, "--repo-path", repoPath}
+	if len(tracks) > 0 {
+		argv = append(argv, "--tracks")
+		argv = append(argv, tracks...)
+	}
+
+	fmt.Fprintf(out, "Indexing with: %s %s\n", pythonPath, strings.Join(argv, " "))
+
+	indexCmd := exec.Command(pythonPath, argv...)
+	indexCmd.Env = append(os.Environ(), "COCOINDEX_DATABASE_URL="+databaseURL)
+	indexCmd.Stdout = out
+	indexCmd.Stderr = cmd.ErrOrStderr()
+
+	if err := indexCmd.Run(); err != nil {
+		return fmt.Errorf("indexing failed: %w", err)
+	}
+
+	return nil
+}
+
+// loadRailyardConfig is a lightweight YAML loader that extracts the fields
+// needed by the index command without importing internal/config (which would
+// pull in GORM and other dependencies into the CLI binary).
+type ryConfigForIndex struct {
+	cocoindexDatabaseURL  string
+	cocoindexVenvPath     string
+	cocoindexScriptsPath  string
+	tracks                []ryTrackForIndex
+}
+
+type ryTrackForIndex struct {
+	Name string
+}
+
+func loadRailyardConfig(path string) (*ryConfigForIndex, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+
+	var raw struct {
+		CocoIndex struct {
+			DatabaseURL string `yaml:"database_url"`
+			VenvPath    string `yaml:"venv_path"`
+			ScriptsPath string `yaml:"scripts_path"`
+		} `yaml:"cocoindex"`
+		Tracks []struct {
+			Name string `yaml:"name"`
+		} `yaml:"tracks"`
+	}
+
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+
+	result := &ryConfigForIndex{
+		cocoindexDatabaseURL: raw.CocoIndex.DatabaseURL,
+		cocoindexVenvPath:    raw.CocoIndex.VenvPath,
+		cocoindexScriptsPath: raw.CocoIndex.ScriptsPath,
+	}
+	for _, t := range raw.Tracks {
+		result.tracks = append(result.tracks, ryTrackForIndex{Name: t.Name})
+	}
+
+	return result, nil
 }
 
 func runCocoIndexInit(cmd *cobra.Command, configPath string, port int, skipMigrations, skipVenv bool) error {
