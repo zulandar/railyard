@@ -601,7 +601,7 @@ func TestDefaultConstants(t *testing.T) {
 func newMockSession() *Session {
 	return &Session{
 		EngineID: "eng-test1",
-		CarID:   "car-test1",
+		CarID:    "car-test1",
 		stdout: &logWriter{
 			direction: "out",
 			writeFn:   func(models.AgentLog) error { return nil },

@@ -230,11 +230,11 @@ func Stop(opts StopOpts) error {
 
 // StatusInfo holds dashboard information.
 type StatusInfo struct {
-	SessionRunning   bool
-	DispatchRunning  bool
-	Engines          []EngineInfo
-	TrackSummary     []TrackSummary
-	MessageDepth     int64
+	SessionRunning    bool
+	DispatchRunning   bool
+	Engines           []EngineInfo
+	TrackSummary      []TrackSummary
+	MessageDepth      int64
 	TotalInputTokens  int64
 	TotalOutputTokens int64
 	TotalTokens       int64
@@ -245,7 +245,7 @@ type EngineInfo struct {
 	ID           string
 	Track        string
 	Status       string
-	CurrentCar  string
+	CurrentCar   string
 	LastActivity time.Time
 	Uptime       time.Duration
 }
@@ -284,7 +284,7 @@ func Status(db *gorm.DB, tmux Tmux) (*StatusInfo, error) {
 			ID:           e.ID,
 			Track:        e.Track,
 			Status:       e.Status,
-			CurrentCar:  e.CurrentCar,
+			CurrentCar:   e.CurrentCar,
 			LastActivity: e.LastActivity,
 			Uptime:       now.Sub(e.StartedAt),
 		})

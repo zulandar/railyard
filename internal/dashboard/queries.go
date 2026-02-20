@@ -43,15 +43,15 @@ func EngineSummary(db *gorm.DB) ([]EngineRow, error) {
 
 // TrackStatusCount holds car counts by status for a single track.
 type TrackStatusCount struct {
-	Track       string
-	Draft       int
-	Open        int
-	Claimed     int
-	InProgress  int
-	Done        int
-	Merged      int
-	Blocked     int
-	Total       int
+	Track      string
+	Draft      int
+	Open       int
+	Claimed    int
+	InProgress int
+	Done       int
+	Merged     int
+	Blocked    int
+	Total      int
 }
 
 // TrackSummary returns per-track car counts grouped by status.
@@ -236,7 +236,7 @@ type CarDetail struct {
 	ClaimedAt   *time.Time
 	CompletedAt *time.Time
 
-	Children []ChildRow
+	Children  []ChildRow
 	BlockedBy []DepRow
 	Blocks    []DepRow
 	Progress  []ProgressRow

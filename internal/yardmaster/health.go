@@ -64,14 +64,14 @@ func ReassignCar(db *gorm.DB, carID, fromEngineID, reason string) error {
 
 	// Mark the engine as dead and clear its current car.
 	db.Model(&models.Engine{}).Where("id = ?", fromEngineID).Updates(map[string]interface{}{
-		"status":       "dead",
+		"status":      "dead",
 		"current_car": "",
 	})
 
 	// Write progress note.
 	note := fmt.Sprintf("Reassigned from engine %s: %s", fromEngineID, reason)
 	db.Create(&models.CarProgress{
-		CarID:       carID,
+		CarID:        carID,
 		EngineID:     fromEngineID,
 		Note:         note,
 		FilesChanged: "[]",

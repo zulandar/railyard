@@ -185,7 +185,7 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 			fmt.Fprintf(out, "Abort instruction received for car %s\n", eng.CurrentCar)
 			gormDB.Model(&models.Engine{}).Where("id = ?", eng.ID).Updates(map[string]interface{}{
 				"current_car": "",
-				"status":       engine.StatusIdle,
+				"status":      engine.StatusIdle,
 			})
 			eng.CurrentCar = ""
 			cycle = 0
@@ -214,7 +214,7 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 		commits, _ := engine.RecentCommits(workDir, claimed.Branch, 10)
 
 		contextPayload, err := engine.RenderContext(engine.ContextInput{
-			Car:          claimed,
+			Car:           claimed,
 			Track:         &trackModel,
 			Config:        cfg,
 			Progress:      progress,
@@ -250,7 +250,7 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 		// Spawn Claude Code.
 		sess, err := engine.SpawnAgent(ctx, gormDB, engine.SpawnOpts{
 			EngineID:       eng.ID,
-			CarID:         claimed.ID,
+			CarID:          claimed.ID,
 			ContextPayload: contextPayload,
 			WorkDir:        workDir,
 		})
@@ -326,10 +326,10 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 type outcomeKind int
 
 const (
-	outcomeCompleted  outcomeKind = iota // car marked done
-	outcomeClear                         // agent exited, car not done
-	outcomeStall                         // stall detected
-	outcomeCancelled                     // context cancelled (shutdown)
+	outcomeCompleted outcomeKind = iota // car marked done
+	outcomeClear                        // agent exited, car not done
+	outcomeStall                        // stall detected
+	outcomeCancelled                    // context cancelled (shutdown)
 )
 
 type sessionOutcome struct {

@@ -38,7 +38,7 @@ type StallReason struct {
 type StallDetector struct {
 	cfg      StallConfig
 	engineID string
-	carID   string
+	carID    string
 
 	mu           sync.Mutex
 	lastStdoutAt time.Time
@@ -67,7 +67,7 @@ func NewStallDetector(sess *Session, cfg StallConfig) *StallDetector {
 	sd := &StallDetector{
 		cfg:          cfg,
 		engineID:     sess.EngineID,
-		carID:       sess.CarID,
+		carID:        sess.CarID,
 		lastStdoutAt: time.Now(),
 		stallCh:      make(chan StallReason, 1),
 	}
@@ -142,7 +142,7 @@ func HandleStall(db *gorm.DB, engineID, carID string, reason StallReason) error 
 
 	// Send message to yardmaster.
 	_, err := messaging.Send(db, engineID, "yardmaster", "engine-stalled", body, messaging.SendOpts{
-		CarID:   carID,
+		CarID:    carID,
 		Priority: "urgent",
 	})
 	if err != nil {

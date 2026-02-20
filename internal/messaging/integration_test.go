@@ -142,7 +142,7 @@ func TestIntegration_Send_WithOpts(t *testing.T) {
 
 	tid := uint(99)
 	msg, err := Send(gormDB, "eng-001", "eng-002", "help", "need review", SendOpts{
-		CarID:   "car-123",
+		CarID:    "car-123",
 		ThreadID: &tid,
 		Priority: "urgent",
 	})

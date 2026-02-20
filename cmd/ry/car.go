@@ -34,7 +34,7 @@ func newCarCreateCmd() *cobra.Command {
 		configPath  string
 		title       string
 		track       string
-		carType    string
+		carType     string
 		priority    int
 		description string
 		acceptance  string
@@ -102,7 +102,7 @@ func newCarListCmd() *cobra.Command {
 		configPath string
 		track      string
 		status     string
-		carType   string
+		carType    string
 		assignee   string
 		showTokens bool
 	)

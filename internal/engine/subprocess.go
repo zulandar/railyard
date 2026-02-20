@@ -18,7 +18,7 @@ import (
 // SpawnOpts holds parameters for spawning a claude subprocess.
 type SpawnOpts struct {
 	EngineID       string
-	CarID         string
+	CarID          string
 	ContextPayload string
 	WorkDir        string // working directory for claude
 	ClaudeBinary   string // path to claude binary, default "claude"
@@ -28,7 +28,7 @@ type SpawnOpts struct {
 type Session struct {
 	ID       string
 	EngineID string
-	CarID   string
+	CarID    string
 	PID      int
 
 	cmd    *exec.Cmd
@@ -43,7 +43,7 @@ type Session struct {
 type logWriter struct {
 	engineID  string
 	sessionID string
-	carID    string
+	carID     string
 	direction string // "out" or "err"
 
 	mu      sync.Mutex
@@ -121,7 +121,7 @@ func SpawnAgent(ctx context.Context, db *gorm.DB, opts SpawnOpts) (*Session, err
 	return &Session{
 		ID:       sessionID,
 		EngineID: opts.EngineID,
-		CarID:   opts.CarID,
+		CarID:    opts.CarID,
 		PID:      cmd.Process.Pid,
 		cmd:      cmd,
 		cancel:   cancel,
@@ -175,7 +175,7 @@ func newLogWriter(db *gorm.DB, engineID, sessionID, carID, direction string) *lo
 	return &logWriter{
 		engineID:  engineID,
 		sessionID: sessionID,
-		carID:    carID,
+		carID:     carID,
 		direction: direction,
 		writeFn: func(log models.AgentLog) error {
 			return db.Create(&log).Error
@@ -209,7 +209,7 @@ func (w *logWriter) Flush() error {
 	log := models.AgentLog{
 		EngineID:  w.engineID,
 		SessionID: w.sessionID,
-		CarID:    w.carID,
+		CarID:     w.carID,
 		Direction: w.direction,
 		Content:   content,
 		CreatedAt: time.Now(),

@@ -12,7 +12,7 @@ import (
 
 // ContextInput holds all data needed to render the context injection template.
 type ContextInput struct {
-	Car          *models.Car
+	Car           *models.Car
 	Track         *models.Track
 	Config        *config.Config
 	Progress      []models.CarProgress

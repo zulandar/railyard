@@ -19,7 +19,7 @@ func newLogsCmd() *cobra.Command {
 	var (
 		configPath string
 		engineID   string
-		carID     string
+		carID      string
 		sessionID  string
 		follow     bool
 		lines      int
@@ -33,7 +33,7 @@ func newLogsCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runLogs(cmd, configPath, logsOpts{
 				engineID:  engineID,
-				carID:    carID,
+				carID:     carID,
 				sessionID: sessionID,
 				follow:    follow,
 				lines:     lines,
@@ -54,7 +54,7 @@ func newLogsCmd() *cobra.Command {
 
 type logsOpts struct {
 	engineID  string
-	carID    string
+	carID     string
 	sessionID string
 	follow    bool
 	lines     int

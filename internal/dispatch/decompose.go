@@ -19,14 +19,14 @@ type CarPlan struct {
 
 // DepPlan represents a planned dependency.
 type DepPlan struct {
-	CarID    string
+	CarID     string
 	BlockedBy string
 }
 
 // DecompositionPlan represents the full output of a dispatch decomposition.
 type DecompositionPlan struct {
 	Cars []CarPlan
-	Deps  []DepPlan
+	Deps []DepPlan
 }
 
 // ValidatePlan checks that a decomposition plan is structurally valid.

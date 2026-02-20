@@ -11,24 +11,24 @@ import (
 
 // Config is the top-level Railyard configuration, loaded from config.yaml.
 type Config struct {
-	Owner              string              `yaml:"owner"`
-	Repo               string              `yaml:"repo"`
-	BranchPrefix       string              `yaml:"branch_prefix"`
-	DefaultAcceptance  string              `yaml:"default_acceptance"`
-	RequirePR          bool                `yaml:"require_pr"`
-	Dolt               DoltConfig          `yaml:"dolt"`
-	Stall              StallConfig         `yaml:"stall"`
-	Tracks             []TrackConfig       `yaml:"tracks"`
-	Notifications      NotificationsConfig `yaml:"notifications"`
-	CocoIndex          CocoIndexConfig     `yaml:"cocoindex"`
+	Owner             string              `yaml:"owner"`
+	Repo              string              `yaml:"repo"`
+	BranchPrefix      string              `yaml:"branch_prefix"`
+	DefaultAcceptance string              `yaml:"default_acceptance"`
+	RequirePR         bool                `yaml:"require_pr"`
+	Dolt              DoltConfig          `yaml:"dolt"`
+	Stall             StallConfig         `yaml:"stall"`
+	Tracks            []TrackConfig       `yaml:"tracks"`
+	Notifications     NotificationsConfig `yaml:"notifications"`
+	CocoIndex         CocoIndexConfig     `yaml:"cocoindex"`
 }
 
 // CocoIndexConfig holds settings for the CocoIndex semantic search integration.
 type CocoIndexConfig struct {
-	DatabaseURL string              `yaml:"database_url"`
-	VenvPath    string              `yaml:"venv_path"`
-	ScriptsPath string              `yaml:"scripts_path"`
-	Overlay     OverlayConfig       `yaml:"overlay"`
+	DatabaseURL string        `yaml:"database_url"`
+	VenvPath    string        `yaml:"venv_path"`
+	ScriptsPath string        `yaml:"scripts_path"`
+	Overlay     OverlayConfig `yaml:"overlay"`
 }
 
 // OverlayConfig holds settings for per-engine overlay indexing.

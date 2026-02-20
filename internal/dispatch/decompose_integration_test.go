@@ -206,7 +206,7 @@ func TestIntegration_LargePlan(t *testing.T) {
 		if ti > 0 {
 			prevTrack := tracks[ti-1]
 			deps = append(deps, DepPlan{
-				CarID:    fmt.Sprintf("%s-001", track),
+				CarID:     fmt.Sprintf("%s-001", track),
 				BlockedBy: fmt.Sprintf("%s-004", prevTrack),
 			})
 		}

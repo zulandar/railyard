@@ -191,7 +191,7 @@ func TestLogWriter_Flush(t *testing.T) {
 	w := &logWriter{
 		engineID:  "eng-abc",
 		sessionID: "sess-12345",
-		carID:    "car-xyz",
+		carID:     "car-xyz",
 		direction: "out",
 		writeFn: func(log models.AgentLog) error {
 			called = true
@@ -260,7 +260,7 @@ func TestLogWriter_Close(t *testing.T) {
 	w := &logWriter{
 		engineID:  "eng-abc",
 		sessionID: "sess-12345",
-		carID:    "car-xyz",
+		carID:     "car-xyz",
 		direction: "err",
 		writeFn: func(log models.AgentLog) error {
 			captured = log
@@ -288,7 +288,7 @@ func TestLogWriter_FlushPopulatesTokenUsage(t *testing.T) {
 	w := &logWriter{
 		engineID:  "eng-tok",
 		sessionID: "sess-tok",
-		carID:    "car-tok",
+		carID:     "car-tok",
 		direction: "out",
 		writeFn: func(log models.AgentLog) error {
 			captured = log
@@ -324,7 +324,7 @@ func TestLogWriter_FlushStderrNoTokens(t *testing.T) {
 	w := &logWriter{
 		engineID:  "eng-err",
 		sessionID: "sess-err",
-		carID:    "car-err",
+		carID:     "car-err",
 		direction: "err",
 		writeFn: func(log models.AgentLog) error {
 			captured = log
@@ -355,7 +355,7 @@ func TestLogWriter_FlushStderrNoTokens(t *testing.T) {
 
 func TestSpawnAgent_EmptyEngineID(t *testing.T) {
 	_, err := SpawnAgent(context.Background(), nil, SpawnOpts{
-		CarID:         "car-1",
+		CarID:          "car-1",
 		ContextPayload: "ctx",
 	})
 	if err == nil {
@@ -382,7 +382,7 @@ func TestSpawnAgent_EmptyCarID(t *testing.T) {
 func TestSpawnAgent_EmptyContext(t *testing.T) {
 	_, err := SpawnAgent(context.Background(), nil, SpawnOpts{
 		EngineID: "eng-abc",
-		CarID:   "car-1",
+		CarID:    "car-1",
 	})
 	if err == nil {
 		t.Fatal("expected error for empty contextPayload")
@@ -436,7 +436,7 @@ func spawnWithMockDB(t *testing.T, ctx context.Context, opts SpawnOpts) *Session
 	stdoutWriter := &logWriter{
 		engineID:  opts.EngineID,
 		sessionID: sessionID,
-		carID:    opts.CarID,
+		carID:     opts.CarID,
 		direction: "out",
 		writeFn: func(log models.AgentLog) error {
 			mu.Lock()
@@ -448,7 +448,7 @@ func spawnWithMockDB(t *testing.T, ctx context.Context, opts SpawnOpts) *Session
 	stderrWriter := &logWriter{
 		engineID:  opts.EngineID,
 		sessionID: sessionID,
-		carID:    opts.CarID,
+		carID:     opts.CarID,
 		direction: "err",
 		writeFn: func(log models.AgentLog) error {
 			mu.Lock()
@@ -483,7 +483,7 @@ func spawnWithMockDB(t *testing.T, ctx context.Context, opts SpawnOpts) *Session
 	return &Session{
 		ID:       sessionID,
 		EngineID: opts.EngineID,
-		CarID:   opts.CarID,
+		CarID:    opts.CarID,
 		PID:      cmd.Process.Pid,
 		cmd:      cmd,
 		cancel:   cancel,
@@ -500,7 +500,7 @@ func TestSpawnAgent_MockBinary(t *testing.T) {
 	sess := spawnWithMockDB(t, context.Background(), SpawnOpts{
 		ClaudeBinary:   binary,
 		EngineID:       "eng-mock1",
-		CarID:         "car-mock1",
+		CarID:          "car-mock1",
 		ContextPayload: "test context",
 		WorkDir:        dir,
 	})
@@ -531,7 +531,7 @@ echo "captured output line 2"`)
 	sess := spawnWithMockDB(t, context.Background(), SpawnOpts{
 		ClaudeBinary:   binary,
 		EngineID:       "eng-cap",
-		CarID:         "car-cap",
+		CarID:          "car-cap",
 		ContextPayload: "ctx",
 		WorkDir:        dir,
 	})
@@ -563,7 +563,7 @@ func TestSpawnAgent_ExitError(t *testing.T) {
 	sess := spawnWithMockDB(t, context.Background(), SpawnOpts{
 		ClaudeBinary:   binary,
 		EngineID:       "eng-exit",
-		CarID:         "car-exit",
+		CarID:          "car-exit",
 		ContextPayload: "ctx",
 		WorkDir:        dir,
 	})
@@ -584,7 +584,7 @@ func TestSpawnAgent_ContextCancel(t *testing.T) {
 	sess := spawnWithMockDB(t, ctx, SpawnOpts{
 		ClaudeBinary:   binary,
 		EngineID:       "eng-cancel",
-		CarID:         "car-cancel",
+		CarID:          "car-cancel",
 		ContextPayload: "ctx",
 		WorkDir:        dir,
 	})
@@ -613,7 +613,7 @@ func TestSpawnAgent_DoneChannel(t *testing.T) {
 	sess := spawnWithMockDB(t, context.Background(), SpawnOpts{
 		ClaudeBinary:   binary,
 		EngineID:       "eng-done",
-		CarID:         "car-done",
+		CarID:          "car-done",
 		ContextPayload: "ctx",
 		WorkDir:        dir,
 	})

@@ -44,7 +44,7 @@ func HandleCompletion(db *gorm.DB, car *models.Car, engine *models.Engine, opts 
 	}
 
 	if err := db.Create(&models.CarProgress{
-		CarID:       car.ID,
+		CarID:        car.ID,
 		EngineID:     engine.ID,
 		SessionID:    opts.SessionID,
 		Note:         note,
@@ -56,9 +56,9 @@ func HandleCompletion(db *gorm.DB, car *models.Car, engine *models.Engine, opts 
 
 	// Set engine back to idle, clear current car.
 	if err := db.Model(&models.Engine{}).Where("id = ?", engine.ID).Updates(map[string]interface{}{
-		"status":       StatusIdle,
+		"status":      StatusIdle,
 		"current_car": "",
-		"session_id":   "",
+		"session_id":  "",
 	}).Error; err != nil {
 		return fmt.Errorf("engine: reset engine to idle: %w", err)
 	}
@@ -105,7 +105,7 @@ func HandleClearCycle(db *gorm.DB, car *models.Car, engine *models.Engine, opts 
 
 	// Write progress note.
 	if err := db.Create(&models.CarProgress{
-		CarID:       car.ID,
+		CarID:        car.ID,
 		Cycle:        opts.Cycle,
 		EngineID:     engine.ID,
 		SessionID:    opts.SessionID,

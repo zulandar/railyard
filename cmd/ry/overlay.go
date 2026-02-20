@@ -395,4 +395,3 @@ func getActiveEngineIDs(cfg *config.Config) ([]string, error) {
 	}
 	return ids, nil
 }
-

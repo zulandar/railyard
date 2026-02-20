@@ -45,15 +45,18 @@ type mockTmux struct {
 	sentKeys      []string
 }
 
-func (m *mockTmux) SessionExists(name string) bool              { return m.sessionExists }
-func (m *mockTmux) CreateSession(name string) error             { return nil }
-func (m *mockTmux) NewPane(session string) (string, error)      { m.panesCreated++; return "%mock", nil }
-func (m *mockTmux) SendKeys(paneID, keys string) error          { m.sentKeys = append(m.sentKeys, keys); return nil }
-func (m *mockTmux) SendSignal(paneID, signal string) error      { return nil }
-func (m *mockTmux) KillPane(paneID string) error                { return nil }
-func (m *mockTmux) KillSession(name string) error               { return nil }
-func (m *mockTmux) ListPanes(session string) ([]string, error)  { return nil, nil }
-func (m *mockTmux) TileLayout(session string) error             { return nil }
+func (m *mockTmux) SessionExists(name string) bool         { return m.sessionExists }
+func (m *mockTmux) CreateSession(name string) error        { return nil }
+func (m *mockTmux) NewPane(session string) (string, error) { m.panesCreated++; return "%mock", nil }
+func (m *mockTmux) SendKeys(paneID, keys string) error {
+	m.sentKeys = append(m.sentKeys, keys)
+	return nil
+}
+func (m *mockTmux) SendSignal(paneID, signal string) error     { return nil }
+func (m *mockTmux) KillPane(paneID string) error               { return nil }
+func (m *mockTmux) KillSession(name string) error              { return nil }
+func (m *mockTmux) ListPanes(session string) ([]string, error) { return nil, nil }
+func (m *mockTmux) TileLayout(session string) error            { return nil }
 
 func twoTrackConfig() *config.Config {
 	return &config.Config{

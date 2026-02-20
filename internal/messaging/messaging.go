@@ -37,7 +37,7 @@ func Send(db *gorm.DB, from, to, subject, body string, opts SendOpts) (*models.M
 	msg := models.Message{
 		FromAgent: from,
 		ToAgent:   to,
-		CarID:    opts.CarID,
+		CarID:     opts.CarID,
 		ThreadID:  opts.ThreadID,
 		Subject:   subject,
 		Body:      body,

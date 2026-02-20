@@ -11,12 +11,12 @@ import (
 type InstructionType string
 
 const (
-	InstructionAbort      InstructionType = "abort"
-	InstructionPause      InstructionType = "pause"
-	InstructionResume     InstructionType = "resume"
+	InstructionAbort       InstructionType = "abort"
+	InstructionPause       InstructionType = "pause"
+	InstructionResume      InstructionType = "resume"
 	InstructionSwitchTrack InstructionType = "switch-track"
-	InstructionGuidance   InstructionType = "guidance"
-	InstructionUnknown    InstructionType = "unknown"
+	InstructionGuidance    InstructionType = "guidance"
+	InstructionUnknown     InstructionType = "unknown"
 )
 
 // Instruction represents a parsed yardmaster instruction from the inbox.
@@ -25,7 +25,7 @@ type Instruction struct {
 	MessageID uint
 	Subject   string
 	Body      string
-	CarID    string
+	CarID     string
 }
 
 // ClassifyMessage determines the instruction type from a message subject.
@@ -68,7 +68,7 @@ func ProcessInbox(db *gorm.DB, engineID string) ([]Instruction, error) {
 			MessageID: msgs[i].ID,
 			Subject:   msgs[i].Subject,
 			Body:      msgs[i].Body,
-			CarID:    msgs[i].CarID,
+			CarID:     msgs[i].CarID,
 		}
 		instructions = append(instructions, inst)
 

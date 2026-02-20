@@ -103,7 +103,7 @@ func TestGitPush_NoRemote(t *testing.T) {
 		}
 	}
 
-	run("git", "init")
+	run("git", "init", "-b", "main")
 	run("git", "config", "user.email", "test@test.com")
 	run("git", "config", "user.name", "test")
 	run("git", "commit", "--allow-empty", "-m", "init")
@@ -131,7 +131,7 @@ func TestGitPush_WithRemote(t *testing.T) {
 	}
 
 	// Create bare remote repo.
-	run(bareDir, "git", "init", "--bare")
+	run(bareDir, "git", "init", "--bare", "-b", "main")
 
 	// Clone it to get a local repo with origin set up.
 	parentDir := t.TempDir()
@@ -184,7 +184,7 @@ func TestDetachEngineWorktree_DetachesCheckedOutBranch(t *testing.T) {
 		}
 	}
 
-	run(repoDir, "git", "init")
+	run(repoDir, "git", "init", "-b", "main")
 	run(repoDir, "git", "config", "user.email", "test@test.com")
 	run(repoDir, "git", "config", "user.name", "test")
 	run(repoDir, "git", "commit", "--allow-empty", "-m", "init")
@@ -241,7 +241,7 @@ func TestDetachEngineWorktree_AlreadyDetached(t *testing.T) {
 		}
 	}
 
-	run(repoDir, "git", "init")
+	run(repoDir, "git", "init", "-b", "main")
 	run(repoDir, "git", "config", "user.email", "test@test.com")
 	run(repoDir, "git", "config", "user.name", "test")
 	run(repoDir, "git", "commit", "--allow-empty", "-m", "init")

@@ -14,7 +14,7 @@ func initTestRepo(t *testing.T) string {
 	dir := t.TempDir()
 
 	for _, args := range [][]string{
-		{"git", "init"},
+		{"git", "init", "-b", "main"},
 		{"git", "config", "user.name", "Test"},
 		{"git", "config", "user.email", "test@test.com"},
 	} {
@@ -232,7 +232,7 @@ func TestPushBranch_NoRemote(t *testing.T) {
 func TestPushBranch_WithRemote(t *testing.T) {
 	// Create a bare repo to act as remote.
 	bareDir := t.TempDir()
-	cmd := exec.Command("git", "init", "--bare")
+	cmd := exec.Command("git", "init", "--bare", "-b", "main")
 	cmd.Dir = bareDir
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init --bare: %s\n%s", err, out)

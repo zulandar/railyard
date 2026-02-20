@@ -28,7 +28,7 @@ func newMessageSendCmd() *cobra.Command {
 		to         string
 		subject    string
 		body       string
-		carID     string
+		carID      string
 		threadID   uint
 		priority   string
 	)
@@ -44,7 +44,7 @@ func newMessageSendCmd() *cobra.Command {
 			}
 
 			opts := messaging.SendOpts{
-				CarID:   carID,
+				CarID:    carID,
 				Priority: priority,
 			}
 			if cmd.Flags().Changed("thread-id") {

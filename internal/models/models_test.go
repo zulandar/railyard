@@ -269,7 +269,7 @@ func TestCar_Instantiation(t *testing.T) {
 
 func TestCarDep_Instantiation(t *testing.T) {
 	d := CarDep{
-		CarID:    "car-001",
+		CarID:     "car-001",
 		BlockedBy: "car-002",
 		DepType:   "blocks",
 	}
@@ -284,7 +284,7 @@ func TestCarDep_Instantiation(t *testing.T) {
 func TestCarProgress_Instantiation(t *testing.T) {
 	p := CarProgress{
 		ID:           1,
-		CarID:       "car-001",
+		CarID:        "car-001",
 		Cycle:        3,
 		SessionID:    "sess-1",
 		EngineID:     "eng-1",
@@ -323,7 +323,7 @@ func TestEngine_Instantiation(t *testing.T) {
 		Track:        "backend",
 		Role:         "engine",
 		Status:       "idle",
-		CurrentCar:  "car-001",
+		CurrentCar:   "car-001",
 		SessionID:    "sess-1",
 		StartedAt:    now,
 		LastActivity: now,
@@ -339,7 +339,7 @@ func TestMessage_Instantiation(t *testing.T) {
 		ID:           1,
 		FromAgent:    "engine-1",
 		ToAgent:      "yardmaster",
-		CarID:       "car-001",
+		CarID:        "car-001",
 		ThreadID:     &threadID,
 		Subject:      "Need help",
 		Body:         "Stuck on merge conflict",
@@ -359,7 +359,7 @@ func TestAgentLog_Instantiation(t *testing.T) {
 		ID:           1,
 		EngineID:     "eng-001",
 		SessionID:    "sess-1",
-		CarID:       "car-001",
+		CarID:        "car-001",
 		Direction:    "out",
 		Content:      "response content",
 		TokenCount:   500,

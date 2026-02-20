@@ -34,7 +34,7 @@ func AddDep(db *gorm.DB, carID, blockedBy, depType string) error {
 	}
 
 	dep := models.CarDep{
-		CarID:    carID,
+		CarID:     carID,
 		BlockedBy: blockedBy,
 		DepType:   depType,
 	}

@@ -60,7 +60,7 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 	}
 
 	result := &SwitchResult{
-		CarID: carID,
+		CarID:  carID,
 		Branch: car.Branch,
 	}
 

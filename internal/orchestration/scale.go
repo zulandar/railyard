@@ -251,7 +251,7 @@ func ListEngines(opts EngineListOpts) ([]EngineInfo, error) {
 			ID:           e.ID,
 			Track:        e.Track,
 			Status:       e.Status,
-			CurrentCar:  e.CurrentCar,
+			CurrentCar:   e.CurrentCar,
 			LastActivity: e.LastActivity,
 			Uptime:       now.Sub(e.StartedAt),
 		})

@@ -180,4 +180,3 @@ func TestMarshalJSON_Error(t *testing.T) {
 		t.Fatal("expected error marshaling channel")
 	}
 }
-

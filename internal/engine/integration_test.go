@@ -764,7 +764,7 @@ echo "stderr output" >&2
 
 	sess, err := SpawnAgent(context.Background(), gormDB, SpawnOpts{
 		EngineID:       eng.ID,
-		CarID:         "car-integ1",
+		CarID:          "car-integ1",
 		ContextPayload: "integration test context",
 		WorkDir:        dir,
 		ClaudeBinary:   mockPath,
@@ -868,9 +868,9 @@ func TestIntegration_HandleCompletion(t *testing.T) {
 
 	// Set engine to working state.
 	gormDB.Model(&models.Engine{}).Where("id = ?", eng.ID).Updates(map[string]interface{}{
-		"status":       StatusWorking,
+		"status":      StatusWorking,
 		"current_car": b.ID,
-		"session_id":   "sess-comp1",
+		"session_id":  "sess-comp1",
 	})
 
 	// Set up a bare repo as remote for push.
@@ -883,10 +883,10 @@ func TestIntegration_HandleCompletion(t *testing.T) {
 			t.Fatalf("%v: %s\n%s", args, err, out)
 		}
 	}
-	run(bareDir, "git", "init", "--bare")
+	run(bareDir, "git", "init", "--bare", "-b", "main")
 
 	repoDir := t.TempDir()
-	run(repoDir, "git", "init")
+	run(repoDir, "git", "init", "-b", "main")
 	run(repoDir, "git", "config", "user.name", "Test")
 	run(repoDir, "git", "config", "user.email", "test@test.com")
 	os.WriteFile(filepath.Join(repoDir, "f.txt"), []byte("x"), 0644)
@@ -961,7 +961,7 @@ func TestIntegration_HandleCompletion_DefaultNote(t *testing.T) {
 	gormDB.Create(b)
 
 	gormDB.Model(&models.Engine{}).Where("id = ?", eng.ID).Updates(map[string]interface{}{
-		"status":       StatusWorking,
+		"status":      StatusWorking,
 		"current_car": b.ID,
 	})
 
@@ -975,7 +975,7 @@ func TestIntegration_HandleCompletion_DefaultNote(t *testing.T) {
 			t.Fatalf("%v: %s\n%s", args, err, out)
 		}
 	}
-	run("git", "init")
+	run("git", "init", "-b", "main")
 	run("git", "config", "user.name", "Test")
 	run("git", "config", "user.email", "test@test.com")
 	os.WriteFile(filepath.Join(repoDir, "f.txt"), []byte("x"), 0644)
@@ -1028,7 +1028,7 @@ func TestIntegration_HandleClearCycle(t *testing.T) {
 			t.Fatalf("%v: %s\n%s", args, err, out)
 		}
 	}
-	run("git", "init")
+	run("git", "init", "-b", "main")
 	run("git", "config", "user.name", "Test")
 	run("git", "config", "user.email", "test@test.com")
 	os.WriteFile(filepath.Join(repoDir, "main.go"), []byte("package main\n"), 0644)

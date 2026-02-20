@@ -1,8 +1,8 @@
 package engine
 
 import (
-	"testing"
 	"github.com/zulandar/railyard/internal/models"
+	"testing"
 )
 
 func TestClassifyMessage_Nil(t *testing.T) {
