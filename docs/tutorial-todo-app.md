@@ -8,6 +8,7 @@ This tutorial walks you through building a Todo List API using Railyard to orche
 - Configuring Railyard for any language
 - Using Dispatch to plan work through conversation
 - How engines claim cars, work in parallel, and merge results
+- Setting up semantic code search so agents can find relevant code
 - Monitoring progress and verifying the build
 
 **Time:** ~10 minutes of setup, then sit back and watch.
@@ -42,22 +43,32 @@ Start with an empty project and a git repo. Here are examples for different lang
 ```bash
 mkdir -p ~/projects/todo-app && cd ~/projects/todo-app
 go mod init github.com/yourname/todo-app
-git init && git commit --allow-empty -m "Initial commit"
+git init -b main && git commit --allow-empty -m "Initial commit"
 ```
 
 **PHP (Laravel):**
 ```bash
 composer create-project laravel/laravel ~/projects/todo-app
 cd ~/projects/todo-app
-git init && git add -A && git commit -m "Initial commit"
+git init -b main && git add -A && git commit -m "Initial commit"
 ```
 
 **Node.js (Express):**
 ```bash
 mkdir -p ~/projects/todo-app && cd ~/projects/todo-app
 npm init -y && npm install express
-git init && git commit --allow-empty -m "Initial commit"
+git init -b main && git commit --allow-empty -m "Initial commit"
 ```
+
+### Set up .gitignore
+
+Use Railyard to generate a proper `.gitignore` for your language:
+
+```bash
+ry gitignore --detect
+```
+
+This scans for language indicators (`go.mod`, `package.json`, `composer.json`, etc.) and appends appropriate ignore patterns for binaries, build artifacts, caches, and IDE files. Use `--dry-run` to preview changes first.
 
 ---
 
@@ -163,6 +174,33 @@ You should see an empty dashboard — no cars, no engines, ready to go.
 
 ---
 
+## Step 3.5: (Optional) Enable Semantic Code Search
+
+If you have Docker and Python 3.13+ installed, you can give engines semantic code search. This lets agents search your codebase by meaning, not just keywords — useful once the project grows beyond a few files.
+
+```bash
+ry cocoindex init -c railyard.yaml
+```
+
+This will:
+1. Start a pgvector (PostgreSQL + vector extension) container on port 5481
+2. Create a Python 3.13+ virtual environment at `cocoindex/.venv`
+3. Install embedding and search dependencies
+4. Run schema migrations
+
+Then add the database URL to your config:
+
+```yaml
+cocoindex:
+  database_url: "postgresql://cocoindex:cocoindex@localhost:5481/cocoindex"
+```
+
+When configured, each engine automatically gets an MCP server that provides semantic code search across both the main index and the engine's own changed files (overlay index).
+
+> **Skip this for the tutorial** if you just want to get started quickly. Engines work fine without it — they'll just use standard file search instead of semantic search.
+
+---
+
 ## Step 4: Start Railyard and Plan with Dispatch
 
 Instead of manually creating cars, we'll use **Dispatch** — Railyard's planning agent. Start the full orchestration:
@@ -264,11 +302,20 @@ ry status -c railyard.yaml
 # Auto-refreshing dashboard
 ry status -c railyard.yaml --watch
 
+# Web dashboard with real-time updates
+ry dashboard -c railyard.yaml
+
 # See what engines are doing
 ry engine list -c railyard.yaml
 
 # Check a specific car
 ry car show <car-id> -c railyard.yaml
+
+# Tail agent logs
+ry logs -c railyard.yaml --follow
+
+# Stream messages between agents
+ry watch -c railyard.yaml
 ```
 
 Or watch the tmux panes directly — you'll see agents writing code in real time.
@@ -332,6 +379,29 @@ ry stop -c railyard.yaml
 ```
 
 This gracefully shuts down all engines, Dispatch, and Yardmaster.
+
+---
+
+## Troubleshooting
+
+### Check system health
+
+If something isn't working, run the doctor:
+
+```bash
+ry doctor -c railyard.yaml
+```
+
+This checks prerequisites (Go, Dolt, tmux, Claude Code), validates your config, tests database connectivity, and verifies the git repo.
+
+### Common issues
+
+| Problem | Fix |
+|---|---|
+| Dolt not running after reboot | `ry db start -c railyard.yaml` |
+| Engine stuck / stalled | Yardmaster auto-detects stalls. Check `ry engine list` |
+| pgvector container not running | `docker compose -f docker/docker-compose.pgvector.yaml up -d` |
+| Python venv missing ensurepip | `sudo apt install python3.13-venv` or let `ry cocoindex init` auto-fallback |
 
 ---
 
