@@ -53,6 +53,48 @@ func TestHandleRetryMerge_OutputPrefix(t *testing.T) {
 	}
 }
 
+func TestHandleRetryMerge_EpicAutoCloses(t *testing.T) {
+	db := testDB(t)
+
+	epicID := "epic-retry1"
+	db.Create(&models.Car{ID: epicID, Type: "epic", Status: "open", Track: "backend"})
+	db.Create(&models.Car{ID: "child-r1", Type: "task", Status: "merged", Track: "backend", ParentID: &epicID})
+	db.Create(&models.Car{ID: "child-r2", Type: "task", Status: "merged", Track: "backend", ParentID: &epicID})
+
+	var buf bytes.Buffer
+	msg := models.Message{Subject: "retry-merge", CarID: epicID, Body: "all children merged"}
+	handleRetryMerge(db, msg, &buf)
+
+	if !strings.Contains(buf.String(), "epic") {
+		t.Errorf("output = %q, want to mention epic", buf.String())
+	}
+
+	var epic models.Car
+	db.First(&epic, "id = ?", epicID)
+	if epic.Status != "done" {
+		t.Errorf("epic status = %q, want %q", epic.Status, "done")
+	}
+}
+
+func TestHandleRetryMerge_EpicWithPendingChildren(t *testing.T) {
+	db := testDB(t)
+
+	epicID := "epic-retry2"
+	db.Create(&models.Car{ID: epicID, Type: "epic", Status: "open", Track: "backend"})
+	db.Create(&models.Car{ID: "child-r3", Type: "task", Status: "merged", Track: "backend", ParentID: &epicID})
+	db.Create(&models.Car{ID: "child-r4", Type: "task", Status: "open", Track: "backend", ParentID: &epicID})
+
+	var buf bytes.Buffer
+	msg := models.Message{Subject: "retry-merge", CarID: epicID, Body: "try closing"}
+	handleRetryMerge(db, msg, &buf)
+
+	var epic models.Car
+	db.First(&epic, "id = ?", epicID)
+	if epic.Status != "open" {
+		t.Errorf("epic status = %q, want %q (child still open)", epic.Status, "open")
+	}
+}
+
 // --- handleRequeueCar ---
 
 func TestHandleRequeueCar_NoCarID(t *testing.T) {

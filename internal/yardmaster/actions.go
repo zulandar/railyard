@@ -46,18 +46,28 @@ func handleRestartEngine(_ context.Context, db *gorm.DB, _ *config.Config, confi
 
 // handleRetryMerge sets a blocked car's status back to "done" so the
 // handleCompletedCars phase will pick it up and re-run the switch (merge) flow.
+// For epics, it calls TryCloseEpic since epics don't go through the merge flow.
 func handleRetryMerge(db *gorm.DB, msg models.Message, out io.Writer) {
 	if msg.CarID == "" {
 		fmt.Fprintf(out, "Action retry-merge: no car-id provided, skipping\n")
 		return
 	}
 
-	// Only retry if car is currently blocked.
 	var car models.Car
 	if err := db.Where("id = ?", msg.CarID).First(&car).Error; err != nil {
 		fmt.Fprintf(out, "Action retry-merge: car %s not found\n", msg.CarID)
 		return
 	}
+
+	// Epics don't have branches — they close when all children are done.
+	if car.Type == "epic" {
+		fmt.Fprintf(out, "Action retry-merge: car %s is an epic, attempting auto-close — %s\n", msg.CarID, msg.Body)
+		TryCloseEpic(db, msg.CarID)
+		writeProgressNote(db, msg.CarID, "dispatch", fmt.Sprintf("Retry merge (epic auto-close attempted): %s", msg.Body))
+		return
+	}
+
+	// Only retry regular cars if currently blocked.
 	if car.Status != "blocked" {
 		fmt.Fprintf(out, "Action retry-merge: car %s is %q (not blocked), skipping\n", msg.CarID, car.Status)
 		return
