@@ -225,6 +225,7 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 			Progress:      progress,
 			Messages:      messages,
 			RecentCommits: commits,
+			EngineID:      eng.ID,
 		})
 		if err != nil {
 			log.Printf("render context error: %v", err)

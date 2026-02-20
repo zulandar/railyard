@@ -267,9 +267,9 @@ func gitMerge(repoDir, branch string) error {
 		return fmt.Errorf("git checkout main: %s: %w", string(out), err)
 	}
 
-	// Merge the branch.
-	merge := exec.Command("git", "merge", "--no-ff", branch, "-m",
-		fmt.Sprintf("Switch: merge %s to main", branch))
+	// Merge the branch with co-author trailer for Railyard attribution.
+	msg := fmt.Sprintf("Switch: merge %s to main\n\nCo-Authored-By: Railyard Yardmaster <railyard-yardmaster@noreply>", branch)
+	merge := exec.Command("git", "merge", "--no-ff", branch, "-m", msg)
 	merge.Dir = repoDir
 	if out, err := merge.CombinedOutput(); err != nil {
 		return fmt.Errorf("git merge %s: %s: %w", branch, string(out), err)

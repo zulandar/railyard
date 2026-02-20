@@ -33,6 +33,12 @@ repo: git@github.com:org/myproject.git
 # criteria, design notes, diff stats, and progress notes.
 # require_pr: false
 
+# Git attribution: Engine commits include a Co-Authored-By trailer
+# (e.g. "Co-Authored-By: Railyard Engine eng-abc123 <railyard-engine@noreply>")
+# so you can distinguish engine work from human commits on GitHub.
+# Yardmaster merge commits similarly include a Railyard Yardmaster trailer.
+# Your git identity (from ~/.gitconfig or PAT) remains the commit author.
+
 # ---------------------------------------------------------------------------
 # Dolt database connection (optional — defaults shown)
 # ---------------------------------------------------------------------------

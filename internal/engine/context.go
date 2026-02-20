@@ -18,6 +18,7 @@ type ContextInput struct {
 	Progress      []models.CarProgress
 	Messages      []models.Message
 	RecentCommits []string // pre-fetched "git log --oneline" lines
+	EngineID      string   // engine identifier, used for co-author trailer
 }
 
 // RenderContext produces the full markdown prompt injected into engine sessions.
@@ -39,7 +40,7 @@ func RenderContext(input ContextInput) (string, error) {
 	writeProgress(&w, input.Progress)
 	writeMessages(&w, input.Messages)
 	writeRecentCommits(&w, input.RecentCommits)
-	writeInstructions(&w)
+	writeInstructions(&w, input.EngineID)
 	return w.String(), nil
 }
 
@@ -125,7 +126,17 @@ func writeRecentCommits(w *strings.Builder, commits []string) {
 	w.WriteString("\n")
 }
 
-func writeInstructions(w *strings.Builder) {
+func writeInstructions(w *strings.Builder, engineID string) {
+	// Co-author trailer instruction.
+	if engineID != "" {
+		w.WriteString("## Git Commit Attribution\n")
+		w.WriteString("You MUST append the following Co-Authored-By trailer to EVERY commit message:\n")
+		w.WriteString("```\n")
+		fmt.Fprintf(w, "Co-Authored-By: Railyard Engine %s <railyard-engine@noreply>\n", engineID)
+		w.WriteString("```\n")
+		w.WriteString("This identifies which engine produced the work. Do not omit this.\n\n")
+	}
+
 	w.WriteString("## When You're Done\n")
 	w.WriteString("1. Run tests, ensure they pass\n")
 	w.WriteString("2. Mark the car complete by running this command:\n")

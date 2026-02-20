@@ -283,8 +283,46 @@ func TestRenderContext_Instructions(t *testing.T) {
 	}
 }
 
+func TestRenderContext_CoAuthorTrailer(t *testing.T) {
+	input := makeInput()
+	input.EngineID = "eng-abc123"
+	out, err := RenderContext(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"## Git Commit Attribution",
+		"Co-Authored-By: Railyard Engine eng-abc123 <railyard-engine@noreply>",
+		"EVERY commit message",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("co-author section missing %q", want)
+		}
+	}
+
+	// Co-author section should appear before "When You're Done".
+	coAuthorIdx := strings.Index(out, "## Git Commit Attribution")
+	doneIdx := strings.Index(out, "## When You're Done")
+	if coAuthorIdx > doneIdx {
+		t.Error("co-author section should appear before 'When You're Done'")
+	}
+}
+
+func TestRenderContext_CoAuthorTrailer_NoEngineID(t *testing.T) {
+	input := makeInput()
+	input.EngineID = ""
+	out, err := RenderContext(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "## Git Commit Attribution") {
+		t.Error("co-author section should be omitted when EngineID is empty")
+	}
+}
+
 func TestRenderContext_FullTemplate(t *testing.T) {
 	input := makeInput()
+	input.EngineID = "eng-full01"
 	input.Progress = []models.CarProgress{
 		{Cycle: 1, Note: "Scaffolded", FilesChanged: `["main.go"]`, CommitHash: "aaa1111"},
 	}
@@ -306,6 +344,7 @@ func TestRenderContext_FullTemplate(t *testing.T) {
 		"## Previous Progress (if resuming)",
 		"## Yardmaster Messages",
 		"## Recent Commits on Your Branch",
+		"## Git Commit Attribution",
 		"## When You're Done",
 		"## If You're Stuck",
 		"## If You Need to Split Work",
