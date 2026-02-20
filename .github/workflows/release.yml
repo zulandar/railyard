@@ -130,11 +130,17 @@ jobs:
 
           cat changelog.md
 
-      - name: Create GitHub Release
+      - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            --title "$GITHUB_REF_NAME" \
-            --notes-file changelog.md \
-            artifacts/*
+          # Create the release if it doesn't already exist.
+          if ! gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" \
+              --title "$GITHUB_REF_NAME" \
+              --notes-file changelog.md \
+              artifacts/*
+          else
+            echo "Release $GITHUB_REF_NAME already exists, uploading artifacts..."
+            gh release upload "$GITHUB_REF_NAME" artifacts/* --clobber
+          fi
