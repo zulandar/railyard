@@ -328,6 +328,7 @@ class TestBuild:
             get_deleted_files=mock.DEFAULT,
             get_head_commit=mock.DEFAULT,
             get_current_branch=mock.DEFAULT,
+            load_config=mock.DEFAULT,
         )
 
         class _Ctx:
@@ -337,6 +338,10 @@ class TestBuild:
                 mocks["get_deleted_files"].return_value = deleted
                 mocks["get_head_commit"].return_value = "deadbeef"
                 mocks["get_current_branch"].return_value = "ry/test/feat"
+
+                # Return a default config from load_config mock
+                from config import CocoIndexConfig
+                mocks["load_config"].return_value = CocoIndexConfig()
 
                 # Configure SentenceTransformer stub in sys.modules
                 model_mock = mock.MagicMock()

@@ -19,6 +19,7 @@ import re
 import subprocess
 import sys
 
+from config import load_config
 from main import EMBEDDING_MODEL, LANGUAGE_MAP
 
 # ---------------------------------------------------------------------------
@@ -28,14 +29,14 @@ from main import EMBEDDING_MODEL, LANGUAGE_MAP
 _SAFE_ID_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 
-def overlay_table_name(engine_id: str) -> str:
+def overlay_table_name(engine_id: str, prefix: str = "ovl_") -> str:
     """Derive a safe Postgres table name from an engine ID.
 
-    eng-a1b2c3d4 -> ovl_eng_a1b2c3d4
+    eng-a1b2c3d4 -> ovl_eng_a1b2c3d4 (default prefix)
     """
     if not _SAFE_ID_RE.match(engine_id):
         raise ValueError(f"invalid engine_id: {engine_id!r}")
-    return "ovl_" + engine_id.replace("-", "_")
+    return prefix + engine_id.replace("-", "_")
 
 
 # ---------------------------------------------------------------------------
@@ -161,13 +162,17 @@ def build(args: argparse.Namespace) -> dict:
     import psycopg2
     from sentence_transformers import SentenceTransformer
 
+    # Load config for overlay table prefix
+    cfg = load_config(getattr(args, "config", None))
+
     # 1. Get changed and deleted files via git
     changed = get_changed_files(args.worktree)
     deleted = get_deleted_files(args.worktree)
 
-    # 2. Filter by track's file patterns
-    changed = filter_by_patterns(changed, args.file_patterns)
-    deleted = filter_by_patterns(deleted, args.file_patterns)
+    # 2. Filter by track's file patterns (use config overrides if present)
+    patterns = cfg.included_patterns_for_track(args.track, args.file_patterns)
+    changed = filter_by_patterns(changed, patterns)
+    deleted = filter_by_patterns(deleted, patterns)
 
     if not changed and not deleted:
         result = {"files_indexed": 0, "chunks_indexed": 0, "status": "no_changes"}
@@ -194,7 +199,7 @@ def build(args: argparse.Namespace) -> dict:
             rows.append((filepath, chunk["location"], chunk["text"], embedding))
 
     # 5-6. Create/truncate overlay table and insert embeddings
-    table = overlay_table_name(args.engine_id)
+    table = overlay_table_name(args.engine_id, prefix=cfg.overlay_table_prefix)
     conn = psycopg2.connect(args.database_url)
     try:
         with conn.cursor() as cur:
@@ -278,6 +283,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     build_p.add_argument("--database-url", required=True, help="pgvector database URL.")
     build_p.add_argument("--language", default=None, help="Primary language (for future use).")
+    build_p.add_argument("--config", default=None, help="Path to cocoindex.yaml config file.")
 
     return parser.parse_args(argv)
 

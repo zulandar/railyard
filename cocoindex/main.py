@@ -2,8 +2,9 @@
 Per-track main index builder for Railyard.
 
 Creates a CocoIndex flow that indexes source files into a pgvector table
-named main_{track}_embeddings. The code_to_embedding transform is defined
-at module level so overlay.py can import it for vector space consistency.
+named main_{track}_embeddings (configurable via cocoindex.yaml). The
+code_to_embedding transform is defined at module level so overlay.py can
+import it for vector space consistency.
 
 Usage:
     python main.py --track backend --file-patterns "*.go" "cmd/**" "internal/**"
@@ -17,6 +18,8 @@ import sys
 import cocoindex
 import numpy as np
 from numpy.typing import NDArray
+
+from config import CocoIndexConfig, load_config
 
 # ---------------------------------------------------------------------------
 # Shared embedding transform — importable by overlay.py
@@ -67,9 +70,22 @@ def make_flow_def(
     file_patterns: list[str],
     repo_path: str,
     language: str | None = None,
+    cfg: CocoIndexConfig | None = None,
 ):
-    """Return a CocoIndex flow definition function for the given track."""
-    table_name = f"main_{track_name}_embeddings"
+    """Return a CocoIndex flow definition function for the given track.
+
+    When cfg is provided, table name and excluded patterns are resolved
+    from the CocoIndex config (with per-track overrides). Otherwise falls
+    back to hardcoded defaults for backward compatibility.
+    """
+    if cfg is not None:
+        table_name = cfg.main_table_name(track_name)
+        excluded = cfg.excluded_patterns_for_track(track_name)
+        file_patterns = cfg.included_patterns_for_track(track_name, file_patterns)
+    else:
+        table_name = f"main_{track_name}_embeddings"
+        excluded = EXCLUDED_PATTERNS
+
     treesitter_lang = LANGUAGE_MAP.get(language) if language else None
 
     def flow_def(
@@ -79,7 +95,7 @@ def make_flow_def(
             cocoindex.sources.LocalFile(
                 path=repo_path,
                 included_patterns=file_patterns,
-                excluded_patterns=EXCLUDED_PATTERNS,
+                excluded_patterns=excluded,
             ),
             refresh_interval=None,  # triggered manually after merge
         )
@@ -150,27 +166,35 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Primary language for tree-sitter parsing (go, typescript, python, etc.).",
     )
+    parser.add_argument(
+        "--config",
+        default=None,
+        help="Path to cocoindex.yaml config file (auto-detected if omitted).",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
+    cfg = load_config(args.config)
 
     cocoindex.init()
 
+    table_name = cfg.main_table_name(args.track)
     flow_name = f"CodeEmbedding_{args.track}"
     flow_def = make_flow_def(
         track_name=args.track,
         file_patterns=args.file_patterns,
         repo_path=args.repo_path,
         language=args.language,
+        cfg=cfg,
     )
 
     flow = cocoindex.open_flow(flow_name, flow_def)
     cocoindex.setup_all_flows()
-    print(f"Indexing track '{args.track}' -> main_{args.track}_embeddings")
+    print(f"Indexing track '{args.track}' -> {table_name}")
     flow.update()
-    print(f"Done. Table main_{args.track}_embeddings is up to date.")
+    print(f"Done. Table {table_name} is up to date.")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,23 @@
+# CocoIndex configuration — per-track index settings
+#
+# Table naming templates (use {track} as placeholder):
+main_table_template: "main_{track}_embeddings"
+overlay_table_prefix: "ovl_"
+
+# Default exclusion patterns applied to all tracks unless overridden per-track.
+excluded_patterns:
+  - ".*"
+  - vendor
+  - node_modules
+  - dist
+  - __pycache__
+  - .git
+
+# Per-track overrides (track names must match railyard.yaml).
+# Uncomment and customize as needed:
+# tracks:
+#   backend:
+#     excluded_patterns: [".*", "vendor", ".git"]
+#   frontend:
+#     included_patterns: ["src/**", "*.ts", "*.tsx"]  # overrides railyard.yaml file_patterns
+#     excluded_patterns: [".*", "node_modules", "dist", ".git"]

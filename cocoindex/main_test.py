@@ -97,6 +97,7 @@ sys.modules["cocoindex.targets"] = _targets
 sys.modules["cocoindex.storages"] = _storages
 
 # Now safe to import main
+from config import CocoIndexConfig, TrackOverrides  # noqa: E402
 from main import (  # noqa: E402
     EMBEDDING_MODEL,
     EXCLUDED_PATTERNS,
@@ -191,6 +192,7 @@ class TestParseArgs:
         args = parse_args(["--track", "fe", "--file-patterns", "*.ts"])
         assert args.repo_path == "."
         assert args.language is None
+        assert args.config is None
 
     def test_all_flags(self):
         args = parse_args([
@@ -198,11 +200,13 @@ class TestParseArgs:
             "--file-patterns", "src/**", "*.tsx",
             "--repo-path", "/repos/myapp",
             "--language", "typescript",
+            "--config", "/path/to/cocoindex.yaml",
         ])
         assert args.track == "frontend"
         assert args.file_patterns == ["src/**", "*.tsx"]
         assert args.repo_path == "/repos/myapp"
         assert args.language == "typescript"
+        assert args.config == "/path/to/cocoindex.yaml"
 
     def test_missing_track_exits(self):
         with pytest.raises(SystemExit):
@@ -351,6 +355,55 @@ class TestMakeFlowDef:
 
         export_call = collector.export.call_args
         assert export_call[1]["primary_key_fields"] == ["filename", "location"]
+
+    def test_cfg_custom_table_template(self):
+        """With cfg, table name comes from main_table_template."""
+        flow_builder, data_scope, _, collector = _build_flow_mocks()
+        cfg = CocoIndexConfig(main_table_template="idx_{track}")
+
+        fn = make_flow_def("backend", ["*.go"], "/repos/app", cfg=cfg)
+        fn(flow_builder, data_scope)
+
+        export_call = collector.export.call_args
+        assert export_call[0][1] == ("Postgres", {"table_name": "idx_backend"})
+
+    def test_cfg_excluded_patterns_override(self):
+        """With per-track excluded_patterns override in cfg."""
+        flow_builder, data_scope, _, _ = _build_flow_mocks()
+        cfg = CocoIndexConfig(
+            tracks={"backend": TrackOverrides(excluded_patterns=[".*", ".git"])}
+        )
+
+        fn = make_flow_def("backend", ["*.go"], "/repos/app", cfg=cfg)
+        fn(flow_builder, data_scope)
+
+        source_arg = flow_builder.add_source.call_args[0][0]
+        assert source_arg[1]["excluded_patterns"] == [".*", ".git"]
+
+    def test_cfg_included_patterns_override(self):
+        """With per-track included_patterns override in cfg."""
+        flow_builder, data_scope, _, _ = _build_flow_mocks()
+        cfg = CocoIndexConfig(
+            tracks={"backend": TrackOverrides(included_patterns=["internal/**"])}
+        )
+
+        fn = make_flow_def("backend", ["*.go", "cmd/**"], "/repos/app", cfg=cfg)
+        fn(flow_builder, data_scope)
+
+        source_arg = flow_builder.add_source.call_args[0][0]
+        assert source_arg[1]["included_patterns"] == ["internal/**"]
+
+    def test_cfg_none_uses_defaults(self):
+        """When cfg is None, behavior is unchanged (backward compatible)."""
+        flow_builder, data_scope, _, collector = _build_flow_mocks()
+
+        fn = make_flow_def("backend", ["*.go"], "/repos/app", cfg=None)
+        fn(flow_builder, data_scope)
+
+        source_arg = flow_builder.add_source.call_args[0][0]
+        assert source_arg[1]["excluded_patterns"] == EXCLUDED_PATTERNS
+        export_call = collector.export.call_args
+        assert export_call[0][1] == ("Postgres", {"table_name": "main_backend_embeddings"})
 
 
 # ===================================================================
