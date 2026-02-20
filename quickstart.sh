@@ -328,7 +328,7 @@ if check_cmd docker && docker compose version &>/dev/null 2>&1; then
             COCOINDEX_PG_PORT=${PG_PORT} docker compose -f docker/docker-compose.pgvector.yaml up -d 2>&1
             PGVECTOR_STARTED_BY_US=true
 
-            # Wait for health check.
+            # Wait for container-internal health check.
             PG_READY=false
             for i in $(seq 1 30); do
                 if docker exec railyard-pgvector pg_isready -U cocoindex -d cocoindex &>/dev/null 2>&1; then
@@ -337,6 +337,22 @@ if check_cmd docker && docker compose version &>/dev/null 2>&1; then
                 fi
                 sleep 1
             done
+
+            # Verify host-side port forwarding (WSL2 can lag behind container readiness).
+            if $PG_READY; then
+                HOST_READY=false
+                for i in $(seq 1 15); do
+                    if bash -c "echo >/dev/tcp/127.0.0.1/${PG_PORT}" 2>/dev/null; then
+                        HOST_READY=true
+                        break
+                    fi
+                    sleep 1
+                done
+                if ! $HOST_READY; then
+                    PG_READY=false
+                    warn "Container ready but host port ${PG_PORT} not reachable (Docker port forwarding lag)."
+                fi
+            fi
 
             if $PG_READY; then
                 ok "pgvector ready on port ${PG_PORT}"

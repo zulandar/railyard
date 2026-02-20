@@ -234,7 +234,20 @@ func runCocoIndexIndex(cmd *cobra.Command, configPath string, tracks []string, r
 	indexCmd.Stderr = cmd.ErrOrStderr()
 
 	if err := indexCmd.Run(); err != nil {
-		return fmt.Errorf("indexing failed: %w", err)
+		// Retry once after a short delay — covers the case where Docker
+		// port forwarding from WSL2 is still stabilising when build_all.py
+		// tries to open a connection pool.
+		fmt.Fprintf(out, "Indexing failed, retrying in 5s (port forwarding may still be starting)...\n")
+		time.Sleep(5 * time.Second)
+
+		retryCmd := exec.Command(pythonPath, argv...)
+		retryCmd.Env = append(os.Environ(), "COCOINDEX_DATABASE_URL="+databaseURL)
+		retryCmd.Stdout = out
+		retryCmd.Stderr = cmd.ErrOrStderr()
+
+		if retryErr := retryCmd.Run(); retryErr != nil {
+			return fmt.Errorf("indexing failed after retry: %w", retryErr)
+		}
 	}
 
 	return nil
@@ -637,18 +650,38 @@ func startPGVector(port int) error {
 	return nil
 }
 
-// waitForPG polls pg_isready until the database is accepting connections.
+// waitForPG polls pg_isready until the database is accepting connections,
+// then verifies the host-side port forwarding is working via a TCP dial.
+// This two-phase check is needed because in WSL2 (and some Docker Desktop
+// configurations) the container-internal postgres can be ready before the
+// Docker port mapping from localhost:<port> to container:5432 is active.
 func waitForPG(port int) error {
 	deadline := time.Now().Add(pgReadyTimeout)
+
+	// Phase 1: Wait for container-internal readiness.
 	for time.Now().Before(deadline) {
 		cmd := exec.Command("docker", "exec", "railyard-pgvector",
 			"pg_isready", "-U", defaultDBUser, "-d", defaultDBName)
 		if err := cmd.Run(); err == nil {
-			return nil
+			goto hostCheck
 		}
 		time.Sleep(pgReadyInterval)
 	}
-	return fmt.Errorf("postgres not ready on port %d", port)
+	return fmt.Errorf("postgres not ready on port %d (container check timed out)", port)
+
+hostCheck:
+	// Phase 2: Verify host-side port forwarding is active.
+	// This catches the WSL2 case where Docker port mapping lags behind
+	// container readiness.
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), time.Second)
+		if err == nil {
+			conn.Close()
+			return nil
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	return fmt.Errorf("postgres not ready on port %d (host port check timed out — Docker port forwarding may be slow)", port)
 }
 
 // runMigrations shells out to cocoindex/migrate.py.
