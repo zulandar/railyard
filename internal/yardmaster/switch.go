@@ -159,6 +159,12 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 			fmt.Sprintf("Merged %s, unblocked: %s", carID, strings.Join(titles, ", ")),
 			messaging.SendOpts{CarID: carID},
 		)
+		// Auto-close any unblocked epics whose children are all complete.
+		for _, u := range unblocked {
+			if u.Type == "epic" {
+				TryCloseEpic(db, u.ID)
+			}
+		}
 	}
 
 	// Auto-close parent epic if all children are done.

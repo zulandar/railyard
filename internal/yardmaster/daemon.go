@@ -389,6 +389,10 @@ func handleBlockedCars(db *gorm.DB, out io.Writer) error {
 			}
 			for _, u := range unblocked {
 				fmt.Fprintf(out, "Unblocked car %s (dependency %s resolved)\n", u.ID, c.ID)
+				// Auto-close epics whose children are all complete.
+				if u.Type == "epic" {
+					TryCloseEpic(db, u.ID)
+				}
 			}
 		}
 	}

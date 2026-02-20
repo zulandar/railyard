@@ -416,3 +416,58 @@ func TestTryCloseEpic_EmptyID(t *testing.T) {
 	// Should not panic with empty ID.
 	TryCloseEpic(nil, "")
 }
+
+func TestTryCloseEpic_ClosesWhenAllChildrenMerged(t *testing.T) {
+	db := testDB(t)
+
+	epicID := "epic-close1"
+	db.Create(&models.Car{ID: epicID, Type: "epic", Status: "open", Track: "backend"})
+	db.Create(&models.Car{ID: "child-1", Type: "task", Status: "merged", Track: "backend", ParentID: &epicID})
+	db.Create(&models.Car{ID: "child-2", Type: "task", Status: "merged", Track: "backend", ParentID: &epicID})
+
+	TryCloseEpic(db, epicID)
+
+	var epic models.Car
+	db.First(&epic, "id = ?", epicID)
+	if epic.Status != "done" {
+		t.Errorf("epic status = %q, want %q", epic.Status, "done")
+	}
+}
+
+func TestTryCloseEpic_DoesNotCloseWithPendingChildren(t *testing.T) {
+	db := testDB(t)
+
+	epicID := "epic-open1"
+	db.Create(&models.Car{ID: epicID, Type: "epic", Status: "open", Track: "backend"})
+	db.Create(&models.Car{ID: "child-3", Type: "task", Status: "merged", Track: "backend", ParentID: &epicID})
+	db.Create(&models.Car{ID: "child-4", Type: "task", Status: "open", Track: "backend", ParentID: &epicID})
+
+	TryCloseEpic(db, epicID)
+
+	var epic models.Car
+	db.First(&epic, "id = ?", epicID)
+	if epic.Status != "open" {
+		t.Errorf("epic status = %q, want %q (child still open)", epic.Status, "open")
+	}
+}
+
+func TestTryCloseEpic_ClosesBlockedEpicWhenAllChildrenDone(t *testing.T) {
+	// Simulates the bug scenario: epic was blocked, gets unblocked,
+	// but all children are already merged. TryCloseEpic should close it
+	// regardless of the epic's own status.
+	db := testDB(t)
+
+	epicID := "epic-blocked1"
+	db.Create(&models.Car{ID: epicID, Type: "epic", Status: "open", Track: "backend"})
+	db.Create(&models.Car{ID: "child-5", Type: "task", Status: "done", Track: "backend", ParentID: &epicID})
+	db.Create(&models.Car{ID: "child-6", Type: "task", Status: "merged", Track: "frontend", ParentID: &epicID})
+	db.Create(&models.Car{ID: "child-7", Type: "task", Status: "cancelled", Track: "backend", ParentID: &epicID})
+
+	TryCloseEpic(db, epicID)
+
+	var epic models.Car
+	db.First(&epic, "id = ?", epicID)
+	if epic.Status != "done" {
+		t.Errorf("epic status = %q, want %q", epic.Status, "done")
+	}
+}
