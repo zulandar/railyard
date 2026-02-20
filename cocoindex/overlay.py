@@ -265,6 +265,87 @@ def build(args: argparse.Namespace) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Cleanup subcommand
+# ---------------------------------------------------------------------------
+
+
+def cleanup(args: argparse.Namespace) -> dict:
+    """Drop overlay table and delete overlay_meta row for an engine.
+
+    Both operations are idempotent and non-fatal on missing data.
+    """
+    import psycopg2
+
+    cfg = load_config(getattr(args, "config", None))
+    table = overlay_table_name(args.engine_id, prefix=cfg.overlay_table_prefix)
+
+    conn = psycopg2.connect(args.database_url)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(f"DROP TABLE IF EXISTS {table}")
+            cur.execute(
+                "DELETE FROM overlay_meta WHERE engine_id = %s",
+                (args.engine_id,),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    result = {"engine_id": args.engine_id, "table": table, "status": "cleaned"}
+    print(json.dumps(result))
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Status subcommand
+# ---------------------------------------------------------------------------
+
+
+def status(args: argparse.Namespace) -> dict:
+    """Query overlay_meta for an engine and report freshness as JSON.
+
+    Returns metadata including engine_id, track, branch, last_commit,
+    files/chunks indexed, deleted files, and timestamps. Non-fatal if
+    no metadata row exists for the engine.
+    """
+    import psycopg2
+
+    conn = psycopg2.connect(args.database_url)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT engine_id, track, branch, last_commit, "
+                "files_indexed, chunks_indexed, deleted_files, "
+                "created_at, updated_at "
+                "FROM overlay_meta WHERE engine_id = %s",
+                (args.engine_id,),
+            )
+            row = cur.fetchone()
+    finally:
+        conn.close()
+
+    if row is None:
+        result = {"engine_id": args.engine_id, "status": "not_found"}
+        print(json.dumps(result))
+        return result
+
+    result = {
+        "engine_id": row[0],
+        "track": row[1],
+        "branch": row[2],
+        "last_commit": row[3],
+        "files_indexed": row[4],
+        "chunks_indexed": row[5],
+        "deleted_files": json.loads(row[6]) if row[6] else [],
+        "created_at": str(row[7]),
+        "updated_at": str(row[8]),
+        "status": "ok",
+    }
+    print(json.dumps(result))
+    return result
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -285,6 +366,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     build_p.add_argument("--language", default=None, help="Primary language (for future use).")
     build_p.add_argument("--config", default=None, help="Path to cocoindex.yaml config file.")
 
+    cleanup_p = sub.add_parser("cleanup", help="Drop overlay table and metadata for an engine.")
+    cleanup_p.add_argument("--engine-id", required=True, help="Engine ID (e.g. eng-a1b2c3d4).")
+    cleanup_p.add_argument("--database-url", required=True, help="pgvector database URL.")
+    cleanup_p.add_argument("--config", default=None, help="Path to cocoindex.yaml config file.")
+
+    status_p = sub.add_parser("status", help="Show overlay freshness info for an engine.")
+    status_p.add_argument("--engine-id", required=True, help="Engine ID (e.g. eng-a1b2c3d4).")
+    status_p.add_argument("--database-url", required=True, help="pgvector database URL.")
+
     return parser.parse_args(argv)
 
 
@@ -292,6 +382,10 @@ def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
     if args.command == "build":
         build(args)
+    elif args.command == "cleanup":
+        cleanup(args)
+    elif args.command == "status":
+        status(args)
 
 
 if __name__ == "__main__":

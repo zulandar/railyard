@@ -54,6 +54,7 @@ sys.modules["sentence_transformers"] = _st
 from overlay import (  # noqa: E402
     build,
     chunk_text,
+    cleanup,
     filter_by_patterns,
     get_changed_files,
     get_current_branch,
@@ -61,6 +62,7 @@ from overlay import (  # noqa: E402
     get_head_commit,
     overlay_table_name,
     parse_args,
+    status,
 )
 
 
@@ -478,3 +480,265 @@ class TestBuild:
         sql_calls = [str(c) for c in ctx.cursor_mock.execute.call_args_list]
         sql_joined = " ".join(sql_calls)
         assert "ivfflat" not in sql_joined.lower()
+
+
+# ===================================================================
+# Helper: build args for cleanup/status
+# ===================================================================
+
+
+def _make_cleanup_args(**overrides):
+    defaults = {
+        "engine_id": "eng-abc123",
+        "database_url": "postgresql://localhost/cocoindex",
+        "config": None,
+    }
+    defaults.update(overrides)
+    import argparse
+    return argparse.Namespace(**defaults)
+
+
+def _make_status_args(**overrides):
+    defaults = {
+        "engine_id": "eng-abc123",
+        "database_url": "postgresql://localhost/cocoindex",
+    }
+    defaults.update(overrides)
+    import argparse
+    return argparse.Namespace(**defaults)
+
+
+# ===================================================================
+# cleanup
+# ===================================================================
+
+
+class TestCleanup:
+    def _patch_db(self):
+        """Return a context manager that patches psycopg2 + load_config for cleanup."""
+        from config import CocoIndexConfig
+
+        cursor_mock = mock.MagicMock()
+        cursor_mock.__enter__ = mock.MagicMock(return_value=cursor_mock)
+        cursor_mock.__exit__ = mock.MagicMock(return_value=False)
+        conn_mock = mock.MagicMock()
+        conn_mock.cursor.return_value = cursor_mock
+        pg_connect = mock.MagicMock(return_value=conn_mock)
+
+        patches = mock.patch.multiple(
+            "overlay",
+            load_config=mock.DEFAULT,
+        )
+
+        class _Ctx:
+            def __enter__(self_ctx):
+                mocks = patches.__enter__()
+                mocks["load_config"].return_value = CocoIndexConfig()
+                sys.modules["psycopg2"].connect = pg_connect
+                self_ctx.cursor_mock = cursor_mock
+                self_ctx.conn_mock = conn_mock
+                self_ctx.pg_connect = pg_connect
+                return self_ctx
+
+            def __exit__(self_ctx, *args):
+                patches.__exit__(*args)
+
+        return _Ctx()
+
+    def test_drops_table(self):
+        with self._patch_db() as ctx:
+            cleanup(_make_cleanup_args())
+        sql_calls = [str(c) for c in ctx.cursor_mock.execute.call_args_list]
+        sql_joined = " ".join(sql_calls)
+        assert "DROP TABLE IF EXISTS ovl_eng_abc123" in sql_joined
+
+    def test_deletes_overlay_meta_row(self):
+        with self._patch_db() as ctx:
+            cleanup(_make_cleanup_args())
+        meta_calls = [
+            c for c in ctx.cursor_mock.execute.call_args_list
+            if "overlay_meta" in str(c)
+        ]
+        assert len(meta_calls) == 1
+        assert meta_calls[0][0][1] == ("eng-abc123",)
+
+    def test_commits_transaction(self):
+        with self._patch_db() as ctx:
+            cleanup(_make_cleanup_args())
+        ctx.conn_mock.commit.assert_called_once()
+
+    def test_closes_connection(self):
+        with self._patch_db() as ctx:
+            cleanup(_make_cleanup_args())
+        ctx.conn_mock.close.assert_called_once()
+
+    def test_returns_result(self):
+        with self._patch_db() as ctx:
+            result = cleanup(_make_cleanup_args())
+        assert result["engine_id"] == "eng-abc123"
+        assert result["table"] == "ovl_eng_abc123"
+        assert result["status"] == "cleaned"
+
+    def test_connects_with_database_url(self):
+        with self._patch_db() as ctx:
+            cleanup(_make_cleanup_args(database_url="postgresql://custom/db"))
+        ctx.pg_connect.assert_called_once_with("postgresql://custom/db")
+
+    def test_uses_config_prefix(self):
+        """Cleanup should use overlay_table_prefix from config."""
+        from config import CocoIndexConfig
+        with mock.patch("overlay.load_config") as mock_cfg:
+            mock_cfg.return_value = CocoIndexConfig(overlay_table_prefix="custom_")
+            cursor_mock = mock.MagicMock()
+            cursor_mock.__enter__ = mock.MagicMock(return_value=cursor_mock)
+            cursor_mock.__exit__ = mock.MagicMock(return_value=False)
+            conn_mock = mock.MagicMock()
+            conn_mock.cursor.return_value = cursor_mock
+            sys.modules["psycopg2"].connect = mock.MagicMock(return_value=conn_mock)
+
+            result = cleanup(_make_cleanup_args())
+        assert result["table"] == "custom_eng_abc123"
+
+
+# ===================================================================
+# status
+# ===================================================================
+
+
+class TestStatus:
+    def _patch_db(self, fetchone_result=None):
+        """Return a context manager that patches psycopg2 for status."""
+        cursor_mock = mock.MagicMock()
+        cursor_mock.__enter__ = mock.MagicMock(return_value=cursor_mock)
+        cursor_mock.__exit__ = mock.MagicMock(return_value=False)
+        cursor_mock.fetchone.return_value = fetchone_result
+        conn_mock = mock.MagicMock()
+        conn_mock.cursor.return_value = cursor_mock
+        pg_connect = mock.MagicMock(return_value=conn_mock)
+
+        class _Ctx:
+            def __enter__(self_ctx):
+                sys.modules["psycopg2"].connect = pg_connect
+                self_ctx.cursor_mock = cursor_mock
+                self_ctx.conn_mock = conn_mock
+                self_ctx.pg_connect = pg_connect
+                return self_ctx
+
+            def __exit__(self_ctx, *args):
+                pass
+
+        return _Ctx()
+
+    def test_not_found(self):
+        with self._patch_db(fetchone_result=None) as ctx:
+            result = status(_make_status_args())
+        assert result["status"] == "not_found"
+        assert result["engine_id"] == "eng-abc123"
+
+    def test_returns_metadata(self):
+        row = (
+            "eng-abc123", "backend", "ry/test/feat", "deadbeef",
+            5, 42, '["old.go"]', "2026-02-19 12:00:00", "2026-02-19 12:05:00",
+        )
+        with self._patch_db(fetchone_result=row) as ctx:
+            result = status(_make_status_args())
+        assert result["status"] == "ok"
+        assert result["engine_id"] == "eng-abc123"
+        assert result["track"] == "backend"
+        assert result["branch"] == "ry/test/feat"
+        assert result["last_commit"] == "deadbeef"
+        assert result["files_indexed"] == 5
+        assert result["chunks_indexed"] == 42
+        assert result["deleted_files"] == ["old.go"]
+
+    def test_queries_correct_engine_id(self):
+        with self._patch_db(fetchone_result=None) as ctx:
+            status(_make_status_args(engine_id="eng-xyz789"))
+        query_calls = [
+            c for c in ctx.cursor_mock.execute.call_args_list
+            if "overlay_meta" in str(c)
+        ]
+        assert len(query_calls) == 1
+        assert query_calls[0][0][1] == ("eng-xyz789",)
+
+    def test_closes_connection(self):
+        with self._patch_db(fetchone_result=None) as ctx:
+            status(_make_status_args())
+        ctx.conn_mock.close.assert_called_once()
+
+    def test_connects_with_database_url(self):
+        with self._patch_db(fetchone_result=None) as ctx:
+            status(_make_status_args(database_url="postgresql://custom/db"))
+        ctx.pg_connect.assert_called_once_with("postgresql://custom/db")
+
+    def test_empty_deleted_files(self):
+        row = (
+            "eng-abc123", "backend", "ry/test/feat", "deadbeef",
+            0, 0, "[]", "2026-02-19 12:00:00", "2026-02-19 12:00:00",
+        )
+        with self._patch_db(fetchone_result=row) as ctx:
+            result = status(_make_status_args())
+        assert result["deleted_files"] == []
+
+    def test_null_deleted_files(self):
+        row = (
+            "eng-abc123", "backend", "ry/test/feat", "deadbeef",
+            0, 0, None, "2026-02-19 12:00:00", "2026-02-19 12:00:00",
+        )
+        with self._patch_db(fetchone_result=row) as ctx:
+            result = status(_make_status_args())
+        assert result["deleted_files"] == []
+
+
+# ===================================================================
+# parse_args — cleanup and status subcommands
+# ===================================================================
+
+
+class TestParseArgsCleanup:
+    def test_cleanup_subcommand(self):
+        args = parse_args([
+            "cleanup",
+            "--engine-id", "eng-abc123",
+            "--database-url", "postgresql://localhost/cocoindex",
+        ])
+        assert args.command == "cleanup"
+        assert args.engine_id == "eng-abc123"
+        assert args.database_url == "postgresql://localhost/cocoindex"
+
+    def test_cleanup_with_config(self):
+        args = parse_args([
+            "cleanup",
+            "--engine-id", "eng-1",
+            "--database-url", "postgresql://x",
+            "--config", "/path/to/cocoindex.yaml",
+        ])
+        assert args.config == "/path/to/cocoindex.yaml"
+
+    def test_cleanup_missing_engine_id_exits(self):
+        with pytest.raises(SystemExit):
+            parse_args(["cleanup", "--database-url", "postgresql://x"])
+
+    def test_cleanup_missing_database_url_exits(self):
+        with pytest.raises(SystemExit):
+            parse_args(["cleanup", "--engine-id", "eng-1"])
+
+
+class TestParseArgsStatus:
+    def test_status_subcommand(self):
+        args = parse_args([
+            "status",
+            "--engine-id", "eng-abc123",
+            "--database-url", "postgresql://localhost/cocoindex",
+        ])
+        assert args.command == "status"
+        assert args.engine_id == "eng-abc123"
+        assert args.database_url == "postgresql://localhost/cocoindex"
+
+    def test_status_missing_engine_id_exits(self):
+        with pytest.raises(SystemExit):
+            parse_args(["status", "--database-url", "postgresql://x"])
+
+    def test_status_missing_database_url_exits(self):
+        with pytest.raises(SystemExit):
+            parse_args(["status", "--engine-id", "eng-1"])
