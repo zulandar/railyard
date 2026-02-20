@@ -710,6 +710,183 @@ func TestSwitch_SkipsMergeWhenAlreadyAncestor(t *testing.T) {
 	}
 }
 
+// --- Switch full merge integration tests (with remote) ---
+
+// initTestRepoWithRemote creates a git repo with a bare remote and returns
+// the local repo dir, bare remote dir, and a run helper.
+func initTestRepoWithRemote(t *testing.T) (repoDir, bareDir string, run func(dir string, args ...string)) {
+	t.Helper()
+	bareDir = t.TempDir()
+	run = func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("%v in %s failed: %s: %v", args, dir, out, err)
+		}
+	}
+
+	// Create bare remote.
+	run(bareDir, "git", "init", "--bare", "-b", "main")
+
+	// Clone to get local repo with origin.
+	parentDir := t.TempDir()
+	run(parentDir, "git", "clone", bareDir, "repo")
+	repoDir = filepath.Join(parentDir, "repo")
+	run(repoDir, "git", "config", "user.email", "test@test.com")
+	run(repoDir, "git", "config", "user.name", "test")
+	run(repoDir, "git", "commit", "--allow-empty", "-m", "init")
+	run(repoDir, "git", "push", "origin", "main")
+	return repoDir, bareDir, run
+}
+
+func TestSwitch_FullMerge_PushesToRemote(t *testing.T) {
+	repoDir, bareDir, run := initTestRepoWithRemote(t)
+
+	// Create a feature branch with a commit.
+	run(repoDir, "git", "checkout", "-b", "ry/alice/backend/car-fm1")
+	run(repoDir, "git", "commit", "--allow-empty", "-m", "feature work")
+	run(repoDir, "git", "checkout", "main")
+
+	// Set up DB with the car.
+	db := testDB(t)
+	db.Create(&models.Car{
+		ID:     "car-fm1",
+		Title:  "Full merge test",
+		Track:  "backend",
+		Branch: "ry/alice/backend/car-fm1",
+		Status: "done",
+	})
+
+	result, err := Switch(db, "car-fm1", SwitchOpts{
+		RepoDir:     repoDir,
+		TestCommand: "true", // always passes
+	})
+	if err != nil {
+		t.Fatalf("Switch returned error: %v", err)
+	}
+
+	if !result.Merged {
+		t.Error("expected Merged=true")
+	}
+	if result.AlreadyMerged {
+		t.Error("expected AlreadyMerged=false for direct merge")
+	}
+	if !result.TestsPassed {
+		t.Error("expected TestsPassed=true")
+	}
+
+	// Verify the car is marked as merged in DB.
+	var car models.Car
+	db.First(&car, "id = ?", "car-fm1")
+	if car.Status != "merged" {
+		t.Errorf("car status = %q, want %q", car.Status, "merged")
+	}
+
+	// Verify the remote has the merge commit.
+	cmd := exec.Command("git", "log", "--oneline", "main")
+	cmd.Dir = bareDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git log on bare failed: %s: %v", out, err)
+	}
+	if !strings.Contains(string(out), "Switch: merge") {
+		t.Errorf("remote missing merge commit, got: %s", out)
+	}
+}
+
+func TestSwitch_MergeRevertsOnPushFailure(t *testing.T) {
+	// Create a repo with NO remote — push will fail.
+	repoDir, run := initTestRepo(t)
+
+	// Create a feature branch with a commit.
+	run("git", "checkout", "-b", "ry/alice/backend/car-pf1")
+	run("git", "commit", "--allow-empty", "-m", "feature work")
+	run("git", "checkout", "main")
+
+	// Record pre-merge HEAD.
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = repoDir
+	preHead, _ := cmd.Output()
+	preMergeHead := strings.TrimSpace(string(preHead))
+
+	// Set up DB with the car.
+	db := testDB(t)
+	db.Create(&models.Car{
+		ID:     "car-pf1",
+		Title:  "Push failure test",
+		Track:  "backend",
+		Branch: "ry/alice/backend/car-pf1",
+		Status: "done",
+	})
+
+	result, err := Switch(db, "car-pf1", SwitchOpts{
+		RepoDir:     repoDir,
+		TestCommand: "true",
+	})
+
+	// Should return error with push-failed category.
+	if err == nil {
+		t.Fatal("expected error when push fails")
+	}
+	if result.FailureCategory != SwitchFailPush {
+		t.Errorf("FailureCategory = %q, want %q", result.FailureCategory, SwitchFailPush)
+	}
+	if result.Merged {
+		t.Error("Merged should be false when push fails")
+	}
+
+	// Verify car was NOT marked as merged.
+	var car models.Car
+	db.First(&car, "id = ?", "car-pf1")
+	if car.Status == "merged" {
+		t.Error("car should NOT be marked merged when push fails")
+	}
+
+	// Verify local main was reset (merge undone).
+	cmd = exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = repoDir
+	postHead, _ := cmd.Output()
+	postMergeHead := strings.TrimSpace(string(postHead))
+
+	if postMergeHead != preMergeHead {
+		t.Errorf("local main should be reset to pre-merge HEAD\npre:  %s\npost: %s", preMergeHead, postMergeHead)
+	}
+}
+
+func TestGitResetToCommit(t *testing.T) {
+	repoDir, run := initTestRepo(t)
+
+	// Record initial HEAD.
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = repoDir
+	initialHead, _ := cmd.Output()
+	initial := strings.TrimSpace(string(initialHead))
+
+	// Add a commit.
+	run("git", "commit", "--allow-empty", "-m", "extra commit")
+
+	// Verify we've moved forward.
+	cmd = exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = repoDir
+	newHead, _ := cmd.Output()
+	if strings.TrimSpace(string(newHead)) == initial {
+		t.Fatal("HEAD should have advanced")
+	}
+
+	// Reset to initial.
+	gitResetToCommit(repoDir, initial)
+
+	// Verify we're back.
+	cmd = exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = repoDir
+	afterReset, _ := cmd.Output()
+	if strings.TrimSpace(string(afterReset)) != initial {
+		t.Errorf("after reset: HEAD = %q, want %q", strings.TrimSpace(string(afterReset)), initial)
+	}
+}
+
 // --- runTests pre-test and no-test-files tests ---
 
 func TestRunTests_PreTestCommand(t *testing.T) {

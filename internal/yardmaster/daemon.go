@@ -305,8 +305,6 @@ func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, r
 		return err
 	}
 
-	anyMerged := false
-
 	for _, c := range cars {
 		fmt.Fprintf(out, "Completed car %s (%s) — switching\n", c.ID, c.Title)
 
@@ -358,8 +356,7 @@ func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, r
 			if result.AlreadyMerged {
 				fmt.Fprintf(out, "Car %s already merged (branch %s was ancestor of main)\n", c.ID, result.Branch)
 			} else {
-				anyMerged = true
-				fmt.Fprintf(out, "Car %s merged (branch %s)\n", c.ID, result.Branch)
+				fmt.Fprintf(out, "Car %s merged and pushed (branch %s)\n", c.ID, result.Branch)
 			}
 
 			// Clean up the completing engine's overlay (non-fatal).
@@ -375,16 +372,6 @@ func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, r
 			}
 		} else if !result.TestsPassed {
 			fmt.Fprintf(out, "Car %s tests failed — blocked\n", c.ID)
-		}
-	}
-
-	// Push main to remote once after all merges in this cycle.
-	if anyMerged {
-		if err := gitPush(repoDir); err != nil {
-			log.Printf("push main to remote: %v", err)
-			fmt.Fprintf(out, "Failed to push main to remote: %v\n", err)
-		} else {
-			fmt.Fprintf(out, "Pushed main to remote\n")
 		}
 	}
 
@@ -450,9 +437,16 @@ func sweepOpenEpics(db *gorm.DB, out io.Writer) error {
 
 // reconcileStaleCars detects cars whose branches have already been merged to
 // main (e.g., via a monolithic epic commit) and updates their status to "merged".
+// It checks against origin/main (the remote truth) to avoid false positives from
+// local-only merges that were never pushed.
 func reconcileStaleCars(db *gorm.DB, repoDir string, out io.Writer) error {
-	// Get all branches merged into main.
-	cmd := exec.Command("git", "branch", "-a", "--merged", "main")
+	// Fetch first to get current remote state.
+	if err := gitFetch(repoDir); err != nil {
+		return fmt.Errorf("reconcile fetch: %w", err)
+	}
+
+	// Check against origin/main — only branches confirmed on the remote.
+	cmd := exec.Command("git", "branch", "-a", "--merged", "origin/main")
 	cmd.Dir = repoDir
 	output, err := cmd.Output()
 	if err != nil {

@@ -210,6 +210,9 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 		return result, nil
 	}
 
+	// Save pre-merge HEAD so we can undo the merge if push fails.
+	preMergeHead := getHeadCommit(opts.RepoDir)
+
 	// Merge to main.
 	if err := gitMerge(opts.RepoDir, car.Branch); err != nil {
 		result.FailureCategory = SwitchFailMerge
@@ -217,9 +220,19 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 		return result, result.Error
 	}
 
+	// Push to remote before marking merged — the car should only be
+	// considered merged once the code is confirmed on the remote.
+	if err := gitPush(opts.RepoDir); err != nil {
+		// Undo the local merge so the car will be retried next cycle.
+		gitResetToCommit(opts.RepoDir, preMergeHead)
+		result.FailureCategory = SwitchFailPush
+		result.Error = fmt.Errorf("push after merge: %w", err)
+		return result, result.Error
+	}
+
 	result.Merged = true
 
-	// Mark car as merged so it won't be re-processed.
+	// Mark car as merged — push succeeded, safe to update status.
 	now := time.Now()
 	db.Model(&models.Car{}).Where("id = ?", carID).Updates(map[string]interface{}{
 		"status":       "merged",
@@ -445,6 +458,14 @@ func gitMerge(repoDir, branch string) error {
 	}
 
 	return nil
+}
+
+// gitResetToCommit resets the current branch to the given commit hash.
+// This is used to undo a local merge when the subsequent push fails.
+func gitResetToCommit(repoDir, commitHash string) {
+	cmd := exec.Command("git", "reset", "--hard", commitHash)
+	cmd.Dir = repoDir
+	cmd.CombinedOutput() // best-effort — error logged by caller
 }
 
 // gitPush pushes the current branch to the remote.
