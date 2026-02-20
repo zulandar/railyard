@@ -51,8 +51,8 @@ func BuildOverlay(workDir, engineID, track string, cfg *config.Config) (string, 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	pythonPath := filepath.Join(cfg.CocoIndex.VenvPath, "bin", "python")
-	scriptPath := filepath.Join(cfg.CocoIndex.ScriptsPath, "overlay.py")
+	pythonPath, _ := filepath.Abs(filepath.Join(cfg.CocoIndex.VenvPath, "bin", "python"))
+	scriptPath, _ := filepath.Abs(filepath.Join(cfg.CocoIndex.ScriptsPath, "overlay.py"))
 
 	args := []string{
 		scriptPath, "build",
@@ -97,8 +97,8 @@ func CleanupOverlay(engineID string, cfg *config.Config) error {
 		return nil // no pgvector configured, nothing to clean up
 	}
 
-	pythonPath := filepath.Join(cfg.CocoIndex.VenvPath, "bin", "python")
-	scriptPath := filepath.Join(cfg.CocoIndex.ScriptsPath, "overlay.py")
+	pythonPath, _ := filepath.Abs(filepath.Join(cfg.CocoIndex.VenvPath, "bin", "python"))
+	scriptPath, _ := filepath.Abs(filepath.Join(cfg.CocoIndex.ScriptsPath, "overlay.py"))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -136,8 +136,8 @@ func WriteMCPConfig(workDir, engineID, track string, cfg *config.Config) error {
 		return nil // no pgvector configured, skip MCP config
 	}
 
-	pythonPath := filepath.Join(cfg.CocoIndex.VenvPath, "bin", "python")
-	scriptPath := filepath.Join(cfg.CocoIndex.ScriptsPath, "mcp_server.py")
+	pythonPath, _ := filepath.Abs(filepath.Join(cfg.CocoIndex.VenvPath, "bin", "python"))
+	scriptPath, _ := filepath.Abs(filepath.Join(cfg.CocoIndex.ScriptsPath, "mcp_server.py"))
 
 	mainTable := fmt.Sprintf("main_%s_embeddings", track)
 	overlayTable := OverlayTableName(engineID)

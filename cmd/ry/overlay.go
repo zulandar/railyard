@@ -126,8 +126,8 @@ type overlayStatusResult struct {
 }
 
 func showOverlayStatus(out io.Writer, engineID string, cfg *config.Config) error {
-	pythonPath := filepath.Join(cfg.CocoIndex.VenvPath, "bin", "python")
-	scriptPath := filepath.Join(cfg.CocoIndex.ScriptsPath, "overlay.py")
+	pythonPath, _ := filepath.Abs(filepath.Join(cfg.CocoIndex.VenvPath, "bin", "python"))
+	scriptPath, _ := filepath.Abs(filepath.Join(cfg.CocoIndex.ScriptsPath, "overlay.py"))
 
 	cmd := exec.Command(pythonPath, scriptPath, "status",
 		"--engine-id", engineID,
@@ -155,8 +155,8 @@ func showOverlayStatus(out io.Writer, engineID string, cfg *config.Config) error
 }
 
 func showAllOverlayStatus(out io.Writer, cfg *config.Config) error {
-	pythonPath := filepath.Join(cfg.CocoIndex.VenvPath, "bin", "python")
-	scriptPath := filepath.Join(cfg.CocoIndex.ScriptsPath, "overlay.py")
+	pythonPath, _ := filepath.Abs(filepath.Join(cfg.CocoIndex.VenvPath, "bin", "python"))
+	scriptPath, _ := filepath.Abs(filepath.Join(cfg.CocoIndex.ScriptsPath, "overlay.py"))
 
 	// Query overlay_meta for all engines via a small inline Python script.
 	script := fmt.Sprintf(`
@@ -344,7 +344,7 @@ func runOverlayGC(cmd *cobra.Command, cfg *config.Config, dryRun bool) error {
 
 // getOverlayEngineIDs queries pgvector overlay_meta for all engine IDs.
 func getOverlayEngineIDs(cfg *config.Config) ([]string, error) {
-	pythonPath := filepath.Join(cfg.CocoIndex.VenvPath, "bin", "python")
+	pythonPath, _ := filepath.Abs(filepath.Join(cfg.CocoIndex.VenvPath, "bin", "python"))
 
 	script := fmt.Sprintf(`
 import psycopg2, json
