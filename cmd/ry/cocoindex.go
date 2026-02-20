@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -38,27 +39,31 @@ func newCocoIndexInitCmd() *cobra.Command {
 		configPath     string
 		port           int
 		skipMigrations bool
+		skipVenv       bool
 	)
 
 	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Initialize pgvector for CocoIndex semantic search",
 		Long: `Sets up the pgvector infrastructure for CocoIndex:
-  1. Starts postgres+pgvector via Docker Compose
-  2. Runs schema migrations
-  3. Creates/updates cocoindex.yaml with the database URL`,
+  1. Checks for Python >= 3.13
+  2. Creates Python venv and installs dependencies
+  3. Starts postgres+pgvector via Docker Compose
+  4. Runs schema migrations
+  5. Creates/updates cocoindex.yaml with the database URL`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCocoIndexInit(cmd, configPath, port, skipMigrations)
+			return runCocoIndexInit(cmd, configPath, port, skipMigrations, skipVenv)
 		},
 	}
 
 	cmd.Flags().StringVarP(&configPath, "config", "c", "railyard.yaml", "path to Railyard config file")
 	cmd.Flags().IntVar(&port, "port", 0, "pgvector port (default: 5481, auto-detects conflicts)")
 	cmd.Flags().BoolVar(&skipMigrations, "skip-migrations", false, "skip running schema migrations")
+	cmd.Flags().BoolVar(&skipVenv, "skip-venv", false, "skip Python venv creation")
 	return cmd
 }
 
-func runCocoIndexInit(cmd *cobra.Command, configPath string, port int, skipMigrations bool) error {
+func runCocoIndexInit(cmd *cobra.Command, configPath string, port int, skipMigrations, skipVenv bool) error {
 	out := cmd.OutOrStdout()
 
 	// Step 1: Check Docker is available.
@@ -72,24 +77,32 @@ func runCocoIndexInit(cmd *cobra.Command, configPath string, port int, skipMigra
 	}
 	fmt.Fprintln(out, "Docker and docker compose found")
 
-	// Step 2: Check if railyard-pgvector is already running.
+	// Step 2: Set up Python venv with dependencies.
+	if !skipVenv {
+		fmt.Fprintln(out, "Setting up Python venv...")
+		if err := ensureCocoIndexVenv(out); err != nil {
+			return fmt.Errorf("python venv setup: %w", err)
+		}
+	}
+
+	// Step 3: Check if railyard-pgvector is already running.
 	running, runningPort := isPGVectorRunning()
 	if running {
 		fmt.Fprintf(out, "pgvector container already running on port %d\n", runningPort)
 		port = runningPort
 	} else {
-		// Step 3: Port conflict detection.
+		// Step 4: Port conflict detection.
 		if port == 0 {
 			port = detectPGPort()
 		}
 
-		// Step 4: Start the container.
+		// Step 5: Start the container.
 		fmt.Fprintf(out, "Starting pgvector on port %d...\n", port)
 		if err := startPGVector(port); err != nil {
 			return fmt.Errorf("start pgvector: %w", err)
 		}
 
-		// Step 5: Wait for health check.
+		// Step 6: Wait for health check.
 		fmt.Fprint(out, "Waiting for postgres to be ready...")
 		if err := waitForPG(port); err != nil {
 			fmt.Fprintln(out, " failed")
@@ -101,7 +114,7 @@ func runCocoIndexInit(cmd *cobra.Command, configPath string, port int, skipMigra
 	databaseURL := fmt.Sprintf("postgresql://%s:%s@localhost:%d/%s",
 		defaultDBUser, defaultDBPassword, port, defaultDBName)
 
-	// Step 6: Run migrations.
+	// Step 7: Run migrations.
 	if !skipMigrations {
 		fmt.Fprintln(out, "Running migrations...")
 		if err := runMigrations(databaseURL); err != nil {
@@ -110,7 +123,7 @@ func runCocoIndexInit(cmd *cobra.Command, configPath string, port int, skipMigra
 		fmt.Fprintln(out, "Migrations applied")
 	}
 
-	// Step 7: Create/update cocoindex.yaml.
+	// Step 8: Create/update cocoindex.yaml.
 	if err := updateCocoIndexYAML(databaseURL); err != nil {
 		return fmt.Errorf("update cocoindex.yaml: %w", err)
 	}
@@ -122,10 +135,94 @@ func runCocoIndexInit(cmd *cobra.Command, configPath string, port int, skipMigra
 	fmt.Fprintf(out, "  Port:         %d\n", port)
 	fmt.Fprintf(out, "  Database URL: %s\n", databaseURL)
 	fmt.Fprintf(out, "  Container:    railyard-pgvector\n")
+	fmt.Fprintf(out, "  Venv:         cocoindex/.venv\n")
 	fmt.Fprintln(out, "")
 	fmt.Fprintf(out, "  Connect: psql -h localhost -p %d -U cocoindex -d cocoindex\n", port)
 	fmt.Fprintf(out, "  Stop:    docker compose -f docker/docker-compose.pgvector.yaml down\n")
 
+	return nil
+}
+
+// ensureCocoIndexVenv creates the Python venv and installs dependencies if needed.
+func ensureCocoIndexVenv(out io.Writer) error {
+	venvPath := filepath.Join("cocoindex", ".venv")
+	requirementsPath := filepath.Join("cocoindex", "requirements.txt")
+
+	// Check if venv already exists and has pip.
+	venvPip := filepath.Join(venvPath, "bin", "pip")
+	if _, err := os.Stat(venvPip); err == nil {
+		fmt.Fprintln(out, "Python venv already exists at cocoindex/.venv")
+		// Still run pip install to pick up any new deps.
+		fmt.Fprintln(out, "Updating dependencies...")
+		return runPipInstall(venvPath, requirementsPath)
+	}
+
+	// Find Python >= 3.13.
+	pythonBin, err := findPython313()
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "Using %s\n", pythonBin)
+
+	// Create venv.
+	cmd := exec.Command(pythonBin, "-m", "venv", venvPath)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("create venv: %s: %w", strings.TrimSpace(string(output)), err)
+	}
+	fmt.Fprintln(out, "Created venv at cocoindex/.venv")
+
+	// Install dependencies.
+	fmt.Fprintln(out, "Installing dependencies (this may take a few minutes)...")
+	if err := runPipInstall(venvPath, requirementsPath); err != nil {
+		return err
+	}
+	fmt.Fprintln(out, "Dependencies installed")
+
+	return nil
+}
+
+// findPython313 finds a Python >= 3.13 binary on the system.
+// Checks python3.13, python3.14, ..., python3.20, then python3.
+func findPython313() (string, error) {
+	// Check specific version binaries first.
+	for minor := 13; minor <= 20; minor++ {
+		name := fmt.Sprintf("python3.%d", minor)
+		if path, err := exec.LookPath(name); err == nil {
+			return path, nil
+		}
+	}
+
+	// Check generic python3 and verify version.
+	if path, err := exec.LookPath("python3"); err == nil {
+		out, err := exec.Command(path, "-c",
+			"import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')").Output()
+		if err == nil {
+			version := strings.TrimSpace(string(out))
+			parts := strings.SplitN(version, ".", 2)
+			if len(parts) == 2 {
+				major, _ := strconv.Atoi(parts[0])
+				minor, _ := strconv.Atoi(parts[1])
+				if major >= 3 && minor >= 13 {
+					return path, nil
+				}
+			}
+		}
+	}
+
+	return "", fmt.Errorf("Python >= 3.13 is required but not found.\n" +
+		"  Install: https://docs.python.org/3/using/unix.html\n" +
+		"  Ubuntu/Debian: sudo add-apt-repository ppa:deadsnakes/ppa && sudo apt install python3.13 python3.13-venv")
+}
+
+// runPipInstall runs pip install -r requirements.txt in the venv.
+func runPipInstall(venvPath, requirementsPath string) error {
+	pipPath := filepath.Join(venvPath, "bin", "pip")
+	cmd := exec.Command(pipPath, "install", "-r", requirementsPath)
+	cmd.Env = append(os.Environ(), fmt.Sprintf("VIRTUAL_ENV=%s", venvPath))
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("pip install: %s: %w", strings.TrimSpace(string(output)), err)
+	}
 	return nil
 }
 

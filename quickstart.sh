@@ -143,6 +143,44 @@ else
     echo ""
 fi
 
+# Python >= 3.13 is required for CocoIndex.
+# Check python3.13, python3.14, ..., then generic python3.
+PYTHON_CMD=""
+for minor in 13 14 15 16 17 18 19 20; do
+    if check_cmd "python3.${minor}"; then
+        PYTHON_CMD="python3.${minor}"
+        break
+    fi
+done
+if [ -z "${PYTHON_CMD}" ] && check_cmd python3; then
+    PY_VER=$(python3 -c 'import sys; print(f"{sys.version_info.minor}")' 2>/dev/null || echo "0")
+    if [ "${PY_VER}" -ge 13 ] 2>/dev/null; then
+        PYTHON_CMD="python3"
+    fi
+fi
+
+if [ -z "${PYTHON_CMD}" ]; then
+    warn "Python >= 3.13 not found. Installing Python 3.13..."
+    if check_cmd apt-get; then
+        sudo add-apt-repository -y ppa:deadsnakes/ppa 2>/dev/null || true
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq python3.13 python3.13-venv python3.13-dev
+        if check_cmd python3.13; then
+            PYTHON_CMD="python3.13"
+        else
+            warn "Python 3.13 installation failed — CocoIndex will be unavailable."
+            warn "Install manually: https://docs.python.org/3/using/unix.html"
+        fi
+    else
+        warn "Cannot auto-install Python 3.13 (apt-get not found)."
+        warn "Install manually: https://docs.python.org/3/using/unix.html"
+    fi
+fi
+
+if [ -n "${PYTHON_CMD}" ]; then
+    ok "Python $(${PYTHON_CMD} --version 2>&1 | grep -oP '\d+\.\d+\.\d+' | head -1) (${PYTHON_CMD})"
+fi
+
 # ─── Step 2: Build and install ry ─────────────────────────────────────────────
 
 info "Building ry binary..."
@@ -310,17 +348,46 @@ if check_cmd docker && docker compose version &>/dev/null 2>&1; then
         fi
     fi
 
-    # Run migrations if pgvector is ready.
+    # Create Python venv and install dependencies if pgvector is ready.
     if [ "${PGVECTOR_STATUS}" = "skipped" ]; then
         PG_DATABASE_URL="postgresql://cocoindex:cocoindex@localhost:${PG_PORT}/cocoindex"
 
-        # Try venv python, fall back to system python3.
-        PYTHON_PATH="cocoindex/.venv/bin/python"
-        if [ ! -x "${PYTHON_PATH}" ]; then
-            PYTHON_PATH="python3"
-        fi
+        VENV_PATH="cocoindex/.venv"
+        if [ -n "${PYTHON_CMD}" ]; then
+            # Create venv if it doesn't exist.
+            if [ ! -x "${VENV_PATH}/bin/pip" ]; then
+                info "Creating Python venv at ${VENV_PATH}..."
+                if "${PYTHON_CMD}" -m venv "${VENV_PATH}" 2>&1; then
+                    ok "Venv created"
+                else
+                    warn "Failed to create venv — run 'ry cocoindex init' manually."
+                    PGVECTOR_STATUS="venv-failed"
+                fi
+            else
+                ok "Python venv already exists"
+            fi
 
-        if check_cmd "${PYTHON_PATH}"; then
+            # Install dependencies.
+            if [ "${PGVECTOR_STATUS}" = "skipped" ] && [ -f cocoindex/requirements.txt ]; then
+                info "Installing CocoIndex Python dependencies..."
+                if "${VENV_PATH}/bin/pip" install -r cocoindex/requirements.txt 2>&1 | tail -3; then
+                    ok "Dependencies installed"
+                else
+                    warn "pip install failed — run 'ry cocoindex init' manually."
+                    PGVECTOR_STATUS="pip-failed"
+                fi
+            fi
+        else
+            warn "Python >= 3.13 not available — skipping venv setup."
+            warn "Run 'ry cocoindex init' after installing Python >= 3.13."
+            PGVECTOR_STATUS="no-python"
+        fi
+    fi
+
+    # Run migrations if venv is ready.
+    if [ "${PGVECTOR_STATUS}" = "skipped" ]; then
+        PYTHON_PATH="${VENV_PATH}/bin/python"
+        if [ -x "${PYTHON_PATH}" ]; then
             info "Running pgvector migrations..."
             if "${PYTHON_PATH}" cocoindex/migrate.py --database-url "${PG_DATABASE_URL}" 2>&1; then
                 ok "Migrations applied"
@@ -329,8 +396,7 @@ if check_cmd docker && docker compose version &>/dev/null 2>&1; then
                 PGVECTOR_STATUS="migration-failed"
             fi
         else
-            warn "Python not found — skipping migrations."
-            warn "Run 'ry cocoindex init' manually to complete setup."
+            warn "Venv python not found — skipping migrations."
             PGVECTOR_STATUS="no-python"
         fi
     fi

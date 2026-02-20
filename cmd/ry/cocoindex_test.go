@@ -160,3 +160,38 @@ func TestNewCocoIndexCmd_Structure(t *testing.T) {
 		t.Errorf("init subcommand Use = %q, want %q", initCmd.Use, "init")
 	}
 }
+
+func TestNewCocoIndexInitCmd_HasSkipVenvFlag(t *testing.T) {
+	cmd := newCocoIndexInitCmd()
+	f := cmd.Flags().Lookup("skip-venv")
+	if f == nil {
+		t.Error("init command missing --skip-venv flag")
+	}
+}
+
+func TestFindPython313_ReturnsPathOrError(t *testing.T) {
+	// This test works regardless of whether Python 3.13 is installed.
+	// If installed, we get a path. If not, we get an error.
+	path, err := findPython313()
+	if err != nil {
+		// Not installed — verify the error message is helpful.
+		if !strings.Contains(err.Error(), "Python >= 3.13") {
+			t.Errorf("error message should mention Python 3.13: %v", err)
+		}
+		return
+	}
+	// If found, verify it's an executable path.
+	if path == "" {
+		t.Error("findPython313() returned empty path with nil error")
+	}
+}
+
+func TestRunPipInstall_MissingRequirements(t *testing.T) {
+	tmpDir := t.TempDir()
+	// Attempt to install from non-existent requirements file.
+	// Should fail since the venv doesn't exist.
+	err := runPipInstall(tmpDir, filepath.Join(tmpDir, "nonexistent.txt"))
+	if err == nil {
+		t.Error("expected error when pip binary doesn't exist")
+	}
+}
