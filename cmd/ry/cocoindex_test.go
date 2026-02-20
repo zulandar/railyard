@@ -195,3 +195,12 @@ func TestRunPipInstall_MissingRequirements(t *testing.T) {
 		t.Error("expected error when pip binary doesn't exist")
 	}
 }
+
+func TestBootstrapPip_MissingVenv(t *testing.T) {
+	tmpDir := t.TempDir()
+	// Should fail because the venv python binary doesn't exist.
+	err := bootstrapPip(tmpDir)
+	if err == nil {
+		t.Error("expected error when venv python doesn't exist")
+	}
+}

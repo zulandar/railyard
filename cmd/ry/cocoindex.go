@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -167,7 +168,26 @@ func ensureCocoIndexVenv(out io.Writer) error {
 	// Create venv.
 	cmd := exec.Command(pythonBin, "-m", "venv", venvPath)
 	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("create venv: %s: %w", strings.TrimSpace(string(output)), err)
+		msg := strings.TrimSpace(string(output))
+		if strings.Contains(msg, "ensurepip") || strings.Contains(msg, "No module named") {
+			// Try --without-pip fallback.
+			fmt.Fprintln(out, "ensurepip not available, creating venv without pip...")
+			fallbackCmd := exec.Command(pythonBin, "-m", "venv", "--without-pip", venvPath)
+			if fbOut, fbErr := fallbackCmd.CombinedOutput(); fbErr != nil {
+				return fmt.Errorf("create venv (--without-pip): %s: %w\n"+
+					"  Install the venv package for your Python version, e.g.:\n"+
+					"  Ubuntu/Debian: sudo apt install python3.13-venv",
+					strings.TrimSpace(string(fbOut)), fbErr)
+			}
+			// Bootstrap pip via get-pip.py.
+			fmt.Fprintln(out, "Bootstrapping pip...")
+			if err := bootstrapPip(venvPath); err != nil {
+				return fmt.Errorf("bootstrap pip: %w\n"+
+					"  Or install the venv package: sudo apt install python3.13-venv", err)
+			}
+		} else {
+			return fmt.Errorf("create venv: %s: %w", msg, err)
+		}
 	}
 	fmt.Fprintln(out, "Created venv at cocoindex/.venv")
 
@@ -223,6 +243,45 @@ func runPipInstall(venvPath, requirementsPath string) error {
 	if err != nil {
 		return fmt.Errorf("pip install: %s: %w", strings.TrimSpace(string(output)), err)
 	}
+	return nil
+}
+
+// bootstrapPip downloads get-pip.py and runs it inside a venv that was created
+// with --without-pip (i.e. when ensurepip is not available).
+func bootstrapPip(venvPath string) error {
+	getPipURL := "https://bootstrap.pypa.io/get-pip.py"
+	getPipPath := filepath.Join(venvPath, "get-pip.py")
+
+	resp, err := http.Get(getPipURL)
+	if err != nil {
+		return fmt.Errorf("download get-pip.py: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("download get-pip.py: HTTP %d", resp.StatusCode)
+	}
+
+	f, err := os.Create(getPipPath)
+	if err != nil {
+		return fmt.Errorf("create get-pip.py: %w", err)
+	}
+	if _, err := io.Copy(f, resp.Body); err != nil {
+		f.Close()
+		return fmt.Errorf("write get-pip.py: %w", err)
+	}
+	f.Close()
+
+	pythonPath := filepath.Join(venvPath, "bin", "python")
+	cmd := exec.Command(pythonPath, getPipPath)
+	cmd.Env = append(os.Environ(), fmt.Sprintf("VIRTUAL_ENV=%s", venvPath))
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("run get-pip.py: %s: %w", strings.TrimSpace(string(output)), err)
+	}
+
+	// Clean up.
+	os.Remove(getPipPath)
 	return nil
 }
 
