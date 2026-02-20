@@ -88,6 +88,50 @@ func CleanupWorktrees(repoDir string) error {
 	return nil
 }
 
+// ResetWorktree resets an engine's worktree to a clean state at origin/main
+// (or local main if no remote). This must be called before CreateBranch when
+// starting a new car to avoid merge conflicts from stale state.
+func ResetWorktree(wtDir string) error {
+	if wtDir == "" {
+		return fmt.Errorf("engine: worktree directory is required")
+	}
+
+	// Step 1: Fetch origin to get latest refs. Non-fatal if no remote.
+	fetch := exec.Command("git", "fetch", "origin")
+	fetch.Dir = wtDir
+	fetch.CombinedOutput() // ignore error — local-only repos have no remote
+
+	// Step 2: Detach HEAD so we're not on any branch.
+	detach := exec.Command("git", "checkout", "--detach", "HEAD")
+	detach.Dir = wtDir
+	if out, err := detach.CombinedOutput(); err != nil {
+		return fmt.Errorf("engine: detach HEAD: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+
+	// Step 3: Remove untracked files and directories.
+	clean := exec.Command("git", "clean", "-fd")
+	clean.Dir = wtDir
+	if out, err := clean.CombinedOutput(); err != nil {
+		return fmt.Errorf("engine: git clean: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+
+	// Step 4: Hard reset to origin/main (fall back to local main).
+	target := "origin/main"
+	checkRef := exec.Command("git", "rev-parse", "--verify", "origin/main")
+	checkRef.Dir = wtDir
+	if _, err := checkRef.CombinedOutput(); err != nil {
+		target = "main"
+	}
+
+	reset := exec.Command("git", "reset", "--hard", target)
+	reset.Dir = wtDir
+	if out, err := reset.CombinedOutput(); err != nil {
+		return fmt.Errorf("engine: reset to %s: %s: %w", target, strings.TrimSpace(string(out)), err)
+	}
+
+	return nil
+}
+
 // CreateBranch creates a new git branch from main, or checks out an existing one.
 // The repoDir parameter specifies the git repository working directory.
 func CreateBranch(repoDir, branchName string) error {

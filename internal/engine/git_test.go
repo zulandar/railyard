@@ -126,6 +126,157 @@ func TestEnsureWorktree_ReusedStillHasClaudeIgnore(t *testing.T) {
 	}
 }
 
+// --- ResetWorktree tests ---
+
+func TestResetWorktree_EmptyDir(t *testing.T) {
+	err := ResetWorktree("")
+	if err == nil {
+		t.Fatal("expected error for empty dir")
+	}
+	if !strings.Contains(err.Error(), "worktree directory is required") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "worktree directory is required")
+	}
+}
+
+func TestResetWorktree_CleansUpDirtyState(t *testing.T) {
+	dir := initTestRepo(t)
+
+	// Create a worktree.
+	wtDir, err := EnsureWorktree(dir, "eng-reset001")
+	if err != nil {
+		t.Fatalf("EnsureWorktree: %v", err)
+	}
+
+	// Make the worktree dirty: create a branch, add uncommitted files.
+	run := func(d string, args ...string) {
+		t.Helper()
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = d
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v: %s\n%s", args, err, out)
+		}
+	}
+	run(wtDir, "git", "checkout", "-b", "dirty-branch")
+	os.WriteFile(filepath.Join(wtDir, "untracked.txt"), []byte("junk"), 0644)
+	os.WriteFile(filepath.Join(wtDir, "README.md"), []byte("modified\n"), 0644)
+
+	// Reset should succeed.
+	if err := ResetWorktree(wtDir); err != nil {
+		t.Fatalf("ResetWorktree: %v", err)
+	}
+
+	// Verify: HEAD should be detached (not on dirty-branch).
+	branch := currentBranch(t, wtDir)
+	if branch != "HEAD" {
+		t.Errorf("expected detached HEAD, got branch %q", branch)
+	}
+
+	// Verify: untracked file should be gone.
+	if _, err := os.Stat(filepath.Join(wtDir, "untracked.txt")); !os.IsNotExist(err) {
+		t.Error("expected untracked.txt to be removed")
+	}
+
+	// Verify: modified file should be restored.
+	data, err := os.ReadFile(filepath.Join(wtDir, "README.md"))
+	if err != nil {
+		t.Fatalf("read README.md: %v", err)
+	}
+	if string(data) != "# test\n" {
+		t.Errorf("README.md = %q, want original content", string(data))
+	}
+}
+
+func TestResetWorktree_UpdatesToLatestMain(t *testing.T) {
+	dir := initTestRepo(t)
+
+	// Create a worktree.
+	wtDir, err := EnsureWorktree(dir, "eng-reset002")
+	if err != nil {
+		t.Fatalf("EnsureWorktree: %v", err)
+	}
+
+	// Advance main in the parent repo (simulates yardmaster merging another car).
+	run := func(d string, args ...string) {
+		t.Helper()
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = d
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v: %s\n%s", args, err, out)
+		}
+	}
+	run(dir, "git", "checkout", "main")
+	os.WriteFile(filepath.Join(dir, "newfile.txt"), []byte("from main\n"), 0644)
+	run(dir, "git", "add", "newfile.txt")
+	run(dir, "git", "commit", "-m", "advance main")
+
+	// Get the main HEAD hash.
+	getHash := exec.Command("git", "rev-parse", "main")
+	getHash.Dir = dir
+	mainHash, _ := getHash.CombinedOutput()
+
+	// Reset the worktree — should pick up the new main commit.
+	if err := ResetWorktree(wtDir); err != nil {
+		t.Fatalf("ResetWorktree: %v", err)
+	}
+
+	// Verify: worktree HEAD should match main.
+	getWtHash := exec.Command("git", "rev-parse", "HEAD")
+	getWtHash.Dir = wtDir
+	wtHash, _ := getWtHash.CombinedOutput()
+
+	if strings.TrimSpace(string(wtHash)) != strings.TrimSpace(string(mainHash)) {
+		t.Errorf("worktree HEAD = %s, want main HEAD = %s",
+			strings.TrimSpace(string(wtHash)), strings.TrimSpace(string(mainHash)))
+	}
+
+	// Verify: new file from main should be present.
+	if _, err := os.Stat(filepath.Join(wtDir, "newfile.txt")); err != nil {
+		t.Errorf("expected newfile.txt from advanced main: %v", err)
+	}
+}
+
+func TestResetWorktree_ThenCreateBranch(t *testing.T) {
+	dir := initTestRepo(t)
+
+	// Create a worktree.
+	wtDir, err := EnsureWorktree(dir, "eng-reset003")
+	if err != nil {
+		t.Fatalf("EnsureWorktree: %v", err)
+	}
+
+	// Simulate a dirty worktree from previous car.
+	run := func(d string, args ...string) {
+		t.Helper()
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = d
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v: %s\n%s", args, err, out)
+		}
+	}
+	run(wtDir, "git", "checkout", "-b", "ry/old/car")
+	os.WriteFile(filepath.Join(wtDir, "leftover.txt"), []byte("old work"), 0644)
+	run(wtDir, "git", "add", ".")
+	run(wtDir, "git", "commit", "-m", "old car work")
+
+	// Reset then branch — the full flow the engine does.
+	if err := ResetWorktree(wtDir); err != nil {
+		t.Fatalf("ResetWorktree: %v", err)
+	}
+	if err := CreateBranch(wtDir, "ry/new/car"); err != nil {
+		t.Fatalf("CreateBranch after reset: %v", err)
+	}
+
+	got := currentBranch(t, wtDir)
+	if got != "ry/new/car" {
+		t.Errorf("branch = %q, want %q", got, "ry/new/car")
+	}
+
+	// Old car's file should not be present (was on old branch, not main).
+	if _, err := os.Stat(filepath.Join(wtDir, "leftover.txt")); !os.IsNotExist(err) {
+		t.Error("expected leftover.txt from old car to be gone")
+	}
+}
+
 // --- CreateBranch tests ---
 
 func TestCreateBranch(t *testing.T) {

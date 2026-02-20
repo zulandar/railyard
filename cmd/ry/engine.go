@@ -232,6 +232,13 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 			continue
 		}
 
+		// Reset worktree to clean state at latest main before branching.
+		if err := engine.ResetWorktree(workDir); err != nil {
+			log.Printf("reset worktree error: %v", err)
+			sleepWithContext(ctx, pollInterval)
+			continue
+		}
+
 		// Create git branch.
 		if err := engine.CreateBranch(workDir, claimed.Branch); err != nil {
 			log.Printf("create branch error: %v", err)
