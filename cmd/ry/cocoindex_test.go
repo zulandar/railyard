@@ -196,6 +196,44 @@ func TestRunPipInstall_MissingRequirements(t *testing.T) {
 	}
 }
 
+func TestEnsureRequirementsTxt_CreatesFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	reqPath := filepath.Join(tmpDir, "cocoindex", "requirements.txt")
+
+	err := ensureRequirementsTxt(reqPath)
+	if err != nil {
+		t.Fatalf("ensureRequirementsTxt() error: %v", err)
+	}
+
+	data, err := os.ReadFile(reqPath)
+	if err != nil {
+		t.Fatalf("read requirements.txt: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "cocoindex") {
+		t.Error("requirements.txt missing cocoindex dependency")
+	}
+	if !strings.Contains(content, "psycopg2-binary") {
+		t.Error("requirements.txt missing psycopg2-binary dependency")
+	}
+}
+
+func TestEnsureRequirementsTxt_SkipsExisting(t *testing.T) {
+	tmpDir := t.TempDir()
+	reqPath := filepath.Join(tmpDir, "requirements.txt")
+	os.WriteFile(reqPath, []byte("custom-dep>=1.0\n"), 0644)
+
+	err := ensureRequirementsTxt(reqPath)
+	if err != nil {
+		t.Fatalf("ensureRequirementsTxt() error: %v", err)
+	}
+
+	data, _ := os.ReadFile(reqPath)
+	if !strings.Contains(string(data), "custom-dep") {
+		t.Error("existing requirements.txt should not be overwritten")
+	}
+}
+
 func TestBootstrapPip_MissingVenv(t *testing.T) {
 	tmpDir := t.TempDir()
 	// Should fail because the venv python binary doesn't exist.

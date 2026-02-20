@@ -1,0 +1,12 @@
+# CocoIndex Python dependencies
+# Install: python3.13 -m venv .venv && .venv/bin/pip install -r requirements.txt
+#
+# Requires Python >= 3.13
+
+cocoindex>=0.1.44
+psycopg2-binary>=2.9
+sentence-transformers>=2.2
+numpy>=1.24
+PyYAML>=6.0
+mcp>=1.0
+pytest>=7.0

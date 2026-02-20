@@ -1,6 +1,7 @@
 package main
 
 import (
+	_ "embed"
 	"fmt"
 	"io"
 	"net"
@@ -14,6 +15,9 @@ import (
 
 	"github.com/spf13/cobra"
 )
+
+//go:embed cocoindex_requirements.txt
+var embeddedRequirements string
 
 const (
 	defaultPGPort     = 5481
@@ -144,10 +148,28 @@ func runCocoIndexInit(cmd *cobra.Command, configPath string, port int, skipMigra
 	return nil
 }
 
+// ensureRequirementsTxt writes cocoindex/requirements.txt if it doesn't exist,
+// using the copy embedded in the ry binary.
+func ensureRequirementsTxt(requirementsPath string) error {
+	if _, err := os.Stat(requirementsPath); err == nil {
+		return nil // already exists
+	}
+	// Ensure the parent directory exists.
+	if err := os.MkdirAll(filepath.Dir(requirementsPath), 0755); err != nil {
+		return fmt.Errorf("create cocoindex dir: %w", err)
+	}
+	return os.WriteFile(requirementsPath, []byte(embeddedRequirements), 0644)
+}
+
 // ensureCocoIndexVenv creates the Python venv and installs dependencies if needed.
 func ensureCocoIndexVenv(out io.Writer) error {
 	venvPath := filepath.Join("cocoindex", ".venv")
 	requirementsPath := filepath.Join("cocoindex", "requirements.txt")
+
+	// Write requirements.txt from embedded copy if missing.
+	if err := ensureRequirementsTxt(requirementsPath); err != nil {
+		return fmt.Errorf("write requirements.txt: %w", err)
+	}
 
 	// Check if venv already exists and has pip.
 	venvPip := filepath.Join(venvPath, "bin", "pip")
