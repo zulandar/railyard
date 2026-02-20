@@ -2,6 +2,13 @@ package models
 
 import "time"
 
+// ResolvedBlockerStatuses lists car statuses that count as "resolved" when
+// evaluating whether a blocker still prevents its dependent from being worked.
+// Every query that checks for unresolved blockers must use this list to stay
+// consistent. Forgetting a status here causes dependent cars to appear
+// permanently blocked.
+var ResolvedBlockerStatuses = []string{"done", "cancelled", "merged"}
+
 // Car is the core work item in Railyard.
 type Car struct {
 	ID          string  `gorm:"primaryKey;size:32"`

@@ -260,7 +260,8 @@ func UnblockDeps(db *gorm.DB, carID string) ([]models.Car, error) {
 		var otherBlockers int64
 		db.Model(&models.CarDep{}).
 			Where("car_id = ? AND blocked_by != ?", dep.CarID, carID).
-			Joins("JOIN cars ON cars.id = car_deps.blocked_by AND cars.status NOT IN ('done', 'merged')").
+			Joins("JOIN cars ON cars.id = car_deps.blocked_by").
+			Where("cars.status NOT IN ?", models.ResolvedBlockerStatuses).
 			Count(&otherBlockers)
 
 		if otherBlockers == 0 {

@@ -225,11 +225,11 @@ func findIdleEngine(db *gorm.DB, track string) *models.Engine {
 // countReadyWork counts open, unblocked, unassigned, non-epic cars on a track.
 // This mirrors the query logic from engine.ClaimCar.
 func countReadyWork(db *gorm.DB, track string) (int, error) {
-	// Subquery: car IDs that have at least one non-done, non-cancelled blocker.
+	// Subquery: car IDs that have at least one unresolved blocker.
 	blockedSub := db.Table("car_deps").
 		Select("car_deps.car_id").
 		Joins("JOIN cars blocker ON car_deps.blocked_by = blocker.id").
-		Where("blocker.status NOT IN ?", []string{"done", "cancelled"})
+		Where("blocker.status NOT IN ?", models.ResolvedBlockerStatuses)
 
 	var count int64
 	err := db.Model(&models.Car{}).

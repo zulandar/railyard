@@ -34,11 +34,11 @@ func ClaimCar(db *gorm.DB, engineID, track string) (*models.Car, error) {
 
 	for attempt := range claimMaxRetries {
 		lastErr = db.Transaction(func(tx *gorm.DB) error {
-			// Subquery: car IDs that have at least one non-done, non-cancelled blocker.
+			// Subquery: car IDs that have at least one unresolved blocker.
 			blockedSub := tx.Table("car_deps").
 				Select("car_deps.car_id").
 				Joins("JOIN cars blocker ON car_deps.blocked_by = blocker.id").
-				Where("blocker.status NOT IN ?", []string{"done", "cancelled"})
+				Where("blocker.status NOT IN ?", models.ResolvedBlockerStatuses)
 
 			// Find the highest-priority ready car, locking the row.
 			// Exclude epics — they are container cars, not implementable work.

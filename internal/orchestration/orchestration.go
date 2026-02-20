@@ -300,14 +300,15 @@ func Status(db *gorm.DB, tmux Tmux) (*StatusInfo, error) {
 		db.Model(&models.Car{}).Where("track = ? AND status = ?", t.Name, "in_progress").Count(&ts.InProgress)
 		db.Model(&models.Car{}).Where("track = ? AND status = ?", t.Name, "done").Count(&ts.Done)
 		db.Model(&models.Car{}).Where("track = ? AND status = ?", t.Name, "blocked").Count(&ts.Blocked)
-		// Ready = open with no unresolved blockers (simplified: count open with no deps or all deps done).
+		// Ready = open with no unresolved blockers.
 		var ready int64
 		db.Model(&models.Car{}).
 			Where("track = ? AND status = ? AND (assignee = ? OR assignee IS NULL)", t.Name, "open", "").
 			Where("id NOT IN (?)",
 				db.Model(&models.CarDep{}).
 					Select("car_id").
-					Joins("JOIN cars ON cars.id = car_deps.blocked_by AND cars.status != 'done'"),
+					Joins("JOIN cars ON cars.id = car_deps.blocked_by").
+					Where("cars.status NOT IN ?", models.ResolvedBlockerStatuses),
 			).Count(&ready)
 		ts.Ready = ready
 		info.TrackSummary = append(info.TrackSummary, ts)

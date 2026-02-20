@@ -39,6 +39,18 @@ func assertFieldType(t *testing.T, typ reflect.Type, fieldName, expectedType str
 	}
 }
 
+func TestResolvedBlockerStatuses(t *testing.T) {
+	expected := map[string]bool{"done": true, "cancelled": true, "merged": true}
+	if len(ResolvedBlockerStatuses) != len(expected) {
+		t.Fatalf("ResolvedBlockerStatuses has %d entries, want %d", len(ResolvedBlockerStatuses), len(expected))
+	}
+	for _, s := range ResolvedBlockerStatuses {
+		if !expected[s] {
+			t.Errorf("unexpected status in ResolvedBlockerStatuses: %q", s)
+		}
+	}
+}
+
 func TestCar_Fields(t *testing.T) {
 	typ := reflect.TypeOf(Car{})
 
