@@ -78,6 +78,9 @@ def make_flow_def(
     from the CocoIndex config (with per-track overrides). Otherwise falls
     back to hardcoded defaults for backward compatibility.
     """
+    # CocoIndex LocalFile requires the full absolute path to the root directory.
+    repo_path = os.path.abspath(repo_path)
+
     if cfg is not None:
         table_name = cfg.main_table_name(track_name)
         excluded = cfg.excluded_patterns_for_track(track_name)
@@ -171,30 +174,68 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Path to cocoindex.yaml config file (auto-detected if omitted).",
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        default=False,
+        help="Force reprocessing even if data appears up-to-date.",
+    )
     return parser.parse_args(argv)
 
 
-def main(argv: list[str] | None = None) -> None:
-    args = parse_args(argv)
-    cfg = load_config(args.config)
+def build_index(
+    track: str,
+    file_patterns: list[str],
+    repo_path: str,
+    language: str | None = None,
+    config_path: str | None = None,
+    force: bool = False,
+) -> None:
+    """Build the index for a single track.
 
-    cocoindex.init()
+    Assumes cocoindex.init() has already been called. Opens the flow,
+    sets up schemas, runs update, and prints stats.
+    """
+    cfg = load_config(config_path)
+    table_name = cfg.main_table_name(track)
+    flow_name = f"CodeEmbedding_{track}"
+    abs_repo = os.path.abspath(repo_path)
 
-    table_name = cfg.main_table_name(args.track)
-    flow_name = f"CodeEmbedding_{args.track}"
     flow_def = make_flow_def(
-        track_name=args.track,
-        file_patterns=args.file_patterns,
-        repo_path=args.repo_path,
-        language=args.language,
+        track_name=track,
+        file_patterns=file_patterns,
+        repo_path=abs_repo,
+        language=language,
         cfg=cfg,
     )
 
     flow = cocoindex.open_flow(flow_name, flow_def)
     cocoindex.setup_all_flows()
-    print(f"Indexing track '{args.track}' -> {table_name}")
-    flow.update()
+
+    print(f"Indexing track '{track}' -> {table_name}")
+    print(f"  Source path: {abs_repo}")
+    print(f"  Patterns:    {file_patterns}")
+    if force:
+        print("  Mode:        force (reexport_targets=True)")
+
+    stats = flow.update(reexport_targets=force)
+    print(f"  Stats:       {stats}")
     print(f"Done. Table {table_name} is up to date.")
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = parse_args(argv)
+
+    cocoindex.init()
+
+    build_index(
+        track=args.track,
+        file_patterns=args.file_patterns,
+        repo_path=args.repo_path,
+        language=args.language,
+        config_path=args.config,
+        force=args.force,
+    )
 
 
 if __name__ == "__main__":

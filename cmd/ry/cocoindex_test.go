@@ -182,6 +182,9 @@ func TestNewCocoIndexIndexCmd_Flags(t *testing.T) {
 	if f := cmd.Flags().Lookup("repo-path"); f == nil {
 		t.Error("index command missing --repo-path flag")
 	}
+	if f := cmd.Flags().Lookup("force"); f == nil {
+		t.Error("index command missing --force flag")
+	}
 }
 
 func TestLoadRailyardConfig_ParsesTracks(t *testing.T) {
@@ -520,7 +523,7 @@ func TestEnsureCocoIndexScripts_CreatesFiles(t *testing.T) {
 		{"migrate.py", "run_migrations"},
 		{"config.py", "CocoIndexConfig"},
 		{"main.py", "code_to_embedding"},
-		{"build_all.py", "build_track"},
+		{"build_all.py", "build_index"},
 		{"overlay.py", "overlay_table_name"},
 		{"mcp_server.py", "search_code"},
 		{filepath.Join("migrations", "001_create_overlay_meta.sql"), "overlay_meta"},

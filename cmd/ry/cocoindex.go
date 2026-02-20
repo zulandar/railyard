@@ -123,6 +123,7 @@ func newCocoIndexIndexCmd() *cobra.Command {
 		configPath string
 		tracks     []string
 		repoPath   string
+		force      bool
 	)
 
 	cmd := &cobra.Command{
@@ -135,19 +136,21 @@ Examples:
   ry cocoindex index                           # Index all tracks
   ry cocoindex index --tracks backend          # Index only backend
   ry cocoindex index --tracks backend frontend # Index specific tracks
-  ry cocoindex index --repo-path /path/to/repo # Custom repo path`,
+  ry cocoindex index --repo-path /path/to/repo # Custom repo path
+  ry cocoindex index --force                   # Force reindex all data`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCocoIndexIndex(cmd, configPath, tracks, repoPath)
+			return runCocoIndexIndex(cmd, configPath, tracks, repoPath, force)
 		},
 	}
 
 	cmd.Flags().StringVarP(&configPath, "config", "c", "railyard.yaml", "path to Railyard config file")
 	cmd.Flags().StringSliceVar(&tracks, "tracks", nil, "specific tracks to index (default: all)")
 	cmd.Flags().StringVar(&repoPath, "repo-path", ".", "path to the repository root")
+	cmd.Flags().BoolVar(&force, "force", false, "force reprocessing even if data appears up-to-date")
 	return cmd
 }
 
-func runCocoIndexIndex(cmd *cobra.Command, configPath string, tracks []string, repoPath string) error {
+func runCocoIndexIndex(cmd *cobra.Command, configPath string, tracks []string, repoPath string, force bool) error {
 	out := cmd.OutOrStdout()
 
 	// Load config to get database URL and track definitions.
@@ -190,6 +193,9 @@ func runCocoIndexIndex(cmd *cobra.Command, configPath string, tracks []string, r
 	if len(tracks) > 0 {
 		argv = append(argv, "--tracks")
 		argv = append(argv, tracks...)
+	}
+	if force {
+		argv = append(argv, "--force")
 	}
 
 	fmt.Fprintf(out, "Indexing with: %s %s\n", pythonPath, strings.Join(argv, " "))

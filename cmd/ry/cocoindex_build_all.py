@@ -15,6 +15,7 @@ Usage:
 import argparse
 import sys
 
+import cocoindex
 import yaml
 
 from config import load_config
@@ -46,32 +47,6 @@ def load_tracks(railyard_config_path: str) -> list[dict]:
     return tracks
 
 
-def build_track(
-    track_name: str,
-    file_patterns: list[str],
-    repo_path: str,
-    language: str | None,
-    config_path: str | None,
-) -> None:
-    """Build the main index for a single track.
-
-    Imports and calls main.py's main() with appropriate CLI args.
-    """
-    from main import main as main_index_main
-
-    argv = [
-        "--track", track_name,
-        "--file-patterns", *file_patterns,
-        "--repo-path", repo_path,
-    ]
-    if language:
-        argv.extend(["--language", language])
-    if config_path:
-        argv.extend(["--config", config_path])
-
-    main_index_main(argv)
-
-
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Build CocoIndex main indexes for all tracks in railyard.yaml."
@@ -96,6 +71,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         nargs="+",
         default=None,
         help="Only build these tracks (default: all tracks in railyard.yaml).",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        default=False,
+        help="Force reprocessing even if data appears up-to-date.",
     )
     return parser.parse_args(argv)
 
@@ -122,22 +103,25 @@ def main(argv: list[str] | None = None) -> None:
             )
             sys.exit(1)
 
+    # Initialize CocoIndex once for all tracks.
+    cocoindex.init()
+
     print(f"Building indexes for {len(tracks)} track(s)...")
+
+    from main import build_index
 
     for track in tracks:
         name = track["name"]
-        table = cfg.main_table_name(name)
         file_patterns = cfg.included_patterns_for_track(name, track["file_patterns"])
-        print(f"\n--- Track: {name} -> {table} ---")
-        print(f"  Patterns: {file_patterns}")
-        print(f"  Language: {track['language'] or 'none (text splitting)'}")
+        print(f"\n--- Track: {name} ---")
 
-        build_track(
-            track_name=name,
+        build_index(
+            track=name,
             file_patterns=file_patterns,
             repo_path=args.repo_path,
             language=track["language"],
             config_path=args.config,
+            force=args.force,
         )
 
     print(f"\nDone. {len(tracks)} track index(es) built.")
