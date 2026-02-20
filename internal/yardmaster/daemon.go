@@ -99,6 +99,11 @@ func RunDaemon(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath,
 			log.Printf("yardmaster blocked cars error: %v", err)
 		}
 
+		// Phase 4b: Sweep open epics whose children may all be complete.
+		if err := sweepOpenEpics(db, out); err != nil {
+			log.Printf("yardmaster sweep open epics error: %v", err)
+		}
+
 		// Phase 5: Reconcile stale cars whose branches are already merged.
 		if err := reconcileStaleCars(db, repoDir, out); err != nil {
 			log.Printf("yardmaster reconcile error: %v", err)
@@ -397,6 +402,35 @@ func handleBlockedCars(db *gorm.DB, out io.Writer) error {
 				if u.Type == "epic" {
 					TryCloseEpic(db, u.ID)
 				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// sweepOpenEpics checks open epics whose children may all be complete and
+// auto-closes them. This is a safety net for epics that missed the reactive
+// TryCloseEpic call (e.g., timing issues, last child merged before check).
+func sweepOpenEpics(db *gorm.DB, out io.Writer) error {
+	openEpics, err := car.List(db, car.ListFilters{Status: "open", Type: "epic"})
+	if err != nil {
+		return err
+	}
+
+	for _, e := range openEpics {
+		var remaining int64
+		db.Model(&models.Car{}).
+			Where("parent_id = ? AND status NOT IN ?", e.ID, []string{"done", "merged", "cancelled"}).
+			Count(&remaining)
+
+		if remaining == 0 {
+			// Double-check the epic has at least one child (don't close empty epics).
+			var total int64
+			db.Model(&models.Car{}).Where("parent_id = ?", e.ID).Count(&total)
+			if total > 0 {
+				fmt.Fprintf(out, "Sweep: auto-closing epic %s (%s) — all children complete\n", e.ID, e.Title)
+				TryCloseEpic(db, e.ID)
 			}
 		}
 	}

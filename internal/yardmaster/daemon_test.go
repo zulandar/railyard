@@ -89,6 +89,70 @@ func TestMaxTestFailures(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// sweepOpenEpics tests
+// ---------------------------------------------------------------------------
+
+func TestSweepOpenEpics_ClosesCompletedEpic(t *testing.T) {
+	db := testDB(t)
+
+	epicID := "epic-sweep1"
+	db.Create(&models.Car{ID: epicID, Type: "epic", Status: "open", Track: "backend", Title: "Test Epic"})
+	db.Create(&models.Car{ID: "child-sw1", Type: "task", Status: "merged", Track: "backend", ParentID: &epicID})
+	db.Create(&models.Car{ID: "child-sw2", Type: "task", Status: "done", Track: "backend", ParentID: &epicID})
+
+	var buf bytes.Buffer
+	if err := sweepOpenEpics(db, &buf); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var epic models.Car
+	db.First(&epic, "id = ?", epicID)
+	if epic.Status != "done" {
+		t.Errorf("epic status = %q, want %q", epic.Status, "done")
+	}
+	if !strings.Contains(buf.String(), "auto-closing epic") {
+		t.Errorf("output = %q, want to mention auto-closing", buf.String())
+	}
+}
+
+func TestSweepOpenEpics_SkipsEpicWithPendingChildren(t *testing.T) {
+	db := testDB(t)
+
+	epicID := "epic-sweep2"
+	db.Create(&models.Car{ID: epicID, Type: "epic", Status: "open", Track: "backend"})
+	db.Create(&models.Car{ID: "child-sw3", Type: "task", Status: "merged", Track: "backend", ParentID: &epicID})
+	db.Create(&models.Car{ID: "child-sw4", Type: "task", Status: "in_progress", Track: "backend", ParentID: &epicID})
+
+	var buf bytes.Buffer
+	if err := sweepOpenEpics(db, &buf); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var epic models.Car
+	db.First(&epic, "id = ?", epicID)
+	if epic.Status != "open" {
+		t.Errorf("epic status = %q, want %q", epic.Status, "open")
+	}
+}
+
+func TestSweepOpenEpics_SkipsEmptyEpic(t *testing.T) {
+	db := testDB(t)
+
+	db.Create(&models.Car{ID: "epic-sweep3", Type: "epic", Status: "open", Track: "backend"})
+
+	var buf bytes.Buffer
+	if err := sweepOpenEpics(db, &buf); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var epic models.Car
+	db.First(&epic, "id = ?", "epic-sweep3")
+	if epic.Status != "open" {
+		t.Errorf("empty epic should stay open, got %q", epic.Status)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // processInbox drain tests
 // ---------------------------------------------------------------------------
 
