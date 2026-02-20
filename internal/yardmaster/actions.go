@@ -67,9 +67,9 @@ func handleRetryMerge(db *gorm.DB, msg models.Message, out io.Writer) {
 		return
 	}
 
-	// Only retry regular cars if currently blocked.
-	if car.Status != "blocked" {
-		fmt.Fprintf(out, "Action retry-merge: car %s is %q (not blocked), skipping\n", msg.CarID, car.Status)
+	// Only retry regular cars if currently blocked or merge-failed.
+	if car.Status != "blocked" && car.Status != "merge-failed" {
+		fmt.Fprintf(out, "Action retry-merge: car %s is %q (not blocked/merge-failed), skipping\n", msg.CarID, car.Status)
 		return
 	}
 

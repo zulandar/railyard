@@ -281,6 +281,7 @@ func TestSwitchFailureReason_AllCategories(t *testing.T) {
 		{SwitchFailFetch, "repeated-fetch-failure"},
 		{SwitchFailPreTest, "repeated-pre-test-failure"},
 		{SwitchFailTest, "repeated-test-failure"},
+		{SwitchFailInfra, "infrastructure-test-failure"},
 		{SwitchFailMerge, "repeated-merge-conflict"},
 		{SwitchFailPush, "repeated-push-failure"},
 		{SwitchFailPR, "repeated-pr-failure"},
@@ -341,5 +342,24 @@ func TestMaybeSwitchEscalate_AtThreshold(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "repeated-fetch-failure") {
 		t.Errorf("output should mention failure reason, got: %s", buf.String())
+	}
+}
+
+func TestMaybeSwitchEscalate_InfraEscalatesImmediately(t *testing.T) {
+	db := testDB(t)
+	db.Create(&models.Car{ID: "car-infra1", Track: "backend"})
+
+	// NO prior failures — infra should escalate on first occurrence.
+	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
+	cfg.Stall.MaxSwitchFailures = 3
+
+	var buf bytes.Buffer
+	maybeSwitchEscalate(context.Background(), db, cfg, "car-infra1", SwitchFailInfra, nil, &buf)
+
+	if !strings.Contains(buf.String(), "infra failure") {
+		t.Errorf("should escalate immediately for infra, got: %s", buf.String())
+	}
+	if !strings.Contains(buf.String(), "escalating immediately") {
+		t.Errorf("output should say 'escalating immediately', got: %s", buf.String())
 	}
 }

@@ -95,6 +95,39 @@ func TestHandleRetryMerge_EpicWithPendingChildren(t *testing.T) {
 	}
 }
 
+func TestHandleRetryMerge_AcceptsMergeFailed(t *testing.T) {
+	db := testDB(t)
+
+	db.Create(&models.Car{ID: "car-mf1", Type: "task", Status: "merge-failed", Track: "backend"})
+
+	var buf bytes.Buffer
+	msg := models.Message{Subject: "retry-merge", CarID: "car-mf1", Body: "fixed Docker"}
+	handleRetryMerge(db, msg, &buf)
+
+	var car models.Car
+	db.First(&car, "id = ?", "car-mf1")
+	if car.Status != "done" {
+		t.Errorf("car status = %q, want %q", car.Status, "done")
+	}
+	if !strings.Contains(buf.String(), "setting car car-mf1 back to done") {
+		t.Errorf("output = %q, want setting back to done", buf.String())
+	}
+}
+
+func TestHandleRetryMerge_RejectsOpenStatus(t *testing.T) {
+	db := testDB(t)
+
+	db.Create(&models.Car{ID: "car-mf2", Type: "task", Status: "open", Track: "backend"})
+
+	var buf bytes.Buffer
+	msg := models.Message{Subject: "retry-merge", CarID: "car-mf2", Body: "try again"}
+	handleRetryMerge(db, msg, &buf)
+
+	if !strings.Contains(buf.String(), "not blocked/merge-failed") {
+		t.Errorf("output = %q, want rejection for open status", buf.String())
+	}
+}
+
 // --- handleRequeueCar ---
 
 func TestHandleRequeueCar_NoCarID(t *testing.T) {

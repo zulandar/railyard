@@ -550,6 +550,8 @@ func switchFailureReason(cat SwitchFailureCategory) string {
 		return "repeated-pre-test-failure"
 	case SwitchFailTest:
 		return "repeated-test-failure"
+	case SwitchFailInfra:
+		return "infrastructure-test-failure"
 	case SwitchFailMerge:
 		return "repeated-merge-conflict"
 	case SwitchFailPush:
@@ -564,6 +566,29 @@ func switchFailureReason(cat SwitchFailureCategory) string {
 // maybeSwitchEscalate checks whether a car has exceeded the switch failure
 // threshold and, if so, escalates to Claude with the failure category.
 func maybeSwitchEscalate(ctx context.Context, db *gorm.DB, cfg *config.Config, carID string, cat SwitchFailureCategory, switchErr error, out io.Writer) {
+	// Infrastructure failures escalate immediately — no threshold needed.
+	// The human message was already sent by Switch(); here we also escalate
+	// to Claude for a suggested action.
+	if cat == SwitchFailInfra {
+		reason := switchFailureReason(cat)
+		fmt.Fprintf(out, "Car %s infra failure (%s) — escalating immediately\n", carID, reason)
+
+		go func(carID, reason string) {
+			res, escErr := EscalateToClaude(ctx, EscalateOpts{
+				CarID:   carID,
+				Reason:  reason,
+				Details: fmt.Sprintf("Infrastructure test failure for car %s. The test command failed due to environment issues (missing dependencies, broken Docker, misconfigured commands), not code problems. Latest: %v", carID, switchErr),
+				DB:      db,
+			})
+			if escErr != nil {
+				log.Printf("escalation error for %s: %v", carID, escErr)
+				return
+			}
+			handleEscalateResult(db, "", carID, res, out)
+		}(carID, reason)
+		return
+	}
+
 	maxFailures := cfg.Stall.MaxSwitchFailures
 	if maxFailures <= 0 {
 		maxFailures = 3

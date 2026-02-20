@@ -1,6 +1,7 @@
 package yardmaster
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -47,6 +48,79 @@ func TestSwitchResult_ZeroValue(t *testing.T) {
 	r := SwitchResult{}
 	if r.CarID != "" || r.Branch != "" || r.TestsPassed || r.Merged || r.AlreadyMerged || r.PRCreated || r.PRUrl != "" || r.FailureCategory != SwitchFailNone {
 		t.Error("zero-value SwitchResult should have empty/false fields")
+	}
+}
+
+// --- classifyTestFailure tests ---
+
+func TestClassifyTestFailure_ExitCode127(t *testing.T) {
+	// Simulate exit code 127 (command not found).
+	cmd := exec.Command("sh", "-c", "exit 127")
+	err := cmd.Run()
+	cat := classifyTestFailure(err, "")
+	if cat != SwitchFailInfra {
+		t.Errorf("exit 127: got %q, want %q", cat, SwitchFailInfra)
+	}
+}
+
+func TestClassifyTestFailure_ExitCode126(t *testing.T) {
+	cmd := exec.Command("sh", "-c", "exit 126")
+	err := cmd.Run()
+	cat := classifyTestFailure(err, "")
+	if cat != SwitchFailInfra {
+		t.Errorf("exit 126: got %q, want %q", cat, SwitchFailInfra)
+	}
+}
+
+func TestClassifyTestFailure_InfraPatterns(t *testing.T) {
+	tests := []struct {
+		name   string
+		output string
+	}{
+		{"command not found", "sh: vitest: command not found"},
+		{"permission denied", "sh: ./run_tests.sh: Permission denied"},
+		{"docker daemon", "Cannot connect to the Docker daemon"},
+		{"connection refused", "connect ECONNREFUSED 127.0.0.1:5432"},
+		{"no config", "Error: No configuration file provided"},
+		{"not installed", "Error: jest is not installed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := fmt.Errorf("tests failed: exit status 1")
+			cat := classifyTestFailure(err, tt.output)
+			if cat != SwitchFailInfra {
+				t.Errorf("output %q: got %q, want %q", tt.output, cat, SwitchFailInfra)
+			}
+		})
+	}
+}
+
+func TestClassifyTestFailure_CodeTestFailure(t *testing.T) {
+	err := fmt.Errorf("tests failed: exit status 1")
+	output := "--- FAIL: TestSomething (0.00s)\n    expected 42 but got 0\nFAIL\texit status 1"
+	cat := classifyTestFailure(err, output)
+	if cat != SwitchFailTest {
+		t.Errorf("code test failure: got %q, want %q", cat, SwitchFailTest)
+	}
+}
+
+func TestTruncateOutput_Short(t *testing.T) {
+	out := truncateOutput("hello", 100)
+	if out != "hello" {
+		t.Errorf("got %q, want %q", out, "hello")
+	}
+}
+
+func TestTruncateOutput_Long(t *testing.T) {
+	out := truncateOutput("abcdefghij", 5)
+	if !strings.HasPrefix(out, "abcde") || !strings.Contains(out, "truncated") {
+		t.Errorf("got %q, want truncated output", out)
+	}
+}
+
+func TestSwitchFailInfra_Constant(t *testing.T) {
+	if SwitchFailInfra != "infra-failed" {
+		t.Errorf("SwitchFailInfra = %q, want %q", SwitchFailInfra, "infra-failed")
 	}
 }
 

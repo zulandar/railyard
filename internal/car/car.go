@@ -44,13 +44,14 @@ type StatusCount struct {
 // ValidTransitions maps each status to its valid next statuses.
 // The special case "any → blocked" is handled in isValidTransition.
 var ValidTransitions = map[string][]string{
-	"draft":       {"open"},
-	"open":        {"ready", "cancelled", "blocked"},
-	"ready":       {"claimed", "blocked"},
-	"claimed":     {"in_progress", "blocked"},
-	"in_progress": {"done", "blocked"},
-	"done":        {"merged"},
-	"blocked":     {"open", "ready"},
+	"draft":        {"open"},
+	"open":         {"ready", "cancelled", "blocked"},
+	"ready":        {"claimed", "blocked"},
+	"claimed":      {"in_progress", "blocked"},
+	"in_progress":  {"done", "blocked"},
+	"done":         {"merged", "merge-failed"},
+	"blocked":      {"open", "ready"},
+	"merge-failed": {"done"},
 }
 
 // GenerateID creates a unique car ID in car-xxxxx format (5-char hex).

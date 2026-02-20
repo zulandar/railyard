@@ -1,6 +1,7 @@
 package yardmaster
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -31,6 +32,7 @@ const (
 	SwitchFailFetch   SwitchFailureCategory = "fetch-failed"
 	SwitchFailPreTest SwitchFailureCategory = "pre-test-failed"
 	SwitchFailTest    SwitchFailureCategory = "test-failed"
+	SwitchFailInfra   SwitchFailureCategory = "infra-failed"
 	SwitchFailMerge   SwitchFailureCategory = "merge-conflict"
 	SwitchFailPush    SwitchFailureCategory = "push-failed"
 	SwitchFailPR      SwitchFailureCategory = "pr-failed"
@@ -103,19 +105,32 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 
 		if testErr != nil {
 			result.TestsPassed = false
-			// Set car status to blocked and notify.
-			db.Model(&models.Car{}).Where("id = ?", carID).Update("status", "blocked")
-			if car.Assignee != "" {
-				messaging.Send(db, "yardmaster", car.Assignee, "test-failure",
-					fmt.Sprintf("Tests failed for car %s on branch %s:\n%s", carID, car.Branch, testOutput),
-					messaging.SendOpts{CarID: carID, Priority: "urgent"},
-				)
-			}
+
 			if strings.Contains(testErr.Error(), "pre-test command failed") {
 				result.FailureCategory = SwitchFailPreTest
 			} else {
-				result.FailureCategory = SwitchFailTest
+				result.FailureCategory = classifyTestFailure(testErr, testOutput)
 			}
+
+			if result.FailureCategory == SwitchFailInfra {
+				// Infrastructure failure — set merge-failed, escalate to human.
+				db.Model(&models.Car{}).Where("id = ?", carID).Update("status", "merge-failed")
+				messaging.Send(db, "yardmaster", "human", "infra-test-failure",
+					fmt.Sprintf("Infrastructure test failure for car %s (%s) on branch %s:\n%s",
+						carID, car.Track, car.Branch, truncateOutput(testOutput, 500)),
+					messaging.SendOpts{CarID: carID, Priority: "urgent"},
+				)
+			} else {
+				// Code test failure — set blocked, notify engine.
+				db.Model(&models.Car{}).Where("id = ?", carID).Update("status", "blocked")
+				if car.Assignee != "" {
+					messaging.Send(db, "yardmaster", car.Assignee, "test-failure",
+						fmt.Sprintf("Tests failed for car %s on branch %s:\n%s", carID, car.Branch, testOutput),
+						messaging.SendOpts{CarID: carID, Priority: "urgent"},
+					)
+				}
+			}
+
 			result.Error = fmt.Errorf("tests failed: %w", testErr)
 			return result, nil // return result without error — test failure is a normal outcome
 		}
@@ -298,6 +313,59 @@ var noTestPatterns = []string{
 	"no test files",
 	"No tests found",
 	"No test suites found",
+}
+
+// infraPatterns are output patterns that indicate infrastructure failures
+// rather than code test assertion failures.
+var infraPatterns = []string{
+	"command not found",
+	"permission denied",
+	"no such file or directory",
+	"no configuration file",
+	"service not running",
+	"cannot connect",
+	"connection refused",
+	"econnrefused",
+	"docker: error",
+	"cannot connect to the docker daemon",
+	"is the docker daemon running",
+	"docker compose",
+	"exec format error",
+	"not installed",
+	"module not found",
+	"no such module",
+}
+
+// classifyTestFailure distinguishes infrastructure failures from code test
+// failures by inspecting the error and output. Exit codes 126 (permission
+// denied) and 127 (command not found) are always infrastructure. Otherwise
+// the output is pattern-matched against known infrastructure signatures.
+func classifyTestFailure(err error, output string) SwitchFailureCategory {
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		code := exitErr.ExitCode()
+		if code == 127 || code == 126 {
+			return SwitchFailInfra
+		}
+	}
+
+	lower := strings.ToLower(output)
+	for _, pat := range infraPatterns {
+		if strings.Contains(lower, pat) {
+			return SwitchFailInfra
+		}
+	}
+
+	return SwitchFailTest
+}
+
+// truncateOutput returns at most maxLen bytes of output, appending a
+// truncation notice if the output was trimmed.
+func truncateOutput(output string, maxLen int) string {
+	if len(output) <= maxLen {
+		return output
+	}
+	return output[:maxLen] + "\n... (truncated)"
 }
 
 // runTests checks out the branch and runs the test suite.

@@ -252,12 +252,13 @@ type EngineInfo struct {
 
 // TrackSummary holds per-track car counts.
 type TrackSummary struct {
-	Track      string
-	Open       int64
-	Ready      int64
-	InProgress int64
-	Done       int64
-	Blocked    int64
+	Track       string
+	Open        int64
+	Ready       int64
+	InProgress  int64
+	Done        int64
+	Blocked     int64
+	MergeFailed int64
 }
 
 // Status gathers dashboard information.
@@ -300,6 +301,7 @@ func Status(db *gorm.DB, tmux Tmux) (*StatusInfo, error) {
 		db.Model(&models.Car{}).Where("track = ? AND status = ?", t.Name, "in_progress").Count(&ts.InProgress)
 		db.Model(&models.Car{}).Where("track = ? AND status = ?", t.Name, "done").Count(&ts.Done)
 		db.Model(&models.Car{}).Where("track = ? AND status = ?", t.Name, "blocked").Count(&ts.Blocked)
+		db.Model(&models.Car{}).Where("track = ? AND status = ?", t.Name, "merge-failed").Count(&ts.MergeFailed)
 		// Ready = open with no unresolved blockers.
 		var ready int64
 		db.Model(&models.Car{}).
@@ -370,11 +372,11 @@ func FormatStatus(info *StatusInfo) string {
 
 	// Track summary.
 	b.WriteString("TRACKS\n")
-	b.WriteString(fmt.Sprintf("%-12s %6s %6s %6s %6s %6s\n",
-		"TRACK", "OPEN", "READY", "ACTIVE", "DONE", "BLOCKED"))
+	b.WriteString(fmt.Sprintf("%-12s %6s %6s %6s %6s %6s %8s\n",
+		"TRACK", "OPEN", "READY", "ACTIVE", "DONE", "BLOCKED", "MRG-FAIL"))
 	for _, t := range info.TrackSummary {
-		b.WriteString(fmt.Sprintf("%-12s %6d %6d %6d %6d %6d\n",
-			t.Track, t.Open, t.Ready, t.InProgress, t.Done, t.Blocked))
+		b.WriteString(fmt.Sprintf("%-12s %6d %6d %6d %6d %6d %8d\n",
+			t.Track, t.Open, t.Ready, t.InProgress, t.Done, t.Blocked, t.MergeFailed))
 	}
 	if len(info.TrackSummary) == 0 {
 		b.WriteString("  (no active tracks)\n")
