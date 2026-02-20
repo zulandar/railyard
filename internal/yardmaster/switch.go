@@ -27,13 +27,13 @@ type SwitchOpts struct {
 type SwitchFailureCategory string
 
 const (
-	SwitchFailNone       SwitchFailureCategory = ""
-	SwitchFailFetch      SwitchFailureCategory = "fetch-failed"
-	SwitchFailPreTest    SwitchFailureCategory = "pre-test-failed"
-	SwitchFailTest       SwitchFailureCategory = "test-failed"
-	SwitchFailMerge      SwitchFailureCategory = "merge-conflict"
-	SwitchFailPush       SwitchFailureCategory = "push-failed"
-	SwitchFailPR         SwitchFailureCategory = "pr-failed"
+	SwitchFailNone    SwitchFailureCategory = ""
+	SwitchFailFetch   SwitchFailureCategory = "fetch-failed"
+	SwitchFailPreTest SwitchFailureCategory = "pre-test-failed"
+	SwitchFailTest    SwitchFailureCategory = "test-failed"
+	SwitchFailMerge   SwitchFailureCategory = "merge-conflict"
+	SwitchFailPush    SwitchFailureCategory = "push-failed"
+	SwitchFailPR      SwitchFailureCategory = "pr-failed"
 )
 
 // SwitchResult contains the outcome of a switch operation.
