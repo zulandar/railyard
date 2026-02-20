@@ -1,0 +1,140 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Test
+        run: go test ./... -count=1 -timeout 300s -race
+
+  release:
+    name: Release
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          COMMIT="${GITHUB_SHA::8}"
+          DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          LDFLAGS="-s -w -X main.Version=${VERSION} -X main.Commit=${COMMIT} -X main.Date=${DATE}"
+          OUTPUT="ry-${VERSION}-${GOOS}-${GOARCH}"
+          if [ "$GOOS" = "windows" ]; then OUTPUT="${OUTPUT}.exe"; fi
+          go build -ldflags "${LDFLAGS}" -o "${OUTPUT}" ./cmd/ry/
+          tar czf "${OUTPUT}.tar.gz" "${OUTPUT}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ry-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: "*.tar.gz"
+
+  publish:
+    name: Publish Release
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+
+          # Find previous tag.
+          PREV_TAG=$(git tag --sort=-v:refname | grep -E '^v' | sed -n '2p')
+
+          if [ -z "$PREV_TAG" ]; then
+            RANGE="HEAD"
+          else
+            RANGE="${PREV_TAG}..HEAD"
+          fi
+
+          # Collect commits grouped by type.
+          {
+            echo "## What's Changed"
+            echo ""
+
+            # Features
+            FEATURES=$(git log "$RANGE" --pretty=format:"%s (%h)" --grep="^[Aa]dd " --grep="^[Ff]eat" --grep="^[Nn]ew " | head -50)
+            if [ -n "$FEATURES" ]; then
+              echo "### Features"
+              echo "$FEATURES" | sed 's/^/- /'
+              echo ""
+            fi
+
+            # Fixes
+            FIXES=$(git log "$RANGE" --pretty=format:"%s (%h)" --grep="^[Ff]ix" | head -50)
+            if [ -n "$FIXES" ]; then
+              echo "### Bug Fixes"
+              echo "$FIXES" | sed 's/^/- /'
+              echo ""
+            fi
+
+            # All other commits
+            OTHER=$(git log "$RANGE" --pretty=format:"%s (%h)" --invert-grep --grep="^[Aa]dd " --grep="^[Ff]eat" --grep="^[Nn]ew " --grep="^[Ff]ix" | head -50)
+            if [ -n "$OTHER" ]; then
+              echo "### Other Changes"
+              echo "$OTHER" | sed 's/^/- /'
+              echo ""
+            fi
+
+            echo "---"
+            echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREV_TAG}...${VERSION}"
+          } > changelog.md
+
+          cat changelog.md
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file changelog.md \
+            artifacts/*
