@@ -276,7 +276,7 @@ var languageIgnorePatterns = map[string][]string{
 func railyardPatterns() []string {
 	return []string{
 		".claude",
-		"engines/",
+		".railyard/",
 		"cocoindex/.venv/",
 		"cocoindex/__pycache__/",
 	}

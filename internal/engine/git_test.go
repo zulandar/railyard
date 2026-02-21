@@ -191,7 +191,7 @@ func TestEnsureWorktree_CreatesClaudeIgnore(t *testing.T) {
 	}
 
 	content := string(data)
-	for _, want := range []string{"railyard.yaml", ".beads/", "engines/"} {
+	for _, want := range []string{"railyard.yaml", ".beads/", ".railyard/"} {
 		if !strings.Contains(content, want) {
 			t.Errorf(".claudeignore missing %q, got:\n%s", want, content)
 		}

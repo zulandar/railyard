@@ -51,10 +51,10 @@ func DetectBaseBranch(repoDir, defaultBranch string) string {
 	return "main"
 }
 
-// EnsureWorktree creates a git worktree at engines/<engineID> if it doesn't exist.
+// EnsureWorktree creates a git worktree at .railyard/engines/<engineID> if it doesn't exist.
 // Returns the absolute path to the worktree directory.
 func EnsureWorktree(repoDir, engineID string) (string, error) {
-	wtDir := filepath.Join(repoDir, "engines", engineID)
+	wtDir := filepath.Join(repoDir, ".railyard", "engines", engineID)
 
 	// If worktree directory already exists (stale from crash), reuse it.
 	if _, err := os.Stat(wtDir); err == nil {
@@ -62,7 +62,7 @@ func EnsureWorktree(repoDir, engineID string) (string, error) {
 		return wtDir, nil
 	}
 
-	if err := os.MkdirAll(filepath.Join(repoDir, "engines"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(repoDir, ".railyard", "engines"), 0755); err != nil {
 		return "", fmt.Errorf("engine: create engines dir: %w", err)
 	}
 
@@ -84,14 +84,14 @@ func writeClaudeIgnore(wtDir string) {
 	const ignoreContent = `# Railyard orchestration files — not part of the project
 railyard.yaml
 .beads/
-engines/
+.railyard/
 `
 	os.WriteFile(filepath.Join(wtDir, ".claudeignore"), []byte(ignoreContent), 0644)
 }
 
 // RemoveWorktree removes an engine's git worktree.
 func RemoveWorktree(repoDir, engineID string) error {
-	wtPath := filepath.Join("engines", engineID)
+	wtPath := filepath.Join(".railyard", "engines", engineID)
 	cmd := exec.Command("git", "worktree", "remove", "--force", wtPath)
 	cmd.Dir = repoDir
 	out, err := cmd.CombinedOutput()
@@ -107,7 +107,7 @@ func RemoveWorktree(repoDir, engineID string) error {
 
 // CleanupWorktrees removes all engine worktrees and prunes stale entries.
 func CleanupWorktrees(repoDir string) error {
-	enginesDir := filepath.Join(repoDir, "engines")
+	enginesDir := filepath.Join(repoDir, ".railyard", "engines")
 	entries, err := os.ReadDir(enginesDir)
 	if err != nil {
 		if os.IsNotExist(err) {

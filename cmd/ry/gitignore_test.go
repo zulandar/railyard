@@ -112,7 +112,7 @@ func TestReadGitIgnoreEntries(t *testing.T) {
 	content := `# comment
 .claude
 /ry
-engines/
+.railyard/
 
 # another comment
 *.exe
@@ -120,7 +120,7 @@ engines/
 	os.WriteFile(path, []byte(content), 0644)
 
 	entries := readGitIgnoreEntries(path)
-	for _, want := range []string{".claude", "/ry", "engines/", "*.exe"} {
+	for _, want := range []string{".claude", "/ry", ".railyard/", "*.exe"} {
 		if !entries[want] {
 			t.Errorf("missing entry %q", want)
 		}
@@ -264,7 +264,7 @@ func TestRunGitIgnore_SkipsDuplicates(t *testing.T) {
 	os.WriteFile("go.mod", []byte("module test"), 0644)
 
 	// Pre-create .gitignore with some Go patterns.
-	existing := ".claude\nengines/\n*.exe\n*.test\n"
+	existing := ".claude\n.railyard/\n*.exe\n*.test\n"
 	os.WriteFile(".gitignore", []byte(existing), 0644)
 
 	var buf bytes.Buffer
@@ -325,7 +325,7 @@ func TestRailyardPatterns(t *testing.T) {
 	if !has[".claude"] {
 		t.Error("missing .claude")
 	}
-	if !has["engines/"] {
-		t.Error("missing engines/")
+	if !has[".railyard/"] {
+		t.Error("missing .railyard/")
 	}
 }

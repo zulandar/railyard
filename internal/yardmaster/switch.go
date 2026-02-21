@@ -482,7 +482,7 @@ func gitPush(repoDir string) error {
 // can be checked out elsewhere. This is a best-effort operation — if the
 // worktree doesn't exist or is already detached, the error is silently ignored.
 func detachEngineWorktree(repoDir, engineID string) {
-	wtDir := filepath.Join(repoDir, "engines", engineID)
+	wtDir := filepath.Join(repoDir, ".railyard", "engines", engineID)
 	if _, err := os.Stat(wtDir); err != nil {
 		return // worktree directory doesn't exist
 	}

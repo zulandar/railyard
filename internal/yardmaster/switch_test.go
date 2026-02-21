@@ -270,7 +270,7 @@ func TestDetachEngineWorktree_DetachesCheckedOutBranch(t *testing.T) {
 
 	// Create worktree for the engine on the feature branch.
 	engineID := "eng-001"
-	wtDir := filepath.Join(repoDir, "engines", engineID)
+	wtDir := filepath.Join(repoDir, ".railyard", "engines", engineID)
 	os.MkdirAll(filepath.Dir(wtDir), 0o755)
 	run(repoDir, "git", "worktree", "add", wtDir, "ry/alice/backend/car-001")
 
@@ -324,7 +324,7 @@ func TestDetachEngineWorktree_AlreadyDetached(t *testing.T) {
 	run(repoDir, "git", "checkout", "main")
 
 	engineID := "eng-002"
-	wtDir := filepath.Join(repoDir, "engines", engineID)
+	wtDir := filepath.Join(repoDir, ".railyard", "engines", engineID)
 	os.MkdirAll(filepath.Dir(wtDir), 0o755)
 	run(repoDir, "git", "worktree", "add", wtDir, "feature")
 
