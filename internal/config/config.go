@@ -14,6 +14,7 @@ type Config struct {
 	Owner             string              `yaml:"owner"`
 	Repo              string              `yaml:"repo"`
 	BranchPrefix      string              `yaml:"branch_prefix"`
+	DefaultBranch     string              `yaml:"default_branch"`
 	DefaultAcceptance string              `yaml:"default_acceptance"`
 	RequirePR         bool                `yaml:"require_pr"`
 	Dolt              DoltConfig          `yaml:"dolt"`

@@ -77,6 +77,103 @@ func addCommit(t *testing.T, dir, msg string) {
 	}
 }
 
+// --- DetectBaseBranch tests ---
+
+func TestDetectBaseBranch_CurrentBranch(t *testing.T) {
+	dir := initTestRepo(t)
+	// On main branch — should detect "main".
+	got := DetectBaseBranch(dir, "")
+	if got != "main" {
+		t.Errorf("DetectBaseBranch = %q, want %q", got, "main")
+	}
+}
+
+func TestDetectBaseBranch_NonMainBranch(t *testing.T) {
+	dir := initTestRepo(t)
+	// Create and checkout a different branch.
+	cmd := exec.Command("git", "checkout", "-b", "develop")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("checkout -b develop: %s\n%s", err, out)
+	}
+
+	got := DetectBaseBranch(dir, "")
+	if got != "develop" {
+		t.Errorf("DetectBaseBranch = %q, want %q", got, "develop")
+	}
+}
+
+func TestDetectBaseBranch_DetachedHEAD_FallsBackToConfig(t *testing.T) {
+	dir := initTestRepo(t)
+	// Detach HEAD.
+	cmd := exec.Command("git", "checkout", "--detach", "HEAD")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("detach HEAD: %s\n%s", err, out)
+	}
+
+	got := DetectBaseBranch(dir, "develop")
+	if got != "develop" {
+		t.Errorf("DetectBaseBranch = %q, want %q (config fallback)", got, "develop")
+	}
+}
+
+func TestDetectBaseBranch_DetachedHEAD_NoConfig_FallsBackToOriginHEAD(t *testing.T) {
+	// Create a bare repo as remote.
+	bareDir := t.TempDir()
+	run := func(d string, args ...string) {
+		t.Helper()
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = d
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v: %s\n%s", args, err, out)
+		}
+	}
+	run(bareDir, "git", "init", "--bare", "-b", "trunk")
+
+	// Create a working repo with that remote.
+	dir := initTestRepo(t)
+	run(dir, "git", "remote", "add", "origin", bareDir)
+	run(dir, "git", "push", "-u", "origin", "main")
+
+	// Set origin/HEAD to point to a branch called "trunk" in the bare repo.
+	// First create "trunk" branch in the bare repo by pushing to it.
+	run(dir, "git", "push", "origin", "main:trunk")
+	// Now set origin/HEAD locally.
+	run(dir, "git", "remote", "set-head", "origin", "trunk")
+
+	// Detach HEAD so step 1 fails.
+	run(dir, "git", "checkout", "--detach", "HEAD")
+
+	got := DetectBaseBranch(dir, "")
+	if got != "trunk" {
+		t.Errorf("DetectBaseBranch = %q, want %q (origin/HEAD fallback)", got, "trunk")
+	}
+}
+
+func TestDetectBaseBranch_FinalFallbackMain(t *testing.T) {
+	// No repo dir, no config — should return "main".
+	got := DetectBaseBranch("", "")
+	if got != "main" {
+		t.Errorf("DetectBaseBranch = %q, want %q (final fallback)", got, "main")
+	}
+}
+
+func TestDetectBaseBranch_DetachedHEAD_NoRemote_FallsBackToMain(t *testing.T) {
+	dir := initTestRepo(t)
+	// Detach HEAD, no remote configured.
+	cmd := exec.Command("git", "checkout", "--detach", "HEAD")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("detach HEAD: %s\n%s", err, out)
+	}
+
+	got := DetectBaseBranch(dir, "")
+	if got != "main" {
+		t.Errorf("DetectBaseBranch = %q, want %q (no remote, final fallback)", got, "main")
+	}
+}
+
 // --- EnsureWorktree tests ---
 
 func TestEnsureWorktree_CreatesClaudeIgnore(t *testing.T) {

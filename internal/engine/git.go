@@ -9,6 +9,48 @@ import (
 	"time"
 )
 
+// DetectBaseBranch returns the base branch to use for new cars.
+// Fallback chain:
+//  1. git symbolic-ref --short HEAD on repoDir (current branch)
+//  2. defaultBranch parameter (from config) if non-empty
+//  3. origin/HEAD target (remote default branch)
+//  4. "main" as final fallback
+func DetectBaseBranch(repoDir, defaultBranch string) string {
+	// Step 1: current branch via symbolic-ref.
+	if repoDir != "" {
+		cmd := exec.Command("git", "symbolic-ref", "--short", "HEAD")
+		cmd.Dir = repoDir
+		if out, err := cmd.CombinedOutput(); err == nil {
+			if branch := strings.TrimSpace(string(out)); branch != "" {
+				return branch
+			}
+		}
+	}
+
+	// Step 2: explicit config default.
+	if defaultBranch != "" {
+		return defaultBranch
+	}
+
+	// Step 3: remote default branch via origin/HEAD.
+	if repoDir != "" {
+		cmd := exec.Command("git", "symbolic-ref", "refs/remotes/origin/HEAD")
+		cmd.Dir = repoDir
+		if out, err := cmd.CombinedOutput(); err == nil {
+			// Output is like "refs/remotes/origin/main" — extract the branch name.
+			ref := strings.TrimSpace(string(out))
+			if i := strings.LastIndex(ref, "/"); i >= 0 {
+				if branch := ref[i+1:]; branch != "" {
+					return branch
+				}
+			}
+		}
+	}
+
+	// Step 4: final fallback.
+	return "main"
+}
+
 // EnsureWorktree creates a git worktree at engines/<engineID> if it doesn't exist.
 // Returns the absolute path to the worktree directory.
 func EnsureWorktree(repoDir, engineID string) (string, error) {

@@ -24,6 +24,15 @@ repo: git@github.com:org/myproject.git
 # Branch prefix for Railyard-managed branches (default: ry/{owner}).
 # branch_prefix: ry/yourname
 
+# Base branch for new cars. When omitted, Railyard auto-detects using:
+#   1. Current branch of the primary repo (git symbolic-ref HEAD)
+#   2. Remote default branch (origin/HEAD)
+#   3. Fallback: 'main'
+# Set this explicitly if your repo uses a non-standard default branch
+# (e.g. develop, trunk) and you want all cars to target it regardless
+# of which branch is currently checked out.
+# default_branch: main
+
 # Default acceptance criteria appended to every new car if the car doesn't
 # define its own. Useful for org-wide standards like "all tests pass".
 # default_acceptance: "All tests pass. No lint warnings."

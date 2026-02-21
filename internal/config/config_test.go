@@ -455,6 +455,34 @@ tracks:
 	}
 }
 
+func TestParse_DefaultBranch_Explicit(t *testing.T) {
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+default_branch: develop
+tracks:
+  - name: backend
+    language: go
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.DefaultBranch != "develop" {
+		t.Errorf("DefaultBranch = %q, want %q", cfg.DefaultBranch, "develop")
+	}
+}
+
+func TestParse_DefaultBranch_OmittedIsEmpty(t *testing.T) {
+	cfg, err := Parse([]byte(minimalYAML))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.DefaultBranch != "" {
+		t.Errorf("DefaultBranch = %q, want empty when omitted", cfg.DefaultBranch)
+	}
+}
+
 func TestParse_RequirePR(t *testing.T) {
 	yaml := `
 owner: alice
