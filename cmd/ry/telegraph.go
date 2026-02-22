@@ -12,6 +12,7 @@ import (
 	"github.com/zulandar/railyard/internal/db"
 	"github.com/zulandar/railyard/internal/orchestration"
 	"github.com/zulandar/railyard/internal/telegraph"
+	discordadapter "github.com/zulandar/railyard/internal/telegraph/discord"
 	slackadapter "github.com/zulandar/railyard/internal/telegraph/slack"
 )
 
@@ -130,7 +131,10 @@ func createAdapter(cfg *config.Config) (telegraph.Adapter, error) {
 			ChannelID: cfg.Telegraph.Channel,
 		})
 	case "discord":
-		return nil, fmt.Errorf("telegraph: discord adapter not yet implemented")
+		return discordadapter.New(discordadapter.AdapterOpts{
+			BotToken:  cfg.Telegraph.Discord.BotToken,
+			ChannelID: cfg.Telegraph.Channel,
+		})
 	default:
 		return nil, fmt.Errorf("telegraph: unsupported platform %q", cfg.Telegraph.Platform)
 	}
