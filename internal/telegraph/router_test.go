@@ -326,6 +326,72 @@ func TestHandle_MentionInThread(t *testing.T) {
 	}
 }
 
+// --- Follow-up message in channel resumes after process exits ---
+
+func TestHandle_FollowUpInChannelResumesSession(t *testing.T) {
+	db := openRouterTestDB(t)
+	router, adapter, spawner := setupRouter(t, db, "bot-123")
+
+	ctx := context.Background()
+
+	// 1. Initial @mention in a channel (no thread) — creates session with threadID=channelID.
+	router.Handle(ctx, InboundMessage{
+		UserID:    "user-1",
+		UserName:  "alice",
+		ChannelID: "C1",
+		Text:      "@railyard what about car-111ab?",
+	})
+
+	if len(spawner.processes) != 1 {
+		t.Fatalf("expected 1 process, got %d", len(spawner.processes))
+	}
+
+	// 2. Simulate process exit (one-shot model: Claude responds and exits).
+	//    monitorProcess removes the in-memory session and ReleaseLock marks it "completed".
+	proc := spawner.lastProcess()
+	close(proc.recvCh) // EOF on output (relayOutput finishes)
+	proc.Close()       // signal done (monitorProcess cleans up)
+
+	// Give monitorProcess goroutine time to clean up.
+	time.Sleep(50 * time.Millisecond)
+
+	// Verify the session was cleaned up from memory.
+	if router.sessionMgr.HasSession("C1", "C1") {
+		t.Fatal("expected session to be removed from memory after process exit")
+	}
+
+	// Verify it exists as a historic session (completed in DB).
+	if !router.sessionMgr.HasHistoricSession("C1", "C1") {
+		t.Fatal("expected historic session in DB after process exit")
+	}
+
+	// Clear sent messages from the initial exchange.
+	adapter.mu.Lock()
+	adapter.sent = nil
+	adapter.mu.Unlock()
+
+	// 3. Follow-up message WITHOUT @mention, same channel, no thread ID.
+	//    This is the exact scenario from the bug: user says "go ahead and work on it"
+	//    without re-mentioning the bot, and threadID is empty.
+	router.Handle(ctx, InboundMessage{
+		UserID:    "user-1",
+		UserName:  "alice",
+		ChannelID: "C1",
+		Text:      "go ahead and have yardmaster work on it",
+	})
+
+	// Should have resumed: spawner now has 2 processes.
+	if len(spawner.processes) != 2 {
+		t.Fatalf("expected 2 processes (original + resumed), got %d", len(spawner.processes))
+	}
+
+	// Ack should have been sent.
+	all := adapter.AllSent()
+	if len(all) == 0 {
+		t.Fatal("expected ack message on resume")
+	}
+}
+
 // --- Unknown/unhandled message ---
 
 func TestHandle_IgnoresUnknownMessage(t *testing.T) {
@@ -386,6 +452,22 @@ func TestIsCommand(t *testing.T) {
 		got := isCommand(tt.text)
 		if got != tt.want {
 			t.Errorf("isCommand(%q) = %v, want %v", tt.text, got, tt.want)
+		}
+	}
+}
+
+func TestResolveThreadID(t *testing.T) {
+	tests := []struct {
+		channelID, threadID, want string
+	}{
+		{"C1", "T1", "T1"},
+		{"C1", "", "C1"},
+		{"C1", "C1", "C1"},
+	}
+	for _, tt := range tests {
+		got := resolveThreadID(tt.channelID, tt.threadID)
+		if got != tt.want {
+			t.Errorf("resolveThreadID(%q, %q) = %q, want %q", tt.channelID, tt.threadID, got, tt.want)
 		}
 	}
 }

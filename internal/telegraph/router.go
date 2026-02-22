@@ -91,38 +91,38 @@ func (r *Router) Handle(ctx context.Context, msg InboundMessage) {
 		return
 	}
 
-	// 3. Thread reply with active session.
-	if msg.ThreadID != "" && r.sessionMgr.HasSession(msg.ChannelID, msg.ThreadID) {
-		fmt.Fprintf(r.out, "telegraph: router: → active session [ch=%s thread=%s]\n", msg.ChannelID, msg.ThreadID)
-		r.sendAck(ctx, msg.ChannelID, msg.ThreadID)
-		if err := r.sessionMgr.Route(ctx, msg.ChannelID, msg.ThreadID, msg.UserName, text); err != nil {
+	// Resolve thread ID: for top-level channel messages use the channel ID
+	// as the thread key, matching the fallback in path 5 (new session).
+	threadID := resolveThreadID(msg.ChannelID, msg.ThreadID)
+
+	// 3. Active session for this channel/thread.
+	if r.sessionMgr.HasSession(msg.ChannelID, threadID) {
+		fmt.Fprintf(r.out, "telegraph: router: → active session [ch=%s thread=%s]\n", msg.ChannelID, threadID)
+		r.sendAck(ctx, msg.ChannelID, threadID)
+		if err := r.sessionMgr.Route(ctx, msg.ChannelID, threadID, msg.UserName, text); err != nil {
 			log.Printf("telegraph: router: route to session: %v", err)
 		}
 		return
 	}
 
-	// 4. Thread reply with historic session → resume.
-	if msg.ThreadID != "" && r.sessionMgr.HasHistoricSession(msg.ChannelID, msg.ThreadID) {
-		fmt.Fprintf(r.out, "telegraph: router: → resume session [ch=%s thread=%s]\n", msg.ChannelID, msg.ThreadID)
-		r.sendAck(ctx, msg.ChannelID, msg.ThreadID)
-		_, err := r.sessionMgr.Resume(ctx, msg.ChannelID, msg.ThreadID, msg.UserName)
+	// 4. Historic (completed/expired) session → resume with conversation context.
+	if r.sessionMgr.HasHistoricSession(msg.ChannelID, threadID) {
+		fmt.Fprintf(r.out, "telegraph: router: → resume session [ch=%s thread=%s]\n", msg.ChannelID, threadID)
+		r.sendAck(ctx, msg.ChannelID, threadID)
+		_, err := r.sessionMgr.Resume(ctx, msg.ChannelID, threadID, msg.UserName)
 		if err != nil {
 			log.Printf("telegraph: router: resume session: %v", err)
 			return
 		}
 		// Route the message to the newly resumed session.
-		if err := r.sessionMgr.Route(ctx, msg.ChannelID, msg.ThreadID, msg.UserName, text); err != nil {
+		if err := r.sessionMgr.Route(ctx, msg.ChannelID, threadID, msg.UserName, text); err != nil {
 			log.Printf("telegraph: router: route after resume: %v", err)
 		}
 		return
 	}
 
-	// 5. New message (non-thread or thread with no session history) → new session.
+	// 5. New message with @mention → new session.
 	if isMention(text) {
-		threadID := msg.ThreadID
-		if threadID == "" {
-			threadID = msg.ChannelID // use channel as thread for top-level messages
-		}
 		fmt.Fprintf(r.out, "telegraph: router: → new session [ch=%s thread=%s]\n", msg.ChannelID, threadID)
 		r.sendAck(ctx, msg.ChannelID, threadID)
 		_, err := r.sessionMgr.NewSession(ctx, "telegraph", msg.UserName, threadID, msg.ChannelID)
@@ -139,6 +139,17 @@ func (r *Router) Handle(ctx context.Context, msg InboundMessage) {
 
 	// 6. Unknown/unhandled message → ignore.
 	fmt.Fprintf(r.out, "telegraph: router: → ignore (no mention, no thread session)\n")
+}
+
+// resolveThreadID returns the effective thread ID for session lookups.
+// For top-level channel messages (empty threadID), the channel ID is used
+// as the thread key so that follow-up messages in the same channel can
+// find the session even without an explicit thread.
+func resolveThreadID(channelID, threadID string) string {
+	if threadID == "" {
+		return channelID
+	}
+	return threadID
 }
 
 // truncate returns s truncated to maxLen with "..." appended if needed.
