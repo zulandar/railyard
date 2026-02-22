@@ -21,6 +21,7 @@ type Car struct {
 	Assignee    string  `gorm:"size:64"`
 	ParentID    *string `gorm:"size:32"`
 	Branch      string  `gorm:"size:128"`
+	BaseBranch  string  `gorm:"size:64" json:"base_branch"`
 	DesignNotes string  `gorm:"type:text"`
 	Acceptance  string  `gorm:"type:text"`
 	SkipTests   bool    `gorm:"default:false"`

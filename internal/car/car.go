@@ -24,6 +24,7 @@ type CreateOpts struct {
 	Acceptance   string
 	SkipTests    bool
 	BranchPrefix string // e.g., "ry/alice"
+	BaseBranch   string // base branch for merging (empty = "main")
 }
 
 // ListFilters holds optional filters for listing cars.
@@ -112,6 +113,7 @@ func Create(db *gorm.DB, opts CreateOpts) (*models.Car, error) {
 		Status:      "draft",
 		Priority:    opts.Priority,
 		Track:       opts.Track,
+		BaseBranch:  opts.BaseBranch,
 		DesignNotes: opts.DesignNotes,
 		Acceptance:  opts.Acceptance,
 		SkipTests:   opts.SkipTests,

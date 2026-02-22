@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"text/tabwriter"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/zulandar/railyard/internal/car"
 	"github.com/zulandar/railyard/internal/config"
 	"github.com/zulandar/railyard/internal/db"
+	"github.com/zulandar/railyard/internal/engine"
 	"gorm.io/gorm"
 )
 
@@ -82,6 +84,10 @@ func runCarCreate(cmd *cobra.Command, configPath string, opts car.CreateOpts) er
 		return err
 	}
 	opts.BranchPrefix = cfg.BranchPrefix
+
+	// Snapshot the current base branch at car creation time.
+	repoDir, _ := os.Getwd()
+	opts.BaseBranch = engine.DetectBaseBranch(repoDir, cfg.DefaultBranch)
 
 	b, err := car.Create(gormDB, opts)
 	if err != nil {
