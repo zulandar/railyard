@@ -33,6 +33,7 @@ type InboundMessage struct {
 	Platform  string    // e.g. "slack", "discord"
 	ChannelID string    // platform-specific channel identifier
 	ThreadID  string    // thread/conversation identifier (empty if top-level)
+	MessageID string    // platform-specific message ID (Slack: ts, Discord: message snowflake)
 	UserID    string    // platform-specific user identifier
 	UserName  string    // human-readable username
 	Text      string    // raw message text
@@ -71,12 +72,14 @@ type BotUserIDer interface {
 
 // ThreadStarter is an optional interface that adapters can implement to
 // support creating threads from messages. When a top-level @mention triggers
-// a new dispatch session, the router uses this to create a thread for the
-// conversation instead of posting responses directly in the channel.
+// a new dispatch session, the router uses this to create a thread from the
+// user's original message and send the ack as the first reply.
 type ThreadStarter interface {
-	// StartThread sends a message to a channel and creates a thread from it.
+	// StartThread creates a thread from an existing message and sends the
+	// first reply (ack text) in that thread. messageID is the platform-specific
+	// ID of the message to thread from (Slack: ts, Discord: snowflake).
 	// Returns the thread ID that subsequent messages should be sent to.
-	StartThread(ctx context.Context, channelID, text, threadName string) (threadID string, err error)
+	StartThread(ctx context.Context, channelID, messageID, replyText, threadName string) (threadID string, err error)
 }
 
 // ThreadMessage represents a single message within a thread history.

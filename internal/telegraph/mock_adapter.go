@@ -99,9 +99,10 @@ func (m *MockAdapter) Close() error {
 	return nil
 }
 
-// StartThread implements ThreadStarter. It records the message as sent and
-// returns a synthetic thread ID.
-func (m *MockAdapter) StartThread(ctx context.Context, channelID, text, threadName string) (string, error) {
+// StartThread implements ThreadStarter. It records the ack reply as sent and
+// returns the messageID as the thread ID (simulating thread creation from
+// the user's message).
+func (m *MockAdapter) StartThread(ctx context.Context, channelID, messageID, replyText, threadName string) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if !m.connected {
@@ -111,7 +112,8 @@ func (m *MockAdapter) StartThread(ctx context.Context, channelID, text, threadNa
 	threadID := fmt.Sprintf("thread-%d", m.threadCounter)
 	m.sent = append(m.sent, OutboundMessage{
 		ChannelID: channelID,
-		Text:      text,
+		ThreadID:  threadID,
+		Text:      replyText,
 	})
 	return threadID, nil
 }

@@ -146,7 +146,7 @@ func (r *Router) Handle(ctx context.Context, msg InboundMessage) {
 		sessionThreadID := msg.ChannelID // fallback if thread creation unavailable
 		if ts, ok := r.adapter.(ThreadStarter); ok {
 			ack := r.nextAck()
-			newThreadID, err := ts.StartThread(ctx, msg.ChannelID, ack, "Dispatch")
+			newThreadID, err := ts.StartThread(ctx, msg.ChannelID, msg.MessageID, ack, "Dispatch")
 			if err != nil {
 				log.Printf("telegraph: router: create thread: %v", err)
 				r.sendAck(ctx, msg.ChannelID, "")

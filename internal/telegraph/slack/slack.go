@@ -205,11 +205,11 @@ func (a *Adapter) Send(ctx context.Context, msg telegraph.OutboundMessage) error
 	return nil
 }
 
-// StartThread sends a message to a channel and returns the message timestamp
-// as the thread ID. In Slack, threads are simply replies to a message — the
-// message timestamp serves as the thread identifier for subsequent replies.
+// StartThread creates a thread from an existing message by replying to it.
+// In Slack, threads are simply replies to a message — the original message's
+// timestamp serves as the thread identifier (thread_ts) for all replies.
 // Implements telegraph.ThreadStarter.
-func (a *Adapter) StartThread(ctx context.Context, channelID, text, threadName string) (string, error) {
+func (a *Adapter) StartThread(ctx context.Context, channelID, messageID, replyText, threadName string) (string, error) {
 	a.mu.Lock()
 	if !a.connected {
 		a.mu.Unlock()
@@ -217,16 +217,18 @@ func (a *Adapter) StartThread(ctx context.Context, channelID, text, threadName s
 	}
 	a.mu.Unlock()
 
-	var ts string
 	err := retryOnRateLimit(ctx, func() error {
-		_, timestamp, postErr := a.client.PostMessage(channelID, slackapi.MsgOptionText(text, false))
-		ts = timestamp
+		_, _, postErr := a.client.PostMessage(channelID,
+			slackapi.MsgOptionText(replyText, false),
+			slackapi.MsgOptionTS(messageID),
+		)
 		return postErr
 	})
 	if err != nil {
-		return "", fmt.Errorf("slack: send thread starter: %w", err)
+		return "", fmt.Errorf("slack: start thread: %w", err)
 	}
-	return ts, nil
+	// The thread ID is the original message's timestamp.
+	return messageID, nil
 }
 
 // ThreadHistory retrieves messages from a Slack thread using conversations.replies.
@@ -431,6 +433,7 @@ func (a *Adapter) handleMessage(ev *slackevents.MessageEvent) {
 		Platform:  "slack",
 		ChannelID: ev.Channel,
 		ThreadID:  ev.ThreadTimeStamp,
+		MessageID: ev.TimeStamp,
 		UserID:    ev.User,
 		UserName:  a.resolveUserName(ev.User),
 		Text:      ev.Text,
@@ -453,6 +456,7 @@ func (a *Adapter) handleAppMention(ev *slackevents.AppMentionEvent) {
 		Platform:  "slack",
 		ChannelID: ev.Channel,
 		ThreadID:  ev.ThreadTimeStamp,
+		MessageID: ev.TimeStamp,
 		UserID:    ev.User,
 		UserName:  a.resolveUserName(ev.User),
 		Text:      ev.Text,

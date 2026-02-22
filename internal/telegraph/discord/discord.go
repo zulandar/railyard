@@ -384,6 +384,7 @@ func (a *Adapter) handleMessage(m *discordgo.MessageCreate) {
 		Platform:  "discord",
 		ChannelID: channelID,
 		ThreadID:  threadID,
+		MessageID: m.ID,
 		UserID:    m.Author.ID,
 		UserName:  m.Author.Username,
 		Text:      m.Content,
@@ -484,9 +485,10 @@ func (a *Adapter) retryOnRateLimit(ctx context.Context, fn func() error) error {
 	return nil // unreachable
 }
 
-// StartThread sends a message to a channel and creates a thread from it.
-// Implements telegraph.ThreadStarter. The thread name is used as the thread title.
-func (a *Adapter) StartThread(ctx context.Context, channelID, text, threadName string) (string, error) {
+// StartThread creates a thread from an existing message and sends the ack as
+// the first reply. Implements telegraph.ThreadStarter. The thread is created
+// from the user's original message so the conversation is rooted there.
+func (a *Adapter) StartThread(ctx context.Context, channelID, messageID, replyText, threadName string) (string, error) {
 	a.mu.Lock()
 	if !a.connected {
 		a.mu.Unlock()
@@ -494,19 +496,22 @@ func (a *Adapter) StartThread(ctx context.Context, channelID, text, threadName s
 	}
 	a.mu.Unlock()
 
-	// Send the initial message to the channel.
-	var msg *discordgo.Message
-	err := a.retryOnRateLimit(ctx, func() error {
-		var sendErr error
-		msg, sendErr = a.sess.ChannelMessageSend(channelID, text)
+	// Create a thread from the user's message.
+	threadID, err := a.CreateThread(ctx, channelID, messageID, threadName)
+	if err != nil {
+		return "", err
+	}
+
+	// Send the ack as the first message in the thread.
+	err = a.retryOnRateLimit(ctx, func() error {
+		_, sendErr := a.sess.ChannelMessageSend(threadID, replyText)
 		return sendErr
 	})
 	if err != nil {
-		return "", fmt.Errorf("discord: send thread starter: %w", err)
+		return threadID, fmt.Errorf("discord: send thread ack: %w", err)
 	}
 
-	// Create a thread from the message.
-	return a.CreateThread(ctx, channelID, msg.ID, threadName)
+	return threadID, nil
 }
 
 // CreateThread creates a Discord thread from a message.

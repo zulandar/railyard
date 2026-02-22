@@ -1619,13 +1619,16 @@ func TestHandleMessage_SkipsBotMentions(t *testing.T) {
 func TestStartThread_Success(t *testing.T) {
 	a, client, _ := newTestAdapter(t)
 
-	threadID, err := a.StartThread(context.Background(), "C1", "Starting dispatch...", "Dispatch")
+	// StartThread now creates a thread from the user's message by replying to it.
+	// The thread ID is the original message's timestamp.
+	userMsgTS := "1771785355.495099"
+	threadID, err := a.StartThread(context.Background(), "C1", userMsgTS, "On it, boss.", "Dispatch")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// mockSlackClient.PostMessage returns "1234567890.123456" as the timestamp.
-	if threadID != "1234567890.123456" {
-		t.Errorf("threadID = %q, want 1234567890.123456", threadID)
+	// Thread ID should be the user's message timestamp (the thread root).
+	if threadID != userMsgTS {
+		t.Errorf("threadID = %q, want %q", threadID, userMsgTS)
 	}
 	if client.postedCount() != 1 {
 		t.Fatalf("expected 1 posted message, got %d", client.postedCount())
@@ -1641,7 +1644,7 @@ func TestStartThread_NotConnected(t *testing.T) {
 	socket := newMockSocketClient()
 	a, _ := New(AdapterOpts{Client: client, Socket: socket})
 
-	_, err := a.StartThread(context.Background(), "C1", "hello", "Thread")
+	_, err := a.StartThread(context.Background(), "C1", "1234567890.123456", "hello", "Thread")
 	if err == nil {
 		t.Fatal("expected error for not connected")
 	}
@@ -1651,7 +1654,7 @@ func TestStartThread_PostError(t *testing.T) {
 	a, client, _ := newTestAdapter(t)
 	client.postErr = fmt.Errorf("channel_not_found")
 
-	_, err := a.StartThread(context.Background(), "C1", "hello", "Thread")
+	_, err := a.StartThread(context.Background(), "C1", "1234567890.123456", "hello", "Thread")
 	if err == nil {
 		t.Fatal("expected error from PostMessage")
 	}
