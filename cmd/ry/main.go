@@ -42,6 +42,7 @@ func newRootCmd() *cobra.Command {
 	cmd.AddCommand(newCocoIndexCmd())
 	cmd.AddCommand(newOverlayCmd())
 	cmd.AddCommand(newGitIgnoreCmd())
+	cmd.AddCommand(newMigrateCmd())
 	return cmd
 }
 

@@ -252,13 +252,14 @@ type EngineInfo struct {
 
 // TrackSummary holds per-track car counts.
 type TrackSummary struct {
-	Track       string
-	Open        int64
-	Ready       int64
-	InProgress  int64
-	Done        int64
-	Blocked     int64
-	MergeFailed int64
+	Track        string
+	Open         int64
+	Ready        int64
+	InProgress   int64
+	Done         int64
+	Blocked      int64
+	MergeFailed  int64
+	BaseBranches []string // unique base branches for active cars on this track
 }
 
 // Status gathers dashboard information.
@@ -313,6 +314,23 @@ func Status(db *gorm.DB, tmux Tmux) (*StatusInfo, error) {
 					Where("cars.status NOT IN ?", models.ResolvedBlockerStatuses),
 			).Count(&ready)
 		ts.Ready = ready
+
+		// Collect unique base branches for active (non-done/merged/cancelled) cars.
+		var bases []string
+		db.Model(&models.Car{}).
+			Where("track = ? AND status NOT IN ?", t.Name, []string{"done", "merged", "cancelled"}).
+			Distinct("base_branch").Pluck("base_branch", &bases)
+		seen := map[string]bool{}
+		for _, b := range bases {
+			if b == "" {
+				b = "main"
+			}
+			if !seen[b] {
+				ts.BaseBranches = append(ts.BaseBranches, b)
+				seen[b] = true
+			}
+		}
+
 		info.TrackSummary = append(info.TrackSummary, ts)
 	}
 
@@ -372,11 +390,25 @@ func FormatStatus(info *StatusInfo) string {
 
 	// Track summary.
 	b.WriteString("TRACKS\n")
-	b.WriteString(fmt.Sprintf("%-12s %6s %6s %6s %6s %6s %8s\n",
-		"TRACK", "OPEN", "READY", "ACTIVE", "DONE", "BLOCKED", "MRG-FAIL"))
-	for _, t := range info.TrackSummary {
-		b.WriteString(fmt.Sprintf("%-12s %6d %6d %6d %6d %6d %8d\n",
-			t.Track, t.Open, t.Ready, t.InProgress, t.Done, t.Blocked, t.MergeFailed))
+	multiBase := hasMultipleBases(info.TrackSummary)
+	if multiBase {
+		b.WriteString(fmt.Sprintf("%-12s %-12s %6s %6s %6s %6s %6s %8s\n",
+			"TRACK", "BASE", "OPEN", "READY", "ACTIVE", "DONE", "BLOCKED", "MRG-FAIL"))
+		for _, t := range info.TrackSummary {
+			base := strings.Join(t.BaseBranches, ",")
+			if base == "" {
+				base = "main"
+			}
+			b.WriteString(fmt.Sprintf("%-12s %-12s %6d %6d %6d %6d %6d %8d\n",
+				t.Track, base, t.Open, t.Ready, t.InProgress, t.Done, t.Blocked, t.MergeFailed))
+		}
+	} else {
+		b.WriteString(fmt.Sprintf("%-12s %6s %6s %6s %6s %6s %8s\n",
+			"TRACK", "OPEN", "READY", "ACTIVE", "DONE", "BLOCKED", "MRG-FAIL"))
+		for _, t := range info.TrackSummary {
+			b.WriteString(fmt.Sprintf("%-12s %6d %6d %6d %6d %6d %8d\n",
+				t.Track, t.Open, t.Ready, t.InProgress, t.Done, t.Blocked, t.MergeFailed))
+		}
 	}
 	if len(info.TrackSummary) == 0 {
 		b.WriteString("  (no active tracks)\n")
@@ -395,6 +427,22 @@ func FormatStatus(info *StatusInfo) string {
 	}
 
 	return b.String()
+}
+
+// hasMultipleBases returns true when any track has more than one base branch,
+// or different tracks target different base branches.
+func hasMultipleBases(tracks []TrackSummary) bool {
+	seen := map[string]bool{}
+	for _, t := range tracks {
+		if len(t.BaseBranches) > 1 {
+			return true
+		}
+		for _, b := range t.BaseBranches {
+			seen[b] = true
+		}
+	}
+	// Multiple distinct base branches across all tracks.
+	return len(seen) > 1
 }
 
 // formatTokens formats an int64 with comma separators.

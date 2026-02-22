@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
 	"github.com/zulandar/railyard/internal/config"
@@ -30,6 +31,9 @@ func newStartCmd() *cobra.Command {
 }
 
 func runStart(cmd *cobra.Command, configPath string, engines int) error {
+	// Warn if old engines/ layout is present without .railyard/.
+	checkMigrationNeeded(cmd)
+
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
@@ -60,4 +64,17 @@ func runStart(cmd *cobra.Command, configPath string, engines int) error {
 	}
 	fmt.Fprintf(out, "\nAttach with: tmux attach -t %s\n", result.Session)
 	return nil
+}
+
+// checkMigrationNeeded prints a warning if the repo uses the old engines/ layout
+// without a .railyard/ directory. Does not block startup.
+func checkMigrationNeeded(cmd *cobra.Command) {
+	if _, err := os.Stat("engines"); err != nil {
+		return // no engines/ dir — nothing to migrate
+	}
+	if _, err := os.Stat(".railyard"); err == nil {
+		return // already migrated
+	}
+	fmt.Fprintln(cmd.ErrOrStderr(),
+		"Warning: Railyard directory layout has changed. Run 'ry migrate' to update.")
 }

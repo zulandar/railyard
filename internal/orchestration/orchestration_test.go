@@ -1484,6 +1484,68 @@ func TestFormatDuration_Zero(t *testing.T) {
 // Tmux interface sanity check — verify DefaultTmux is set
 // ---------------------------------------------------------------------------
 
+func TestFormatStatus_MultipleBaseBranches(t *testing.T) {
+	info := &StatusInfo{
+		SessionRunning:  true,
+		DispatchRunning: true,
+		TrackSummary: []TrackSummary{
+			{Track: "backend", Open: 3, BaseBranches: []string{"main", "develop"}},
+			{Track: "frontend", Open: 2, BaseBranches: []string{"main"}},
+		},
+	}
+	out := FormatStatus(info)
+	if !strings.Contains(out, "BASE") {
+		t.Errorf("expected BASE column header when multiple base branches exist, got: %s", out)
+	}
+	if !strings.Contains(out, "main,develop") {
+		t.Errorf("expected 'main,develop' for backend track, got: %s", out)
+	}
+}
+
+func TestFormatStatus_SingleBaseBranch(t *testing.T) {
+	info := &StatusInfo{
+		SessionRunning:  true,
+		DispatchRunning: true,
+		TrackSummary: []TrackSummary{
+			{Track: "backend", Open: 3, BaseBranches: []string{"main"}},
+			{Track: "frontend", Open: 2, BaseBranches: []string{"main"}},
+		},
+	}
+	out := FormatStatus(info)
+	if strings.Contains(out, "BASE") {
+		t.Errorf("BASE column should not appear when all tracks use the same base branch, got: %s", out)
+	}
+}
+
+func TestHasMultipleBases_Mixed(t *testing.T) {
+	tracks := []TrackSummary{
+		{Track: "a", BaseBranches: []string{"main"}},
+		{Track: "b", BaseBranches: []string{"develop"}},
+	}
+	if !hasMultipleBases(tracks) {
+		t.Error("expected true when tracks have different bases")
+	}
+}
+
+func TestHasMultipleBases_SameBase(t *testing.T) {
+	tracks := []TrackSummary{
+		{Track: "a", BaseBranches: []string{"main"}},
+		{Track: "b", BaseBranches: []string{"main"}},
+	}
+	if hasMultipleBases(tracks) {
+		t.Error("expected false when all tracks use main")
+	}
+}
+
+func TestHasMultipleBases_TrackWithMultiple(t *testing.T) {
+	tracks := []TrackSummary{
+		{Track: "a", BaseBranches: []string{"main", "develop"}},
+	}
+	if !hasMultipleBases(tracks) {
+		t.Error("expected true when a single track has multiple bases")
+	}
+}
+
 func TestDefaultTmux_IsSet(t *testing.T) {
 	if DefaultTmux == nil {
 		t.Fatal("DefaultTmux should not be nil")

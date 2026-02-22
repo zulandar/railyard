@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+
+	"github.com/zulandar/railyard/internal/models"
 )
 
 func TestCarCmd_Help(t *testing.T) {
@@ -507,5 +509,39 @@ func TestRootCmd_HasCarSubcommand(t *testing.T) {
 
 	if !strings.Contains(buf.String(), "car") {
 		t.Error("root help should list 'car' subcommand")
+	}
+}
+
+func TestHasMultipleBaseBranches_AllMain(t *testing.T) {
+	cars := []models.Car{
+		{BaseBranch: "main"},
+		{BaseBranch: ""},  // empty defaults to "main"
+		{BaseBranch: "main"},
+	}
+	if hasMultipleBaseBranches(cars) {
+		t.Error("expected false when all cars target main")
+	}
+}
+
+func TestHasMultipleBaseBranches_Mixed(t *testing.T) {
+	cars := []models.Car{
+		{BaseBranch: "main"},
+		{BaseBranch: "develop"},
+	}
+	if !hasMultipleBaseBranches(cars) {
+		t.Error("expected true when cars target different branches")
+	}
+}
+
+func TestHasMultipleBaseBranches_Empty(t *testing.T) {
+	if hasMultipleBaseBranches(nil) {
+		t.Error("expected false for empty slice")
+	}
+}
+
+func TestHasMultipleBaseBranches_Single(t *testing.T) {
+	cars := []models.Car{{BaseBranch: "develop"}}
+	if hasMultipleBaseBranches(cars) {
+		t.Error("expected false for single car")
 	}
 }

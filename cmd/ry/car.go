@@ -11,6 +11,7 @@ import (
 	"github.com/zulandar/railyard/internal/config"
 	"github.com/zulandar/railyard/internal/db"
 	"github.com/zulandar/railyard/internal/engine"
+	"github.com/zulandar/railyard/internal/models"
 	"gorm.io/gorm"
 )
 
@@ -166,10 +167,18 @@ func runCarList(cmd *cobra.Command, configPath string, filters car.ListFilters, 
 		}
 	}
 
+	// Show BASE column only when cars target multiple base branches.
+	showBase := hasMultipleBaseBranches(cars)
+
 	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	if showTokens {
+	switch {
+	case showTokens && showBase:
+		fmt.Fprintln(w, "ID\tTITLE\tSTATUS\tTRACK\tBASE\tPRI\tASSIGNEE\tTOKENS")
+	case showTokens:
 		fmt.Fprintln(w, "ID\tTITLE\tSTATUS\tTRACK\tPRI\tASSIGNEE\tTOKENS")
-	} else {
+	case showBase:
+		fmt.Fprintln(w, "ID\tTITLE\tSTATUS\tTRACK\tBASE\tPRI\tASSIGNEE")
+	default:
 		fmt.Fprintln(w, "ID\tTITLE\tSTATUS\tTRACK\tPRI\tASSIGNEE")
 	}
 	for _, b := range cars {
@@ -177,14 +186,27 @@ func runCarList(cmd *cobra.Command, configPath string, filters car.ListFilters, 
 		if a == "" {
 			a = "-"
 		}
+		base := b.BaseBranch
+		if base == "" {
+			base = "main"
+		}
+		tokens := "-"
 		if showTokens {
-			tokens := "-"
 			if ts, ok := tokenMap[b.ID]; ok && ts.TotalTokens > 0 {
 				tokens = formatTokenCount(ts.TotalTokens)
 			}
+		}
+		switch {
+		case showTokens && showBase:
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\n",
+				b.ID, truncate(b.Title, 40), b.Status, b.Track, base, b.Priority, a, tokens)
+		case showTokens:
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\t%s\t%s\n",
 				b.ID, truncate(b.Title, 40), b.Status, b.Track, b.Priority, a, tokens)
-		} else {
+		case showBase:
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%d\t%s\n",
+				b.ID, truncate(b.Title, 40), b.Status, b.Track, base, b.Priority, a)
+		default:
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\t%s\n",
 				b.ID, truncate(b.Title, 40), b.Status, b.Track, b.Priority, a)
 		}
@@ -229,6 +251,11 @@ func runCarShow(cmd *cobra.Command, configPath, id string) error {
 	fmt.Fprintf(out, "Priority:    %d\n", b.Priority)
 	fmt.Fprintf(out, "Track:       %s\n", b.Track)
 	fmt.Fprintf(out, "Branch:      %s\n", b.Branch)
+	base := b.BaseBranch
+	if base == "" {
+		base = "main"
+	}
+	fmt.Fprintf(out, "Base Branch: %s\n", base)
 	if b.Assignee != "" {
 		fmt.Fprintf(out, "Assignee:    %s\n", b.Assignee)
 	}
@@ -650,6 +677,27 @@ With --recursive, also publishes all draft children (useful for epics).`,
 	cmd.Flags().StringVarP(&configPath, "config", "c", "railyard.yaml", "path to Railyard config file")
 	cmd.Flags().BoolVarP(&recursive, "recursive", "r", false, "also publish all draft children (for epics)")
 	return cmd
+}
+
+// hasMultipleBaseBranches returns true when not all cars share the same base branch.
+func hasMultipleBaseBranches(cars []models.Car) bool {
+	if len(cars) == 0 {
+		return false
+	}
+	first := cars[0].BaseBranch
+	if first == "" {
+		first = "main"
+	}
+	for _, c := range cars[1:] {
+		b := c.BaseBranch
+		if b == "" {
+			b = "main"
+		}
+		if b != first {
+			return true
+		}
+	}
+	return false
 }
 
 // truncate shortens a string to maxLen, adding "..." if truncated.
