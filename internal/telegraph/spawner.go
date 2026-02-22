@@ -2,10 +2,13 @@ package telegraph
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"os/exec"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -65,6 +68,10 @@ func (s *ClaudeSpawner) Spawn(ctx context.Context, prompt string) (Process, erro
 		return nil, fmt.Errorf("telegraph: stdout pipe: %w", err)
 	}
 
+	// Capture stderr so we can log errors when the process exits.
+	var stderrBuf bytes.Buffer
+	cmd.Stderr = &stderrBuf
+
 	// Set up stdin pipe only when no prompt is provided.
 	if prompt == "" {
 		stdinPipe, err = cmd.StdinPipe()
@@ -98,7 +105,12 @@ func (s *ClaudeSpawner) Spawn(ctx context.Context, prompt string) (Process, erro
 			recvCh <- scanner.Text()
 		}
 		close(recvCh)
-		cmd.Wait()
+		if waitErr := cmd.Wait(); waitErr != nil {
+			log.Printf("telegraph: claude process exit error: %v", waitErr)
+		}
+		if stderrBuf.Len() > 0 {
+			log.Printf("telegraph: claude stderr: %s", strings.TrimSpace(stderrBuf.String()))
+		}
 		close(doneCh)
 	}()
 

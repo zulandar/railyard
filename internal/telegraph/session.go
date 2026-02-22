@@ -12,6 +12,10 @@ import (
 	"gorm.io/gorm"
 )
 
+// processTimeout is the maximum time a Claude subprocess can run before being
+// killed. This prevents hung processes from blocking sessions indefinitely.
+const processTimeout = 5 * time.Minute
+
 // ProcessSpawner abstracts subprocess creation for testability.
 type ProcessSpawner interface {
 	// Spawn starts a dispatch subprocess and returns a handle for I/O.
@@ -92,7 +96,7 @@ func (sm *SessionManager) NewSession(ctx context.Context, source, userName, thre
 		return nil, err
 	}
 
-	procCtx, cancel := context.WithCancel(ctx)
+	procCtx, cancel := context.WithTimeout(ctx, processTimeout)
 	proc, err := sm.spawner.Spawn(procCtx, "")
 	if err != nil {
 		cancel()
@@ -187,7 +191,7 @@ func (sm *SessionManager) Resume(ctx context.Context, channelID, threadID, userN
 		return nil, err
 	}
 
-	procCtx, cancel := context.WithCancel(ctx)
+	procCtx, cancel := context.WithTimeout(ctx, processTimeout)
 	proc, err := sm.spawner.Spawn(procCtx, recoveryPrompt)
 	if err != nil {
 		cancel()
@@ -372,11 +376,13 @@ func (sm *SessionManager) relayOutput(ctx context.Context, channelID, threadID s
 	}
 	chunks := chunkMessage(text, 2000)
 	for _, chunk := range chunks {
-		sm.adapter.Send(ctx, OutboundMessage{
+		if err := sm.adapter.Send(ctx, OutboundMessage{
 			ChannelID: channelID,
 			ThreadID:  threadID,
 			Text:      chunk,
-		})
+		}); err != nil {
+			log.Printf("telegraph: relay session %d: send error: %v", sessionID, err)
+		}
 	}
 }
 
