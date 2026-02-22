@@ -201,7 +201,11 @@ func (a *Adapter) Send(ctx context.Context, msg telegraph.OutboundMessage) error
 	}
 	a.mu.Unlock()
 
-	channelID := msg.ChannelID
+	// In Discord, threads are channels. If ThreadID is set, send there directly.
+	channelID := msg.ThreadID
+	if channelID == "" {
+		channelID = msg.ChannelID
+	}
 	if channelID == "" {
 		channelID = a.channelID
 	}
@@ -372,13 +376,6 @@ func buildMessageSend(msg telegraph.OutboundMessage) *discordgo.MessageSend {
 	if len(msg.Events) > 0 {
 		for _, evt := range msg.Events {
 			data.Embeds = append(data.Embeds, eventToEmbed(evt))
-		}
-	}
-
-	// Thread reply: set message reference.
-	if msg.ThreadID != "" {
-		data.Reference = &discordgo.MessageReference{
-			ChannelID: msg.ThreadID,
 		}
 	}
 

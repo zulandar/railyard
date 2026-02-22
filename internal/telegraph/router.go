@@ -129,13 +129,9 @@ func (r *Router) Handle(ctx context.Context, msg InboundMessage) {
 // handleCommand dispatches a "!ry" command and sends the response.
 func (r *Router) handleCommand(ctx context.Context, msg InboundMessage, text string) {
 	response := r.cmdHandler.Execute(text)
-	threadID := msg.ThreadID
-	if threadID == "" {
-		threadID = msg.ChannelID
-	}
 	if err := r.adapter.Send(ctx, OutboundMessage{
 		ChannelID: msg.ChannelID,
-		ThreadID:  threadID,
+		ThreadID:  msg.ThreadID,
 		Text:      response,
 	}); err != nil {
 		log.Printf("telegraph: router: send command response: %v", err)

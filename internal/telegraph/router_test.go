@@ -195,6 +195,10 @@ func TestHandle_CommandInThread(t *testing.T) {
 		t.Fatalf("expected 1 sent message, got %d", adapter.SentCount())
 	}
 	msg, _ := adapter.LastSent()
+	// Response should be sent to the same thread.
+	if msg.ChannelID != "C1" {
+		t.Errorf("response channel = %q, want C1", msg.ChannelID)
+	}
 	if msg.ThreadID != "T1" {
 		t.Errorf("response thread = %q, want T1", msg.ThreadID)
 	}

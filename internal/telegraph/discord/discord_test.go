@@ -515,11 +515,12 @@ func TestSend_WithThreadID(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	last := sess.lastSent()
-	if last.data.Reference == nil {
-		t.Fatal("expected message reference for thread reply")
+	// Discord threads are channels — ThreadID should be used as the target channel.
+	if last.channelID != "thread-456" {
+		t.Errorf("channel = %q, want thread-456", last.channelID)
 	}
-	if last.data.Reference.ChannelID != "thread-456" {
-		t.Errorf("reference channel = %q, want thread-456", last.data.Reference.ChannelID)
+	if last.data.Reference != nil {
+		t.Error("expected no message reference (Discord threads are channels)")
 	}
 }
 
@@ -1041,11 +1042,9 @@ func TestBuildMessageSend_WithThread(t *testing.T) {
 		Text:     "reply",
 		ThreadID: "thread-1",
 	})
-	if data.Reference == nil {
-		t.Fatal("expected message reference")
-	}
-	if data.Reference.ChannelID != "thread-1" {
-		t.Errorf("reference channel = %q", data.Reference.ChannelID)
+	// Discord threads are channels — no MessageReference needed.
+	if data.Reference != nil {
+		t.Error("expected no message reference (Discord threads are channels)")
 	}
 }
 
