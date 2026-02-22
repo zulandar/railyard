@@ -144,3 +144,31 @@ jobs:
             echo "Release $GITHUB_REF_NAME already exists, uploading artifacts..."
             gh release upload "$GITHUB_REF_NAME" artifacts/* --clobber
           fi
+
+      - name: Notify Discord
+        if: ${{ secrets.DISCORD_WEBHOOK_URL != '' }}
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          RELEASE_URL="https://github.com/${{ github.repository }}/releases/tag/${VERSION}"
+
+          # Truncate changelog for Discord (2000 char embed description limit).
+          CHANGELOG=$(head -c 1800 changelog.md)
+
+          PAYLOAD=$(jq -n \
+            --arg title "Railyard ${VERSION} Released" \
+            --arg url "$RELEASE_URL" \
+            --arg desc "$CHANGELOG" \
+            '{
+              embeds: [{
+                title: $title,
+                url: $url,
+                description: $desc,
+                color: 5814783
+              }]
+            }')
+
+          curl -sf -H "Content-Type: application/json" \
+            -d "$PAYLOAD" \
+            "$DISCORD_WEBHOOK_URL"
