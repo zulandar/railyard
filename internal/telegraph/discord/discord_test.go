@@ -1437,6 +1437,222 @@ func TestSetBotUserID(t *testing.T) {
 	}
 }
 
+// --- AllowedChannels tests ---
+
+func TestHandleMessage_AllowedChannels_Passes(t *testing.T) {
+	sess := newMockSession()
+	a, err := New(AdapterOpts{
+		Session:         sess,
+		ChannelID:       "C_DEFAULT",
+		AllowedChannels: []string{"C_ALLOWED"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.Connect(context.Background())
+	a.SetBotUserID("BOT_USER_ID")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch, _ := a.Listen(ctx)
+
+	a.handleMessage(&discordgo.MessageCreate{
+		Message: &discordgo.Message{
+			ID:        "500",
+			ChannelID: "C_ALLOWED",
+			Content:   "allowed message",
+			Author:    &discordgo.User{ID: "U1", Username: "Alice"},
+		},
+	})
+
+	select {
+	case msg := <-ch:
+		if msg.Text != "allowed message" {
+			t.Errorf("text = %q, want 'allowed message'", msg.Text)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for allowed message")
+	}
+}
+
+func TestHandleMessage_AllowedChannels_Blocks(t *testing.T) {
+	sess := newMockSession()
+	a, err := New(AdapterOpts{
+		Session:         sess,
+		ChannelID:       "C_DEFAULT",
+		AllowedChannels: []string{"C_ALLOWED"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.Connect(context.Background())
+	a.SetBotUserID("BOT_USER_ID")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch, _ := a.Listen(ctx)
+
+	// Message from a non-allowed channel should be dropped.
+	a.handleMessage(&discordgo.MessageCreate{
+		Message: &discordgo.Message{
+			ID:        "501",
+			ChannelID: "C_OTHER",
+			Content:   "blocked message",
+			Author:    &discordgo.User{ID: "U1", Username: "Alice"},
+		},
+	})
+
+	// Send a message from an allowed channel to verify the first was dropped.
+	a.handleMessage(&discordgo.MessageCreate{
+		Message: &discordgo.Message{
+			ID:        "502",
+			ChannelID: "C_ALLOWED",
+			Content:   "allowed message",
+			Author:    &discordgo.User{ID: "U1", Username: "Alice"},
+		},
+	})
+
+	select {
+	case msg := <-ch:
+		if msg.Text != "allowed message" {
+			t.Errorf("expected allowed message, got %q", msg.Text)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout")
+	}
+}
+
+func TestHandleMessage_AllowedChannels_ThreadInAllowedChannel(t *testing.T) {
+	sess := newMockSession()
+	a, err := New(AdapterOpts{
+		Session:         sess,
+		ChannelID:       "C_DEFAULT",
+		AllowedChannels: []string{"C_ALLOWED"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.Connect(context.Background())
+	a.SetBotUserID("BOT_USER_ID")
+
+	// Register a thread whose parent is an allowed channel.
+	sess.mu.Lock()
+	sess.channels["thread-in-allowed"] = &discordgo.Channel{
+		ID:       "thread-in-allowed",
+		Type:     discordgo.ChannelTypeGuildPublicThread,
+		ParentID: "C_ALLOWED",
+	}
+	sess.mu.Unlock()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch, _ := a.Listen(ctx)
+
+	a.handleMessage(&discordgo.MessageCreate{
+		Message: &discordgo.Message{
+			ID:        "503",
+			ChannelID: "thread-in-allowed",
+			Content:   "thread message",
+			Author:    &discordgo.User{ID: "U1", Username: "Alice"},
+		},
+	})
+
+	select {
+	case msg := <-ch:
+		if msg.ChannelID != "C_ALLOWED" {
+			t.Errorf("channelID = %q, want C_ALLOWED", msg.ChannelID)
+		}
+		if msg.ThreadID != "thread-in-allowed" {
+			t.Errorf("threadID = %q, want thread-in-allowed", msg.ThreadID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout")
+	}
+}
+
+func TestHandleMessage_AllowedChannels_ThreadInBlockedChannel(t *testing.T) {
+	sess := newMockSession()
+	a, err := New(AdapterOpts{
+		Session:         sess,
+		ChannelID:       "C_DEFAULT",
+		AllowedChannels: []string{"C_ALLOWED"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.Connect(context.Background())
+	a.SetBotUserID("BOT_USER_ID")
+
+	// Register a thread whose parent is NOT an allowed channel.
+	sess.mu.Lock()
+	sess.channels["thread-in-blocked"] = &discordgo.Channel{
+		ID:       "thread-in-blocked",
+		Type:     discordgo.ChannelTypeGuildPublicThread,
+		ParentID: "C_OTHER",
+	}
+	sess.mu.Unlock()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch, _ := a.Listen(ctx)
+
+	// Thread in a blocked parent channel should be dropped.
+	a.handleMessage(&discordgo.MessageCreate{
+		Message: &discordgo.Message{
+			ID:        "504",
+			ChannelID: "thread-in-blocked",
+			Content:   "blocked thread message",
+			Author:    &discordgo.User{ID: "U1", Username: "Alice"},
+		},
+	})
+
+	// Send from allowed channel to confirm the thread message was dropped.
+	a.handleMessage(&discordgo.MessageCreate{
+		Message: &discordgo.Message{
+			ID:        "505",
+			ChannelID: "C_ALLOWED",
+			Content:   "allowed",
+			Author:    &discordgo.User{ID: "U1", Username: "Alice"},
+		},
+	})
+
+	select {
+	case msg := <-ch:
+		if msg.Text != "allowed" {
+			t.Errorf("expected allowed message, got %q", msg.Text)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout")
+	}
+}
+
+func TestHandleMessage_EmptyAllowedChannels_AllowsAll(t *testing.T) {
+	// No AllowedChannels = respond everywhere (backwards compatible).
+	a, _ := newTestAdapter(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch, _ := a.Listen(ctx)
+
+	a.handleMessage(&discordgo.MessageCreate{
+		Message: &discordgo.Message{
+			ID:        "506",
+			ChannelID: "C_ANY",
+			Content:   "any channel",
+			Author:    &discordgo.User{ID: "U1", Username: "Alice"},
+		},
+	})
+
+	select {
+	case msg := <-ch:
+		if msg.Text != "any channel" {
+			t.Errorf("text = %q, want 'any channel'", msg.Text)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout")
+	}
+}
+
 // --- Verify Adapter interface compliance ---
 
 var _ telegraph.Adapter = (*Adapter)(nil)

@@ -132,6 +132,14 @@ telegraph:
   platform: slack                    # Required: "slack" or "discord"
   channel: C0123456789               # Required: default channel ID for posting
 
+  # --- Channel allowlist (optional) ---
+  # Restrict the bot to only respond in these channels. Messages from
+  # other channels are silently dropped. Threads inside allowed channels
+  # are always permitted. Omit or leave empty to allow all channels.
+  allowed_channels:
+    - C0123456789                    # e.g. #railyard
+    - C9876543210                    # e.g. #ops
+
   # --- Slack credentials (required when platform: slack) ---
   slack:
     bot_token: ${SLACK_BOT_TOKEN}    # xoxb-... bot token

@@ -57,27 +57,29 @@ func (r *realSocketClient) Ack(req socketmode.Request, payload ...interface{}) {
 
 // Adapter implements telegraph.Adapter for Slack Socket Mode.
 type Adapter struct {
-	client       slackClient
-	socket       socketClient
-	botUserID    string
-	appToken     string
-	botToken     string
-	channelID    string // default channel for messages without explicit channel
-	mu           sync.Mutex
-	connected    bool
-	closed       bool
-	inbound      chan telegraph.InboundMessage
-	cancelFunc   context.CancelFunc
-	baseBackoff  time.Duration // reconnection base backoff (default: baseBackoff const)
-	maxBackoff   time.Duration // reconnection max backoff (default: maxBackoff const)
-	maxReconnect int           // max reconnection attempts (default: maxReconnectAttempts)
+	client          slackClient
+	socket          socketClient
+	botUserID       string
+	appToken        string
+	botToken        string
+	channelID       string          // default channel for messages without explicit channel
+	allowedChannels map[string]bool // channels the bot may respond in; nil/empty = all
+	mu              sync.Mutex
+	connected       bool
+	closed          bool
+	inbound         chan telegraph.InboundMessage
+	cancelFunc      context.CancelFunc
+	baseBackoff     time.Duration // reconnection base backoff (default: baseBackoff const)
+	maxBackoff      time.Duration // reconnection max backoff (default: maxBackoff const)
+	maxReconnect    int           // max reconnection attempts (default: maxReconnectAttempts)
 }
 
 // AdapterOpts holds parameters for creating a Slack Adapter.
 type AdapterOpts struct {
-	AppToken  string // xapp-... Slack app-level token for Socket Mode
-	BotToken  string // xoxb-... Slack bot token
-	ChannelID string // default channel to post to
+	AppToken        string   // xapp-... Slack app-level token for Socket Mode
+	BotToken        string   // xoxb-... Slack bot token
+	ChannelID       string   // default channel to post to
+	AllowedChannels []string // channel IDs the bot may respond in; empty = all
 	// For testing: inject mock clients instead of real Slack API.
 	Client slackClient
 	Socket socketClient
@@ -92,14 +94,23 @@ func New(opts AdapterOpts) (*Adapter, error) {
 		return nil, fmt.Errorf("slack: app token is required for socket mode")
 	}
 
+	var allowed map[string]bool
+	if len(opts.AllowedChannels) > 0 {
+		allowed = make(map[string]bool, len(opts.AllowedChannels))
+		for _, ch := range opts.AllowedChannels {
+			allowed[ch] = true
+		}
+	}
+
 	a := &Adapter{
-		appToken:     opts.AppToken,
-		botToken:     opts.BotToken,
-		channelID:    opts.ChannelID,
-		inbound:      make(chan telegraph.InboundMessage, 100),
-		baseBackoff:  baseBackoff,
-		maxBackoff:   maxBackoff,
-		maxReconnect: maxReconnectAttempts,
+		appToken:        opts.AppToken,
+		botToken:        opts.BotToken,
+		channelID:       opts.ChannelID,
+		allowedChannels: allowed,
+		inbound:         make(chan telegraph.InboundMessage, 100),
+		baseBackoff:     baseBackoff,
+		maxBackoff:      maxBackoff,
+		maxReconnect:    maxReconnectAttempts,
 	}
 
 	if opts.Client != nil {
@@ -382,6 +393,10 @@ func (a *Adapter) handleMessage(ev *slackevents.MessageEvent) {
 	if ev.BotID != "" || ev.SubType != "" {
 		return
 	}
+	// Filter messages from channels not in the allowlist.
+	if len(a.allowedChannels) > 0 && !a.allowedChannels[ev.Channel] {
+		return
+	}
 
 	a.inbound <- telegraph.InboundMessage{
 		Platform:  "slack",
@@ -398,6 +413,10 @@ func (a *Adapter) handleMessage(ev *slackevents.MessageEvent) {
 func (a *Adapter) handleAppMention(ev *slackevents.AppMentionEvent) {
 	// Filter self-mentions (shouldn't happen but be safe).
 	if ev.User == a.botUserID {
+		return
+	}
+	// Filter messages from channels not in the allowlist.
+	if len(a.allowedChannels) > 0 && !a.allowedChannels[ev.Channel] {
 		return
 	}
 

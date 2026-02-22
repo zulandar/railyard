@@ -77,14 +77,15 @@ type TrackConfig struct {
 
 // TelegraphConfig holds settings for the Telegraph chat bridge.
 type TelegraphConfig struct {
-	Platform      string              `yaml:"platform"` // "slack" or "discord"
-	Channel       string              `yaml:"channel"`  // default channel ID
-	Slack         SlackConfig         `yaml:"slack"`
-	Discord       DiscordConfig       `yaml:"discord"`
-	DispatchLock  DispatchLockConfig  `yaml:"dispatch_lock"`
-	Events        EventsConfig        `yaml:"events"`
-	Digest        DigestConfig        `yaml:"digest"`
-	Conversations ConversationsConfig `yaml:"conversations"`
+	Platform        string              `yaml:"platform"`         // "slack" or "discord"
+	Channel         string              `yaml:"channel"`          // default channel ID
+	AllowedChannels []string            `yaml:"allowed_channels"` // channel IDs the bot may respond in; empty = all
+	Slack           SlackConfig         `yaml:"slack"`
+	Discord         DiscordConfig       `yaml:"discord"`
+	DispatchLock    DispatchLockConfig  `yaml:"dispatch_lock"`
+	Events          EventsConfig        `yaml:"events"`
+	Digest          DigestConfig        `yaml:"digest"`
+	Conversations   ConversationsConfig `yaml:"conversations"`
 }
 
 // SlackConfig holds Slack-specific credentials.

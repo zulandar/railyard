@@ -72,25 +72,27 @@ func (r *realSession) AddHandler(handler interface{}) func() {
 
 // Adapter implements telegraph.Adapter for Discord via the Gateway WebSocket.
 type Adapter struct {
-	sess          session
-	botToken      string
-	channelID     string // default channel for messages
-	botUserID     string
-	mu            sync.Mutex
-	connected     bool
-	closed        bool
-	inbound       chan telegraph.InboundMessage
-	cancelFunc    context.CancelFunc
-	removeHandler func()
-	baseBackoff   time.Duration
-	maxBackoff    time.Duration
-	maxReconnect  int
+	sess            session
+	botToken        string
+	channelID       string          // default channel for messages
+	allowedChannels map[string]bool // channels the bot may respond in; nil/empty = all
+	botUserID       string
+	mu              sync.Mutex
+	connected       bool
+	closed          bool
+	inbound         chan telegraph.InboundMessage
+	cancelFunc      context.CancelFunc
+	removeHandler   func()
+	baseBackoff     time.Duration
+	maxBackoff      time.Duration
+	maxReconnect    int
 }
 
 // AdapterOpts holds parameters for creating a Discord Adapter.
 type AdapterOpts struct {
-	BotToken  string // Discord bot token
-	ChannelID string // default channel to post to
+	BotToken        string   // Discord bot token
+	ChannelID       string   // default channel to post to
+	AllowedChannels []string // channel IDs the bot may respond in; empty = all
 	// For testing: inject a mock session instead of real Discord API.
 	Session session
 }
@@ -101,13 +103,22 @@ func New(opts AdapterOpts) (*Adapter, error) {
 		return nil, fmt.Errorf("discord: bot token is required")
 	}
 
+	var allowed map[string]bool
+	if len(opts.AllowedChannels) > 0 {
+		allowed = make(map[string]bool, len(opts.AllowedChannels))
+		for _, ch := range opts.AllowedChannels {
+			allowed[ch] = true
+		}
+	}
+
 	a := &Adapter{
-		botToken:     opts.BotToken,
-		channelID:    opts.ChannelID,
-		inbound:      make(chan telegraph.InboundMessage, 100),
-		baseBackoff:  baseBackoff,
-		maxBackoff:   maxBackoff,
-		maxReconnect: maxReconnectAttempts,
+		botToken:        opts.BotToken,
+		channelID:       opts.ChannelID,
+		allowedChannels: allowed,
+		inbound:         make(chan telegraph.InboundMessage, 100),
+		baseBackoff:     baseBackoff,
+		maxBackoff:      maxBackoff,
+		maxReconnect:    maxReconnectAttempts,
 	}
 
 	if opts.Session != nil {
@@ -360,6 +371,11 @@ func (a *Adapter) handleMessage(m *discordgo.MessageCreate) {
 	if ch, err := a.sess.Channel(m.ChannelID); err == nil && ch.IsThread() {
 		channelID = ch.ParentID
 		threadID = m.ChannelID
+	}
+
+	// Filter messages from channels not in the allowlist.
+	if len(a.allowedChannels) > 0 && !a.allowedChannels[channelID] {
+		return
 	}
 
 	ts, _ := discordgo.SnowflakeTimestamp(m.ID)

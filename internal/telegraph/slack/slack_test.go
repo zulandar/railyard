@@ -1332,6 +1332,197 @@ func TestHandleSocketEvent_ConnectionEvents(t *testing.T) {
 	a.handleSocketEvent(socketmode.Event{Type: socketmode.EventTypeDisconnect})
 }
 
+// --- AllowedChannels tests ---
+
+func newTestAdapterWithAllowedChannels(t *testing.T, channels []string) (*Adapter, *mockSlackClient, *mockSocketClient) {
+	t.Helper()
+	client := newMockSlackClient()
+	socket := newMockSocketClient()
+
+	a, err := New(AdapterOpts{
+		Client:          client,
+		Socket:          socket,
+		ChannelID:       "C_DEFAULT",
+		AllowedChannels: channels,
+	})
+	if err != nil {
+		t.Fatalf("new adapter: %v", err)
+	}
+	if err := a.Connect(context.Background()); err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	return a, client, socket
+}
+
+func TestHandleMessage_AllowedChannels_Passes(t *testing.T) {
+	a, _, socket := newTestAdapterWithAllowedChannels(t, []string{"C_ALLOWED"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch, _ := a.Listen(ctx)
+
+	socket.events <- socketmode.Event{
+		Type: socketmode.EventTypeEventsAPI,
+		Data: slackevents.EventsAPIEvent{
+			Type: slackevents.CallbackEvent,
+			InnerEvent: slackevents.EventsAPIInnerEvent{
+				Data: &slackevents.MessageEvent{
+					User:      "U_ALICE",
+					Channel:   "C_ALLOWED",
+					Text:      "allowed message",
+					TimeStamp: "1700000000.000001",
+				},
+			},
+		},
+		Request: &socketmode.Request{EnvelopeID: "env-20"},
+	}
+
+	select {
+	case msg := <-ch:
+		if msg.Text != "allowed message" {
+			t.Errorf("text = %q, want 'allowed message'", msg.Text)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout")
+	}
+}
+
+func TestHandleMessage_AllowedChannels_Blocks(t *testing.T) {
+	a, _, socket := newTestAdapterWithAllowedChannels(t, []string{"C_ALLOWED"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch, _ := a.Listen(ctx)
+
+	// Message from non-allowed channel should be dropped.
+	socket.events <- socketmode.Event{
+		Type: socketmode.EventTypeEventsAPI,
+		Data: slackevents.EventsAPIEvent{
+			Type: slackevents.CallbackEvent,
+			InnerEvent: slackevents.EventsAPIInnerEvent{
+				Data: &slackevents.MessageEvent{
+					User:      "U_ALICE",
+					Channel:   "C_OTHER",
+					Text:      "blocked message",
+					TimeStamp: "1700000000.000001",
+				},
+			},
+		},
+		Request: &socketmode.Request{EnvelopeID: "env-21"},
+	}
+
+	// Send from allowed channel to confirm blocked one was dropped.
+	socket.events <- socketmode.Event{
+		Type: socketmode.EventTypeEventsAPI,
+		Data: slackevents.EventsAPIEvent{
+			Type: slackevents.CallbackEvent,
+			InnerEvent: slackevents.EventsAPIInnerEvent{
+				Data: &slackevents.MessageEvent{
+					User:      "U_ALICE",
+					Channel:   "C_ALLOWED",
+					Text:      "allowed message",
+					TimeStamp: "1700000001.000001",
+				},
+			},
+		},
+		Request: &socketmode.Request{EnvelopeID: "env-22"},
+	}
+
+	select {
+	case msg := <-ch:
+		if msg.Text != "allowed message" {
+			t.Errorf("expected allowed message, got %q", msg.Text)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout")
+	}
+}
+
+func TestHandleAppMention_AllowedChannels_Blocks(t *testing.T) {
+	a, _, socket := newTestAdapterWithAllowedChannels(t, []string{"C_ALLOWED"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch, _ := a.Listen(ctx)
+
+	// @mention from non-allowed channel should be dropped.
+	socket.events <- socketmode.Event{
+		Type: socketmode.EventTypeEventsAPI,
+		Data: slackevents.EventsAPIEvent{
+			Type: slackevents.CallbackEvent,
+			InnerEvent: slackevents.EventsAPIInnerEvent{
+				Data: &slackevents.AppMentionEvent{
+					User:      "U_ALICE",
+					Channel:   "C_OTHER",
+					Text:      "blocked mention",
+					TimeStamp: "1700000000.000001",
+				},
+			},
+		},
+		Request: &socketmode.Request{EnvelopeID: "env-23"},
+	}
+
+	// @mention from allowed channel.
+	socket.events <- socketmode.Event{
+		Type: socketmode.EventTypeEventsAPI,
+		Data: slackevents.EventsAPIEvent{
+			Type: slackevents.CallbackEvent,
+			InnerEvent: slackevents.EventsAPIInnerEvent{
+				Data: &slackevents.AppMentionEvent{
+					User:      "U_ALICE",
+					Channel:   "C_ALLOWED",
+					Text:      "allowed mention",
+					TimeStamp: "1700000001.000001",
+				},
+			},
+		},
+		Request: &socketmode.Request{EnvelopeID: "env-24"},
+	}
+
+	select {
+	case msg := <-ch:
+		if msg.Text != "allowed mention" {
+			t.Errorf("expected allowed mention, got %q", msg.Text)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout")
+	}
+}
+
+func TestHandleMessage_EmptyAllowedChannels_AllowsAll(t *testing.T) {
+	// No AllowedChannels = respond everywhere (backwards compatible).
+	a, _, socket := newTestAdapter(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch, _ := a.Listen(ctx)
+
+	socket.events <- socketmode.Event{
+		Type: socketmode.EventTypeEventsAPI,
+		Data: slackevents.EventsAPIEvent{
+			Type: slackevents.CallbackEvent,
+			InnerEvent: slackevents.EventsAPIInnerEvent{
+				Data: &slackevents.MessageEvent{
+					User:      "U_ALICE",
+					Channel:   "C_ANY",
+					Text:      "any channel",
+					TimeStamp: "1700000000.000001",
+				},
+			},
+		},
+		Request: &socketmode.Request{EnvelopeID: "env-25"},
+	}
+
+	select {
+	case msg := <-ch:
+		if msg.Text != "any channel" {
+			t.Errorf("text = %q, want 'any channel'", msg.Text)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout")
+	}
+}
+
 // --- Verify Adapter interface compliance ---
 
 var _ telegraph.Adapter = (*Adapter)(nil)

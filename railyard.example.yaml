@@ -148,6 +148,9 @@ tracks:
 # telegraph:
 #   platform: slack                    # "slack" or "discord"
 #   channel: C0123456789               # default channel ID
+#   allowed_channels:                  # restrict bot to these channels (omit for all)
+#     - C0123456789
+#     - C9876543210
 #   slack:
 #     bot_token: ${SLACK_BOT_TOKEN}    # xoxb-... bot token
 #     app_token: ${SLACK_APP_TOKEN}    # xapp-... app-level token (Socket Mode)

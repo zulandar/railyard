@@ -166,14 +166,16 @@ func createAdapter(cfg *config.Config) (telegraph.Adapter, error) {
 	switch cfg.Telegraph.Platform {
 	case "slack":
 		return slackadapter.New(slackadapter.AdapterOpts{
-			AppToken:  cfg.Telegraph.Slack.AppToken,
-			BotToken:  cfg.Telegraph.Slack.BotToken,
-			ChannelID: cfg.Telegraph.Channel,
+			AppToken:        cfg.Telegraph.Slack.AppToken,
+			BotToken:        cfg.Telegraph.Slack.BotToken,
+			ChannelID:       cfg.Telegraph.Channel,
+			AllowedChannels: cfg.Telegraph.AllowedChannels,
 		})
 	case "discord":
 		return discordadapter.New(discordadapter.AdapterOpts{
-			BotToken:  cfg.Telegraph.Discord.BotToken,
-			ChannelID: cfg.Telegraph.Channel,
+			BotToken:        cfg.Telegraph.Discord.BotToken,
+			ChannelID:       cfg.Telegraph.Channel,
+			AllowedChannels: cfg.Telegraph.AllowedChannels,
 		})
 	default:
 		return nil, fmt.Errorf("telegraph: unsupported platform %q", cfg.Telegraph.Platform)
