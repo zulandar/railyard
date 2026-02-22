@@ -30,6 +30,7 @@ const (
 type session interface {
 	Open() error
 	Close() error
+	Channel(channelID string) (*discordgo.Channel, error)
 	ChannelMessageSend(channelID, content string, options ...discordgo.RequestOption) (*discordgo.Message, error)
 	ChannelMessageSendEmbed(channelID string, embed *discordgo.MessageEmbed, options ...discordgo.RequestOption) (*discordgo.Message, error)
 	ChannelMessageSendComplex(channelID string, data *discordgo.MessageSend, options ...discordgo.RequestOption) (*discordgo.Message, error)
@@ -46,6 +47,9 @@ type realSession struct {
 func (r *realSession) Open() error { return r.s.Open() }
 func (r *realSession) Close() error {
 	return r.s.Close()
+}
+func (r *realSession) Channel(channelID string) (*discordgo.Channel, error) {
+	return r.s.State.Channel(channelID)
 }
 func (r *realSession) ChannelMessageSend(channelID, content string, options ...discordgo.RequestOption) (*discordgo.Message, error) {
 	return r.s.ChannelMessageSend(channelID, content, options...)
@@ -347,10 +351,14 @@ func (a *Adapter) handleMessage(m *discordgo.MessageCreate) {
 		return
 	}
 
-	// Determine thread ID: if the message is in a thread, use the channel ID
-	// (since Discord threads are channels). For top-level messages, thread is empty.
+	// Determine thread context. In Discord, threads are channels — a message's
+	// ChannelID is the thread ID if it was sent inside a thread. We look up the
+	// channel from the state cache to detect this and resolve the parent channel.
+	channelID := m.ChannelID
 	threadID := ""
-	if m.MessageReference != nil && m.MessageReference.ChannelID != m.ChannelID {
+
+	if ch, err := a.sess.Channel(m.ChannelID); err == nil && ch.IsThread() {
+		channelID = ch.ParentID
 		threadID = m.ChannelID
 	}
 
@@ -358,7 +366,7 @@ func (a *Adapter) handleMessage(m *discordgo.MessageCreate) {
 
 	a.inbound <- telegraph.InboundMessage{
 		Platform:  "discord",
-		ChannelID: m.ChannelID,
+		ChannelID: channelID,
 		ThreadID:  threadID,
 		UserID:    m.Author.ID,
 		UserName:  m.Author.Username,

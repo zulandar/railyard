@@ -30,6 +30,7 @@ type mockSession struct {
 	messagesErr    error
 	handler        interface{}
 	removeCount    int
+	channels       map[string]*discordgo.Channel // for Channel() lookups
 }
 
 type sentMessage struct {
@@ -46,6 +47,7 @@ type createdThread struct {
 func newMockSession() *mockSession {
 	return &mockSession{
 		threadResponse: &discordgo.Channel{ID: "thread-123"},
+		channels:       make(map[string]*discordgo.Channel),
 	}
 }
 
@@ -64,6 +66,15 @@ func (m *mockSession) Close() error {
 	defer m.mu.Unlock()
 	m.closeCalled = true
 	return m.closeErr
+}
+
+func (m *mockSession) Channel(channelID string) (*discordgo.Channel, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if ch, ok := m.channels[channelID]; ok {
+		return ch, nil
+	}
+	return nil, fmt.Errorf("channel not found: %s", channelID)
 }
 
 func (m *mockSession) ChannelMessageSend(channelID, content string, options ...discordgo.RequestOption) (*discordgo.Message, error) {
@@ -411,6 +422,119 @@ func TestHandleMessage_NilAuthor(t *testing.T) {
 	case msg := <-ch:
 		if msg.Text != "real" {
 			t.Errorf("expected real message, got %q", msg.Text)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout")
+	}
+}
+
+func TestHandleMessage_ThreadChannel(t *testing.T) {
+	a, sess := newTestAdapter(t)
+
+	// Register a thread channel in the mock session's channel map.
+	sess.mu.Lock()
+	sess.channels["thread-999"] = &discordgo.Channel{
+		ID:       "thread-999",
+		Type:     discordgo.ChannelTypeGuildPublicThread,
+		ParentID: "parent-channel",
+	}
+	sess.mu.Unlock()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	ch, _ := a.Listen(ctx)
+
+	// Message in a thread channel — ChannelID should be resolved to parent,
+	// ThreadID should be the thread channel.
+	a.handleMessage(&discordgo.MessageCreate{
+		Message: &discordgo.Message{
+			ID:        "400",
+			ChannelID: "thread-999",
+			Content:   "hello from thread",
+			Author:    &discordgo.User{ID: "U1", Username: "Alice"},
+		},
+	})
+
+	select {
+	case msg := <-ch:
+		if msg.ChannelID != "parent-channel" {
+			t.Errorf("ChannelID = %q, want %q", msg.ChannelID, "parent-channel")
+		}
+		if msg.ThreadID != "thread-999" {
+			t.Errorf("ThreadID = %q, want %q", msg.ThreadID, "thread-999")
+		}
+		if msg.Text != "hello from thread" {
+			t.Errorf("Text = %q, want %q", msg.Text, "hello from thread")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for thread message")
+	}
+}
+
+func TestHandleMessage_NonThreadChannel(t *testing.T) {
+	a, sess := newTestAdapter(t)
+
+	// Register a regular channel (not a thread).
+	sess.mu.Lock()
+	sess.channels["C1"] = &discordgo.Channel{
+		ID:   "C1",
+		Type: discordgo.ChannelTypeGuildText,
+	}
+	sess.mu.Unlock()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	ch, _ := a.Listen(ctx)
+
+	a.handleMessage(&discordgo.MessageCreate{
+		Message: &discordgo.Message{
+			ID:        "401",
+			ChannelID: "C1",
+			Content:   "top-level message",
+			Author:    &discordgo.User{ID: "U1", Username: "Alice"},
+		},
+	})
+
+	select {
+	case msg := <-ch:
+		if msg.ChannelID != "C1" {
+			t.Errorf("ChannelID = %q, want %q", msg.ChannelID, "C1")
+		}
+		if msg.ThreadID != "" {
+			t.Errorf("ThreadID = %q, want empty", msg.ThreadID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout")
+	}
+}
+
+func TestHandleMessage_UnknownChannel(t *testing.T) {
+	a, _ := newTestAdapter(t)
+
+	// Channel not in state cache — should fall back to treating as non-thread.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	ch, _ := a.Listen(ctx)
+
+	a.handleMessage(&discordgo.MessageCreate{
+		Message: &discordgo.Message{
+			ID:        "402",
+			ChannelID: "unknown-channel",
+			Content:   "message",
+			Author:    &discordgo.User{ID: "U1", Username: "Alice"},
+		},
+	})
+
+	select {
+	case msg := <-ch:
+		if msg.ChannelID != "unknown-channel" {
+			t.Errorf("ChannelID = %q, want %q", msg.ChannelID, "unknown-channel")
+		}
+		if msg.ThreadID != "" {
+			t.Errorf("ThreadID = %q, want empty for unknown channel", msg.ThreadID)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timeout")

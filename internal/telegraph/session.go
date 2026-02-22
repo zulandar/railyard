@@ -3,6 +3,7 @@ package telegraph
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -108,6 +109,9 @@ func (sm *SessionManager) NewSession(ctx context.Context, source, userName, thre
 	}
 	sm.mu.Unlock()
 
+	log.Printf("telegraph: session %d spawned [ch=%s thread=%s user=%s]",
+		dbSession.ID, channelID, threadID, userName)
+
 	// Relay subprocess output back to the chat platform.
 	go sm.relayOutput(ctx, channelID, threadID, dbSession.ID, proc)
 
@@ -188,6 +192,9 @@ func (sm *SessionManager) Resume(ctx context.Context, channelID, threadID, userN
 	}
 	sm.mu.Unlock()
 
+	log.Printf("telegraph: session %d resumed [ch=%s thread=%s user=%s] recovery_len=%d",
+		dbSession.ID, channelID, threadID, userName, len(recoveryPrompt))
+
 	// Relay subprocess output back to the chat platform.
 	go sm.relayOutput(ctx, channelID, threadID, dbSession.ID, proc)
 
@@ -236,6 +243,8 @@ func (sm *SessionManager) CloseSession(channelID, threadID string) error {
 // monitorProcess watches for process exit and cleans up the session.
 func (sm *SessionManager) monitorProcess(key string, sessionID uint, proc Process) {
 	<-proc.Done()
+
+	log.Printf("telegraph: session %d process exited, cleaning up [key=%s]", sessionID, key)
 
 	sm.mu.Lock()
 	delete(sm.sessions, key)
@@ -310,8 +319,10 @@ func (sm *SessionManager) relayOutput(ctx context.Context, channelID, threadID s
 
 	text := strings.TrimSpace(buf.String())
 	if text == "" {
+		log.Printf("telegraph: relay session %d: no output from process", sessionID)
 		return
 	}
+	log.Printf("telegraph: relay session %d: %d chars output", sessionID, len(text))
 
 	// Record assistant response in conversation history.
 	var maxSeq int
