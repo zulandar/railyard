@@ -49,10 +49,11 @@ type OutboundMessage struct {
 
 // FormattedEvent represents a Railyard event formatted for display in chat.
 type FormattedEvent struct {
-	Title  string  // event headline (e.g. "Car backend-42 merged")
-	Body   string  // detail text
-	Color  string  // sidebar color hint (e.g. "#36a64f" for success)
-	Fields []Field // key-value metadata pairs
+	Title    string  // event headline (e.g. "Car backend-42 merged")
+	Body     string  // detail text
+	Severity string  // "info", "warning", "error", "success"
+	Color    string  // sidebar color hint (e.g. "#36a64f" for success)
+	Fields   []Field // key-value metadata pairs
 }
 
 // Field is a key-value pair displayed in an event attachment.
