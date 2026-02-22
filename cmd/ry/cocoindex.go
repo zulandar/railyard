@@ -26,9 +26,6 @@ var embeddedDockerCompose string
 //go:embed cocoindex_init_pgvector.sql
 var embeddedInitPGVector string
 
-//go:embed cocoindex_pkg_init.py
-var embeddedPkgInit string
-
 //go:embed cocoindex_migrate.py
 var embeddedMigrate string
 
@@ -57,7 +54,6 @@ var embeddedScripts = []struct {
 	path    string
 	content *string
 }{
-	{"__init__.py", &embeddedPkgInit},
 	{"migrate.py", &embeddedMigrate},
 	{"config.py", &embeddedConfig},
 	{"main.py", &embeddedMain},
@@ -441,6 +437,14 @@ func ensureCocoIndexScripts(scriptsDir string) error {
 			return fmt.Errorf("write %s: %w", s.path, err)
 		}
 	}
+
+	// Remove stale __init__.py from previous versions — it shadows the
+	// pip-installed cocoindex package when the project root is on sys.path.
+	staleInit := filepath.Join(scriptsDir, "__init__.py")
+	if err := os.Remove(staleInit); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove stale __init__.py: %w", err)
+	}
+
 	return nil
 }
 
