@@ -320,7 +320,7 @@ func TestHasHistoricSession_ActiveNotHistoric(t *testing.T) {
 	db := openSessionTestDB(t)
 	sm, _ := NewSessionManager(SessionManagerOpts{DB: db, Spawner: &mockSpawner{}})
 
-	// Active sessions should not count as historic.
+	// Active sessions with fresh heartbeat should not count as historic.
 	db.Create(&models.DispatchSession{
 		Source:           "telegraph",
 		UserName:         "alice",
@@ -332,7 +332,30 @@ func TestHasHistoricSession_ActiveNotHistoric(t *testing.T) {
 	})
 
 	if sm.HasHistoricSession("C01", "thread-1") {
-		t.Error("HasHistoricSession should return false for active session")
+		t.Error("HasHistoricSession should return false for active session with fresh heartbeat")
+	}
+}
+
+func TestHasHistoricSession_StaleActiveIsHistoric(t *testing.T) {
+	db := openSessionTestDB(t)
+	sm, _ := NewSessionManager(SessionManagerOpts{DB: db, Spawner: &mockSpawner{}})
+
+	// Active sessions with stale heartbeat (orphaned) should count as historic.
+	// This covers the case where monitorProcess cleaned up the in-memory map
+	// but ReleaseLock failed, leaving the DB record in "active" status.
+	staleTime := time.Now().Add(-2 * DefaultHeartbeatTimeout)
+	db.Create(&models.DispatchSession{
+		Source:           "telegraph",
+		UserName:         "alice",
+		PlatformThreadID: "thread-1",
+		ChannelID:        "C01",
+		Status:           "active",
+		CarsCreated:      "[]",
+		LastHeartbeat:    staleTime,
+	})
+
+	if !sm.HasHistoricSession("C01", "thread-1") {
+		t.Error("HasHistoricSession should return true for active session with stale heartbeat")
 	}
 }
 

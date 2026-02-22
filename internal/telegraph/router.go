@@ -155,7 +155,11 @@ func (r *Router) Handle(ctx context.Context, msg InboundMessage) {
 	}
 
 	// 6. Unknown/unhandled message → ignore.
-	fmt.Fprintf(r.out, "telegraph: router: → ignore (no mention, no thread session)\n")
+	if msg.ThreadID != "" {
+		fmt.Fprintf(r.out, "telegraph: router: → ignore (thread reply, no session found for thread=%s)\n", threadID)
+	} else {
+		fmt.Fprintf(r.out, "telegraph: router: → ignore (no mention, no command prefix)\n")
+	}
 }
 
 // resolveThreadID returns the effective thread ID for session lookups.

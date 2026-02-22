@@ -244,13 +244,16 @@ func (sm *SessionManager) HasSession(channelID, threadID string) bool {
 	return ok
 }
 
-// HasHistoricSession returns true if there is a completed or expired session
-// in the database for the given thread/channel (candidate for Resume).
+// HasHistoricSession returns true if there is a resumable session in the
+// database for the given thread/channel. This matches sessions that are
+// completed, expired, or orphaned (still "active" in DB but with a stale
+// heartbeat, meaning the process exited without ReleaseLock succeeding).
 func (sm *SessionManager) HasHistoricSession(channelID, threadID string) bool {
 	var count int64
+	cutoff := time.Now().Add(-sm.timeout)
 	sm.db.Model(&models.DispatchSession{}).
-		Where("platform_thread_id = ? AND channel_id = ? AND status IN ?",
-			threadID, channelID, []string{"completed", "expired"}).
+		Where("platform_thread_id = ? AND channel_id = ? AND (status IN ? OR (status = ? AND last_heartbeat < ?))",
+			threadID, channelID, []string{"completed", "expired"}, "active", cutoff).
 		Count(&count)
 	return count > 0
 }
@@ -282,7 +285,9 @@ func (sm *SessionManager) monitorProcess(key string, sessionID uint, proc Proces
 	delete(sm.sessions, key)
 	sm.mu.Unlock()
 
-	ReleaseLock(sm.db, sessionID)
+	if err := ReleaseLock(sm.db, sessionID); err != nil {
+		log.Printf("telegraph: session %d: release lock failed: %v", sessionID, err)
+	}
 }
 
 // buildRecoveryContext constructs a recovery prompt from conversation history.
