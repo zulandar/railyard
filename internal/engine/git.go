@@ -276,3 +276,151 @@ func ChangedFiles(repoDir string) ([]string, error) {
 	}
 	return strings.Split(raw, "\n"), nil
 }
+
+// EnsureDispatchWorktree creates a persistent git worktree at .railyard/dispatch/
+// for the dispatcher agent. Returns the absolute path to the worktree directory.
+// If the worktree already exists, it is reused.
+func EnsureDispatchWorktree(repoDir string) (string, error) {
+	if repoDir == "" {
+		return "", fmt.Errorf("engine: repo directory is required")
+	}
+
+	wtDir := filepath.Join(repoDir, ".railyard", "dispatch")
+
+	// Reuse existing worktree.
+	if _, err := os.Stat(wtDir); err == nil {
+		writeClaudeIgnore(wtDir)
+		symlinkRailyardYaml(repoDir, wtDir)
+		return wtDir, nil
+	}
+
+	if err := os.MkdirAll(filepath.Join(repoDir, ".railyard"), 0755); err != nil {
+		return "", fmt.Errorf("engine: create .railyard dir: %w", err)
+	}
+
+	cmd := exec.Command("git", "worktree", "add", "--detach", wtDir)
+	cmd.Dir = repoDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("engine: create dispatch worktree: %s", strings.TrimSpace(string(out)))
+	}
+
+	writeClaudeIgnore(wtDir)
+	symlinkRailyardYaml(repoDir, wtDir)
+	return wtDir, nil
+}
+
+// RemoveDispatchWorktree removes the dispatcher's git worktree.
+func RemoveDispatchWorktree(repoDir string) error {
+	wtPath := filepath.Join(".railyard", "dispatch")
+	cmd := exec.Command("git", "worktree", "remove", "--force", wtPath)
+	cmd.Dir = repoDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		if strings.Contains(string(out), "is not a working tree") {
+			return nil
+		}
+		return fmt.Errorf("engine: remove dispatch worktree: %s", strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// EnsureYardmasterWorktree creates a persistent git worktree at .railyard/yardmaster/
+// for the yardmaster agent. Returns the absolute path to the worktree directory.
+func EnsureYardmasterWorktree(repoDir string) (string, error) {
+	if repoDir == "" {
+		return "", fmt.Errorf("engine: repo directory is required")
+	}
+
+	wtDir := filepath.Join(repoDir, ".railyard", "yardmaster")
+
+	// Reuse existing worktree.
+	if _, err := os.Stat(wtDir); err == nil {
+		return wtDir, nil
+	}
+
+	if err := os.MkdirAll(filepath.Join(repoDir, ".railyard"), 0755); err != nil {
+		return "", fmt.Errorf("engine: create .railyard dir: %w", err)
+	}
+
+	cmd := exec.Command("git", "worktree", "add", "--detach", wtDir)
+	cmd.Dir = repoDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("engine: create yardmaster worktree: %s", strings.TrimSpace(string(out)))
+	}
+
+	return wtDir, nil
+}
+
+// RemoveYardmasterWorktree removes the yardmaster's git worktree.
+func RemoveYardmasterWorktree(repoDir string) error {
+	wtPath := filepath.Join(".railyard", "yardmaster")
+	cmd := exec.Command("git", "worktree", "remove", "--force", wtPath)
+	cmd.Dir = repoDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		if strings.Contains(string(out), "is not a working tree") {
+			return nil
+		}
+		return fmt.Errorf("engine: remove yardmaster worktree: %s", strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// SyncWorktreeToBranch resets a worktree to match a given branch.
+// Fetches first, then resets to origin/{branch} (falls back to local {branch}).
+func SyncWorktreeToBranch(wtDir, branch string) error {
+	if wtDir == "" {
+		return fmt.Errorf("engine: worktree directory is required")
+	}
+	if branch == "" {
+		branch = "main"
+	}
+
+	// Fetch latest.
+	fetch := exec.Command("git", "fetch", "origin")
+	fetch.Dir = wtDir
+	fetch.CombinedOutput() // ignore error — no remote is fine
+
+	// Detach HEAD first.
+	detach := exec.Command("git", "checkout", "--detach", "HEAD")
+	detach.Dir = wtDir
+	detach.CombinedOutput() // ignore error
+
+	// Clean untracked files.
+	clean := exec.Command("git", "clean", "-fd")
+	clean.Dir = wtDir
+	clean.CombinedOutput() // ignore error
+
+	// Reset to origin/{branch}, fall back to local branch.
+	target := "origin/" + branch
+	checkRef := exec.Command("git", "rev-parse", "--verify", target)
+	checkRef.Dir = wtDir
+	if _, err := checkRef.CombinedOutput(); err != nil {
+		target = branch
+	}
+
+	reset := exec.Command("git", "reset", "--hard", target)
+	reset.Dir = wtDir
+	if out, err := reset.CombinedOutput(); err != nil {
+		return fmt.Errorf("engine: sync worktree to %s: %s: %w", target, strings.TrimSpace(string(out)), err)
+	}
+
+	return nil
+}
+
+// symlinkRailyardYaml creates a symlink to railyard.yaml in the worktree
+// so the dispatcher can find the config.
+func symlinkRailyardYaml(repoDir, wtDir string) {
+	linkPath := filepath.Join(wtDir, "railyard.yaml")
+	target := filepath.Join(repoDir, "railyard.yaml")
+
+	// Remove stale symlink if present.
+	os.Remove(linkPath)
+
+	// Only create if source exists.
+	if _, err := os.Stat(target); err == nil {
+		os.Symlink(target, linkPath)
+	}
+}

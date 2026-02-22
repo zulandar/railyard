@@ -16,7 +16,9 @@ import (
 
 // SwitchOpts holds parameters for the switch (merge) operation.
 type SwitchOpts struct {
-	RepoDir        string // working directory
+	RepoDir        string // working directory (yardmaster worktree when running via daemon)
+	PrimaryRepoDir string // primary repo directory (for engine worktree detachment; empty = use RepoDir)
+	BaseBranch     string // target branch for merge (default "main"); used for worktree-safe operations
 	DryRun         bool   // run tests but don't merge
 	PreTestCommand string // command to run before tests (e.g. "go mod vendor", "npm install")
 	TestCommand    string // per-track test command (e.g. "go test ./...", "phpunit", "npm test")
@@ -78,6 +80,11 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 		return nil, fmt.Errorf("yardmaster: car %s has no branch", carID)
 	}
 
+	baseBranch := opts.BaseBranch
+	if baseBranch == "" {
+		baseBranch = "main"
+	}
+
 	result := &SwitchResult{
 		CarID:  carID,
 		Branch: car.Branch,
@@ -90,9 +97,14 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 		return result, result.Error
 	}
 
-	// Detach the engine worktree so the branch can be checked out in the main repo.
+	// Detach the engine worktree so the branch can be checked out.
+	// Engine worktrees live under the primary repo, not the yardmaster worktree.
 	if car.Assignee != "" {
-		detachEngineWorktree(opts.RepoDir, car.Assignee)
+		detachDir := opts.PrimaryRepoDir
+		if detachDir == "" {
+			detachDir = opts.RepoDir
+		}
+		detachEngineWorktree(detachDir, car.Assignee)
 	}
 
 	// Run tests on the branch (unless skip_tests is set on the car).
@@ -100,7 +112,7 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 		result.TestsPassed = true
 		result.TestOutput = "tests skipped (skip_tests=true on car)"
 	} else {
-		testOutput, testErr := runTests(opts.RepoDir, car.Branch, opts.PreTestCommand, opts.TestCommand)
+		testOutput, testErr := runTests(opts.RepoDir, car.Branch, baseBranch, opts.PreTestCommand, opts.TestCommand)
 		result.TestOutput = testOutput
 
 		if testErr != nil {
@@ -144,7 +156,7 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 
 	// If the branch is already an ancestor of main (e.g. a dependent car's
 	// merge already included this branch's commits), skip the merge.
-	if isAncestor(opts.RepoDir, car.Branch) {
+	if isAncestor(opts.RepoDir, car.Branch, baseBranch) {
 		result.Merged = true
 		result.AlreadyMerged = true
 
@@ -188,7 +200,7 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 		}
 
 		// Build the PR body from the car record and progress notes.
-		prBody := buildPRBody(db, &car, opts.RepoDir)
+		prBody := buildPRBody(db, &car, opts.RepoDir, baseBranch)
 
 		prURL, err := createDraftPR(opts.RepoDir, car.Title, prBody, car.Branch)
 		if err != nil {
@@ -213,8 +225,8 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 	// Save pre-merge HEAD so we can undo the merge if push fails.
 	preMergeHead := getHeadCommit(opts.RepoDir)
 
-	// Merge to main.
-	if err := gitMerge(opts.RepoDir, car.Branch); err != nil {
+	// Merge to the base branch.
+	if err := gitMerge(opts.RepoDir, car.Branch, baseBranch); err != nil {
 		result.FailureCategory = SwitchFailMerge
 		result.Error = fmt.Errorf("merge: %w", err)
 		return result, result.Error
@@ -222,7 +234,7 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 
 	// Push to remote before marking merged — the car should only be
 	// considered merged once the code is confirmed on the remote.
-	if err := gitPush(opts.RepoDir); err != nil {
+	if err := gitPush(opts.RepoDir, baseBranch); err != nil {
 		// Undo the local merge so the car will be retried next cycle.
 		gitResetToCommit(opts.RepoDir, preMergeHead)
 		result.FailureCategory = SwitchFailPush
@@ -382,7 +394,8 @@ func truncateOutput(output string, maxLen int) string {
 }
 
 // runTests checks out the branch and runs the test suite.
-func runTests(repoDir, branch, preTestCommand, testCommand string) (string, error) {
+// baseBranch is the branch to return to after tests (e.g. "main").
+func runTests(repoDir, branch, baseBranch, preTestCommand, testCommand string) (string, error) {
 	// Checkout the branch.
 	checkout := exec.Command("git", "checkout", branch)
 	checkout.Dir = repoDir
@@ -395,10 +408,7 @@ func runTests(repoDir, branch, preTestCommand, testCommand string) (string, erro
 		preCmd := exec.Command("sh", "-c", preTestCommand)
 		preCmd.Dir = repoDir
 		if out, err := preCmd.CombinedOutput(); err != nil {
-			// Checkout main again before returning.
-			backToMain := exec.Command("git", "checkout", "main")
-			backToMain.Dir = repoDir
-			backToMain.CombinedOutput()
+			checkoutBase(repoDir, baseBranch)
 			return string(out), fmt.Errorf("pre-test command failed: %w", err)
 		}
 	}
@@ -413,10 +423,8 @@ func runTests(repoDir, branch, preTestCommand, testCommand string) (string, erro
 	out, err := testCmd.CombinedOutput()
 	output := string(out)
 
-	// Checkout main again regardless.
-	backToMain := exec.Command("git", "checkout", "main")
-	backToMain.Dir = repoDir
-	backToMain.CombinedOutput()
+	// Return to base branch regardless.
+	checkoutBase(repoDir, baseBranch)
 
 	if err != nil {
 		// Check for "no tests" patterns — treat as pass.
@@ -431,26 +439,44 @@ func runTests(repoDir, branch, preTestCommand, testCommand string) (string, erro
 	return output, nil
 }
 
+// checkoutBase switches back to the base branch after test/merge operations.
+// In a worktree, "git checkout main" may fail because main is checked out
+// in the primary repo. Falls back to detaching HEAD at origin/{baseBranch}.
+func checkoutBase(repoDir, baseBranch string) {
+	cmd := exec.Command("git", "checkout", baseBranch)
+	cmd.Dir = repoDir
+	if _, err := cmd.CombinedOutput(); err == nil {
+		return
+	}
+	// Fallback: detach at origin/{baseBranch} (worktree-safe).
+	detach := exec.Command("git", "checkout", "--detach", "origin/"+baseBranch)
+	detach.Dir = repoDir
+	if _, err := detach.CombinedOutput(); err != nil {
+		// Last resort: detach at local {baseBranch} ref.
+		last := exec.Command("git", "checkout", "--detach", baseBranch)
+		last.Dir = repoDir
+		last.CombinedOutput()
+	}
+}
+
 // isAncestor returns true if the given branch is already fully contained
-// in main (i.e., all its commits are reachable from main). This happens
-// when a dependent car's merge already included this branch's changes.
-func isAncestor(repoDir, branch string) bool {
-	cmd := exec.Command("git", "merge-base", "--is-ancestor", branch, "main")
+// in the base branch (i.e., all its commits are reachable from baseBranch).
+// This happens when a dependent car's merge already included this branch's changes.
+func isAncestor(repoDir, branch, baseBranch string) bool {
+	cmd := exec.Command("git", "merge-base", "--is-ancestor", branch, baseBranch)
 	cmd.Dir = repoDir
 	return cmd.Run() == nil
 }
 
-// gitMerge merges the branch into main.
-func gitMerge(repoDir, branch string) error {
-	// Checkout main.
-	checkout := exec.Command("git", "checkout", "main")
-	checkout.Dir = repoDir
-	if out, err := checkout.CombinedOutput(); err != nil {
-		return fmt.Errorf("git checkout main: %s: %w", string(out), err)
-	}
+// gitMerge merges the branch into the base branch.
+// Uses checkoutBase which handles worktree mode (detached HEAD fallback).
+func gitMerge(repoDir, branch, baseBranch string) error {
+	// Checkout the base branch (worktree-safe).
+	checkoutBase(repoDir, baseBranch)
 
+	// Verify we're at the right commit (either on baseBranch or detached at it).
 	// Merge the branch with co-author trailer for Railyard attribution.
-	msg := fmt.Sprintf("Switch: merge %s to main\n\nCo-Authored-By: Railyard Yardmaster <railyard-yardmaster@noreply>", branch)
+	msg := fmt.Sprintf("Switch: merge %s to %s\n\nCo-Authored-By: Railyard Yardmaster <railyard-yardmaster@noreply>", branch, baseBranch)
 	merge := exec.Command("git", "merge", "--no-ff", branch, "-m", msg)
 	merge.Dir = repoDir
 	if out, err := merge.CombinedOutput(); err != nil {
@@ -468,9 +494,10 @@ func gitResetToCommit(repoDir, commitHash string) {
 	cmd.CombinedOutput() // best-effort — error logged by caller
 }
 
-// gitPush pushes the current branch to the remote.
-func gitPush(repoDir string) error {
-	cmd := exec.Command("git", "push", "origin", "main")
+// gitPush pushes the current HEAD to the base branch on the remote.
+// Uses HEAD:{baseBranch} refspec which works in both normal repos and worktrees.
+func gitPush(repoDir, baseBranch string) error {
+	cmd := exec.Command("git", "push", "origin", "HEAD:"+baseBranch)
 	cmd.Dir = repoDir
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git push: %s: %w", string(out), err)
@@ -546,7 +573,7 @@ func gitPushBranch(repoDir, branch string) error {
 }
 
 // buildPRBody assembles a rich PR description from the car record and progress notes.
-func buildPRBody(db *gorm.DB, car *models.Car, repoDir string) string {
+func buildPRBody(db *gorm.DB, car *models.Car, repoDir, baseBranch string) string {
 	var b strings.Builder
 
 	// Summary.
@@ -573,7 +600,7 @@ func buildPRBody(db *gorm.DB, car *models.Car, repoDir string) string {
 	}
 
 	// What Changed — git diff --stat.
-	diffStat := gitDiffStat(repoDir, car.Branch)
+	diffStat := gitDiffStat(repoDir, car.Branch, baseBranch)
 	if diffStat != "" {
 		b.WriteString("## What Changed\n```\n")
 		b.WriteString(diffStat)
@@ -608,9 +635,9 @@ func buildPRBody(db *gorm.DB, car *models.Car, repoDir string) string {
 	return b.String()
 }
 
-// gitDiffStat returns the diff --stat between main and the given branch.
-func gitDiffStat(repoDir, branch string) string {
-	cmd := exec.Command("git", "diff", "--stat", "main..."+branch)
+// gitDiffStat returns the diff --stat between the base branch and the given branch.
+func gitDiffStat(repoDir, branch, baseBranch string) string {
+	cmd := exec.Command("git", "diff", "--stat", baseBranch+"..."+branch)
 	cmd.Dir = repoDir
 	out, err := cmd.Output()
 	if err != nil {

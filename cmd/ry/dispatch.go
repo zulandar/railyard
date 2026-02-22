@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
 	"github.com/zulandar/railyard/internal/config"
@@ -30,8 +31,11 @@ func runDispatch(cmd *cobra.Command, configPath string) error {
 		return fmt.Errorf("load config: %w", err)
 	}
 
+	repoDir, _ := os.Getwd()
+
 	return dispatch.Start(dispatch.StartOpts{
 		ConfigPath: configPath,
 		Config:     cfg,
+		RepoDir:    repoDir,
 	})
 }

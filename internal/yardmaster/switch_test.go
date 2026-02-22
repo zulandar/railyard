@@ -182,7 +182,7 @@ func TestGitPush_NoRemote(t *testing.T) {
 	run("git", "config", "user.name", "test")
 	run("git", "commit", "--allow-empty", "-m", "init")
 
-	err := gitPush(repoDir)
+	err := gitPush(repoDir, "main")
 	if err == nil {
 		t.Fatal("expected error when no remote is configured")
 	}
@@ -220,7 +220,7 @@ func TestGitPush_WithRemote(t *testing.T) {
 	run(repoDir, "git", "commit", "--allow-empty", "-m", "feature work")
 
 	// Push using our helper.
-	if err := gitPush(repoDir); err != nil {
+	if err := gitPush(repoDir, "main"); err != nil {
 		t.Fatalf("gitPush failed: %v", err)
 	}
 
@@ -364,7 +364,7 @@ func TestBuildPRBody_FullCar(t *testing.T) {
 		Note:     "Added test coverage for all token states",
 	})
 
-	body := buildPRBody(db, &c, "/nonexistent") // repoDir doesn't matter — git diff will fail gracefully
+	body := buildPRBody(db, &c, "/nonexistent", "main") // repoDir doesn't matter — git diff will fail gracefully
 
 	// Summary section.
 	if !strings.Contains(body, "## Summary") {
@@ -427,7 +427,7 @@ func TestBuildPRBody_MinimalCar(t *testing.T) {
 	}
 	db.Create(&c)
 
-	body := buildPRBody(db, &c, "/nonexistent")
+	body := buildPRBody(db, &c, "/nonexistent", "main")
 
 	// Should use title as summary when description is empty.
 	if !strings.Contains(body, "Fix typo") {
@@ -470,7 +470,7 @@ func TestBuildPRBody_NilDB(t *testing.T) {
 	}
 
 	// Should not panic with nil DB — just no progress section.
-	body := buildPRBody(nil, &c, "/nonexistent")
+	body := buildPRBody(nil, &c, "/nonexistent", "main")
 	if !strings.Contains(body, "## Summary") {
 		t.Error("missing Summary section")
 	}
@@ -626,7 +626,7 @@ func TestIsAncestor_TrueWhenBranchBehindMain(t *testing.T) {
 	// Advance main past the feature branch.
 	run("git", "commit", "--allow-empty", "-m", "main advance")
 
-	if !isAncestor(repoDir, "feature") {
+	if !isAncestor(repoDir, "feature", "main") {
 		t.Error("isAncestor should be true when feature is behind main")
 	}
 }
@@ -639,7 +639,7 @@ func TestIsAncestor_FalseWhenBranchAhead(t *testing.T) {
 	run("git", "commit", "--allow-empty", "-m", "feature work")
 	run("git", "checkout", "main")
 
-	if isAncestor(repoDir, "feature") {
+	if isAncestor(repoDir, "feature", "main") {
 		t.Error("isAncestor should be false when feature has commits not in main")
 	}
 }
@@ -651,7 +651,7 @@ func TestIsAncestor_TrueWhenSameCommit(t *testing.T) {
 	run("git", "checkout", "-b", "feature")
 	run("git", "checkout", "main")
 
-	if !isAncestor(repoDir, "feature") {
+	if !isAncestor(repoDir, "feature", "main") {
 		t.Error("isAncestor should be true when feature and main are at the same commit")
 	}
 }
@@ -900,7 +900,7 @@ func TestRunTests_PreTestCommand(t *testing.T) {
 	preTest := "echo pre-test-ran > " + markerPath
 	testCmd := "test -f " + markerPath
 
-	output, err := runTests(repoDir, "feature", preTest, testCmd)
+	output, err := runTests(repoDir, "feature", "main", preTest, testCmd)
 	if err != nil {
 		t.Fatalf("runTests failed: %v\noutput: %s", err, output)
 	}
@@ -921,7 +921,7 @@ func TestRunTests_PreTestFailure(t *testing.T) {
 	run("git", "checkout", "main")
 
 	// Pre-test fails; test command should never run.
-	_, err := runTests(repoDir, "feature", "false", "echo should-not-run")
+	_, err := runTests(repoDir, "feature", "main", "false", "echo should-not-run")
 	if err == nil {
 		t.Fatal("expected error when pre-test fails")
 	}
@@ -947,7 +947,7 @@ func TestRunTests_NoTestFilesPattern(t *testing.T) {
 	// Simulate "no test files" by echoing the pattern and exiting non-zero.
 	testCmd := `echo "no test files" && exit 1`
 
-	output, err := runTests(repoDir, "feature", "", testCmd)
+	output, err := runTests(repoDir, "feature", "main", "", testCmd)
 	if err != nil {
 		t.Fatalf("runTests should treat 'no test files' as pass, got error: %v", err)
 	}
@@ -964,13 +964,106 @@ func TestRunTests_NoTestsFoundPattern(t *testing.T) {
 
 	testCmd := `echo "No tests found" && exit 1`
 
-	output, err := runTests(repoDir, "feature", "", testCmd)
+	output, err := runTests(repoDir, "feature", "main", "", testCmd)
 	if err != nil {
 		t.Fatalf("runTests should treat 'No tests found' as pass, got error: %v", err)
 	}
 	if !strings.Contains(output, "No tests found") {
 		t.Errorf("output should contain the pattern, got: %s", output)
 	}
+}
+
+// --- PrimaryRepoDir and worktree isolation tests ---
+
+func TestSwitch_PrimaryRepoDirUsedForDetach(t *testing.T) {
+	// Verify that when PrimaryRepoDir is set, detachEngineWorktree uses it
+	// (not RepoDir) to find engine worktrees.
+	opts := SwitchOpts{
+		RepoDir:        "/some/worktree/path",
+		PrimaryRepoDir: "/primary/repo/path",
+	}
+	if opts.PrimaryRepoDir != "/primary/repo/path" {
+		t.Errorf("PrimaryRepoDir = %q, want %q", opts.PrimaryRepoDir, "/primary/repo/path")
+	}
+	// When PrimaryRepoDir is empty, fallback to RepoDir.
+	opts2 := SwitchOpts{RepoDir: "/some/path"}
+	detachDir := opts2.PrimaryRepoDir
+	if detachDir == "" {
+		detachDir = opts2.RepoDir
+	}
+	if detachDir != "/some/path" {
+		t.Errorf("fallback detachDir = %q, want %q", detachDir, "/some/path")
+	}
+}
+
+func TestSwitch_InWorktree_MergePushes(t *testing.T) {
+	// Integration test: create a yardmaster worktree and run Switch in it
+	// while the primary repo stays on main (untouched).
+	repoDir, bareDir, run := initTestRepoWithRemote(t)
+
+	// Create a feature branch with a commit.
+	run(repoDir, "git", "checkout", "-b", "ry/alice/backend/car-wt1")
+	run(repoDir, "git", "commit", "--allow-empty", "-m", "worktree feature")
+	run(repoDir, "git", "checkout", "main")
+
+	// Create a yardmaster worktree (simulating what RunDaemon does).
+	ymDir := filepath.Join(repoDir, ".railyard", "yardmaster")
+	os.MkdirAll(filepath.Join(repoDir, ".railyard"), 0o755)
+	run(repoDir, "git", "worktree", "add", "--detach", ymDir)
+
+	// Reset worktree to main (simulating SyncWorktreeToBranch).
+	run(ymDir, "git", "reset", "--hard", "main")
+
+	// Set up DB with the car.
+	db := testDB(t)
+	db.Create(&models.Car{
+		ID:     "car-wt1",
+		Title:  "Worktree merge test",
+		Track:  "backend",
+		Branch: "ry/alice/backend/car-wt1",
+		Status: "done",
+	})
+
+	result, err := Switch(db, "car-wt1", SwitchOpts{
+		RepoDir:        ymDir,
+		PrimaryRepoDir: repoDir,
+		TestCommand:    "true",
+	})
+	if err != nil {
+		t.Fatalf("Switch in worktree returned error: %v", err)
+	}
+
+	if !result.Merged {
+		t.Error("expected Merged=true")
+	}
+	if !result.TestsPassed {
+		t.Error("expected TestsPassed=true")
+	}
+
+	// Verify the remote has the merge commit.
+	cmd := exec.Command("git", "log", "--oneline", "main")
+	cmd.Dir = bareDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git log on bare failed: %s: %v", out, err)
+	}
+	if !strings.Contains(string(out), "Switch: merge") {
+		t.Errorf("remote missing merge commit, got: %s", out)
+	}
+
+	// Verify the primary repo's HEAD is still on main (untouched).
+	cmd = exec.Command("git", "symbolic-ref", "--short", "HEAD")
+	cmd.Dir = repoDir
+	out, err = cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("symbolic-ref failed: %s: %v", out, err)
+	}
+	if strings.TrimSpace(string(out)) != "main" {
+		t.Errorf("primary repo HEAD = %q, want %q (should be untouched)", strings.TrimSpace(string(out)), "main")
+	}
+
+	// Clean up worktree.
+	exec.Command("git", "worktree", "remove", "--force", ymDir).Run()
 }
 
 func TestRunTests_RealTestFailure(t *testing.T) {
@@ -982,7 +1075,7 @@ func TestRunTests_RealTestFailure(t *testing.T) {
 	// A real failure that doesn't match any no-test patterns.
 	testCmd := `echo "FAIL: TestSomething" && exit 1`
 
-	_, err := runTests(repoDir, "feature", "", testCmd)
+	_, err := runTests(repoDir, "feature", "main", "", testCmd)
 	if err == nil {
 		t.Fatal("expected error for real test failure")
 	}

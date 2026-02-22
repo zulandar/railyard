@@ -51,6 +51,16 @@ func RunDaemon(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath,
 	}
 	fmt.Fprintf(out, "Yardmaster registered (id=%s)\n", YardmasterID)
 
+	// Create the yardmaster worktree so switch operations don't disturb the
+	// primary repo. Falls back to repoDir if worktree creation fails.
+	ymDir, ymErr := engine.EnsureYardmasterWorktree(repoDir)
+	if ymErr != nil {
+		log.Printf("yardmaster: worktree setup warning: %v (using repo dir)", ymErr)
+		ymDir = repoDir
+	} else {
+		fmt.Fprintf(out, "Yardmaster worktree ready at %s\n", ymDir)
+	}
+
 	hbErrCh := engine.StartHeartbeat(ctx, db, YardmasterID, engine.DefaultHeartbeatInterval)
 
 	fmt.Fprintf(out, "Yardmaster daemon starting (poll every %s)...\n", pollInterval)
@@ -90,7 +100,7 @@ func RunDaemon(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath,
 		}
 
 		// Phase 3: Handle completed cars.
-		if err := handleCompletedCars(ctx, db, cfg, repoDir, out); err != nil {
+		if err := handleCompletedCars(ctx, db, cfg, repoDir, ymDir, out); err != nil {
 			log.Printf("yardmaster completed cars error: %v", err)
 		}
 
@@ -299,7 +309,9 @@ func handleStaleEngines(db *gorm.DB, cfg *config.Config, configPath string, out 
 
 // handleCompletedCars finds cars with status "done" and runs the switch flow.
 // Switch() marks cars as "merged" after successful merge, so they won't reappear.
-func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, repoDir string, out io.Writer) error {
+// ymDir is the yardmaster worktree where switch operations happen; repoDir is
+// the primary repo (used for engine worktree detachment).
+func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, repoDir, ymDir string, out io.Writer) error {
 	cars, err := car.List(db, car.ListFilters{Status: "done"})
 	if err != nil {
 		return err
@@ -307,6 +319,18 @@ func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, r
 
 	for _, c := range cars {
 		fmt.Fprintf(out, "Completed car %s (%s) — switching\n", c.ID, c.Title)
+
+		// Reset the yardmaster worktree to the car's base branch before each
+		// switch so we start from a clean state.
+		baseBranch := c.BaseBranch
+		if baseBranch == "" {
+			baseBranch = "main"
+		}
+		if ymDir != repoDir {
+			if err := engine.SyncWorktreeToBranch(ymDir, baseBranch); err != nil {
+				log.Printf("reset yardmaster worktree for %s: %v", c.ID, err)
+			}
+		}
 
 		var testCommand, preTestCommand string
 		for _, t := range cfg.Tracks {
@@ -318,7 +342,9 @@ func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, r
 		}
 
 		result, err := Switch(db, c.ID, SwitchOpts{
-			RepoDir:        repoDir,
+			RepoDir:        ymDir,
+			PrimaryRepoDir: repoDir,
+			BaseBranch:     baseBranch,
 			PreTestCommand: preTestCommand,
 			TestCommand:    testCommand,
 			RequirePR:      cfg.RequirePR,
@@ -366,7 +392,7 @@ func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, r
 				}
 			}
 
-			commitHash := getHeadCommit(repoDir)
+			commitHash := getHeadCommit(ymDir)
 			if err := CreateReindexJob(db, c.Track, commitHash); err != nil {
 				log.Printf("create reindex job for %s: %v", c.Track, err)
 			}

@@ -690,3 +690,148 @@ func TestChangedFiles_MultipleFiles(t *testing.T) {
 		t.Fatalf("got %d files, want 2: %v", len(files), files)
 	}
 }
+
+// --- EnsureDispatchWorktree tests ---
+
+func TestEnsureDispatchWorktree(t *testing.T) {
+	dir := initTestRepo(t)
+
+	wtDir, err := EnsureDispatchWorktree(dir)
+	if err != nil {
+		t.Fatalf("EnsureDispatchWorktree: %v", err)
+	}
+
+	// Verify path.
+	expected := filepath.Join(dir, ".railyard", "dispatch")
+	if wtDir != expected {
+		t.Errorf("wtDir = %q, want %q", wtDir, expected)
+	}
+
+	// Verify .claudeignore exists.
+	if _, err := os.Stat(filepath.Join(wtDir, ".claudeignore")); err != nil {
+		t.Errorf("expected .claudeignore in dispatch worktree: %v", err)
+	}
+
+	// Verify railyard.yaml symlink (create source first).
+	os.WriteFile(filepath.Join(dir, "railyard.yaml"), []byte("owner: test\n"), 0644)
+	wtDir2, err := EnsureDispatchWorktree(dir)
+	if err != nil {
+		t.Fatalf("second EnsureDispatchWorktree: %v", err)
+	}
+	if wtDir2 != wtDir {
+		t.Errorf("reuse path changed: %q → %q", wtDir, wtDir2)
+	}
+	linkTarget, err := os.Readlink(filepath.Join(wtDir2, "railyard.yaml"))
+	if err != nil {
+		t.Fatalf("expected railyard.yaml symlink: %v", err)
+	}
+	if linkTarget != filepath.Join(dir, "railyard.yaml") {
+		t.Errorf("symlink target = %q, want %q", linkTarget, filepath.Join(dir, "railyard.yaml"))
+	}
+}
+
+func TestEnsureDispatchWorktree_EmptyDir(t *testing.T) {
+	_, err := EnsureDispatchWorktree("")
+	if err == nil {
+		t.Fatal("expected error for empty dir")
+	}
+}
+
+// --- EnsureYardmasterWorktree tests ---
+
+func TestEnsureYardmasterWorktree(t *testing.T) {
+	dir := initTestRepo(t)
+
+	wtDir, err := EnsureYardmasterWorktree(dir)
+	if err != nil {
+		t.Fatalf("EnsureYardmasterWorktree: %v", err)
+	}
+
+	expected := filepath.Join(dir, ".railyard", "yardmaster")
+	if wtDir != expected {
+		t.Errorf("wtDir = %q, want %q", wtDir, expected)
+	}
+
+	// Verify reuse.
+	wtDir2, err := EnsureYardmasterWorktree(dir)
+	if err != nil {
+		t.Fatalf("second EnsureYardmasterWorktree: %v", err)
+	}
+	if wtDir2 != wtDir {
+		t.Errorf("reuse path changed: %q → %q", wtDir, wtDir2)
+	}
+}
+
+func TestEnsureYardmasterWorktree_EmptyDir(t *testing.T) {
+	_, err := EnsureYardmasterWorktree("")
+	if err == nil {
+		t.Fatal("expected error for empty dir")
+	}
+}
+
+// --- SyncWorktreeToBranch tests ---
+
+func TestSyncWorktreeToBranch(t *testing.T) {
+	dir := initTestRepo(t)
+
+	// Create a "develop" branch with a different file.
+	run := func(d string, args ...string) {
+		t.Helper()
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = d
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v: %s\n%s", args, err, out)
+		}
+	}
+	run(dir, "git", "checkout", "-b", "develop")
+	os.WriteFile(filepath.Join(dir, "develop.txt"), []byte("develop branch\n"), 0644)
+	run(dir, "git", "add", ".")
+	run(dir, "git", "commit", "-m", "develop commit")
+	run(dir, "git", "checkout", "main")
+
+	// Create a worktree.
+	wtDir, err := EnsureYardmasterWorktree(dir)
+	if err != nil {
+		t.Fatalf("EnsureYardmasterWorktree: %v", err)
+	}
+
+	// Sync to develop branch.
+	if err := SyncWorktreeToBranch(wtDir, "develop"); err != nil {
+		t.Fatalf("SyncWorktreeToBranch: %v", err)
+	}
+
+	// Verify develop.txt exists.
+	if _, err := os.Stat(filepath.Join(wtDir, "develop.txt")); err != nil {
+		t.Errorf("expected develop.txt after sync: %v", err)
+	}
+
+	// Sync back to main.
+	if err := SyncWorktreeToBranch(wtDir, "main"); err != nil {
+		t.Fatalf("SyncWorktreeToBranch main: %v", err)
+	}
+
+	// develop.txt should be gone.
+	if _, err := os.Stat(filepath.Join(wtDir, "develop.txt")); !os.IsNotExist(err) {
+		t.Error("expected develop.txt to be gone after sync to main")
+	}
+}
+
+func TestSyncWorktreeToBranch_EmptyDir(t *testing.T) {
+	err := SyncWorktreeToBranch("", "main")
+	if err == nil {
+		t.Fatal("expected error for empty dir")
+	}
+}
+
+func TestSyncWorktreeToBranch_EmptyBranchDefaultsToMain(t *testing.T) {
+	dir := initTestRepo(t)
+	wtDir, err := EnsureYardmasterWorktree(dir)
+	if err != nil {
+		t.Fatalf("EnsureYardmasterWorktree: %v", err)
+	}
+
+	// Should not error with empty branch (defaults to "main").
+	if err := SyncWorktreeToBranch(wtDir, ""); err != nil {
+		t.Fatalf("SyncWorktreeToBranch empty branch: %v", err)
+	}
+}
