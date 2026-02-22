@@ -40,6 +40,13 @@ func TestStartCmd_Flags(t *testing.T) {
 	if engFlag.DefValue != "0" {
 		t.Errorf("--engines default = %q, want %q", engFlag.DefValue, "0")
 	}
+	tgFlag := cmd.Flags().Lookup("telegraph")
+	if tgFlag == nil {
+		t.Fatal("expected --telegraph flag")
+	}
+	if tgFlag.DefValue != "false" {
+		t.Errorf("--telegraph default = %q, want %q", tgFlag.DefValue, "false")
+	}
 }
 
 func TestStartCmd_MissingConfig(t *testing.T) {

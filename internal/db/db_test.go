@@ -95,8 +95,8 @@ func TestCreateDatabase_RequiresDolt(t *testing.T) {
 
 func TestAllModels_Count(t *testing.T) {
 	models := AllModels()
-	if len(models) != 10 {
-		t.Errorf("AllModels() returned %d models, want 10", len(models))
+	if len(models) != 12 {
+		t.Errorf("AllModels() returned %d models, want 12", len(models))
 	}
 }
 

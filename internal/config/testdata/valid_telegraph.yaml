@@ -1,0 +1,31 @@
+owner: alice
+repo: git@github.com:org/myapp.git
+tracks:
+  - name: backend
+    language: go
+
+telegraph:
+  platform: slack
+  channel: C0123456789
+  slack:
+    bot_token: xoxb-test-token
+    app_token: xapp-test-token
+  dispatch_lock:
+    heartbeat_interval_sec: 15
+    heartbeat_timeout_sec: 60
+    queue_max: 3
+  events:
+    car_lifecycle: true
+    engine_stalls: true
+    escalations: false
+    poll_interval_sec: 10
+  digest:
+    pulse:
+      enabled: true
+      cron: "*/30 * * * *"
+    daily:
+      enabled: true
+      cron: "0 9 * * *"
+  conversations:
+    max_turns: 30
+    recovery_lookback_days: 14

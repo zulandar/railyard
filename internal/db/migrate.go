@@ -23,6 +23,8 @@ func AllModels() []interface{} {
 		&models.AgentLog{},
 		&models.RailyardConfig{},
 		&models.ReindexJob{},
+		&models.DispatchSession{},
+		&models.TelegraphConversation{},
 	}
 }
 

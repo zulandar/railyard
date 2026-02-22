@@ -14,6 +14,7 @@ Railyard is a multi-agent AI orchestration system that coordinates coding agents
 | **Engine** | A worker agent (Claude Code, Codex, etc.) |
 | **Yardmaster** | The supervisor agent — merges, monitors, coordinates |
 | **Dispatch** | The planner agent — your interface, breaks down work |
+| **Telegraph** | Chat bridge — connects Railyard to Slack/Discord for commands, events, and dispatch |
 | **Roundhouse** | CocoIndex GPU box — re-indexes code after merges |
 | **Coupling** | Car dependencies — cars linked together |
 | **Switch** | Merging a branch back to main |

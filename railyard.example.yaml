@@ -136,3 +136,44 @@ tracks:
   #   conventions:
   #     min_ios: "17.0"
   #     architecture: "MVVM with Combine"
+
+# ---------------------------------------------------------------------------
+# Telegraph chat bridge (optional — Slack or Discord)
+# ---------------------------------------------------------------------------
+#
+# Connects Railyard to a chat platform for command routing, event
+# notifications, dispatch via @mention, and scheduled digests.
+# See docs/telegraph-setup.md for full setup instructions.
+#
+# telegraph:
+#   platform: slack                    # "slack" or "discord"
+#   channel: C0123456789               # default channel ID
+#   allowed_channels:                  # restrict bot to these channels (omit for all)
+#     - C0123456789
+#     - C9876543210
+#   slack:
+#     bot_token: ${SLACK_BOT_TOKEN}    # xoxb-... bot token
+#     app_token: ${SLACK_APP_TOKEN}    # xapp-... app-level token (Socket Mode)
+#   # discord:
+#   #   bot_token: ${DISCORD_BOT_TOKEN}
+#   #   guild_id: "123456789"
+#   #   channel_id: "123456789"
+#   events:
+#     car_lifecycle: true              # post car status changes (default: true)
+#     engine_stalls: true              # post stall alerts (default: true)
+#     escalations: true                # post escalation messages (default: true)
+#     poll_interval_sec: 15            # event poll interval (default: 15)
+#   digest:
+#     daily:
+#       enabled: true
+#       cron: "0 9 * * *"             # 9am daily
+#     weekly:
+#       enabled: true
+#       cron: "0 9 * * 1"             # 9am Monday
+#   dispatch_lock:
+#     heartbeat_interval_sec: 30       # session heartbeat interval (default: 30)
+#     heartbeat_timeout_sec: 90        # stale heartbeat threshold (default: 90)
+#     queue_max: 5                     # max queued dispatch requests (default: 5)
+#   conversations:
+#     max_turns: 20                    # max turns per dispatch conversation (default: 20)
+#     recovery_lookback_days: 7        # days to look back for session recovery (default: 7)
