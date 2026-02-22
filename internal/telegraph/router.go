@@ -120,15 +120,35 @@ func (r *Router) Handle(ctx context.Context, msg InboundMessage) {
 
 	// 5. New message with @mention → new session.
 	if isMention(text) {
-		fmt.Fprintf(r.out, "telegraph: router: → new session [ch=%s thread=%s]\n", msg.ChannelID, threadID)
-		r.sendAck(ctx, msg.ChannelID, threadID)
-		_, err := r.sessionMgr.NewSession(ctx, "telegraph", msg.UserName, threadID, msg.ChannelID)
+		// For top-level channel messages, create a thread if the adapter supports it.
+		// This keeps dispatch conversations contained in threads.
+		sessionThreadID := threadID
+		if msg.ThreadID == "" {
+			if ts, ok := r.adapter.(ThreadStarter); ok {
+				ack := r.nextAck()
+				newThreadID, err := ts.StartThread(ctx, msg.ChannelID, ack, "Dispatch")
+				if err != nil {
+					log.Printf("telegraph: router: create thread: %v", err)
+					// Fall back to channel-level messaging.
+				} else {
+					sessionThreadID = newThreadID
+					fmt.Fprintf(r.out, "telegraph: router: created thread %s for dispatch\n", newThreadID)
+				}
+			} else {
+				r.sendAck(ctx, msg.ChannelID, threadID)
+			}
+		} else {
+			r.sendAck(ctx, msg.ChannelID, threadID)
+		}
+
+		fmt.Fprintf(r.out, "telegraph: router: → new session [ch=%s thread=%s]\n", msg.ChannelID, sessionThreadID)
+		_, err := r.sessionMgr.NewSession(ctx, "telegraph", msg.UserName, sessionThreadID, msg.ChannelID)
 		if err != nil {
 			log.Printf("telegraph: router: new session: %v", err)
 			return
 		}
 		// Route the initial message.
-		if err := r.sessionMgr.Route(ctx, msg.ChannelID, threadID, msg.UserName, text); err != nil {
+		if err := r.sessionMgr.Route(ctx, msg.ChannelID, sessionThreadID, msg.UserName, text); err != nil {
 			log.Printf("telegraph: router: route initial message: %v", err)
 		}
 		return

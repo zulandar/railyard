@@ -69,6 +69,16 @@ type BotUserIDer interface {
 	BotUserID() string
 }
 
+// ThreadStarter is an optional interface that adapters can implement to
+// support creating threads from messages. When a top-level @mention triggers
+// a new dispatch session, the router uses this to create a thread for the
+// conversation instead of posting responses directly in the channel.
+type ThreadStarter interface {
+	// StartThread sends a message to a channel and creates a thread from it.
+	// Returns the thread ID that subsequent messages should be sent to.
+	StartThread(ctx context.Context, channelID, text, threadName string) (threadID string, err error)
+}
+
 // ThreadMessage represents a single message within a thread history.
 type ThreadMessage struct {
 	UserID    string

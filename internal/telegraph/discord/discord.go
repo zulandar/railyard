@@ -468,6 +468,31 @@ func (a *Adapter) retryOnRateLimit(ctx context.Context, fn func() error) error {
 	return nil // unreachable
 }
 
+// StartThread sends a message to a channel and creates a thread from it.
+// Implements telegraph.ThreadStarter. The thread name is used as the thread title.
+func (a *Adapter) StartThread(ctx context.Context, channelID, text, threadName string) (string, error) {
+	a.mu.Lock()
+	if !a.connected {
+		a.mu.Unlock()
+		return "", fmt.Errorf("discord: not connected")
+	}
+	a.mu.Unlock()
+
+	// Send the initial message to the channel.
+	var msg *discordgo.Message
+	err := a.retryOnRateLimit(ctx, func() error {
+		var sendErr error
+		msg, sendErr = a.sess.ChannelMessageSend(channelID, text)
+		return sendErr
+	})
+	if err != nil {
+		return "", fmt.Errorf("discord: send thread starter: %w", err)
+	}
+
+	// Create a thread from the message.
+	return a.CreateThread(ctx, channelID, msg.ID, threadName)
+}
+
 // CreateThread creates a Discord thread from a message.
 func (a *Adapter) CreateThread(ctx context.Context, channelID, messageID, name string) (string, error) {
 	a.mu.Lock()

@@ -7,16 +7,17 @@ import (
 	"time"
 )
 
-// MockAdapter implements Adapter for testing. It records sent messages and
-// allows simulating inbound messages via SimulateInbound.
+// MockAdapter implements Adapter and ThreadStarter for testing. It records
+// sent messages and allows simulating inbound messages via SimulateInbound.
 type MockAdapter struct {
-	mu        sync.Mutex
-	connected bool
-	closed    bool
-	inbound   chan InboundMessage
-	sent      []OutboundMessage
-	history   map[string][]ThreadMessage // key: "channelID:threadID"
-	botUserID string
+	mu            sync.Mutex
+	connected     bool
+	closed        bool
+	inbound       chan InboundMessage
+	sent          []OutboundMessage
+	history       map[string][]ThreadMessage // key: "channelID:threadID"
+	botUserID     string
+	threadCounter int // incremented for each StartThread call
 }
 
 // BotUserID returns the configured bot user ID (implements BotUserIDer).
@@ -96,6 +97,23 @@ func (m *MockAdapter) Close() error {
 	m.connected = false
 	close(m.inbound)
 	return nil
+}
+
+// StartThread implements ThreadStarter. It records the message as sent and
+// returns a synthetic thread ID.
+func (m *MockAdapter) StartThread(ctx context.Context, channelID, text, threadName string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !m.connected {
+		return "", fmt.Errorf("mock adapter: not connected")
+	}
+	m.threadCounter++
+	threadID := fmt.Sprintf("thread-%d", m.threadCounter)
+	m.sent = append(m.sent, OutboundMessage{
+		ChannelID: channelID,
+		Text:      text,
+	})
+	return threadID, nil
 }
 
 // --- Test helpers ---

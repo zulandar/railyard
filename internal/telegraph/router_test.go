@@ -328,13 +328,14 @@ func TestHandle_MentionInThread(t *testing.T) {
 
 // --- Follow-up message in channel resumes after process exits ---
 
-func TestHandle_FollowUpInChannelResumesSession(t *testing.T) {
+func TestHandle_FollowUpInThreadResumesSession(t *testing.T) {
 	db := openRouterTestDB(t)
 	router, adapter, spawner := setupRouter(t, db, "bot-123")
 
 	ctx := context.Background()
 
-	// 1. Initial @mention in a channel (no thread) — creates session with threadID=channelID.
+	// 1. Initial @mention in a channel (no thread) — creates a thread via StartThread
+	//    and spawns a session keyed by channelID:threadID.
 	router.Handle(ctx, InboundMessage{
 		UserID:    "user-1",
 		UserName:  "alice",
@@ -346,8 +347,10 @@ func TestHandle_FollowUpInChannelResumesSession(t *testing.T) {
 		t.Fatalf("expected 1 process, got %d", len(spawner.processes))
 	}
 
+	// The MockAdapter's StartThread returns "thread-1".
+	threadID := "thread-1"
+
 	// 2. Simulate process exit (one-shot model: Claude responds and exits).
-	//    monitorProcess removes the in-memory session and ReleaseLock marks it "completed".
 	proc := spawner.lastProcess()
 	close(proc.recvCh) // EOF on output (relayOutput finishes)
 	proc.Close()       // signal done (monitorProcess cleans up)
@@ -356,12 +359,12 @@ func TestHandle_FollowUpInChannelResumesSession(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	// Verify the session was cleaned up from memory.
-	if router.sessionMgr.HasSession("C1", "C1") {
+	if router.sessionMgr.HasSession("C1", threadID) {
 		t.Fatal("expected session to be removed from memory after process exit")
 	}
 
 	// Verify it exists as a historic session (completed in DB).
-	if !router.sessionMgr.HasHistoricSession("C1", "C1") {
+	if !router.sessionMgr.HasHistoricSession("C1", threadID) {
 		t.Fatal("expected historic session in DB after process exit")
 	}
 
@@ -370,13 +373,12 @@ func TestHandle_FollowUpInChannelResumesSession(t *testing.T) {
 	adapter.sent = nil
 	adapter.mu.Unlock()
 
-	// 3. Follow-up message WITHOUT @mention, same channel, no thread ID.
-	//    This is the exact scenario from the bug: user says "go ahead and work on it"
-	//    without re-mentioning the bot, and threadID is empty.
+	// 3. Follow-up message in the thread (Discord sends threadID for thread messages).
 	router.Handle(ctx, InboundMessage{
 		UserID:    "user-1",
 		UserName:  "alice",
 		ChannelID: "C1",
+		ThreadID:  threadID,
 		Text:      "go ahead and have yardmaster work on it",
 	})
 
@@ -385,10 +387,13 @@ func TestHandle_FollowUpInChannelResumesSession(t *testing.T) {
 		t.Fatalf("expected 2 processes (original + resumed), got %d", len(spawner.processes))
 	}
 
-	// Ack should have been sent.
+	// Ack should have been sent to the thread.
 	all := adapter.AllSent()
 	if len(all) == 0 {
 		t.Fatal("expected ack message on resume")
+	}
+	if all[0].ThreadID != threadID {
+		t.Errorf("ack threadID = %q, want %q", all[0].ThreadID, threadID)
 	}
 }
 
@@ -738,6 +743,80 @@ func TestNextAck_CyclesThroughAllPhrases(t *testing.T) {
 		if seen2[phrase] != 1 {
 			t.Errorf("phrase %q seen %d times in second cycle, want 1", phrase, seen2[phrase])
 		}
+	}
+}
+
+func TestHandle_TopLevelMentionCreatesThread(t *testing.T) {
+	db := openRouterTestDB(t)
+	router, adapter, spawner := setupRouter(t, db, "bot-123")
+
+	// Top-level @mention (no thread) should create a thread via StartThread.
+	router.Handle(context.Background(), InboundMessage{
+		UserID:    "user-1",
+		UserName:  "bob",
+		ChannelID: "C1",
+		Text:      "@railyard close out the epic",
+	})
+
+	if len(spawner.processes) == 0 {
+		t.Fatal("expected process to be spawned")
+	}
+
+	// Session should be keyed by C1:thread-1, not C1:C1.
+	if !router.sessionMgr.HasSession("C1", "thread-1") {
+		t.Error("expected session keyed by thread-1")
+	}
+	if router.sessionMgr.HasSession("C1", "C1") {
+		t.Error("session should NOT be keyed by C1 (channel fallback)")
+	}
+
+	// The ack text should have been sent to the channel (via StartThread).
+	all := adapter.AllSent()
+	if len(all) == 0 {
+		t.Fatal("expected at least 1 sent message")
+	}
+	if all[0].ChannelID != "C1" {
+		t.Errorf("ack channel = %q, want C1", all[0].ChannelID)
+	}
+}
+
+func TestHandle_InThreadMentionDoesNotCreateNewThread(t *testing.T) {
+	db := openRouterTestDB(t)
+	router, adapter, spawner := setupRouter(t, db, "bot-123")
+
+	// @mention inside an existing thread should NOT create another thread.
+	router.Handle(context.Background(), InboundMessage{
+		UserID:    "user-1",
+		UserName:  "bob",
+		ChannelID: "C1",
+		ThreadID:  "T5",
+		Text:      "@railyard close out the epic",
+	})
+
+	if len(spawner.processes) == 0 {
+		t.Fatal("expected process to be spawned")
+	}
+
+	// Session should use the existing thread ID, not create a new one.
+	if !router.sessionMgr.HasSession("C1", "T5") {
+		t.Error("expected session keyed by T5 (existing thread)")
+	}
+
+	// Ack should be sent to the existing thread.
+	all := adapter.AllSent()
+	if len(all) == 0 {
+		t.Fatal("expected at least 1 sent message (ack)")
+	}
+	if all[0].ThreadID != "T5" {
+		t.Errorf("ack threadID = %q, want T5", all[0].ThreadID)
+	}
+
+	// Should only have created 1 thread total (from the mock counter).
+	adapter.mu.Lock()
+	tc := adapter.threadCounter
+	adapter.mu.Unlock()
+	if tc != 0 {
+		t.Errorf("threadCounter = %d, want 0 (no thread creation for in-thread mentions)", tc)
 	}
 }
 

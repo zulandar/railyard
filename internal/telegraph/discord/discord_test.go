@@ -1090,6 +1090,76 @@ func TestClose_RemovesHandler(t *testing.T) {
 	}
 }
 
+// --- StartThread tests ---
+
+func TestStartThread_Success(t *testing.T) {
+	a, sess := newTestAdapter(t)
+
+	threadID, err := a.StartThread(context.Background(), "C1", "On it, boss.", "Dispatch")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if threadID != "thread-123" {
+		t.Errorf("thread ID = %q, want thread-123", threadID)
+	}
+
+	// Should have sent a message first, then created a thread from it.
+	sess.mu.Lock()
+	if len(sess.sentMessages) != 1 {
+		t.Fatalf("expected 1 sent message, got %d", len(sess.sentMessages))
+	}
+	if sess.sentMessages[0].data.Content != "On it, boss." {
+		t.Errorf("message content = %q", sess.sentMessages[0].data.Content)
+	}
+	if len(sess.threads) != 1 {
+		t.Fatalf("expected 1 thread created, got %d", len(sess.threads))
+	}
+	// Thread should be created from message msg-123 (returned by mock).
+	if sess.threads[0].messageID != "msg-123" {
+		t.Errorf("thread message ID = %q, want msg-123", sess.threads[0].messageID)
+	}
+	if sess.threads[0].data.Name != "Dispatch" {
+		t.Errorf("thread name = %q", sess.threads[0].data.Name)
+	}
+	sess.mu.Unlock()
+}
+
+func TestStartThread_NotConnected(t *testing.T) {
+	sess := newMockSession()
+	a, _ := New(AdapterOpts{Session: sess})
+
+	_, err := a.StartThread(context.Background(), "C1", "ack", "Dispatch")
+	if err == nil {
+		t.Fatal("expected error for not connected")
+	}
+}
+
+func TestStartThread_SendError(t *testing.T) {
+	a, sess := newTestAdapter(t)
+	sess.sendErr = fmt.Errorf("rate limited")
+
+	_, err := a.StartThread(context.Background(), "C1", "ack", "Dispatch")
+	if err == nil {
+		t.Fatal("expected error when send fails")
+	}
+	if !strings.Contains(err.Error(), "send thread starter") {
+		t.Errorf("error = %q", err.Error())
+	}
+}
+
+func TestStartThread_ThreadCreationError(t *testing.T) {
+	a, sess := newTestAdapter(t)
+	sess.threadErr = fmt.Errorf("forbidden")
+
+	_, err := a.StartThread(context.Background(), "C1", "ack", "Dispatch")
+	if err == nil {
+		t.Fatal("expected error when thread creation fails")
+	}
+	if !strings.Contains(err.Error(), "create thread") {
+		t.Errorf("error = %q", err.Error())
+	}
+}
+
 // --- CreateThread tests ---
 
 func TestCreateThread_Success(t *testing.T) {
