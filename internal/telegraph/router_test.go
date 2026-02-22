@@ -3,6 +3,7 @@ package telegraph
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -867,5 +868,42 @@ func TestHandle_CommandTakesPriorityOverSession(t *testing.T) {
 	// Command should produce a response.
 	if adapter.SentCount() < 1 {
 		t.Error("expected command response even in active session thread")
+	}
+}
+
+func TestHandle_LongCommandResponseIsChunked(t *testing.T) {
+	db := openRouterTestDB(t)
+
+	// Create enough cars to make "car list" exceed 2000 chars.
+	for i := 0; i < 50; i++ {
+		db.Create(&models.Car{
+			ID:       fmt.Sprintf("car-%03d", i),
+			Title:    fmt.Sprintf("A sufficiently long car title to inflate the response size number %d", i),
+			Status:   "open",
+			Track:    "backend",
+			Priority: 2,
+		})
+	}
+
+	router, adapter, _ := setupRouter(t, db, "bot-123")
+
+	router.Handle(context.Background(), InboundMessage{
+		UserID:    "user-1",
+		UserName:  "alice",
+		ChannelID: "C1",
+		Text:      "!ry car list",
+	})
+
+	// Should send multiple messages, all within 2000 chars.
+	if adapter.SentCount() < 2 {
+		t.Fatalf("expected multiple chunks, got %d message(s)", adapter.SentCount())
+	}
+	for i, msg := range adapter.AllSent() {
+		if len(msg.Text) > 2000 {
+			t.Errorf("chunk %d is %d chars, exceeds 2000", i, len(msg.Text))
+		}
+		if msg.ChannelID != "C1" {
+			t.Errorf("chunk %d channel = %q, want C1", i, msg.ChannelID)
+		}
 	}
 }

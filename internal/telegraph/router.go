@@ -178,14 +178,20 @@ func truncate(s string, maxLen int) string {
 }
 
 // handleCommand dispatches a "!ry" command and sends the response.
+// Long responses are chunked to stay within platform message limits
+// (e.g. Discord's 2000-character cap).
 func (r *Router) handleCommand(ctx context.Context, msg InboundMessage, text string) {
 	response := r.cmdHandler.Execute(text)
-	if err := r.adapter.Send(ctx, OutboundMessage{
-		ChannelID: msg.ChannelID,
-		ThreadID:  msg.ThreadID,
-		Text:      response,
-	}); err != nil {
-		log.Printf("telegraph: router: send command response: %v", err)
+	chunks := chunkMessage(response, 2000)
+	for _, chunk := range chunks {
+		if err := r.adapter.Send(ctx, OutboundMessage{
+			ChannelID: msg.ChannelID,
+			ThreadID:  msg.ThreadID,
+			Text:      chunk,
+		}); err != nil {
+			log.Printf("telegraph: router: send command response: %v", err)
+			return
+		}
 	}
 }
 
