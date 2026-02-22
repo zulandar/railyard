@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,6 +15,24 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
+
+// syncBuffer is a goroutine-safe bytes.Buffer for use as io.Writer in tests.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (sb *syncBuffer) Write(p []byte) (int, error) {
+	sb.mu.Lock()
+	defer sb.mu.Unlock()
+	return sb.buf.Write(p)
+}
+
+func (sb *syncBuffer) String() string {
+	sb.mu.Lock()
+	defer sb.mu.Unlock()
+	return sb.buf.String()
+}
 
 func testCfg() *config.Config {
 	return &config.Config{
@@ -122,14 +141,14 @@ func TestNewDaemon_Success(t *testing.T) {
 
 func TestRun_ConnectsAndShutdown(t *testing.T) {
 	mock := NewMockAdapter()
-	var buf bytes.Buffer
+	buf := &syncBuffer{}
 
 	d, err := NewDaemon(DaemonOpts{
 		DB:             openTestDB(t),
 		Config:         testCfg(),
 		Adapter:        mock,
 		StatusProvider: &nullStatusProvider{},
-		Out:            &buf,
+		Out:            buf,
 	})
 	if err != nil {
 		t.Fatalf("NewDaemon: %v", err)
@@ -188,14 +207,14 @@ func TestRun_ConnectsAndShutdown(t *testing.T) {
 
 func TestRun_HandlesClosed(t *testing.T) {
 	mock := NewMockAdapter()
-	var buf bytes.Buffer
+	buf := &syncBuffer{}
 
 	d, err := NewDaemon(DaemonOpts{
 		DB:             openTestDB(t),
 		Config:         testCfg(),
 		Adapter:        mock,
 		StatusProvider: &nullStatusProvider{},
-		Out:            &buf,
+		Out:            buf,
 	})
 	if err != nil {
 		t.Fatalf("NewDaemon: %v", err)
@@ -236,14 +255,14 @@ func TestRun_HandlesClosed(t *testing.T) {
 
 func TestRun_InboundRoutedToRouter(t *testing.T) {
 	mock := NewMockAdapter()
-	var buf bytes.Buffer
+	buf := &syncBuffer{}
 
 	d, err := NewDaemon(DaemonOpts{
 		DB:             openTestDB(t),
 		Config:         testCfg(),
 		Adapter:        mock,
 		StatusProvider: &nullStatusProvider{},
-		Out:            &buf,
+		Out:            buf,
 	})
 	if err != nil {
 		t.Fatalf("NewDaemon: %v", err)
@@ -297,14 +316,14 @@ func TestRun_InboundRoutedToRouter(t *testing.T) {
 func TestRun_BotUserIDFiltering(t *testing.T) {
 	mock := NewMockAdapter()
 	mock.SetBotUserID("BOT123")
-	var buf bytes.Buffer
+	buf := &syncBuffer{}
 
 	d, err := NewDaemon(DaemonOpts{
 		DB:             openTestDB(t),
 		Config:         testCfg(),
 		Adapter:        mock,
 		StatusProvider: &nullStatusProvider{},
-		Out:            &buf,
+		Out:            buf,
 	})
 	if err != nil {
 		t.Fatalf("NewDaemon: %v", err)
@@ -348,7 +367,7 @@ func TestRun_BotUserIDFiltering(t *testing.T) {
 
 func TestRun_NoSpawner_CommandsWork(t *testing.T) {
 	mock := NewMockAdapter()
-	var buf bytes.Buffer
+	buf := &syncBuffer{}
 
 	d, err := NewDaemon(DaemonOpts{
 		DB:             openTestDB(t),
@@ -356,7 +375,7 @@ func TestRun_NoSpawner_CommandsWork(t *testing.T) {
 		Adapter:        mock,
 		StatusProvider: &nullStatusProvider{},
 		// No Spawner — dispatch disabled, but commands should work.
-		Out: &buf,
+		Out: buf,
 	})
 	if err != nil {
 		t.Fatalf("NewDaemon: %v", err)

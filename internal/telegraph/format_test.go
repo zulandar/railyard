@@ -304,7 +304,7 @@ func TestFormatPulse_BasicStatus(t *testing.T) {
 			{Track: "backend", InProgress: 2, Ready: 3, Done: 5, Blocked: 1},
 			{Track: "frontend", InProgress: 1, Ready: 1, Done: 2, Blocked: 0},
 		},
-		TotalTokens: 150000,
+		TotalTokens:  150000,
 		MessageDepth: 3,
 	}
 
