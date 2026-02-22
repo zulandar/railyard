@@ -205,6 +205,18 @@ ry complete <car-id> "summary"         # Mark car done
 ry progress <car-id> "checkpoint"      # Log progress without completing
 ```
 
+### Telegraph (Chat Bridge)
+
+Telegraph connects Railyard to Slack or Discord for real-time command routing and event notifications.
+
+```bash
+ry telegraph start -c railyard.yaml   # Start chat bridge daemon
+ry telegraph status                    # Check daemon status
+ry telegraph stop                      # Stop daemon
+```
+
+See [Telegraph Setup Guide](docs/telegraph-setup.md) for platform setup instructions.
+
 ### Merging
 
 ```bash
@@ -391,6 +403,9 @@ internal/
   models/            GORM models (Car, Engine, Message, Track, etc.)
   orchestration/     tmux session management, start/stop/scale/status
   yardmaster/        Yardmaster supervisor: health checks, switch/merge
+  telegraph/         Telegraph chat bridge: adapters, routing, watcher, digests
+    slack/           Slack Socket Mode adapter
+    discord/         Discord Gateway adapter
 cocoindex/           Python-based semantic search (CocoIndex + pgvector)
   overlay.py         Per-engine overlay indexer (build, cleanup, status)
   mcp_server.py      MCP server for dual-table semantic search
