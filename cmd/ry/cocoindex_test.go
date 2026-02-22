@@ -528,7 +528,6 @@ func TestEnsureCocoIndexScripts_CreatesFiles(t *testing.T) {
 		path     string
 		contains string
 	}{
-		{"__init__.py", ""},
 		{"migrate.py", "run_migrations"},
 		{"config.py", "CocoIndexConfig"},
 		{"main.py", "code_to_embedding"},
@@ -577,6 +576,25 @@ func TestEnsureCocoIndexScripts_OverwritesExisting(t *testing.T) {
 	// Other files should also exist.
 	if _, err := os.Stat(filepath.Join(scriptsDir, "config.py")); err != nil {
 		t.Error("config.py should have been created")
+	}
+}
+
+func TestEnsureCocoIndexScripts_RemovesStaleInitPy(t *testing.T) {
+	tmpDir := t.TempDir()
+	scriptsDir := filepath.Join(tmpDir, "cocoindex")
+	os.MkdirAll(scriptsDir, 0755)
+
+	// Simulate a stale __init__.py left by a previous ry version.
+	staleInit := filepath.Join(scriptsDir, "__init__.py")
+	os.WriteFile(staleInit, []byte(""), 0644)
+
+	err := ensureCocoIndexScripts(scriptsDir)
+	if err != nil {
+		t.Fatalf("ensureCocoIndexScripts() error: %v", err)
+	}
+
+	if _, err := os.Stat(staleInit); !os.IsNotExist(err) {
+		t.Error("stale __init__.py should have been removed")
 	}
 }
 
