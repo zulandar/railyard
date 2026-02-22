@@ -130,12 +130,16 @@ func CleanupWorktrees(repoDir string) error {
 	return nil
 }
 
-// ResetWorktree resets an engine's worktree to a clean state at origin/main
-// (or local main if no remote). This must be called before CreateBranch when
+// ResetWorktree resets an engine's worktree to a clean state at origin/{baseBranch}
+// (or local {baseBranch} if no remote). This must be called before CreateBranch when
 // starting a new car to avoid merge conflicts from stale state.
-func ResetWorktree(wtDir string) error {
+// If baseBranch is empty, defaults to "main".
+func ResetWorktree(wtDir, baseBranch string) error {
 	if wtDir == "" {
 		return fmt.Errorf("engine: worktree directory is required")
+	}
+	if baseBranch == "" {
+		baseBranch = "main"
 	}
 
 	// Step 1: Fetch origin to get latest refs. Non-fatal if no remote.
@@ -157,12 +161,12 @@ func ResetWorktree(wtDir string) error {
 		return fmt.Errorf("engine: git clean: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 
-	// Step 4: Hard reset to origin/main (fall back to local main).
-	target := "origin/main"
-	checkRef := exec.Command("git", "rev-parse", "--verify", "origin/main")
+	// Step 4: Hard reset to origin/{baseBranch} (fall back to local {baseBranch}).
+	target := "origin/" + baseBranch
+	checkRef := exec.Command("git", "rev-parse", "--verify", target)
 	checkRef.Dir = wtDir
 	if _, err := checkRef.CombinedOutput(); err != nil {
-		target = "main"
+		target = baseBranch
 	}
 
 	reset := exec.Command("git", "reset", "--hard", target)
@@ -174,18 +178,22 @@ func ResetWorktree(wtDir string) error {
 	return nil
 }
 
-// CreateBranch creates a new git branch from main, or checks out an existing one.
+// CreateBranch creates a new git branch from the base branch, or checks out
+// an existing one. If baseBranch is empty, defaults to "main".
 // The repoDir parameter specifies the git repository working directory.
-func CreateBranch(repoDir, branchName string) error {
+func CreateBranch(repoDir, branchName, baseBranch string) error {
 	if branchName == "" {
 		return fmt.Errorf("engine: branch name is required")
 	}
 	if repoDir == "" {
 		return fmt.Errorf("engine: repo directory is required")
 	}
+	if baseBranch == "" {
+		baseBranch = "main"
+	}
 
-	// Try to create a new branch from main.
-	cmd := exec.Command("git", "checkout", "-b", branchName, "main")
+	// Try to create a new branch from the base branch.
+	cmd := exec.Command("git", "checkout", "-b", branchName, baseBranch)
 	cmd.Dir = repoDir
 	out, err := cmd.CombinedOutput()
 	if err == nil {

@@ -226,7 +226,7 @@ func TestEnsureWorktree_ReusedStillHasClaudeIgnore(t *testing.T) {
 // --- ResetWorktree tests ---
 
 func TestResetWorktree_EmptyDir(t *testing.T) {
-	err := ResetWorktree("")
+	err := ResetWorktree("", "")
 	if err == nil {
 		t.Fatal("expected error for empty dir")
 	}
@@ -258,7 +258,7 @@ func TestResetWorktree_CleansUpDirtyState(t *testing.T) {
 	os.WriteFile(filepath.Join(wtDir, "README.md"), []byte("modified\n"), 0644)
 
 	// Reset should succeed.
-	if err := ResetWorktree(wtDir); err != nil {
+	if err := ResetWorktree(wtDir, ""); err != nil {
 		t.Fatalf("ResetWorktree: %v", err)
 	}
 
@@ -312,7 +312,7 @@ func TestResetWorktree_UpdatesToLatestMain(t *testing.T) {
 	mainHash, _ := getHash.CombinedOutput()
 
 	// Reset the worktree — should pick up the new main commit.
-	if err := ResetWorktree(wtDir); err != nil {
+	if err := ResetWorktree(wtDir, ""); err != nil {
 		t.Fatalf("ResetWorktree: %v", err)
 	}
 
@@ -356,10 +356,10 @@ func TestResetWorktree_ThenCreateBranch(t *testing.T) {
 	run(wtDir, "git", "commit", "-m", "old car work")
 
 	// Reset then branch — the full flow the engine does.
-	if err := ResetWorktree(wtDir); err != nil {
+	if err := ResetWorktree(wtDir, ""); err != nil {
 		t.Fatalf("ResetWorktree: %v", err)
 	}
-	if err := CreateBranch(wtDir, "ry/new/car"); err != nil {
+	if err := CreateBranch(wtDir, "ry/new/car", ""); err != nil {
 		t.Fatalf("CreateBranch after reset: %v", err)
 	}
 
@@ -379,7 +379,7 @@ func TestResetWorktree_ThenCreateBranch(t *testing.T) {
 func TestCreateBranch(t *testing.T) {
 	dir := initTestRepo(t)
 
-	if err := CreateBranch(dir, "ry/alice/backend/car-abc12"); err != nil {
+	if err := CreateBranch(dir, "ry/alice/backend/car-abc12", ""); err != nil {
 		t.Fatalf("CreateBranch: %v", err)
 	}
 
@@ -393,7 +393,7 @@ func TestCreateBranch_AlreadyExists(t *testing.T) {
 	dir := initTestRepo(t)
 
 	// Create the branch first time.
-	if err := CreateBranch(dir, "ry/test/branch"); err != nil {
+	if err := CreateBranch(dir, "ry/test/branch", ""); err != nil {
 		t.Fatalf("first CreateBranch: %v", err)
 	}
 
@@ -405,7 +405,7 @@ func TestCreateBranch_AlreadyExists(t *testing.T) {
 	}
 
 	// Create again — should checkout existing.
-	if err := CreateBranch(dir, "ry/test/branch"); err != nil {
+	if err := CreateBranch(dir, "ry/test/branch", ""); err != nil {
 		t.Fatalf("second CreateBranch: %v", err)
 	}
 
@@ -416,7 +416,7 @@ func TestCreateBranch_AlreadyExists(t *testing.T) {
 }
 
 func TestCreateBranch_EmptyName(t *testing.T) {
-	err := CreateBranch("/tmp", "")
+	err := CreateBranch("/tmp", "", "")
 	if err == nil {
 		t.Fatal("expected error for empty branch name")
 	}
@@ -426,7 +426,7 @@ func TestCreateBranch_EmptyName(t *testing.T) {
 }
 
 func TestCreateBranch_EmptyRepoDir(t *testing.T) {
-	err := CreateBranch("", "some-branch")
+	err := CreateBranch("", "some-branch", "")
 	if err == nil {
 		t.Fatal("expected error for empty repo dir")
 	}
@@ -436,9 +436,78 @@ func TestCreateBranch_EmptyRepoDir(t *testing.T) {
 }
 
 func TestCreateBranch_BadDir(t *testing.T) {
-	err := CreateBranch("/nonexistent/path", "some-branch")
+	err := CreateBranch("/nonexistent/path", "some-branch", "")
 	if err == nil {
 		t.Fatal("expected error for bad directory")
+	}
+}
+
+func TestResetWorktree_NonMainBaseBranch(t *testing.T) {
+	dir := initTestRepo(t)
+
+	// Create a "develop" branch with different content.
+	run := func(d string, args ...string) {
+		t.Helper()
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = d
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v: %s\n%s", args, err, out)
+		}
+	}
+	run(dir, "git", "checkout", "-b", "develop")
+	os.WriteFile(filepath.Join(dir, "develop.txt"), []byte("develop content\n"), 0644)
+	run(dir, "git", "add", ".")
+	run(dir, "git", "commit", "-m", "develop commit")
+	run(dir, "git", "checkout", "main")
+
+	// Create a worktree.
+	wtDir, err := EnsureWorktree(dir, "eng-base001")
+	if err != nil {
+		t.Fatalf("EnsureWorktree: %v", err)
+	}
+
+	// Reset to "develop" base branch.
+	if err := ResetWorktree(wtDir, "develop"); err != nil {
+		t.Fatalf("ResetWorktree(develop): %v", err)
+	}
+
+	// Verify develop.txt exists (we're at develop, not main).
+	if _, err := os.Stat(filepath.Join(wtDir, "develop.txt")); err != nil {
+		t.Error("expected develop.txt after resetting to develop branch")
+	}
+}
+
+func TestCreateBranch_FromNonMainBase(t *testing.T) {
+	dir := initTestRepo(t)
+
+	// Create a "develop" branch with a unique file.
+	run := func(d string, args ...string) {
+		t.Helper()
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = d
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v: %s\n%s", args, err, out)
+		}
+	}
+	run(dir, "git", "checkout", "-b", "develop")
+	os.WriteFile(filepath.Join(dir, "develop.txt"), []byte("develop content\n"), 0644)
+	run(dir, "git", "add", ".")
+	run(dir, "git", "commit", "-m", "develop commit")
+	run(dir, "git", "checkout", "main")
+
+	// Branch from develop.
+	if err := CreateBranch(dir, "ry/alice/feat-x", "develop"); err != nil {
+		t.Fatalf("CreateBranch from develop: %v", err)
+	}
+
+	got := currentBranch(t, dir)
+	if got != "ry/alice/feat-x" {
+		t.Errorf("branch = %q, want %q", got, "ry/alice/feat-x")
+	}
+
+	// Verify develop.txt is present (branched from develop, not main).
+	if _, err := os.Stat(filepath.Join(dir, "develop.txt")); err != nil {
+		t.Error("expected develop.txt from develop base branch")
 	}
 }
 
@@ -605,7 +674,7 @@ func TestRecentCommits_OnBranch(t *testing.T) {
 	dir := initTestRepo(t)
 
 	// Create a branch and add a commit to it.
-	if err := CreateBranch(dir, "feature-branch"); err != nil {
+	if err := CreateBranch(dir, "feature-branch", ""); err != nil {
 		t.Fatalf("CreateBranch: %v", err)
 	}
 	addCommit(t, dir, "branch commit")
