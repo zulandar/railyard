@@ -77,8 +77,8 @@ func TestDispatchCmd_LongDescription(t *testing.T) {
 	if !strings.Contains(cmd.Long, "interactive") {
 		t.Errorf("expected long description to mention 'interactive', got: %s", cmd.Long)
 	}
-	if !strings.Contains(cmd.Long, "decompose") {
-		t.Errorf("expected long description to mention 'decompose', got: %s", cmd.Long)
+	if !strings.Contains(cmd.Long, "lock") {
+		t.Errorf("expected long description to mention 'lock', got: %s", cmd.Long)
 	}
 }
 

@@ -443,62 +443,12 @@ func TestStart_ListPanesError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for list panes failure")
 	}
-	if !strings.Contains(err.Error(), "list dispatch panes") {
-		t.Errorf("error = %q, want to contain 'list dispatch panes'", err.Error())
-	}
-	// Should have attempted to kill dispatch session on failure.
-	if len(m.killedSessions) != 1 {
-		t.Errorf("killedSessions = %d, want 1", len(m.killedSessions))
-	}
-}
-
-func TestStart_DispatchSendKeysError(t *testing.T) {
-	db := testDB(t)
-	m := &mockTmux{
-		sessionExists: false,
-		listPanes:     []string{"%0"},
-		sendKeysErr:   fmt.Errorf("send failed"),
-	}
-	_, err := Start(StartOpts{
-		Config:     &config.Config{Tracks: []config.TrackConfig{{Name: "a", EngineSlots: 1}}},
-		ConfigPath: "/tmp/test.yaml",
-		DB:         db,
-		Tmux:       m,
-	})
-	if err == nil {
-		t.Fatal("expected error for send keys failure")
-	}
-	if !strings.Contains(err.Error(), "start dispatch") {
-		t.Errorf("error = %q, want to contain 'start dispatch'", err.Error())
-	}
-}
-
-func TestStart_MainListPanesError(t *testing.T) {
-	db := testDB(t)
-	m := &mockTmux{
-		sessionExists: false,
-		listPanesFunc: func(session string) ([]string, error) {
-			if session == DispatchSessionName {
-				return []string{"%d0"}, nil
-			}
-			return nil, fmt.Errorf("list panes failed")
-		},
-	}
-	_, err := Start(StartOpts{
-		Config:     &config.Config{Tracks: []config.TrackConfig{{Name: "a", EngineSlots: 1}}},
-		ConfigPath: "/tmp/test.yaml",
-		DB:         db,
-		Tmux:       m,
-	})
-	if err == nil {
-		t.Fatal("expected error for main session list panes failure")
-	}
 	if !strings.Contains(err.Error(), "list main panes") {
 		t.Errorf("error = %q, want to contain 'list main panes'", err.Error())
 	}
-	// Should kill both sessions on failure.
-	if len(m.killedSessions) != 2 {
-		t.Errorf("killedSessions = %d, want 2", len(m.killedSessions))
+	// Should have attempted to kill main session on failure.
+	if len(m.killedSessions) != 1 {
+		t.Errorf("killedSessions = %d, want 1", len(m.killedSessions))
 	}
 }
 
@@ -525,43 +475,69 @@ func TestStart_Success(t *testing.T) {
 	if result.Session != SessionName {
 		t.Errorf("session = %q, want %q", result.Session, SessionName)
 	}
-	if result.DispatchSession != DispatchSessionName {
-		t.Errorf("dispatch session = %q, want %q", result.DispatchSession, DispatchSessionName)
-	}
-	if result.DispatchPane != "%0" {
-		t.Errorf("dispatch pane = %q, want %%0", result.DispatchPane)
-	}
-	if result.YardmasterPane == "%0" {
-		// Yardmaster gets its own pane via ListPanes on main session (also %0 from mock).
-		// This is fine — it's a different session's %0.
-	}
 	if result.YardmasterPane == "" {
 		t.Error("yardmaster pane should not be empty")
+	}
+	if result.TelegraphPane != "" {
+		t.Errorf("telegraph pane = %q, want empty (Telegraph not requested)", result.TelegraphPane)
 	}
 	if len(result.EnginePanes) != 2 {
 		t.Errorf("engine panes = %d, want 2", len(result.EnginePanes))
 	}
-	// 2 sessions created (dispatch + main).
-	if len(m.createdSessions) != 2 {
-		t.Errorf("created sessions = %d, want 2", len(m.createdSessions))
+	// 1 session created (main only, no dispatch).
+	if len(m.createdSessions) != 1 {
+		t.Errorf("created sessions = %d, want 1", len(m.createdSessions))
 	}
-	if m.createdSessions[0] != DispatchSessionName {
-		t.Errorf("first session = %q, want %q", m.createdSessions[0], DispatchSessionName)
+	if m.createdSessions[0] != SessionName {
+		t.Errorf("first session = %q, want %q", m.createdSessions[0], SessionName)
 	}
-	if m.createdSessions[1] != SessionName {
-		t.Errorf("second session = %q, want %q", m.createdSessions[1], SessionName)
+	// 1 yardmaster + 2 engines = 3 send-keys calls.
+	if len(m.sentKeys) != 3 {
+		t.Errorf("sent keys = %d, want 3", len(m.sentKeys))
 	}
-	// 1 dispatch + 1 yardmaster + 2 engines = 4 send-keys calls.
-	if len(m.sentKeys) != 4 {
-		t.Errorf("sent keys = %d, want 4", len(m.sentKeys))
+	// Verify yardmaster command was sent first.
+	if !strings.Contains(m.sentKeys[0], "ry yardmaster") {
+		t.Errorf("first send-keys = %q, want to contain 'ry yardmaster'", m.sentKeys[0])
 	}
-	// Verify dispatch command was sent first.
-	if !strings.Contains(m.sentKeys[0], "ry dispatch") {
-		t.Errorf("first send-keys = %q, want to contain 'ry dispatch'", m.sentKeys[0])
+}
+
+func TestStart_WithTelegraph(t *testing.T) {
+	db := testDB(t)
+	m := &mockTmux{
+		sessionExists: false,
+		listPanes:     []string{"%0"},
 	}
-	// Verify yardmaster command was sent second.
-	if !strings.Contains(m.sentKeys[1], "ry yardmaster") {
-		t.Errorf("second send-keys = %q, want to contain 'ry yardmaster'", m.sentKeys[1])
+	cfg := &config.Config{
+		Tracks: []config.TrackConfig{
+			{Name: "backend", EngineSlots: 1},
+		},
+	}
+	result, err := Start(StartOpts{
+		Config:     cfg,
+		ConfigPath: "/tmp/test.yaml",
+		DB:         db,
+		Telegraph:  true,
+		Tmux:       m,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.TelegraphPane == "" {
+		t.Error("telegraph pane should not be empty when Telegraph=true")
+	}
+	// 1 yardmaster + 1 telegraph + 1 engine = 3 send-keys calls.
+	if len(m.sentKeys) != 3 {
+		t.Errorf("sent keys = %d, want 3", len(m.sentKeys))
+	}
+	// Verify telegraph command was sent.
+	foundTelegraph := false
+	for _, k := range m.sentKeys {
+		if strings.Contains(k, "ry telegraph start") {
+			foundTelegraph = true
+		}
+	}
+	if !foundTelegraph {
+		t.Errorf("expected 'ry telegraph start' in sent keys: %v", m.sentKeys)
 	}
 }
 
@@ -638,9 +614,9 @@ func TestStart_EnginePaneError(t *testing.T) {
 	if !strings.Contains(err.Error(), "create engine pane") {
 		t.Errorf("error = %q, want to contain 'create engine pane'", err.Error())
 	}
-	// Both sessions should be cleaned up.
-	if len(m.killedSessions) != 2 {
-		t.Errorf("killedSessions = %d, want 2", len(m.killedSessions))
+	// Main session should be cleaned up.
+	if len(m.killedSessions) != 1 {
+		t.Errorf("killedSessions = %d, want 1", len(m.killedSessions))
 	}
 }
 
@@ -681,8 +657,8 @@ func TestStart_YardmasterSendKeysError(t *testing.T) {
 		sessionExists: false,
 		listPanes:     []string{"%0"},
 	}
-	// Fail on 2nd SendKeys call (1st is dispatch, 2nd is yardmaster).
-	sm := &sendKeysFailMock{mockTmux: m, failAt: 2}
+	// Fail on 1st SendKeys call (yardmaster is first now, no dispatch).
+	sm := &sendKeysFailMock{mockTmux: m, failAt: 1}
 	_, err := Start(StartOpts{
 		Config:     &config.Config{Tracks: []config.TrackConfig{{Name: "a", EngineSlots: 1}}},
 		ConfigPath: "/tmp/test.yaml",
@@ -703,8 +679,8 @@ func TestStart_EngineSendKeysError(t *testing.T) {
 		sessionExists: false,
 		listPanes:     []string{"%0"},
 	}
-	// Fail on 3rd SendKeys call (1st=dispatch, 2nd=yardmaster, 3rd=engine).
-	sm := &sendKeysFailMock{mockTmux: m, failAt: 3}
+	// Fail on 2nd SendKeys call (1st=yardmaster, 2nd=engine).
+	sm := &sendKeysFailMock{mockTmux: m, failAt: 2}
 	_, err := Start(StartOpts{
 		Config:     &config.Config{Tracks: []config.TrackConfig{{Name: "a", EngineSlots: 1}}},
 		ConfigPath: "/tmp/test.yaml",

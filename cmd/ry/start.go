@@ -12,25 +12,27 @@ import (
 
 func newStartCmd() *cobra.Command {
 	var (
-		configPath string
-		engines    int
+		configPath    string
+		engines       int
+		withTelegraph bool
 	)
 
 	cmd := &cobra.Command{
 		Use:   "start",
 		Short: "Start the Railyard orchestration",
-		Long:  "Creates a tmux session with Dispatch, Yardmaster, and N engine agents. Engine count defaults to the sum of track engine_slots.",
+		Long:  "Creates a tmux session with Yardmaster and N engine agents. Use --telegraph to include Telegraph. Start Dispatch separately with 'ry dispatch'.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runStart(cmd, configPath, engines)
+			return runStart(cmd, configPath, engines, withTelegraph)
 		},
 	}
 
 	cmd.Flags().StringVarP(&configPath, "config", "c", "railyard.yaml", "path to Railyard config file")
 	cmd.Flags().IntVar(&engines, "engines", 0, "number of engines (default: sum of track engine_slots)")
+	cmd.Flags().BoolVar(&withTelegraph, "telegraph", false, "include Telegraph chat bridge pane")
 	return cmd
 }
 
-func runStart(cmd *cobra.Command, configPath string, engines int) error {
+func runStart(cmd *cobra.Command, configPath string, engines int, withTelegraph bool) error {
 	// Warn if old engines/ layout is present without .railyard/.
 	checkMigrationNeeded(cmd)
 
@@ -44,11 +46,15 @@ func runStart(cmd *cobra.Command, configPath string, engines int) error {
 		return fmt.Errorf("connect to %s: %w", cfg.Dolt.Database, err)
 	}
 
+	// Enable telegraph if --telegraph flag set or config has telegraph section.
+	telegraph := withTelegraph || cfg.Telegraph.Platform != ""
+
 	result, err := orchestration.Start(orchestration.StartOpts{
 		Config:     cfg,
 		ConfigPath: configPath,
 		DB:         gormDB,
 		Engines:    engines,
+		Telegraph:  telegraph,
 	})
 	if err != nil {
 		return err
@@ -56,13 +62,16 @@ func runStart(cmd *cobra.Command, configPath string, engines int) error {
 
 	out := cmd.OutOrStdout()
 	fmt.Fprintf(out, "Railyard started (session: %s)\n", result.Session)
-	fmt.Fprintf(out, "  Dispatch:    %s\n", result.DispatchPane)
 	fmt.Fprintf(out, "  Yardmaster:  %s\n", result.YardmasterPane)
+	if result.TelegraphPane != "" {
+		fmt.Fprintf(out, "  Telegraph:   %s\n", result.TelegraphPane)
+	}
 	fmt.Fprintf(out, "  Engines:     %d\n", len(result.EnginePanes))
 	for _, ep := range result.EnginePanes {
 		fmt.Fprintf(out, "    %s → %s\n", ep.PaneID, ep.Track)
 	}
 	fmt.Fprintf(out, "\nAttach with: tmux attach -t %s\n", result.Session)
+	fmt.Fprintf(out, "Start Dispatch separately: ry dispatch --config %s\n", configPath)
 	return nil
 }
 

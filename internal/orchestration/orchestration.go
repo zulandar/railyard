@@ -17,16 +17,16 @@ type StartOpts struct {
 	ConfigPath string
 	DB         *gorm.DB
 	Engines    int  // 0 = sum of track engine_slots
+	Telegraph  bool // include telegraph pane in main session
 	Tmux       Tmux // defaults to DefaultTmux if nil
 }
 
 // StartResult holds the result of starting the railyard.
 type StartResult struct {
-	Session         string
-	DispatchSession string
-	DispatchPane    string
-	YardmasterPane  string
-	EnginePanes     []EnginePane
+	Session        string
+	YardmasterPane string
+	TelegraphPane  string // set when Telegraph=true
+	EnginePanes    []EnginePane
 }
 
 // EnginePane maps a tmux pane to a track assignment.
@@ -35,7 +35,8 @@ type EnginePane struct {
 	Track  string
 }
 
-// Start creates a tmux session and launches all components.
+// Start creates a tmux session with yardmaster, engines, and optionally
+// telegraph. Dispatch is NOT auto-launched; use 'ry dispatch' separately.
 func Start(opts StartOpts) (*StartResult, error) {
 	if opts.Config == nil {
 		return nil, fmt.Errorf("orchestration: config is required")
@@ -59,7 +60,7 @@ func Start(opts StartOpts) (*StartResult, error) {
 	}
 
 	// Check if already running.
-	if opts.Tmux.SessionExists(SessionName) || opts.Tmux.SessionExists(DispatchSessionName) {
+	if opts.Tmux.SessionExists(SessionName) {
 		return nil, fmt.Errorf("orchestration: railyard session already running (use 'ry stop' first)")
 	}
 
@@ -77,48 +78,41 @@ func Start(opts StartOpts) (*StartResult, error) {
 	// Assign tracks to engines.
 	assignment := AssignTracks(opts.Config, totalEngines)
 
-	// Create dispatch session (separate from engines/yardmaster).
-	if err := opts.Tmux.CreateSession(DispatchSessionName); err != nil {
+	// Create main session (yardmaster + engines + optional telegraph).
+	if err := opts.Tmux.CreateSession(SessionName); err != nil {
 		return nil, err
 	}
 
 	result := &StartResult{
-		Session:         SessionName,
-		DispatchSession: DispatchSessionName,
-	}
-
-	// Dispatch pane (initial pane of dispatch session).
-	dispatchPanes, err := opts.Tmux.ListPanes(DispatchSessionName)
-	if err != nil {
-		_ = opts.Tmux.KillSession(DispatchSessionName)
-		return nil, fmt.Errorf("orchestration: list dispatch panes: %w", err)
-	}
-	result.DispatchPane = dispatchPanes[0]
-	dispatchCmd := fmt.Sprintf("ry dispatch --config %s", opts.ConfigPath)
-	if err := opts.Tmux.SendKeys(result.DispatchPane, dispatchCmd); err != nil {
-		_ = opts.Tmux.KillSession(DispatchSessionName)
-		return nil, fmt.Errorf("orchestration: start dispatch: %w", err)
-	}
-
-	// Create main session (yardmaster + engines).
-	if err := opts.Tmux.CreateSession(SessionName); err != nil {
-		_ = opts.Tmux.KillSession(DispatchSessionName)
-		return nil, err
+		Session: SessionName,
 	}
 
 	// Pane 0 of main session: yardmaster.
 	mainPanes, err := opts.Tmux.ListPanes(SessionName)
 	if err != nil {
 		_ = opts.Tmux.KillSession(SessionName)
-		_ = opts.Tmux.KillSession(DispatchSessionName)
 		return nil, fmt.Errorf("orchestration: list main panes: %w", err)
 	}
 	result.YardmasterPane = mainPanes[0]
 	ymCmd := fmt.Sprintf("ry yardmaster --config %s", opts.ConfigPath)
 	if err := opts.Tmux.SendKeys(result.YardmasterPane, ymCmd); err != nil {
 		_ = opts.Tmux.KillSession(SessionName)
-		_ = opts.Tmux.KillSession(DispatchSessionName)
 		return nil, fmt.Errorf("orchestration: start yardmaster: %w", err)
+	}
+
+	// Optional telegraph pane.
+	if opts.Telegraph {
+		tgPane, err := opts.Tmux.NewPane(SessionName)
+		if err != nil {
+			_ = opts.Tmux.KillSession(SessionName)
+			return nil, fmt.Errorf("orchestration: create telegraph pane: %w", err)
+		}
+		tgCmd := fmt.Sprintf("ry telegraph start --config %s", opts.ConfigPath)
+		if err := opts.Tmux.SendKeys(tgPane, tgCmd); err != nil {
+			_ = opts.Tmux.KillSession(SessionName)
+			return nil, fmt.Errorf("orchestration: start telegraph: %w", err)
+		}
+		result.TelegraphPane = tgPane
 	}
 
 	// Engine panes in main session.
@@ -127,13 +121,11 @@ func Start(opts StartOpts) (*StartResult, error) {
 			pane, err := opts.Tmux.NewPane(SessionName)
 			if err != nil {
 				_ = opts.Tmux.KillSession(SessionName)
-				_ = opts.Tmux.KillSession(DispatchSessionName)
 				return nil, fmt.Errorf("orchestration: create engine pane: %w", err)
 			}
 			engineCmd := fmt.Sprintf("ry engine start --config %s --track %s", opts.ConfigPath, trackName)
 			if err := opts.Tmux.SendKeys(pane, engineCmd); err != nil {
 				_ = opts.Tmux.KillSession(SessionName)
-				_ = opts.Tmux.KillSession(DispatchSessionName)
 				return nil, fmt.Errorf("orchestration: start engine on %s: %w", trackName, err)
 			}
 			result.EnginePanes = append(result.EnginePanes, EnginePane{PaneID: pane, Track: trackName})

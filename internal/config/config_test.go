@@ -609,3 +609,390 @@ tracks:
 		t.Errorf("CocoIndex.Overlay.BuildTimeoutSec = %d, want 120", cfg.CocoIndex.Overlay.BuildTimeoutSec)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Telegraph config tests
+// ---------------------------------------------------------------------------
+
+func TestParse_TelegraphFullConfig(t *testing.T) {
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+tracks:
+  - name: backend
+    language: go
+telegraph:
+  platform: slack
+  channel: C0123456789
+  slack:
+    bot_token: xoxb-test-bot-token
+    app_token: xapp-test-app-token
+  dispatch_lock:
+    heartbeat_interval_sec: 15
+    heartbeat_timeout_sec: 60
+    queue_max: 3
+  events:
+    car_lifecycle: true
+    engine_stalls: true
+    escalations: false
+    poll_interval_sec: 10
+  digest:
+    pulse:
+      enabled: true
+      cron: "*/30 * * * *"
+    daily:
+      enabled: true
+      cron: "0 9 * * *"
+  conversations:
+    max_turns: 30
+    recovery_lookback_days: 14
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	tg := cfg.Telegraph
+	if tg.Platform != "slack" {
+		t.Errorf("Platform = %q, want slack", tg.Platform)
+	}
+	if tg.Channel != "C0123456789" {
+		t.Errorf("Channel = %q, want C0123456789", tg.Channel)
+	}
+	if tg.Slack.BotToken != "xoxb-test-bot-token" {
+		t.Errorf("Slack.BotToken = %q", tg.Slack.BotToken)
+	}
+	if tg.Slack.AppToken != "xapp-test-app-token" {
+		t.Errorf("Slack.AppToken = %q", tg.Slack.AppToken)
+	}
+	if tg.DispatchLock.HeartbeatIntervalSec != 15 {
+		t.Errorf("DispatchLock.HeartbeatIntervalSec = %d, want 15", tg.DispatchLock.HeartbeatIntervalSec)
+	}
+	if tg.DispatchLock.HeartbeatTimeoutSec != 60 {
+		t.Errorf("DispatchLock.HeartbeatTimeoutSec = %d, want 60", tg.DispatchLock.HeartbeatTimeoutSec)
+	}
+	if tg.DispatchLock.QueueMax != 3 {
+		t.Errorf("DispatchLock.QueueMax = %d, want 3", tg.DispatchLock.QueueMax)
+	}
+	if !tg.Events.CarLifecycle {
+		t.Error("Events.CarLifecycle = false, want true")
+	}
+	if !tg.Events.EngineStalls {
+		t.Error("Events.EngineStalls = false, want true")
+	}
+	if tg.Events.Escalations {
+		t.Error("Events.Escalations = true, want false")
+	}
+	if tg.Events.PollIntervalSec != 10 {
+		t.Errorf("Events.PollIntervalSec = %d, want 10", tg.Events.PollIntervalSec)
+	}
+	if !tg.Digest.Pulse.Enabled {
+		t.Error("Digest.Pulse.Enabled = false, want true")
+	}
+	if tg.Digest.Pulse.Cron != "*/30 * * * *" {
+		t.Errorf("Digest.Pulse.Cron = %q", tg.Digest.Pulse.Cron)
+	}
+	if !tg.Digest.Daily.Enabled {
+		t.Error("Digest.Daily.Enabled = false, want true")
+	}
+	if tg.Digest.Weekly.Enabled {
+		t.Error("Digest.Weekly.Enabled should default to false")
+	}
+	if tg.Conversations.MaxTurns != 30 {
+		t.Errorf("Conversations.MaxTurns = %d, want 30", tg.Conversations.MaxTurns)
+	}
+	if tg.Conversations.RecoveryLookbackDays != 14 {
+		t.Errorf("Conversations.RecoveryLookbackDays = %d, want 14", tg.Conversations.RecoveryLookbackDays)
+	}
+}
+
+func TestParse_TelegraphDefaults(t *testing.T) {
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+tracks:
+  - name: backend
+    language: go
+telegraph:
+  platform: slack
+  channel: C0123456789
+  slack:
+    bot_token: xoxb-token
+    app_token: xapp-token
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	tg := cfg.Telegraph
+	if tg.DispatchLock.HeartbeatIntervalSec != 30 {
+		t.Errorf("DispatchLock.HeartbeatIntervalSec = %d, want 30 (default)", tg.DispatchLock.HeartbeatIntervalSec)
+	}
+	if tg.DispatchLock.HeartbeatTimeoutSec != 90 {
+		t.Errorf("DispatchLock.HeartbeatTimeoutSec = %d, want 90 (default)", tg.DispatchLock.HeartbeatTimeoutSec)
+	}
+	if tg.DispatchLock.QueueMax != 5 {
+		t.Errorf("DispatchLock.QueueMax = %d, want 5 (default)", tg.DispatchLock.QueueMax)
+	}
+	if tg.Events.PollIntervalSec != 15 {
+		t.Errorf("Events.PollIntervalSec = %d, want 15 (default)", tg.Events.PollIntervalSec)
+	}
+	if !tg.Events.CarLifecycle {
+		t.Error("Events.CarLifecycle should default to true")
+	}
+	if !tg.Events.EngineStalls {
+		t.Error("Events.EngineStalls should default to true")
+	}
+	if !tg.Events.Escalations {
+		t.Error("Events.Escalations should default to true")
+	}
+	if tg.Conversations.MaxTurns != 20 {
+		t.Errorf("Conversations.MaxTurns = %d, want 20 (default)", tg.Conversations.MaxTurns)
+	}
+	if tg.Conversations.RecoveryLookbackDays != 7 {
+		t.Errorf("Conversations.RecoveryLookbackDays = %d, want 7 (default)", tg.Conversations.RecoveryLookbackDays)
+	}
+}
+
+func TestParse_TelegraphOmitted(t *testing.T) {
+	cfg, err := Parse([]byte(minimalYAML))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// When telegraph section is absent, no defaults should be applied.
+	if cfg.Telegraph.Platform != "" {
+		t.Errorf("Telegraph.Platform = %q, want empty", cfg.Telegraph.Platform)
+	}
+	if cfg.Telegraph.DispatchLock.HeartbeatIntervalSec != 0 {
+		t.Errorf("defaults should not apply without platform: HeartbeatIntervalSec = %d", cfg.Telegraph.DispatchLock.HeartbeatIntervalSec)
+	}
+}
+
+func TestParse_TelegraphSlackMissingBotToken(t *testing.T) {
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+tracks:
+  - name: backend
+    language: go
+telegraph:
+  platform: slack
+  channel: C0123456789
+  slack:
+    app_token: xapp-token
+`
+	_, err := Parse([]byte(yaml))
+	if err == nil {
+		t.Fatal("expected error for missing bot_token")
+	}
+	if !strings.Contains(err.Error(), "telegraph.slack.bot_token is required") {
+		t.Errorf("error = %q", err)
+	}
+}
+
+func TestParse_TelegraphSlackMissingAppToken(t *testing.T) {
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+tracks:
+  - name: backend
+    language: go
+telegraph:
+  platform: slack
+  channel: C0123456789
+  slack:
+    bot_token: xoxb-token
+`
+	_, err := Parse([]byte(yaml))
+	if err == nil {
+		t.Fatal("expected error for missing app_token")
+	}
+	if !strings.Contains(err.Error(), "telegraph.slack.app_token is required") {
+		t.Errorf("error = %q", err)
+	}
+}
+
+func TestParse_TelegraphMissingChannel(t *testing.T) {
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+tracks:
+  - name: backend
+    language: go
+telegraph:
+  platform: slack
+  slack:
+    bot_token: xoxb-token
+    app_token: xapp-token
+`
+	_, err := Parse([]byte(yaml))
+	if err == nil {
+		t.Fatal("expected error for missing channel")
+	}
+	if !strings.Contains(err.Error(), "telegraph.channel is required") {
+		t.Errorf("error = %q", err)
+	}
+}
+
+func TestParse_TelegraphUnsupportedPlatform(t *testing.T) {
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+tracks:
+  - name: backend
+    language: go
+telegraph:
+  platform: teams
+  channel: C123
+`
+	_, err := Parse([]byte(yaml))
+	if err == nil {
+		t.Fatal("expected error for unsupported platform")
+	}
+	if !strings.Contains(err.Error(), "not supported") {
+		t.Errorf("error = %q", err)
+	}
+}
+
+func TestParse_TelegraphDiscordValidation(t *testing.T) {
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+tracks:
+  - name: backend
+    language: go
+telegraph:
+  platform: discord
+  channel: "123456789"
+  discord:
+    bot_token: discord-bot-token
+    guild_id: "987654321"
+    channel_id: "123456789"
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Telegraph.Platform != "discord" {
+		t.Errorf("Platform = %q, want discord", cfg.Telegraph.Platform)
+	}
+	if cfg.Telegraph.Discord.BotToken != "discord-bot-token" {
+		t.Errorf("Discord.BotToken = %q", cfg.Telegraph.Discord.BotToken)
+	}
+	if cfg.Telegraph.Discord.GuildID != "987654321" {
+		t.Errorf("Discord.GuildID = %q", cfg.Telegraph.Discord.GuildID)
+	}
+}
+
+func TestParse_TelegraphDiscordMissingBotToken(t *testing.T) {
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+tracks:
+  - name: backend
+    language: go
+telegraph:
+  platform: discord
+  channel: "123456789"
+`
+	_, err := Parse([]byte(yaml))
+	if err == nil {
+		t.Fatal("expected error for missing discord bot_token")
+	}
+	if !strings.Contains(err.Error(), "telegraph.discord.bot_token is required") {
+		t.Errorf("error = %q", err)
+	}
+}
+
+func TestParse_TelegraphEnvVarResolution(t *testing.T) {
+	t.Setenv("TEST_SLACK_BOT_TOKEN", "xoxb-from-env")
+	t.Setenv("TEST_SLACK_APP_TOKEN", "xapp-from-env")
+
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+tracks:
+  - name: backend
+    language: go
+telegraph:
+  platform: slack
+  channel: C0123456789
+  slack:
+    bot_token: "${TEST_SLACK_BOT_TOKEN}"
+    app_token: "${TEST_SLACK_APP_TOKEN}"
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Telegraph.Slack.BotToken != "xoxb-from-env" {
+		t.Errorf("Slack.BotToken = %q, want xoxb-from-env", cfg.Telegraph.Slack.BotToken)
+	}
+	if cfg.Telegraph.Slack.AppToken != "xapp-from-env" {
+		t.Errorf("Slack.AppToken = %q, want xapp-from-env", cfg.Telegraph.Slack.AppToken)
+	}
+}
+
+func TestParse_TelegraphEnvVarUnset(t *testing.T) {
+	// Ensure the env var is not set.
+	t.Setenv("TEST_UNSET_TOKEN", "")
+	os.Unsetenv("TEST_UNSET_TOKEN")
+
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+tracks:
+  - name: backend
+    language: go
+telegraph:
+  platform: slack
+  channel: C0123456789
+  slack:
+    bot_token: "${TEST_UNSET_TOKEN}"
+    app_token: xapp-literal
+`
+	_, err := Parse([]byte(yaml))
+	if err == nil {
+		t.Fatal("expected validation error for empty resolved token")
+	}
+	if !strings.Contains(err.Error(), "telegraph.slack.bot_token is required") {
+		t.Errorf("error = %q", err)
+	}
+}
+
+func TestResolveEnvVars(t *testing.T) {
+	t.Setenv("FOO", "bar")
+	t.Setenv("BAZ", "qux")
+
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"${FOO}", "bar"},
+		{"prefix-${FOO}-suffix", "prefix-bar-suffix"},
+		{"${FOO}-${BAZ}", "bar-qux"},
+		{"no-vars-here", "no-vars-here"},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		got := resolveEnvVars(tt.input)
+		if got != tt.want {
+			t.Errorf("resolveEnvVars(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestLoad_TelegraphFixture(t *testing.T) {
+	cfg, err := Load("testdata/valid_telegraph.yaml")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Telegraph.Platform != "slack" {
+		t.Errorf("Platform = %q, want slack", cfg.Telegraph.Platform)
+	}
+	if cfg.Telegraph.Channel != "C0123456789" {
+		t.Errorf("Channel = %q, want C0123456789", cfg.Telegraph.Channel)
+	}
+	if cfg.Telegraph.DispatchLock.HeartbeatIntervalSec != 15 {
+		t.Errorf("DispatchLock.HeartbeatIntervalSec = %d, want 15", cfg.Telegraph.DispatchLock.HeartbeatIntervalSec)
+	}
+}
