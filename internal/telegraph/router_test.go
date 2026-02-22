@@ -425,6 +425,93 @@ func TestIsSelfMessage(t *testing.T) {
 	}
 }
 
+// --- @mention with command routes to command handler ---
+
+func TestHandle_DiscordMentionWithCommand(t *testing.T) {
+	db := openRouterTestDB(t)
+	router, adapter, spawner := setupRouter(t, db, "bot-123")
+
+	// Simulate Discord @mention: "<@1475033217449857074> status"
+	router.Handle(context.Background(), InboundMessage{
+		UserID:    "user-1",
+		UserName:  "alice",
+		ChannelID: "C1",
+		Text:      "<@1475033217449857074> status",
+	})
+
+	// Should route to command handler, not spawn a session.
+	if len(spawner.processes) != 0 {
+		t.Errorf("expected 0 spawned processes, got %d", len(spawner.processes))
+	}
+	if adapter.SentCount() != 1 {
+		t.Fatalf("expected 1 command response, got %d", adapter.SentCount())
+	}
+}
+
+func TestHandle_DiscordNickMentionWithCommand(t *testing.T) {
+	db := openRouterTestDB(t)
+	router, adapter, spawner := setupRouter(t, db, "bot-123")
+
+	// Discord nickname mention format: <@!ID>
+	router.Handle(context.Background(), InboundMessage{
+		UserID:    "user-1",
+		UserName:  "alice",
+		ChannelID: "C1",
+		Text:      "<@!1475033217449857074> car list",
+	})
+
+	if len(spawner.processes) != 0 {
+		t.Errorf("expected 0 spawned processes, got %d", len(spawner.processes))
+	}
+	if adapter.SentCount() != 1 {
+		t.Fatalf("expected 1 command response, got %d", adapter.SentCount())
+	}
+}
+
+func TestHandle_MentionWithNonCommand_SpawnsSession(t *testing.T) {
+	db := openRouterTestDB(t)
+	router, _, spawner := setupRouter(t, db, "bot-123")
+
+	// @mention with non-command text should still try to spawn a session.
+	router.Handle(context.Background(), InboundMessage{
+		UserID:    "user-1",
+		UserName:  "bob",
+		ChannelID: "C1",
+		Text:      "<@1475033217449857074> create a bug ticket",
+	})
+
+	if len(spawner.processes) == 0 {
+		t.Fatal("expected process to be spawned for @mention with non-command text")
+	}
+}
+
+func TestExtractMentionCommand(t *testing.T) {
+	db := openRouterTestDB(t)
+	router, _, _ := setupRouter(t, db, "bot-123")
+
+	tests := []struct {
+		text string
+		want string
+	}{
+		{"<@123456> status", "status"},
+		{"<@!123456> status", "status"},
+		{"<@123456> car list --track backend", "car list --track backend"},
+		{"<@123456> engine list", "engine list"},
+		{"<@123456> help", "help"},
+		{"<@123456> create a bug ticket", ""},
+		{"<@123456>", ""},
+		{"hello world", ""},
+		{"!ry status", ""},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		got := router.extractMentionCommand(tt.text)
+		if got != tt.want {
+			t.Errorf("extractMentionCommand(%q) = %q, want %q", tt.text, got, tt.want)
+		}
+	}
+}
+
 // --- Command takes priority over session routing ---
 
 func TestHandle_CommandTakesPriorityOverSession(t *testing.T) {

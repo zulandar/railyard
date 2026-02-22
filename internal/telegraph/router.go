@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"regexp"
 	"strings"
 )
 
@@ -71,9 +72,13 @@ func (r *Router) Handle(ctx context.Context, msg InboundMessage) {
 
 	text := strings.TrimSpace(msg.Text)
 
-	// 2. Command prefix.
+	// 2. Command prefix ("!ry ...") or @mention with command ("@bot status").
 	if isCommand(text) {
 		r.handleCommand(ctx, msg, text)
+		return
+	}
+	if mentionCmd := r.extractMentionCommand(text); mentionCmd != "" {
+		r.handleCommand(ctx, msg, commandPrefix+" "+mentionCmd)
 		return
 	}
 
@@ -145,6 +150,38 @@ func (r *Router) isSelfMessage(msg InboundMessage) bool {
 // isCommand returns true if the text starts with the command prefix.
 func isCommand(text string) bool {
 	return strings.HasPrefix(text, commandPrefix+" ") || text == commandPrefix
+}
+
+// discordMentionRe matches Discord mention formats: <@ID> or <@!ID>.
+var discordMentionRe = regexp.MustCompile(`<@!?\d+>`)
+
+// knownCommands is the set of top-level commands the CommandHandler supports.
+var knownCommands = map[string]bool{
+	"status": true,
+	"car":    true,
+	"engine": true,
+	"help":   true,
+}
+
+// extractMentionCommand checks if the message is a bot @mention followed by
+// a known command. Returns the command text (without the mention) if so,
+// or empty string if not. Handles Discord <@ID> format and plain @name.
+func (r *Router) extractMentionCommand(text string) string {
+	// Strip Discord-style mentions: <@ID> or <@!ID>.
+	stripped := discordMentionRe.ReplaceAllString(text, "")
+	stripped = strings.TrimSpace(stripped)
+
+	if stripped == "" {
+		return ""
+	}
+
+	// Check if the first word is a known command.
+	firstWord := strings.Fields(stripped)[0]
+	if knownCommands[firstWord] {
+		return stripped
+	}
+
+	return ""
 }
 
 // isMention returns true if the text contains an @mention pattern.
