@@ -515,7 +515,7 @@ func TestRootCmd_HasCarSubcommand(t *testing.T) {
 func TestHasMultipleBaseBranches_AllMain(t *testing.T) {
 	cars := []models.Car{
 		{BaseBranch: "main"},
-		{BaseBranch: ""},  // empty defaults to "main"
+		{BaseBranch: ""}, // empty defaults to "main"
 		{BaseBranch: "main"},
 	}
 	if hasMultipleBaseBranches(cars) {
