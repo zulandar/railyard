@@ -106,17 +106,14 @@ func (r *Router) Handle(ctx context.Context, msg InboundMessage) {
 	}
 
 	// 4. Historic (completed/expired) session → resume with conversation context.
+	//    The user's message is included in the recovery prompt (one-shot), so
+	//    there is no separate Route() call — the subprocess already has it.
 	if r.sessionMgr.HasHistoricSession(msg.ChannelID, threadID) {
 		fmt.Fprintf(r.out, "telegraph: router: → resume session [ch=%s thread=%s]\n", msg.ChannelID, threadID)
 		r.sendAck(ctx, msg.ChannelID, threadID)
-		_, err := r.sessionMgr.Resume(ctx, msg.ChannelID, threadID, msg.UserName)
+		_, err := r.sessionMgr.Resume(ctx, msg.ChannelID, threadID, msg.UserName, text)
 		if err != nil {
 			log.Printf("telegraph: router: resume session: %v", err)
-			return
-		}
-		// Route the message to the newly resumed session.
-		if err := r.sessionMgr.Route(ctx, msg.ChannelID, threadID, msg.UserName, text); err != nil {
-			log.Printf("telegraph: router: route after resume: %v", err)
 		}
 		return
 	}

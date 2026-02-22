@@ -383,7 +383,7 @@ func TestResume_WithDoltHistory(t *testing.T) {
 	})
 
 	// Resume should succeed.
-	newSession, err := sm.Resume(context.Background(), "C01", "thread-1", "alice")
+	newSession, err := sm.Resume(context.Background(), "C01", "thread-1", "alice", "continue where we left off")
 	if err != nil {
 		t.Fatalf("Resume: %v", err)
 	}
@@ -398,6 +398,9 @@ func TestResume_WithDoltHistory(t *testing.T) {
 	}
 	if !strings.Contains(proc.prompt, "create a task for auth") {
 		t.Error("recovery prompt should contain original message")
+	}
+	if !strings.Contains(proc.prompt, "continue where we left off") {
+		t.Error("recovery prompt should contain the new message")
 	}
 }
 
@@ -418,7 +421,7 @@ func TestResume_WithAdapterFallback(t *testing.T) {
 	})
 
 	// No Dolt history — should fall back to adapter.
-	newSession, err := sm.Resume(context.Background(), "C01", "thread-1", "alice")
+	newSession, err := sm.Resume(context.Background(), "C01", "thread-1", "alice", "pick up where we left off")
 	if err != nil {
 		t.Fatalf("Resume: %v", err)
 	}
@@ -441,7 +444,7 @@ func TestResume_NoHistory(t *testing.T) {
 	sm, _ := NewSessionManager(SessionManagerOpts{DB: db, Spawner: spawner})
 
 	// Resume with no history should still work (empty prompt).
-	session, err := sm.Resume(context.Background(), "C01", "thread-new", "alice")
+	session, err := sm.Resume(context.Background(), "C01", "thread-new", "alice", "hello")
 	if err != nil {
 		t.Fatalf("Resume: %v", err)
 	}

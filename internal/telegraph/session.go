@@ -160,14 +160,26 @@ func (sm *SessionManager) Route(ctx context.Context, channelID, threadID, userNa
 }
 
 // Resume re-hydrates a dead session from conversation history and spawns
-// a fresh subprocess. It first tries Dolt conversation history, then falls
-// back to adapter.ThreadHistory().
-func (sm *SessionManager) Resume(ctx context.Context, channelID, threadID, userName string) (*models.DispatchSession, error) {
+// a fresh subprocess. The newMessage is the user's latest input that triggered
+// the resume — it is appended to the recovery context and included in the
+// one-shot prompt so the subprocess can respond to it immediately.
+func (sm *SessionManager) Resume(ctx context.Context, channelID, threadID, userName, newMessage string) (*models.DispatchSession, error) {
 	// Build recovery context from Dolt conversation history.
 	recoveryPrompt, err := sm.buildRecoveryContext(channelID, threadID)
 	if err != nil {
 		return nil, fmt.Errorf("telegraph: build recovery context: %w", err)
 	}
+
+	// Append the new message that triggered the resume.
+	if newMessage != "" {
+		if recoveryPrompt != "" {
+			recoveryPrompt += "\n"
+		}
+		recoveryPrompt += fmt.Sprintf("\n[user] %s: %s", userName, newMessage)
+	}
+
+	// Record the new message in conversation history.
+	// (We do this before spawning so it's included if a subsequent resume occurs.)
 
 	// Acquire a new lock for the resumed session.
 	dbSession, err := AcquireLock(sm.db, "telegraph", userName, threadID, channelID, sm.timeout)
@@ -194,6 +206,22 @@ func (sm *SessionManager) Resume(ctx context.Context, channelID, threadID, userN
 
 	log.Printf("telegraph: session %d resumed [ch=%s thread=%s user=%s] recovery_len=%d",
 		dbSession.ID, channelID, threadID, userName, len(recoveryPrompt))
+
+	// Record the new message in conversation history for future resumes.
+	if newMessage != "" {
+		var maxSeq int
+		sm.db.Model(&models.TelegraphConversation{}).
+			Where("session_id = ?", dbSession.ID).
+			Select("COALESCE(MAX(sequence), 0)").Scan(&maxSeq)
+
+		sm.db.Create(&models.TelegraphConversation{
+			SessionID: dbSession.ID,
+			Sequence:  maxSeq + 1,
+			Role:      "user",
+			UserName:  userName,
+			Content:   newMessage,
+		})
+	}
 
 	// Relay subprocess output back to the chat platform.
 	go sm.relayOutput(ctx, channelID, threadID, dbSession.ID, proc)
