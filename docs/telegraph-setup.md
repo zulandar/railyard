@@ -187,6 +187,8 @@ Token fields support `${ENV_VAR}` substitution — set secrets as environment va
 ry telegraph start -c railyard.yaml   # Start the Telegraph daemon
 ry telegraph status                    # Check if the daemon is running
 ry telegraph stop                      # Stop the daemon
+ry telegraph sessions -c railyard.yaml          # List dispatch session history
+ry telegraph sessions -c railyard.yaml --clear  # Clear all session history
 ```
 
 The `telegraph` command is also aliased as `tg`:
@@ -195,6 +197,7 @@ The `telegraph` command is also aliased as `tg`:
 ry tg start -c railyard.yaml
 ry tg status
 ry tg stop
+ry tg sessions -c railyard.yaml
 ```
 
 Telegraph runs in a dedicated tmux session (`railyard-telegraph`). You can attach directly:

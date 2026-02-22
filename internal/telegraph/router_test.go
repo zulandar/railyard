@@ -489,7 +489,6 @@ func TestIsDispatchPrefix(t *testing.T) {
 	}
 }
 
-
 func TestIsMention(t *testing.T) {
 	tests := []struct {
 		text string

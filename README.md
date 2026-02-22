@@ -14,29 +14,36 @@ Each developer runs their own Railyard instance against the same repo. Agents wo
 | **Yardmaster** | Supervisor agent — merges branches, monitors engines, handles stalls |
 | **Dispatch** | Planner agent — your interface, decomposes requests into cars |
 | **Switch** | Merging a completed car's branch back to main |
+| **Telegraph** | Chat bridge — connects Railyard to Slack or Discord for commands, events, and dispatch via chat |
 | **Overlay** | Per-engine semantic index of changed files for context-aware search |
 
 ## Architecture
 
 ```
-                    ┌───────────┐
-                    │  Dispatch │  ← You talk to this
-                    └─────┬─────┘
-                          │ creates cars
-                    ┌─────▼─────┐
-              ┌─────┤   Dolt DB  ├─────┐
-              │     └─────┬─────┘     │
-              │           │           │
-        ┌─────▼───┐ ┌─────▼───┐ ┌────▼────┐
-        │Engine 1 │ │Engine 2 │ │Engine N │  ← Claude Code agents
-        └─────┬───┘ └─────┬───┘ └────┬────┘
-              │           │          │
-              │     ┌─────▼─────┐   │
-              └─────┤ pgvector  ├───┘  ← Semantic code search
-                    └─────┬─────┘
-              ┌─────▼─────┐
-              │Yardmaster │  ← Merges, monitors, coordinates
-              └───────────┘
+        ┌───────────┐        ┌───────────┐
+        │  Dispatch │        │ Telegraph │  ← Chat bridge (Slack/Discord)
+        └─────┬─────┘        └─────┬─────┘
+              │ creates cars       │ commands, @mentions, events
+              │               ┌────▼────┐
+              │               │ Adapter │  ← Platform-specific (Slack/Discord)
+              │               └────┬────┘
+              │                    │
+              ├────────────────────┘
+              │
+        ┌─────▼─────┐
+  ┌─────┤   Dolt DB  ├─────┐
+  │     └─────┬─────┘     │
+  │           │           │
+┌─▼───────┐ ┌─▼───────┐ ┌─▼───────┐
+│Engine 1 │ │Engine 2 │ │Engine N │  ← Claude Code agents
+└─────┬───┘ └─────┬───┘ └────┬────┘
+      │           │          │
+      │     ┌─────▼─────┐   │
+      └─────┤ pgvector  ├───┘  ← Semantic code search
+            └─────┬─────┘
+      ┌─────▼─────┐
+      │Yardmaster │  ← Merges, monitors, coordinates
+      └───────────┘
 ```
 
 - **Dolt** (version-controlled MySQL) stores all state: cars, engine status, messages, logs
@@ -207,15 +214,17 @@ ry progress <car-id> "checkpoint"      # Log progress without completing
 
 ### Telegraph (Chat Bridge)
 
-Telegraph connects Railyard to Slack or Discord for real-time command routing and event notifications.
+Telegraph connects Railyard to Slack or Discord, providing read-only command routing (`!ry status`), outbound event notifications (car lifecycle, stalls, escalations), dispatch via chat (@mention the bot to create cars from natural language), and scheduled digests.
 
 ```bash
 ry telegraph start -c railyard.yaml   # Start chat bridge daemon
 ry telegraph status                    # Check daemon status
 ry telegraph stop                      # Stop daemon
+ry telegraph sessions -c railyard.yaml          # List dispatch session history
+ry telegraph sessions -c railyard.yaml --clear  # Clear all session history
 ```
 
-See [Telegraph Setup Guide](docs/telegraph-setup.md) for platform setup instructions.
+See [Telegraph Setup Guide](docs/telegraph-setup.md) for platform setup and configuration.
 
 ### Merging
 
@@ -367,7 +376,7 @@ tracks:
 
 ## How It Works
 
-1. **Dispatch** decomposes your request into structured cars with dependencies
+1. **Dispatch** decomposes your request into structured cars with dependencies — either via the CLI (`ry dispatch`) or chat (@mention the bot in Slack/Discord via Telegraph)
 2. **Engines** poll the database for ready cars (no unresolved blockers), claim one atomically, and spawn a Claude Code session with full context (car description, track conventions, prior progress, recent commits)
 3. Each engine works on an isolated git branch (`ry/{owner}/{track}/{car-id}`)
 4. If CocoIndex is configured, each engine gets an MCP server for semantic code search — the overlay index tracks files changed on the engine's branch so search results are always current
