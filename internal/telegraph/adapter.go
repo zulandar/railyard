@@ -63,6 +63,12 @@ type Field struct {
 	Short bool // hint: render side-by-side with another field
 }
 
+// BotUserIDer is an optional interface that adapters can implement to
+// expose the bot's own user ID. This enables self-message filtering.
+type BotUserIDer interface {
+	BotUserID() string
+}
+
 // ThreadMessage represents a single message within a thread history.
 type ThreadMessage struct {
 	UserID    string

@@ -6,8 +6,9 @@ import (
 	"time"
 )
 
-// Compile-time interface compliance check.
+// Compile-time interface compliance checks.
 var _ Adapter = (*MockAdapter)(nil)
+var _ BotUserIDer = (*MockAdapter)(nil)
 
 func TestMockAdapter_InterfaceCompliance(t *testing.T) {
 	var a Adapter = NewMockAdapter()

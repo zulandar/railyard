@@ -16,6 +16,21 @@ type MockAdapter struct {
 	inbound   chan InboundMessage
 	sent      []OutboundMessage
 	history   map[string][]ThreadMessage // key: "channelID:threadID"
+	botUserID string
+}
+
+// BotUserID returns the configured bot user ID (implements BotUserIDer).
+func (m *MockAdapter) BotUserID() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.botUserID
+}
+
+// SetBotUserID sets the bot user ID for testing.
+func (m *MockAdapter) SetBotUserID(id string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.botUserID = id
 }
 
 // NewMockAdapter creates a MockAdapter with a buffered inbound channel.
