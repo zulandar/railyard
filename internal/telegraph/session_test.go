@@ -543,3 +543,185 @@ func TestFormatThreadHistory(t *testing.T) {
 		t.Error("should format thread message")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// relayOutput tests
+// ---------------------------------------------------------------------------
+
+func TestRelayOutput_SendsToAdapter(t *testing.T) {
+	db := openSessionTestDB(t)
+	adapter := NewMockAdapter()
+	adapter.Connect(context.Background())
+	spawner := &mockSpawner{}
+
+	sm, _ := NewSessionManager(SessionManagerOpts{
+		DB:      db,
+		Spawner: spawner,
+		Adapter: adapter,
+	})
+
+	proc := newMockProcess("")
+	// Simulate process output.
+	proc.recvCh <- "Hello from dispatch"
+	proc.recvCh <- "Created car-001"
+	close(proc.recvCh)
+
+	sm.relayOutput(context.Background(), "C01", "thread-1", 1, proc)
+
+	sent := adapter.AllSent()
+	if len(sent) != 1 {
+		t.Fatalf("sent count = %d, want 1", len(sent))
+	}
+	if sent[0].ChannelID != "C01" {
+		t.Errorf("ChannelID = %q, want %q", sent[0].ChannelID, "C01")
+	}
+	if sent[0].ThreadID != "thread-1" {
+		t.Errorf("ThreadID = %q, want %q", sent[0].ThreadID, "thread-1")
+	}
+	expected := "Hello from dispatch\nCreated car-001"
+	if sent[0].Text != expected {
+		t.Errorf("Text = %q, want %q", sent[0].Text, expected)
+	}
+
+	// Verify conversation was recorded.
+	var conv models.TelegraphConversation
+	db.Last(&conv)
+	if conv.Role != "assistant" {
+		t.Errorf("Role = %q, want %q", conv.Role, "assistant")
+	}
+	if conv.Content != expected {
+		t.Errorf("Content = %q, want %q", conv.Content, expected)
+	}
+}
+
+func TestRelayOutput_ChunksLongMessages(t *testing.T) {
+	db := openSessionTestDB(t)
+	adapter := NewMockAdapter()
+	adapter.Connect(context.Background())
+	spawner := &mockSpawner{}
+
+	sm, _ := NewSessionManager(SessionManagerOpts{
+		DB:      db,
+		Spawner: spawner,
+		Adapter: adapter,
+	})
+
+	// Create a message that's longer than 2000 chars.
+	proc := newMockProcess("")
+	longLine := strings.Repeat("a", 1500)
+	proc.recvCh <- longLine
+	proc.recvCh <- longLine
+	close(proc.recvCh)
+
+	sm.relayOutput(context.Background(), "C01", "thread-1", 1, proc)
+
+	sent := adapter.AllSent()
+	if len(sent) < 2 {
+		t.Fatalf("sent count = %d, want >= 2 (message should be chunked)", len(sent))
+	}
+	for i, msg := range sent {
+		if len(msg.Text) > 2000 {
+			t.Errorf("chunk %d length = %d, want <= 2000", i, len(msg.Text))
+		}
+	}
+}
+
+func TestRelayOutput_EmptyOutput(t *testing.T) {
+	db := openSessionTestDB(t)
+	adapter := NewMockAdapter()
+	adapter.Connect(context.Background())
+	spawner := &mockSpawner{}
+
+	sm, _ := NewSessionManager(SessionManagerOpts{
+		DB:      db,
+		Spawner: spawner,
+		Adapter: adapter,
+	})
+
+	proc := newMockProcess("")
+	close(proc.recvCh) // no output
+
+	sm.relayOutput(context.Background(), "C01", "thread-1", 1, proc)
+
+	if adapter.SentCount() != 0 {
+		t.Errorf("sent count = %d, want 0 for empty output", adapter.SentCount())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// chunkMessage tests
+// ---------------------------------------------------------------------------
+
+func TestChunkMessage(t *testing.T) {
+	tests := []struct {
+		name    string
+		text    string
+		maxLen  int
+		wantN   int
+		wantAll bool // if true, verify all chunks <= maxLen
+	}{
+		{
+			name:   "short message",
+			text:   "hello",
+			maxLen: 2000,
+			wantN:  1,
+		},
+		{
+			name:   "exactly at limit",
+			text:   strings.Repeat("x", 2000),
+			maxLen: 2000,
+			wantN:  1,
+		},
+		{
+			name:    "just over limit",
+			text:    strings.Repeat("x", 2001),
+			maxLen:  2000,
+			wantN:   2,
+			wantAll: true,
+		},
+		{
+			name:    "break at newline",
+			text:    strings.Repeat("x", 1500) + "\n" + strings.Repeat("y", 1500),
+			maxLen:  2000,
+			wantN:   2,
+			wantAll: true,
+		},
+		{
+			name:    "multiple chunks",
+			text:    strings.Repeat("x", 5000),
+			maxLen:  2000,
+			wantN:   3,
+			wantAll: true,
+		},
+		{
+			name:   "empty text",
+			text:   "",
+			maxLen: 2000,
+			wantN:  1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			chunks := chunkMessage(tt.text, tt.maxLen)
+			if len(chunks) != tt.wantN {
+				t.Errorf("chunks = %d, want %d", len(chunks), tt.wantN)
+			}
+			if tt.wantAll {
+				for i, c := range chunks {
+					if len(c) > tt.maxLen {
+						t.Errorf("chunk[%d] len = %d, want <= %d", i, len(c), tt.maxLen)
+					}
+				}
+			}
+			// Verify no data is lost (rejoin should equal original minus newline splits).
+			joined := strings.Join(chunks, "\n")
+			if !tt.wantAll && len(chunks) == 1 && chunks[0] != tt.text {
+				t.Errorf("single chunk doesn't match original")
+			}
+			if tt.wantAll && len(joined) < len(tt.text)-len(chunks) {
+				t.Errorf("data lost: joined len = %d, original len = %d", len(joined), len(tt.text))
+			}
+		})
+	}
+}

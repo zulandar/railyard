@@ -108,6 +108,9 @@ func (sm *SessionManager) NewSession(ctx context.Context, source, userName, thre
 	}
 	sm.mu.Unlock()
 
+	// Relay subprocess output back to the chat platform.
+	go sm.relayOutput(ctx, channelID, threadID, dbSession.ID, proc)
+
 	// Monitor process exit and clean up.
 	go sm.monitorProcess(key, dbSession.ID, proc)
 
@@ -184,6 +187,9 @@ func (sm *SessionManager) Resume(ctx context.Context, channelID, threadID, userN
 		cancel:    cancel,
 	}
 	sm.mu.Unlock()
+
+	// Relay subprocess output back to the chat platform.
+	go sm.relayOutput(ctx, channelID, threadID, dbSession.ID, proc)
 
 	go sm.monitorProcess(key, dbSession.ID, proc)
 
@@ -288,4 +294,88 @@ func formatThreadHistory(msgs []ThreadMessage) string {
 		fmt.Fprintf(&b, "%s: %s\n", m.UserName, m.Text)
 	}
 	return b.String()
+}
+
+// relayOutput reads all lines from a process's Recv channel, accumulates
+// them, and sends the result to the chat platform via the adapter. It also
+// records the assistant response in the conversation history.
+func (sm *SessionManager) relayOutput(ctx context.Context, channelID, threadID string, sessionID uint, proc Process) {
+	var buf strings.Builder
+	for line := range proc.Recv() {
+		if buf.Len() > 0 {
+			buf.WriteByte('\n')
+		}
+		buf.WriteString(line)
+	}
+
+	text := strings.TrimSpace(buf.String())
+	if text == "" {
+		return
+	}
+
+	// Record assistant response in conversation history.
+	var maxSeq int
+	sm.db.Model(&models.TelegraphConversation{}).
+		Where("session_id = ?", sessionID).
+		Select("COALESCE(MAX(sequence), 0)").Scan(&maxSeq)
+
+	conv := models.TelegraphConversation{
+		SessionID: sessionID,
+		Sequence:  maxSeq + 1,
+		Role:      "assistant",
+		Content:   text,
+	}
+	sm.db.Create(&conv)
+
+	// Send to chat platform in chunks (Discord 2000 char limit).
+	if sm.adapter == nil {
+		return
+	}
+	chunks := chunkMessage(text, 2000)
+	for _, chunk := range chunks {
+		sm.adapter.Send(ctx, OutboundMessage{
+			ChannelID: channelID,
+			ThreadID:  threadID,
+			Text:      chunk,
+		})
+	}
+}
+
+// chunkMessage splits text into chunks of at most maxLen characters.
+// It prefers breaking at newlines when possible.
+func chunkMessage(text string, maxLen int) []string {
+	if maxLen <= 0 {
+		maxLen = 2000
+	}
+	if len(text) <= maxLen {
+		return []string{text}
+	}
+
+	var chunks []string
+	for len(text) > 0 {
+		if len(text) <= maxLen {
+			chunks = append(chunks, text)
+			break
+		}
+
+		// Look for a newline in the second half of the chunk to break at.
+		chunk := text[:maxLen]
+		breakAt := -1
+		half := maxLen / 2
+		for i := maxLen - 1; i >= half; i-- {
+			if chunk[i] == '\n' {
+				breakAt = i
+				break
+			}
+		}
+
+		if breakAt >= 0 {
+			chunks = append(chunks, text[:breakAt])
+			text = text[breakAt+1:] // skip the newline
+		} else {
+			chunks = append(chunks, chunk)
+			text = text[maxLen:]
+		}
+	}
+	return chunks
 }

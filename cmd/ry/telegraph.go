@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
 	"syscall"
@@ -10,6 +11,8 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/zulandar/railyard/internal/config"
 	"github.com/zulandar/railyard/internal/db"
+	"github.com/zulandar/railyard/internal/dispatch"
+	"github.com/zulandar/railyard/internal/engine"
 	"github.com/zulandar/railyard/internal/orchestration"
 	"github.com/zulandar/railyard/internal/telegraph"
 	discordadapter "github.com/zulandar/railyard/internal/telegraph/discord"
@@ -97,11 +100,48 @@ func runTelegraphStart(cmd *cobra.Command, configPath string) error {
 		return err
 	}
 
+	// Set up dispatch spawner: render prompt, ensure worktree, write MCP config.
+	out := cmd.OutOrStdout()
+	var spawner telegraph.ProcessSpawner
+
+	dispatchPrompt, err := dispatch.RenderPrompt(cfg)
+	if err != nil {
+		fmt.Fprintf(out, "telegraph: dispatch prompt render failed, dispatch disabled: %v\n", err)
+	} else {
+		// Determine repo directory (cwd).
+		repoDir, wdErr := os.Getwd()
+		if wdErr != nil {
+			return fmt.Errorf("telegraph: getwd: %w", wdErr)
+		}
+
+		worktreeDir, wtErr := engine.EnsureDispatchWorktree(repoDir)
+		if wtErr != nil {
+			fmt.Fprintf(out, "telegraph: dispatch worktree failed, dispatch disabled: %v\n", wtErr)
+		} else {
+			baseBranch := engine.DetectBaseBranch(repoDir, cfg.DefaultBranch)
+			if syncErr := engine.SyncWorktreeToBranch(worktreeDir, baseBranch); syncErr != nil {
+				log.Printf("telegraph: sync worktree to %s: %v (continuing anyway)", baseBranch, syncErr)
+			}
+
+			// Write MCP config (non-fatal).
+			if mcpErr := dispatch.WriteDispatchMCPConfig(worktreeDir, cfg); mcpErr != nil {
+				log.Printf("telegraph: write dispatch MCP config: %v (continuing without MCP)", mcpErr)
+			}
+
+			spawner = &telegraph.ClaudeSpawner{
+				SystemPrompt: dispatchPrompt,
+				WorkDir:      worktreeDir,
+			}
+			fmt.Fprintf(out, "telegraph: dispatch enabled (worktree: %s)\n", worktreeDir)
+		}
+	}
+
 	daemon, err := telegraph.NewDaemon(telegraph.DaemonOpts{
 		DB:      gormDB,
 		Config:  cfg,
 		Adapter: adapter,
-		Out:     cmd.OutOrStdout(),
+		Spawner: spawner,
+		Out:     out,
 	})
 	if err != nil {
 		return err
