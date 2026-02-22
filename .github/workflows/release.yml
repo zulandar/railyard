@@ -146,10 +146,14 @@ jobs:
           fi
 
       - name: Notify Discord
-        if: ${{ secrets.DISCORD_WEBHOOK_URL != '' }}
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+            echo "DISCORD_WEBHOOK_URL not set, skipping"
+            exit 0
+          fi
+
           VERSION="${GITHUB_REF_NAME}"
           RELEASE_URL="https://github.com/${{ github.repository }}/releases/tag/${VERSION}"
 
