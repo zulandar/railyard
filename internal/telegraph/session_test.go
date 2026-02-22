@@ -678,6 +678,111 @@ func TestRelayOutput_EmptyOutput(t *testing.T) {
 // chunkMessage tests
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// ClearSessionHistory tests
+// ---------------------------------------------------------------------------
+
+func TestClearSessionHistory_WithData(t *testing.T) {
+	db := openSessionTestDB(t)
+
+	// Create telegraph sessions with conversations.
+	now := time.Now()
+	s1 := models.DispatchSession{
+		Source: "telegraph", UserName: "alice", PlatformThreadID: "t1",
+		ChannelID: "C01", Status: "completed", CarsCreated: "[]",
+		LastHeartbeat: now, CompletedAt: &now,
+	}
+	s2 := models.DispatchSession{
+		Source: "telegraph", UserName: "bob", PlatformThreadID: "t2",
+		ChannelID: "C02", Status: "active", CarsCreated: "[]",
+		LastHeartbeat: now,
+	}
+	db.Create(&s1)
+	db.Create(&s2)
+	db.Create(&models.TelegraphConversation{SessionID: s1.ID, Sequence: 1, Role: "user", Content: "hello"})
+	db.Create(&models.TelegraphConversation{SessionID: s1.ID, Sequence: 2, Role: "assistant", Content: "hi"})
+	db.Create(&models.TelegraphConversation{SessionID: s2.ID, Sequence: 1, Role: "user", Content: "hey"})
+
+	sessions, convos, err := ClearSessionHistory(db)
+	if err != nil {
+		t.Fatalf("ClearSessionHistory: %v", err)
+	}
+	if sessions != 2 {
+		t.Errorf("sessions deleted = %d, want 2", sessions)
+	}
+	if convos != 3 {
+		t.Errorf("conversations deleted = %d, want 3", convos)
+	}
+
+	// Verify DB is empty.
+	var sessionCount, convoCount int64
+	db.Model(&models.DispatchSession{}).Count(&sessionCount)
+	db.Model(&models.TelegraphConversation{}).Count(&convoCount)
+	if sessionCount != 0 {
+		t.Errorf("remaining sessions = %d, want 0", sessionCount)
+	}
+	if convoCount != 0 {
+		t.Errorf("remaining conversations = %d, want 0", convoCount)
+	}
+}
+
+func TestClearSessionHistory_EmptyDB(t *testing.T) {
+	db := openSessionTestDB(t)
+
+	sessions, convos, err := ClearSessionHistory(db)
+	if err != nil {
+		t.Fatalf("ClearSessionHistory: %v", err)
+	}
+	if sessions != 0 {
+		t.Errorf("sessions deleted = %d, want 0", sessions)
+	}
+	if convos != 0 {
+		t.Errorf("conversations deleted = %d, want 0", convos)
+	}
+}
+
+func TestClearSessionHistory_PreservesNonTelegraphSessions(t *testing.T) {
+	db := openSessionTestDB(t)
+
+	now := time.Now()
+	// Telegraph session — should be deleted.
+	tgSession := models.DispatchSession{
+		Source: "telegraph", UserName: "alice", PlatformThreadID: "t1",
+		ChannelID: "C01", Status: "completed", CarsCreated: "[]",
+		LastHeartbeat: now, CompletedAt: &now,
+	}
+	// Local session — should be preserved.
+	localSession := models.DispatchSession{
+		Source: "local", UserName: "bob", PlatformThreadID: "",
+		ChannelID: "", Status: "completed", CarsCreated: "[]",
+		LastHeartbeat: now, CompletedAt: &now,
+	}
+	db.Create(&tgSession)
+	db.Create(&localSession)
+	db.Create(&models.TelegraphConversation{SessionID: tgSession.ID, Sequence: 1, Role: "user", Content: "hello"})
+
+	sessions, convos, err := ClearSessionHistory(db)
+	if err != nil {
+		t.Fatalf("ClearSessionHistory: %v", err)
+	}
+	if sessions != 1 {
+		t.Errorf("sessions deleted = %d, want 1", sessions)
+	}
+	if convos != 1 {
+		t.Errorf("conversations deleted = %d, want 1", convos)
+	}
+
+	// Local session should still exist.
+	var remaining []models.DispatchSession
+	db.Find(&remaining)
+	if len(remaining) != 1 {
+		t.Fatalf("remaining sessions = %d, want 1", len(remaining))
+	}
+	if remaining[0].Source != "local" {
+		t.Errorf("remaining session source = %q, want %q", remaining[0].Source, "local")
+	}
+}
+
 func TestChunkMessage(t *testing.T) {
 	tests := []struct {
 		name    string

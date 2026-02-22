@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/signal"
@@ -13,10 +14,12 @@ import (
 	"github.com/zulandar/railyard/internal/db"
 	"github.com/zulandar/railyard/internal/dispatch"
 	"github.com/zulandar/railyard/internal/engine"
+	"github.com/zulandar/railyard/internal/models"
 	"github.com/zulandar/railyard/internal/orchestration"
 	"github.com/zulandar/railyard/internal/telegraph"
 	discordadapter "github.com/zulandar/railyard/internal/telegraph/discord"
 	slackadapter "github.com/zulandar/railyard/internal/telegraph/slack"
+	"gorm.io/gorm"
 )
 
 const telegraphSessionName = "railyard-telegraph"
@@ -32,6 +35,7 @@ func newTelegraphCmd() *cobra.Command {
 	cmd.AddCommand(newTelegraphStartCmd())
 	cmd.AddCommand(newTelegraphStatusCmd())
 	cmd.AddCommand(newTelegraphStopCmd())
+	cmd.AddCommand(newTelegraphSessionsCmd())
 	return cmd
 }
 
@@ -73,6 +77,73 @@ func newTelegraphStopCmd() *cobra.Command {
 		},
 	}
 	return cmd
+}
+
+func newTelegraphSessionsCmd() *cobra.Command {
+	var (
+		configPath string
+		clear      bool
+	)
+
+	cmd := &cobra.Command{
+		Use:   "sessions",
+		Short: "Manage telegraph dispatch sessions",
+		Long:  "List or clear telegraph dispatch session history stored in the database.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runTelegraphSessions(cmd, configPath, clear)
+		},
+	}
+
+	cmd.Flags().StringVarP(&configPath, "config", "c", "railyard.yaml", "path to Railyard config file")
+	cmd.Flags().BoolVar(&clear, "clear", false, "delete all telegraph session history from the database")
+	return cmd
+}
+
+func runTelegraphSessions(cmd *cobra.Command, configPath string, clear bool) error {
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	gormDB, err := db.Connect(cfg.Dolt.Host, cfg.Dolt.Port, cfg.Dolt.Database)
+	if err != nil {
+		return fmt.Errorf("connect to %s: %w", cfg.Dolt.Database, err)
+	}
+
+	out := cmd.OutOrStdout()
+
+	if clear {
+		sessions, convos, err := telegraph.ClearSessionHistory(gormDB)
+		if err != nil {
+			return fmt.Errorf("clear sessions: %w", err)
+		}
+		fmt.Fprintf(out, "Cleared %d session(s) and %d conversation message(s).\n", sessions, convos)
+		return nil
+	}
+
+	// Default: list session summary.
+	return runTelegraphSessionsList(gormDB, out)
+}
+
+func runTelegraphSessionsList(gormDB *gorm.DB, out io.Writer) error {
+	var sessions []models.DispatchSession
+	if err := gormDB.Where("source = ?", "telegraph").Order("created_at DESC").Find(&sessions).Error; err != nil {
+		return fmt.Errorf("query sessions: %w", err)
+	}
+
+	if len(sessions) == 0 {
+		fmt.Fprintf(out, "No telegraph sessions found.\n")
+		return nil
+	}
+
+	fmt.Fprintf(out, "Telegraph Sessions (%d)\n", len(sessions))
+	fmt.Fprintf(out, "%-6s %-12s %-16s %-20s %-20s\n",
+		"ID", "STATUS", "USER", "CHANNEL", "CREATED")
+	for _, s := range sessions {
+		fmt.Fprintf(out, "%-6d %-12s %-16s %-20s %-20s\n",
+			s.ID, s.Status, s.UserName, s.ChannelID, s.CreatedAt.Format("2006-01-02 15:04:05"))
+	}
+	return nil
 }
 
 // tmuxForTelegraph returns the tmux interface to use. Allows test override.

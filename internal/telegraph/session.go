@@ -258,6 +258,29 @@ func (sm *SessionManager) HasHistoricSession(channelID, threadID string) bool {
 	return count > 0
 }
 
+// ClearSessionHistory deletes all telegraph session history from the database.
+// It removes all TelegraphConversation rows for telegraph sessions, then
+// removes the DispatchSession rows themselves. Returns the number of sessions
+// and conversation messages deleted. This is a standalone function that only
+// needs a DB handle, suitable for CLI use without a running daemon.
+func ClearSessionHistory(db *gorm.DB) (sessions int64, conversations int64, err error) {
+	// 1. Delete conversation rows for telegraph sessions.
+	convoResult := db.Where("session_id IN (?)",
+		db.Model(&models.DispatchSession{}).Select("id").Where("source = ?", "telegraph"),
+	).Delete(&models.TelegraphConversation{})
+	if convoResult.Error != nil {
+		return 0, 0, fmt.Errorf("delete conversations: %w", convoResult.Error)
+	}
+
+	// 2. Delete telegraph sessions.
+	sessionResult := db.Where("source = ?", "telegraph").Delete(&models.DispatchSession{})
+	if sessionResult.Error != nil {
+		return 0, 0, fmt.Errorf("delete sessions: %w", sessionResult.Error)
+	}
+
+	return sessionResult.RowsAffected, convoResult.RowsAffected, nil
+}
+
 // CloseSession releases the lock and cleans up an active session.
 func (sm *SessionManager) CloseSession(channelID, threadID string) error {
 	key := sessionKey(channelID, threadID)
