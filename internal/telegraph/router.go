@@ -9,6 +9,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 )
 
 // commandPrefix is the prefix that triggers read-only command handling.
@@ -23,6 +24,9 @@ type Router struct {
 	adapter    Adapter
 	botUserID  string // the bot's own user ID (to filter self-messages)
 	out        io.Writer
+
+	ackMu   sync.Mutex
+	ackDeck []string // shuffled phrases, popped from end
 }
 
 // RouterOpts holds parameters for creating a Router.
@@ -173,9 +177,10 @@ var ackPhrases = []string{
 }
 
 // sendAck sends a random acknowledgment message to the chat platform so the
-// user knows the bot received their request and is working on it.
+// user knows the bot received their request and is working on it. It cycles
+// through all phrases in shuffled order before repeating any.
 func (r *Router) sendAck(ctx context.Context, channelID, threadID string) {
-	phrase := ackPhrases[rand.Intn(len(ackPhrases))]
+	phrase := r.nextAck()
 	if err := r.adapter.Send(ctx, OutboundMessage{
 		ChannelID: channelID,
 		ThreadID:  threadID,
@@ -183,6 +188,25 @@ func (r *Router) sendAck(ctx context.Context, channelID, threadID string) {
 	}); err != nil {
 		log.Printf("telegraph: router: send ack: %v", err)
 	}
+}
+
+// nextAck returns the next ack phrase from the shuffled deck. When the deck
+// is exhausted it reshuffles, guaranteeing every phrase is used before repeats.
+func (r *Router) nextAck() string {
+	r.ackMu.Lock()
+	defer r.ackMu.Unlock()
+
+	if len(r.ackDeck) == 0 {
+		r.ackDeck = make([]string, len(ackPhrases))
+		copy(r.ackDeck, ackPhrases)
+		rand.Shuffle(len(r.ackDeck), func(i, j int) {
+			r.ackDeck[i], r.ackDeck[j] = r.ackDeck[j], r.ackDeck[i]
+		})
+	}
+
+	phrase := r.ackDeck[len(r.ackDeck)-1]
+	r.ackDeck = r.ackDeck[:len(r.ackDeck)-1]
+	return phrase
 }
 
 // isSelfMessage returns true if the message is from the bot itself.

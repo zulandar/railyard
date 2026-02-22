@@ -630,6 +630,35 @@ func TestHandle_AckOnActiveSession(t *testing.T) {
 	}
 }
 
+func TestNextAck_CyclesThroughAllPhrases(t *testing.T) {
+	db := openRouterTestDB(t)
+	router, _, _ := setupRouter(t, db, "bot-123")
+
+	// Draw exactly len(ackPhrases) acks — should see every phrase exactly once.
+	seen := make(map[string]int)
+	for i := 0; i < len(ackPhrases); i++ {
+		phrase := router.nextAck()
+		seen[phrase]++
+	}
+	for _, phrase := range ackPhrases {
+		if seen[phrase] != 1 {
+			t.Errorf("phrase %q seen %d times in first cycle, want 1", phrase, seen[phrase])
+		}
+	}
+
+	// Draw another full cycle — should again see every phrase exactly once.
+	seen2 := make(map[string]int)
+	for i := 0; i < len(ackPhrases); i++ {
+		phrase := router.nextAck()
+		seen2[phrase]++
+	}
+	for _, phrase := range ackPhrases {
+		if seen2[phrase] != 1 {
+			t.Errorf("phrase %q seen %d times in second cycle, want 1", phrase, seen2[phrase])
+		}
+	}
+}
+
 func TestHandle_NoAckOnCommand(t *testing.T) {
 	db := openRouterTestDB(t)
 	router, adapter, _ := setupRouter(t, db, "bot-123")
