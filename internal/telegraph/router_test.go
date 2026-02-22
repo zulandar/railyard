@@ -489,21 +489,6 @@ func TestIsDispatchPrefix(t *testing.T) {
 	}
 }
 
-func TestResolveThreadID(t *testing.T) {
-	tests := []struct {
-		channelID, threadID, want string
-	}{
-		{"C1", "T1", "T1"},
-		{"C1", "", "C1"},
-		{"C1", "C1", "C1"},
-	}
-	for _, tt := range tests {
-		got := resolveThreadID(tt.channelID, tt.threadID)
-		if got != tt.want {
-			t.Errorf("resolveThreadID(%q, %q) = %q, want %q", tt.channelID, tt.threadID, got, tt.want)
-		}
-	}
-}
 
 func TestIsMention(t *testing.T) {
 	tests := []struct {
@@ -916,38 +901,48 @@ func TestHandle_UnknownRyCommandDispatches(t *testing.T) {
 	}
 }
 
-func TestHandle_TopLevelAckUsesEmptyThreadID(t *testing.T) {
+func TestHandle_TopLevelMentionIgnoresHistoricChannelSession(t *testing.T) {
 	db := openRouterTestDB(t)
-	router, adapter, _ := setupRouter(t, db, "bot-123")
+	router, adapter, spawner := setupRouter(t, db, "bot-123")
 
-	ctx := context.Background()
+	// Create a historic session stored under the channel ID (legacy behavior).
+	now := time.Now()
+	db.Create(&models.DispatchSession{
+		Source:           "telegraph",
+		UserName:         "alice",
+		PlatformThreadID: "C1",
+		ChannelID:        "C1",
+		Status:           "completed",
+		CarsCreated:      "[]",
+		LastHeartbeat:    now,
+		CompletedAt:      &now,
+	})
 
-	// Create an active session keyed by channel ID (simulates a session
-	// created without ThreadStarter, or where the thread ID == channel ID).
-	router.sessionMgr.NewSession(ctx, "telegraph", "alice", "C1", "C1")
-
-	// Clear messages from session creation.
-	adapter.mu.Lock()
-	adapter.sent = nil
-	adapter.mu.Unlock()
-
-	// Send a top-level message (empty ThreadID) that matches the active session.
-	router.Handle(ctx, InboundMessage{
+	// A top-level @mention should create a NEW thread and session,
+	// NOT resume the historic channel-level session.
+	router.Handle(context.Background(), InboundMessage{
 		UserID:    "user-1",
 		UserName:  "alice",
 		ChannelID: "C1",
-		ThreadID:  "",
-		Text:      "do the thing",
+		Text:      "@railyard what is the status?",
 	})
 
-	// The ack should use empty ThreadID (top-level), NOT the channel ID.
-	// This prevents Slack's "invalid_thread_ts" error.
+	if len(spawner.processes) == 0 {
+		t.Fatal("expected process to be spawned")
+	}
+
+	// Session should be keyed by thread-1 (from StartThread), not C1.
+	if !router.sessionMgr.HasSession("C1", "thread-1") {
+		t.Error("expected session keyed by thread-1 (new thread)")
+	}
+
+	// Ack should have been sent via StartThread.
 	all := adapter.AllSent()
 	if len(all) == 0 {
-		t.Fatal("expected at least 1 sent message (ack)")
+		t.Fatal("expected at least 1 sent message (ack via StartThread)")
 	}
-	if all[0].ThreadID != "" {
-		t.Errorf("ack ThreadID = %q, want empty (top-level message)", all[0].ThreadID)
+	if all[0].ChannelID != "C1" {
+		t.Errorf("ack channel = %q, want C1", all[0].ChannelID)
 	}
 }
 

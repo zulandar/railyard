@@ -63,12 +63,16 @@ func NewRouter(opts RouterOpts) (*Router, error) {
 }
 
 // Handle classifies and routes a single inbound message. Routing paths:
+//
 //  1. Bot self-message → ignore
 //  2. Known command ("!ry status") or @mention with command ("@bot status") → command handler
-//  3. Thread reply with active session → session manager Route()
-//  4. Thread reply with historic session → session manager Resume()
-//  5. @mention or "!ry <natural language>" → session manager NewSession()
-//  6. Everything else → ignore
+//  3. Thread reply:
+//     a. Active session in thread → Route()
+//     b. Historic session in thread → Resume()
+//     c. @mention or !ry in thread with no session → NewSession() in that thread
+//     d. No session, no mention → ignore
+//  4. Top-level @mention or !ry → StartThread + NewSession() (always creates a new thread)
+//  5. Everything else → ignore
 func (r *Router) Handle(ctx context.Context, msg InboundMessage) {
 	// 1. Filter bot self-messages.
 	if r.isSelfMessage(msg) {
@@ -91,54 +95,67 @@ func (r *Router) Handle(ctx context.Context, msg InboundMessage) {
 		return
 	}
 
-	// Resolve thread ID: for top-level channel messages use the channel ID
-	// as the thread key, matching the fallback in path 5 (new session).
-	threadID := resolveThreadID(msg.ChannelID, msg.ThreadID)
-
-	// 3. Active session for this channel/thread.
-	if r.sessionMgr.HasSession(msg.ChannelID, threadID) {
-		fmt.Fprintf(r.out, "telegraph: router: → active session [ch=%s thread=%s]\n", msg.ChannelID, threadID)
-		r.sendAck(ctx, msg.ChannelID, msg.ThreadID)
-		if err := r.sessionMgr.Route(ctx, msg.ChannelID, threadID, msg.UserName, text); err != nil {
-			log.Printf("telegraph: router: route to session: %v", err)
+	// 3. Thread reply — route to existing session, resume, or start new.
+	//    All thread lookups use the actual platform thread ID, not a channel fallback.
+	if msg.ThreadID != "" {
+		// 3a. Active session in this thread.
+		if r.sessionMgr.HasSession(msg.ChannelID, msg.ThreadID) {
+			fmt.Fprintf(r.out, "telegraph: router: → active session [ch=%s thread=%s]\n", msg.ChannelID, msg.ThreadID)
+			r.sendAck(ctx, msg.ChannelID, msg.ThreadID)
+			if err := r.sessionMgr.Route(ctx, msg.ChannelID, msg.ThreadID, msg.UserName, text); err != nil {
+				log.Printf("telegraph: router: route to session: %v", err)
+			}
+			return
 		}
+
+		// 3b. Historic session → resume with conversation context.
+		if r.sessionMgr.HasHistoricSession(msg.ChannelID, msg.ThreadID) {
+			fmt.Fprintf(r.out, "telegraph: router: → resume session [ch=%s thread=%s]\n", msg.ChannelID, msg.ThreadID)
+			r.sendAck(ctx, msg.ChannelID, msg.ThreadID)
+			_, err := r.sessionMgr.Resume(ctx, msg.ChannelID, msg.ThreadID, msg.UserName, text)
+			if err != nil {
+				log.Printf("telegraph: router: resume session: %v", err)
+			}
+			return
+		}
+
+		// 3c. @mention or !ry in a thread with no prior session → new session in thread.
+		if isMention(text) || isDispatchPrefix(text) {
+			fmt.Fprintf(r.out, "telegraph: router: → new session in thread [ch=%s thread=%s]\n", msg.ChannelID, msg.ThreadID)
+			r.sendAck(ctx, msg.ChannelID, msg.ThreadID)
+			_, err := r.sessionMgr.NewSession(ctx, "telegraph", msg.UserName, msg.ThreadID, msg.ChannelID)
+			if err != nil {
+				log.Printf("telegraph: router: new session: %v", err)
+				return
+			}
+			if err := r.sessionMgr.Route(ctx, msg.ChannelID, msg.ThreadID, msg.UserName, text); err != nil {
+				log.Printf("telegraph: router: route initial message: %v", err)
+			}
+			return
+		}
+
+		// 3d. Thread reply with no session and no mention → ignore.
+		fmt.Fprintf(r.out, "telegraph: router: → ignore (thread reply, no session found for thread=%s)\n", msg.ThreadID)
 		return
 	}
 
-	// 4. Historic (completed/expired) session → resume with conversation context.
-	//    The user's message is included in the recovery prompt (one-shot), so
-	//    there is no separate Route() call — the subprocess already has it.
-	if r.sessionMgr.HasHistoricSession(msg.ChannelID, threadID) {
-		fmt.Fprintf(r.out, "telegraph: router: → resume session [ch=%s thread=%s]\n", msg.ChannelID, threadID)
-		r.sendAck(ctx, msg.ChannelID, msg.ThreadID)
-		_, err := r.sessionMgr.Resume(ctx, msg.ChannelID, threadID, msg.UserName, text)
-		if err != nil {
-			log.Printf("telegraph: router: resume session: %v", err)
-		}
-		return
-	}
-
-	// 5. New message with @mention or !ry <natural language> → new session.
+	// 4. Top-level @mention or !ry → always create a new thread and session.
+	//    This ensures every top-level mention gets its own conversation thread,
+	//    regardless of any historic channel-level sessions.
 	if isMention(text) || isDispatchPrefix(text) {
-		// For top-level channel messages, create a thread if the adapter supports it.
-		// This keeps dispatch conversations contained in threads.
-		sessionThreadID := threadID
-		if msg.ThreadID == "" {
-			if ts, ok := r.adapter.(ThreadStarter); ok {
-				ack := r.nextAck()
-				newThreadID, err := ts.StartThread(ctx, msg.ChannelID, ack, "Dispatch")
-				if err != nil {
-					log.Printf("telegraph: router: create thread: %v", err)
-					// Fall back to channel-level messaging.
-				} else {
-					sessionThreadID = newThreadID
-					fmt.Fprintf(r.out, "telegraph: router: created thread %s for dispatch\n", newThreadID)
-				}
+		sessionThreadID := msg.ChannelID // fallback if thread creation unavailable
+		if ts, ok := r.adapter.(ThreadStarter); ok {
+			ack := r.nextAck()
+			newThreadID, err := ts.StartThread(ctx, msg.ChannelID, ack, "Dispatch")
+			if err != nil {
+				log.Printf("telegraph: router: create thread: %v", err)
+				r.sendAck(ctx, msg.ChannelID, "")
 			} else {
-				r.sendAck(ctx, msg.ChannelID, msg.ThreadID)
+				sessionThreadID = newThreadID
+				fmt.Fprintf(r.out, "telegraph: router: created thread %s for dispatch\n", newThreadID)
 			}
 		} else {
-			r.sendAck(ctx, msg.ChannelID, msg.ThreadID)
+			r.sendAck(ctx, msg.ChannelID, "")
 		}
 
 		fmt.Fprintf(r.out, "telegraph: router: → new session [ch=%s thread=%s]\n", msg.ChannelID, sessionThreadID)
@@ -147,30 +164,14 @@ func (r *Router) Handle(ctx context.Context, msg InboundMessage) {
 			log.Printf("telegraph: router: new session: %v", err)
 			return
 		}
-		// Route the initial message.
 		if err := r.sessionMgr.Route(ctx, msg.ChannelID, sessionThreadID, msg.UserName, text); err != nil {
 			log.Printf("telegraph: router: route initial message: %v", err)
 		}
 		return
 	}
 
-	// 6. Unknown/unhandled message → ignore.
-	if msg.ThreadID != "" {
-		fmt.Fprintf(r.out, "telegraph: router: → ignore (thread reply, no session found for thread=%s)\n", threadID)
-	} else {
-		fmt.Fprintf(r.out, "telegraph: router: → ignore (no mention, no command prefix)\n")
-	}
-}
-
-// resolveThreadID returns the effective thread ID for session lookups.
-// For top-level channel messages (empty threadID), the channel ID is used
-// as the thread key so that follow-up messages in the same channel can
-// find the session even without an explicit thread.
-func resolveThreadID(channelID, threadID string) string {
-	if threadID == "" {
-		return channelID
-	}
-	return threadID
+	// 5. Unknown/unhandled message → ignore.
+	fmt.Fprintf(r.out, "telegraph: router: → ignore (no mention, no command prefix)\n")
 }
 
 // truncate returns s truncated to maxLen with "..." appended if needed.
