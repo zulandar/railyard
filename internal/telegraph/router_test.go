@@ -449,15 +449,42 @@ func TestIsCommand(t *testing.T) {
 		{"!ry status", true},
 		{"!ry", true},
 		{"!ry car list", true},
+		{"!ry help", true},
+		{"!ry engine list", true},
 		{"!ryExtra", false},
 		{"ry status", false},
 		{"hello !ry", false},
 		{"", false},
+		// Natural language after !ry should NOT be a command — routed to dispatch.
+		{"!ry what is the status of the cars", false},
+		{"!ry can you deploy the backend", false},
+		{"!ry tell me about car-123", false},
 	}
 	for _, tt := range tests {
 		got := isCommand(tt.text)
 		if got != tt.want {
 			t.Errorf("isCommand(%q) = %v, want %v", tt.text, got, tt.want)
+		}
+	}
+}
+
+func TestIsDispatchPrefix(t *testing.T) {
+	tests := []struct {
+		text string
+		want bool
+	}{
+		{"!ry what is the status", true},
+		{"!ry deploy the backend", true},
+		{"!ry status", true}, // but isCommand catches this first in Handle()
+		{"!ry", false},
+		{"hello world", false},
+		{"@railyard status", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		got := isDispatchPrefix(tt.text)
+		if got != tt.want {
+			t.Errorf("isDispatchPrefix(%q) = %v, want %v", tt.text, got, tt.want)
 		}
 	}
 }
@@ -868,6 +895,59 @@ func TestHandle_CommandTakesPriorityOverSession(t *testing.T) {
 	// Command should produce a response.
 	if adapter.SentCount() < 1 {
 		t.Error("expected command response even in active session thread")
+	}
+}
+
+func TestHandle_UnknownRyCommandDispatches(t *testing.T) {
+	db := openRouterTestDB(t)
+	router, _, spawner := setupRouter(t, db, "bot-123")
+
+	// "!ry what is the current status of the cars" is NOT a known command.
+	// It should be routed to dispatch (new session), not the command handler.
+	router.Handle(context.Background(), InboundMessage{
+		UserID:    "user-1",
+		UserName:  "alice",
+		ChannelID: "C1",
+		Text:      "!ry what is the current status of the cars",
+	})
+
+	if len(spawner.processes) == 0 {
+		t.Fatal("expected process to be spawned for !ry <natural language>")
+	}
+}
+
+func TestHandle_TopLevelAckUsesEmptyThreadID(t *testing.T) {
+	db := openRouterTestDB(t)
+	router, adapter, _ := setupRouter(t, db, "bot-123")
+
+	ctx := context.Background()
+
+	// Create an active session keyed by channel ID (simulates a session
+	// created without ThreadStarter, or where the thread ID == channel ID).
+	router.sessionMgr.NewSession(ctx, "telegraph", "alice", "C1", "C1")
+
+	// Clear messages from session creation.
+	adapter.mu.Lock()
+	adapter.sent = nil
+	adapter.mu.Unlock()
+
+	// Send a top-level message (empty ThreadID) that matches the active session.
+	router.Handle(ctx, InboundMessage{
+		UserID:    "user-1",
+		UserName:  "alice",
+		ChannelID: "C1",
+		ThreadID:  "",
+		Text:      "do the thing",
+	})
+
+	// The ack should use empty ThreadID (top-level), NOT the channel ID.
+	// This prevents Slack's "invalid_thread_ts" error.
+	all := adapter.AllSent()
+	if len(all) == 0 {
+		t.Fatal("expected at least 1 sent message (ack)")
+	}
+	if all[0].ThreadID != "" {
+		t.Errorf("ack ThreadID = %q, want empty (top-level message)", all[0].ThreadID)
 	}
 }
 

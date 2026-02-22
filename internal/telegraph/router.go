@@ -64,10 +64,10 @@ func NewRouter(opts RouterOpts) (*Router, error) {
 
 // Handle classifies and routes a single inbound message. Routing paths:
 //  1. Bot self-message → ignore
-//  2. Command prefix "!ry" → command handler
+//  2. Known command ("!ry status") or @mention with command ("@bot status") → command handler
 //  3. Thread reply with active session → session manager Route()
 //  4. Thread reply with historic session → session manager Resume()
-//  5. @mention or new message → session manager NewSession()
+//  5. @mention or "!ry <natural language>" → session manager NewSession()
 //  6. Everything else → ignore
 func (r *Router) Handle(ctx context.Context, msg InboundMessage) {
 	// 1. Filter bot self-messages.
@@ -79,7 +79,7 @@ func (r *Router) Handle(ctx context.Context, msg InboundMessage) {
 	fmt.Fprintf(r.out, "telegraph: router: recv [ch=%s thread=%s user=%s] %q\n",
 		msg.ChannelID, msg.ThreadID, msg.UserName, truncate(text, 80))
 
-	// 2. Command prefix ("!ry ...") or @mention with command ("@bot status").
+	// 2. Known command ("!ry status") or @mention with command ("@bot status").
 	if isCommand(text) {
 		fmt.Fprintf(r.out, "telegraph: router: → command\n")
 		r.handleCommand(ctx, msg, text)
@@ -98,7 +98,7 @@ func (r *Router) Handle(ctx context.Context, msg InboundMessage) {
 	// 3. Active session for this channel/thread.
 	if r.sessionMgr.HasSession(msg.ChannelID, threadID) {
 		fmt.Fprintf(r.out, "telegraph: router: → active session [ch=%s thread=%s]\n", msg.ChannelID, threadID)
-		r.sendAck(ctx, msg.ChannelID, threadID)
+		r.sendAck(ctx, msg.ChannelID, msg.ThreadID)
 		if err := r.sessionMgr.Route(ctx, msg.ChannelID, threadID, msg.UserName, text); err != nil {
 			log.Printf("telegraph: router: route to session: %v", err)
 		}
@@ -110,7 +110,7 @@ func (r *Router) Handle(ctx context.Context, msg InboundMessage) {
 	//    there is no separate Route() call — the subprocess already has it.
 	if r.sessionMgr.HasHistoricSession(msg.ChannelID, threadID) {
 		fmt.Fprintf(r.out, "telegraph: router: → resume session [ch=%s thread=%s]\n", msg.ChannelID, threadID)
-		r.sendAck(ctx, msg.ChannelID, threadID)
+		r.sendAck(ctx, msg.ChannelID, msg.ThreadID)
 		_, err := r.sessionMgr.Resume(ctx, msg.ChannelID, threadID, msg.UserName, text)
 		if err != nil {
 			log.Printf("telegraph: router: resume session: %v", err)
@@ -118,8 +118,8 @@ func (r *Router) Handle(ctx context.Context, msg InboundMessage) {
 		return
 	}
 
-	// 5. New message with @mention → new session.
-	if isMention(text) {
+	// 5. New message with @mention or !ry <natural language> → new session.
+	if isMention(text) || isDispatchPrefix(text) {
 		// For top-level channel messages, create a thread if the adapter supports it.
 		// This keeps dispatch conversations contained in threads.
 		sessionThreadID := threadID
@@ -135,10 +135,10 @@ func (r *Router) Handle(ctx context.Context, msg InboundMessage) {
 					fmt.Fprintf(r.out, "telegraph: router: created thread %s for dispatch\n", newThreadID)
 				}
 			} else {
-				r.sendAck(ctx, msg.ChannelID, threadID)
+				r.sendAck(ctx, msg.ChannelID, msg.ThreadID)
 			}
 		} else {
-			r.sendAck(ctx, msg.ChannelID, threadID)
+			r.sendAck(ctx, msg.ChannelID, msg.ThreadID)
 		}
 
 		fmt.Fprintf(r.out, "telegraph: router: → new session [ch=%s thread=%s]\n", msg.ChannelID, sessionThreadID)
@@ -248,9 +248,30 @@ func (r *Router) isSelfMessage(msg InboundMessage) bool {
 	return r.botUserID != "" && msg.UserID == r.botUserID
 }
 
-// isCommand returns true if the text starts with the command prefix.
+// isCommand returns true if the text is a known "!ry" command (e.g. "!ry status",
+// "!ry car list"). Natural language like "!ry what is the status" returns false
+// so it can be routed to dispatch instead.
 func isCommand(text string) bool {
-	return strings.HasPrefix(text, commandPrefix+" ") || text == commandPrefix
+	if text == commandPrefix {
+		return true // bare "!ry" → help
+	}
+	if !strings.HasPrefix(text, commandPrefix+" ") {
+		return false
+	}
+	rest := strings.TrimSpace(text[len(commandPrefix)+1:])
+	if rest == "" {
+		return true
+	}
+	firstWord := strings.Fields(rest)[0]
+	return knownCommands[firstWord]
+}
+
+// isDispatchPrefix returns true if the text starts with "!ry " but is not a
+// known command. By the time this is called, isCommand() has already returned
+// false, so this only matches natural language queries like
+// "!ry what is the status of the cars".
+func isDispatchPrefix(text string) bool {
+	return strings.HasPrefix(text, commandPrefix+" ")
 }
 
 // discordMentionRe matches Discord mention formats: <@ID> or <@!ID>.

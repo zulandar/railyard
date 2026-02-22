@@ -205,6 +205,30 @@ func (a *Adapter) Send(ctx context.Context, msg telegraph.OutboundMessage) error
 	return nil
 }
 
+// StartThread sends a message to a channel and returns the message timestamp
+// as the thread ID. In Slack, threads are simply replies to a message — the
+// message timestamp serves as the thread identifier for subsequent replies.
+// Implements telegraph.ThreadStarter.
+func (a *Adapter) StartThread(ctx context.Context, channelID, text, threadName string) (string, error) {
+	a.mu.Lock()
+	if !a.connected {
+		a.mu.Unlock()
+		return "", fmt.Errorf("slack: not connected")
+	}
+	a.mu.Unlock()
+
+	var ts string
+	err := retryOnRateLimit(ctx, func() error {
+		_, timestamp, postErr := a.client.PostMessage(channelID, slackapi.MsgOptionText(text, false))
+		ts = timestamp
+		return postErr
+	})
+	if err != nil {
+		return "", fmt.Errorf("slack: send thread starter: %w", err)
+	}
+	return ts, nil
+}
+
 // ThreadHistory retrieves messages from a Slack thread using conversations.replies.
 // It paginates through all replies using cursor-based pagination and handles
 // Slack rate limits with exponential backoff.
