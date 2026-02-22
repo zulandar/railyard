@@ -92,11 +92,12 @@ type Watcher struct {
 	pollInterval   time.Duration
 	pulseInterval  time.Duration
 
-	mu          sync.Mutex
-	snapshot    map[string]carSnapshot // carID -> last-known state
-	seeded      bool                   // true after first poll (baseline established)
-	lastDigest  *pulseDigest           // last emitted pulse for comparison
-	lastPulseAt time.Time              // when the last pulse was emitted
+	mu            sync.Mutex
+	snapshot      map[string]carSnapshot // carID -> last-known state
+	stallSnapshot map[string]bool        // engineID -> true when stalled (for dedup)
+	seeded        bool                   // true after first poll (baseline established)
+	lastDigest    *pulseDigest           // last emitted pulse for comparison
+	lastPulseAt   time.Time              // when the last pulse was emitted
 }
 
 // WatcherOpts holds parameters for creating a Watcher.
@@ -130,6 +131,7 @@ func NewWatcher(opts WatcherOpts) (*Watcher, error) {
 		pollInterval:   poll,
 		pulseInterval:  pulse,
 		snapshot:       make(map[string]carSnapshot),
+		stallSnapshot:  make(map[string]bool),
 	}, nil
 }
 
@@ -270,23 +272,45 @@ func (w *Watcher) detectCarEvents() ([]DetectedEvent, error) {
 	return events, nil
 }
 
-// detectStalls finds engines with status='stalled'.
+// detectStalls finds engines with status='stalled' and emits events only
+// on the transition to stalled (deduplication). When a stalled engine
+// recovers, it is cleared from the snapshot so future stalls are detected.
 func (w *Watcher) detectStalls() ([]DetectedEvent, error) {
 	var engines []models.Engine
-	if err := w.db.Where("status = ?", "stalled").Find(&engines).Error; err != nil {
+	if err := w.db.Select("id, status, track, current_car").Find(&engines).Error; err != nil {
 		return nil, err
 	}
 
-	events := make([]DetectedEvent, 0, len(engines))
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	currentStalled := make(map[string]bool, len(engines))
+	var events []DetectedEvent
+
 	for _, e := range engines {
-		events = append(events, DetectedEvent{
-			Type:       EventEngineStalled,
-			Timestamp:  time.Now(),
-			EngineID:   e.ID,
-			Track:      e.Track,
-			CurrentCar: e.CurrentCar,
-		})
+		if e.Status == "stalled" {
+			currentStalled[e.ID] = true
+			if !w.stallSnapshot[e.ID] {
+				// Newly stalled — emit event.
+				events = append(events, DetectedEvent{
+					Type:       EventEngineStalled,
+					Timestamp:  time.Now(),
+					EngineID:   e.ID,
+					Track:      e.Track,
+					CurrentCar: e.CurrentCar,
+				})
+				w.stallSnapshot[e.ID] = true
+			}
+		}
 	}
+
+	// Clear recovered engines from the snapshot so future stalls are detected.
+	for id := range w.stallSnapshot {
+		if !currentStalled[id] {
+			delete(w.stallSnapshot, id)
+		}
+	}
+
 	return events, nil
 }
 

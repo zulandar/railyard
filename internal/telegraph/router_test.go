@@ -571,6 +571,27 @@ func TestHandle_DiscordNickMentionWithCommand(t *testing.T) {
 	}
 }
 
+func TestHandle_SlackMentionWithCommand(t *testing.T) {
+	db := openRouterTestDB(t)
+	router, adapter, spawner := setupRouter(t, db, "bot-123")
+
+	// Simulate Slack @mention: "<@U1234ABC> status"
+	router.Handle(context.Background(), InboundMessage{
+		UserID:    "user-1",
+		UserName:  "alice",
+		ChannelID: "C1",
+		Text:      "<@U1234ABC> status",
+	})
+
+	// Should route to command handler, not spawn a session.
+	if len(spawner.processes) != 0 {
+		t.Errorf("expected 0 spawned processes, got %d", len(spawner.processes))
+	}
+	if adapter.SentCount() != 1 {
+		t.Fatalf("expected 1 command response, got %d", adapter.SentCount())
+	}
+}
+
 func TestHandle_MentionWithNonCommand_SpawnsSession(t *testing.T) {
 	db := openRouterTestDB(t)
 	router, _, spawner := setupRouter(t, db, "bot-123")
@@ -596,6 +617,7 @@ func TestExtractMentionCommand(t *testing.T) {
 		text string
 		want string
 	}{
+		// Discord mentions (numeric IDs).
 		{"<@123456> status", "status"},
 		{"<@!123456> status", "status"},
 		{"<@123456> car list --track backend", "car list --track backend"},
@@ -603,6 +625,15 @@ func TestExtractMentionCommand(t *testing.T) {
 		{"<@123456> help", "help"},
 		{"<@123456> create a bug ticket", ""},
 		{"<@123456>", ""},
+		// Slack mentions (alphanumeric IDs starting with U/B).
+		{"<@U1234ABC> status", "status"},
+		{"<@U1234ABC> car list", "car list"},
+		{"<@U1234ABC> engine list", "engine list"},
+		{"<@U1234ABC> help", "help"},
+		{"<@U1234ABC> create a bug ticket", ""},
+		{"<@U1234ABC>", ""},
+		{"<@UBOT123> status", "status"},
+		// Non-mentions.
 		{"hello world", ""},
 		{"!ry status", ""},
 		{"", ""},

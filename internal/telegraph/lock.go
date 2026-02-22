@@ -6,6 +6,7 @@ import (
 
 	"github.com/zulandar/railyard/internal/models"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // DefaultHeartbeatTimeout is the duration after which a session's heartbeat
@@ -41,9 +42,13 @@ func AcquireLock(db *gorm.DB, source, userName, threadID, channelID string, time
 		}
 
 		// Check for an existing active session on this thread/channel.
+		// FOR UPDATE serializes concurrent checks on MySQL/Dolt (gap lock
+		// prevents concurrent inserts). SQLite ignores the clause — its
+		// transaction serialization provides equivalent safety.
 		var existing models.DispatchSession
-		result := tx.Where("status = ? AND platform_thread_id = ? AND channel_id = ?",
-			"active", threadID, channelID).First(&existing)
+		result := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("status = ? AND platform_thread_id = ? AND channel_id = ?",
+				"active", threadID, channelID).First(&existing)
 		if result.Error == nil {
 			return fmt.Errorf("dispatch lock held by %q (session %d)", existing.UserName, existing.ID)
 		}

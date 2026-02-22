@@ -243,14 +243,26 @@ func buildTrackBreakdown(db *gorm.DB, since, until time.Time) []TrackDigest {
 		td.Open = int(open)
 
 		// Average completion time for cars completed in period.
-		var avgResult struct{ AvgSec float64 }
-		db.Model(&models.Car{}).
+		// Computed in Go for portability across SQLite (tests) and MySQL/Dolt (production).
+		var completionRows []struct {
+			ClaimedAt   time.Time
+			CompletedAt time.Time
+		}
+		if err := db.Model(&models.Car{}).
 			Where("track = ? AND status IN ? AND completed_at >= ? AND completed_at < ? AND claimed_at IS NOT NULL",
 				t.Track, []string{"done", "merged"}, since, until).
-			Select("COALESCE(AVG(JULIANDAY(completed_at) - JULIANDAY(claimed_at)), 0) * 86400 as avg_sec").
-			Scan(&avgResult)
-		if avgResult.AvgSec > 0 {
-			td.AvgCompletion = time.Duration(avgResult.AvgSec) * time.Second
+			Select("claimed_at, completed_at").
+			Find(&completionRows).Error; err != nil {
+			// Log and continue — a failed avg query shouldn't break the entire breakdown.
+			_ = err
+		}
+		if len(completionRows) > 0 {
+			var totalSec float64
+			for _, row := range completionRows {
+				totalSec += row.CompletedAt.Sub(row.ClaimedAt).Seconds()
+			}
+			avgSec := totalSec / float64(len(completionRows))
+			td.AvgCompletion = time.Duration(avgSec) * time.Second
 		}
 
 		breakdown = append(breakdown, td)

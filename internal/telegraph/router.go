@@ -279,8 +279,10 @@ func isDispatchPrefix(text string) bool {
 	return strings.HasPrefix(text, commandPrefix+" ")
 }
 
-// discordMentionRe matches Discord mention formats: <@ID> or <@!ID>.
-var discordMentionRe = regexp.MustCompile(`<@!?\d+>`)
+// mentionRe matches platform mention formats:
+//   - Discord: <@123456> or <@!123456> (numeric IDs)
+//   - Slack:   <@U123ABC> (alphanumeric IDs starting with a letter)
+var mentionRe = regexp.MustCompile(`<@!?[A-Za-z0-9_]+>`)
 
 // knownCommands is the set of top-level commands the CommandHandler supports.
 var knownCommands = map[string]bool{
@@ -292,10 +294,10 @@ var knownCommands = map[string]bool{
 
 // extractMentionCommand checks if the message is a bot @mention followed by
 // a known command. Returns the command text (without the mention) if so,
-// or empty string if not. Handles Discord <@ID> format and plain @name.
+// or empty string if not. Handles Discord <@ID>, <@!ID>, and Slack <@UID> formats.
 func (r *Router) extractMentionCommand(text string) string {
-	// Strip Discord-style mentions: <@ID> or <@!ID>.
-	stripped := discordMentionRe.ReplaceAllString(text, "")
+	// Strip platform mentions: Discord <@ID>/<@!ID> and Slack <@UXXXXX>.
+	stripped := mentionRe.ReplaceAllString(text, "")
 	stripped = strings.TrimSpace(stripped)
 
 	if stripped == "" {

@@ -300,6 +300,90 @@ func TestDetectStalls_MultipleStalledEngines(t *testing.T) {
 	}
 }
 
+func TestDetectStalls_DeduplicatesAcrossPolls(t *testing.T) {
+	db := openWatcherTestDB(t)
+	db.Create(&models.Engine{ID: "eng-1", Status: "stalled", Track: "backend", CurrentCar: "car-1"})
+
+	w, _ := NewWatcher(WatcherOpts{DB: db})
+
+	// First poll: should detect the stall.
+	events1, err := w.detectStalls()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(events1) != 1 {
+		t.Fatalf("first poll: expected 1 stall event, got %d", len(events1))
+	}
+
+	// Second poll: same engine still stalled — should NOT emit again.
+	events2, err := w.detectStalls()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(events2) != 0 {
+		t.Errorf("second poll: expected 0 stall events (dedup), got %d", len(events2))
+	}
+}
+
+func TestDetectStalls_RecoveryThenRestall(t *testing.T) {
+	db := openWatcherTestDB(t)
+	db.Create(&models.Engine{ID: "eng-1", Status: "stalled", Track: "backend"})
+
+	w, _ := NewWatcher(WatcherOpts{DB: db})
+
+	// First poll: detect stall.
+	events1, _ := w.detectStalls()
+	if len(events1) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events1))
+	}
+
+	// Engine recovers.
+	db.Model(&models.Engine{}).Where("id = ?", "eng-1").Update("status", "working")
+
+	// Poll: no stall events, but snapshot is cleared.
+	events2, _ := w.detectStalls()
+	if len(events2) != 0 {
+		t.Errorf("expected 0 events after recovery, got %d", len(events2))
+	}
+
+	// Engine stalls again.
+	db.Model(&models.Engine{}).Where("id = ?", "eng-1").Update("status", "stalled")
+
+	// Poll: should detect the NEW stall.
+	events3, _ := w.detectStalls()
+	if len(events3) != 1 {
+		t.Errorf("expected 1 event on re-stall, got %d", len(events3))
+	}
+}
+
+func TestDetectStalls_MixedEngineStatuses(t *testing.T) {
+	db := openWatcherTestDB(t)
+	db.Create(&models.Engine{ID: "eng-1", Status: "stalled", Track: "backend"})
+	db.Create(&models.Engine{ID: "eng-2", Status: "working", Track: "frontend"})
+	db.Create(&models.Engine{ID: "eng-3", Status: "stalled", Track: "backend"})
+
+	w, _ := NewWatcher(WatcherOpts{DB: db})
+
+	// First poll: 2 stalled.
+	events1, _ := w.detectStalls()
+	if len(events1) != 2 {
+		t.Fatalf("expected 2 stall events, got %d", len(events1))
+	}
+
+	// eng-1 recovers, eng-3 still stalled, eng-2 now stalls.
+	db.Model(&models.Engine{}).Where("id = ?", "eng-1").Update("status", "working")
+	db.Model(&models.Engine{}).Where("id = ?", "eng-2").Update("status", "stalled")
+
+	events2, _ := w.detectStalls()
+	// Only eng-2 is newly stalled (eng-3 is deduped, eng-1 recovered).
+	if len(events2) != 1 {
+		t.Fatalf("expected 1 new stall event, got %d", len(events2))
+	}
+	if events2[0].EngineID != "eng-2" {
+		t.Errorf("expected eng-2 stall event, got %q", events2[0].EngineID)
+	}
+}
+
 // --- detectEscalations tests ---
 
 func TestDetectEscalations_NoMessages(t *testing.T) {
