@@ -135,7 +135,7 @@ func (a *Adapter) Connect(ctx context.Context) error {
 	}
 
 	// Register Ready handler to capture bot user ID on connect/reconnect.
-	a.sess.AddHandler(func(s interface{}, r *discordgo.Ready) {
+	a.sess.AddHandler(func(_ *discordgo.Session, r *discordgo.Ready) {
 		a.mu.Lock()
 		a.botUserID = r.User.ID
 		a.mu.Unlock()
@@ -144,12 +144,12 @@ func (a *Adapter) Connect(ctx context.Context) error {
 
 	// Register Disconnect handler — discordgo handles reconnection automatically,
 	// but we log it for observability.
-	a.sess.AddHandler(func(s interface{}, d *discordgo.Disconnect) {
+	a.sess.AddHandler(func(_ *discordgo.Session, d *discordgo.Disconnect) {
 		log.Printf("discord: gateway disconnected, discordgo will auto-reconnect")
 	})
 
 	// Register Resumed handler for reconnection awareness.
-	a.sess.AddHandler(func(s interface{}, r *discordgo.Resumed) {
+	a.sess.AddHandler(func(_ *discordgo.Session, r *discordgo.Resumed) {
 		log.Printf("discord: gateway session resumed")
 	})
 
@@ -177,7 +177,7 @@ func (a *Adapter) Listen(ctx context.Context) (<-chan telegraph.InboundMessage, 
 	a.mu.Unlock()
 
 	// Register message handler.
-	remove := a.sess.AddHandler(func(s interface{}, m *discordgo.MessageCreate) {
+	remove := a.sess.AddHandler(func(_ *discordgo.Session, m *discordgo.MessageCreate) {
 		a.handleMessage(m)
 	})
 	a.mu.Lock()
