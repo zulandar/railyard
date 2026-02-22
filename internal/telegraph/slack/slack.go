@@ -421,6 +421,11 @@ func (a *Adapter) handleMessage(ev *slackevents.MessageEvent) {
 	if len(a.allowedChannels) > 0 && !a.allowedChannels[ev.Channel] {
 		return
 	}
+	// Skip @mentions of the bot — they fire as both message.channels and
+	// app_mention events. Let handleAppMention handle them to avoid duplicates.
+	if a.botUserID != "" && strings.Contains(ev.Text, "<@"+a.botUserID+">") {
+		return
+	}
 
 	a.inbound <- telegraph.InboundMessage{
 		Platform:  "slack",
@@ -474,8 +479,10 @@ func (a *Adapter) resolveUserName(userID string) string {
 func buildMessageOptions(msg telegraph.OutboundMessage) []slackapi.MsgOption {
 	var options []slackapi.MsgOption
 
-	// Thread reply.
-	if msg.ThreadID != "" {
+	// Thread reply — only set thread_ts for valid Slack timestamps.
+	// Channel IDs and other non-timestamp values are skipped to prevent
+	// "invalid_thread_ts" API errors from Slack.
+	if isSlackTimestamp(msg.ThreadID) {
 		options = append(options, slackapi.MsgOptionTS(msg.ThreadID))
 	}
 
@@ -547,6 +554,14 @@ func retryOnRateLimit(ctx context.Context, fn func() error) error {
 		}
 	}
 	return nil // unreachable
+}
+
+// isSlackTimestamp returns true if s looks like a Slack message timestamp
+// (e.g. "1234567890.123456"). Slack timestamps always contain a dot separating
+// epoch seconds from a sequence number. Channel IDs (e.g. "C0AGBGVMLPP") and
+// other non-timestamp values are rejected to prevent "invalid_thread_ts" errors.
+func isSlackTimestamp(s string) bool {
+	return s != "" && strings.Contains(s, ".")
 }
 
 // parseSlackTimestamp converts a Slack timestamp (e.g., "1234567890.123456")

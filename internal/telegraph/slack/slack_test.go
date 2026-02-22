@@ -1523,6 +1523,97 @@ func TestHandleMessage_EmptyAllowedChannels_AllowsAll(t *testing.T) {
 	}
 }
 
+// --- isSlackTimestamp tests ---
+
+func TestIsSlackTimestamp(t *testing.T) {
+	tests := []struct {
+		s    string
+		want bool
+	}{
+		{"1234567890.123456", true},
+		{"1700000000.000001", true},
+		{"1234.5678", true},
+		{"C0AGBGVMLPP", false}, // channel ID
+		{"thread-1", false},    // mock thread ID
+		{"U0AH98BETC0", false}, // user ID
+		{"", false},
+	}
+	for _, tt := range tests {
+		got := isSlackTimestamp(tt.s)
+		if got != tt.want {
+			t.Errorf("isSlackTimestamp(%q) = %v, want %v", tt.s, got, tt.want)
+		}
+	}
+}
+
+func TestBuildMessageOptions_SkipsInvalidThreadID(t *testing.T) {
+	// Channel ID as ThreadID should NOT generate a thread_ts option.
+	opts := buildMessageOptions(telegraph.OutboundMessage{
+		Text:     "hello",
+		ThreadID: "C0AGBGVMLPP",
+	})
+	// Should only have text option, NOT thread option.
+	if len(opts) != 1 {
+		t.Errorf("expected 1 option (text only, no thread_ts), got %d", len(opts))
+	}
+}
+
+// --- handleMessage skips bot @mentions (dedup with app_mention) ---
+
+func TestHandleMessage_SkipsBotMentions(t *testing.T) {
+	a, _, socket := newTestAdapter(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	ch, _ := a.Listen(ctx)
+
+	// Message containing a bot @mention should be skipped by handleMessage
+	// (it will be processed by handleAppMention instead).
+	socket.events <- socketmode.Event{
+		Type: socketmode.EventTypeEventsAPI,
+		Data: slackevents.EventsAPIEvent{
+			Type: slackevents.CallbackEvent,
+			InnerEvent: slackevents.EventsAPIInnerEvent{
+				Data: &slackevents.MessageEvent{
+					User:      "U_ALICE",
+					Channel:   "C1",
+					Text:      "<@U_BOT_123> what is the status",
+					TimeStamp: "1700000000.000001",
+				},
+			},
+		},
+		Request: &socketmode.Request{EnvelopeID: "env-30"},
+	}
+
+	// Send a normal message after — this one should be delivered.
+	socket.events <- socketmode.Event{
+		Type: socketmode.EventTypeEventsAPI,
+		Data: slackevents.EventsAPIEvent{
+			Type: slackevents.CallbackEvent,
+			InnerEvent: slackevents.EventsAPIInnerEvent{
+				Data: &slackevents.MessageEvent{
+					User:      "U_ALICE",
+					Channel:   "C1",
+					Text:      "!ry status",
+					TimeStamp: "1700000001.000001",
+				},
+			},
+		},
+		Request: &socketmode.Request{EnvelopeID: "env-31"},
+	}
+
+	select {
+	case msg := <-ch:
+		// First received message should be the non-mention one.
+		if msg.Text != "!ry status" {
+			t.Errorf("expected '!ry status' (bot mention should be skipped), got %q", msg.Text)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for message")
+	}
+}
+
 // --- StartThread tests ---
 
 func TestStartThread_Success(t *testing.T) {
