@@ -380,7 +380,7 @@ func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, r
 			fmt.Fprintf(out, "Car %s draft PR created: %s\n", c.ID, result.PRUrl)
 		} else if result.Merged {
 			if result.AlreadyMerged {
-				fmt.Fprintf(out, "Car %s already merged (branch %s was ancestor of main)\n", c.ID, result.Branch)
+				fmt.Fprintf(out, "Car %s already merged (branch %s was ancestor of %s)\n", c.ID, result.Branch, baseBranch)
 			} else {
 				fmt.Fprintf(out, "Car %s merged and pushed (branch %s)\n", c.ID, result.Branch)
 			}
@@ -462,34 +462,17 @@ func sweepOpenEpics(db *gorm.DB, out io.Writer) error {
 }
 
 // reconcileStaleCars detects cars whose branches have already been merged to
-// main (e.g., via a monolithic epic commit) and updates their status to "merged".
-// It checks against origin/main (the remote truth) to avoid false positives from
-// local-only merges that were never pushed.
+// their base branch (e.g., via a monolithic epic commit) and updates their
+// status to "merged". Checks against origin/{baseBranch} (the remote truth)
+// to avoid false positives from local-only merges that were never pushed.
+// Cars are grouped by base branch so each group is checked against the correct target.
 func reconcileStaleCars(db *gorm.DB, repoDir string, out io.Writer) error {
 	// Fetch first to get current remote state.
 	if err := gitFetch(repoDir); err != nil {
 		return fmt.Errorf("reconcile fetch: %w", err)
 	}
 
-	// Check against origin/main — only branches confirmed on the remote.
-	cmd := exec.Command("git", "branch", "-a", "--merged", "origin/main")
-	cmd.Dir = repoDir
-	output, err := cmd.Output()
-	if err != nil {
-		return fmt.Errorf("git branch --merged: %w", err)
-	}
-
-	mergedBranches := make(map[string]bool)
-	for _, line := range strings.Split(string(output), "\n") {
-		branch := strings.TrimSpace(line)
-		branch = strings.TrimPrefix(branch, "* ")
-		branch = strings.TrimPrefix(branch, "remotes/origin/")
-		if branch != "" {
-			mergedBranches[branch] = true
-		}
-	}
-
-	// Find active cars whose branches are already merged.
+	// Find active cars with branches.
 	var activeCars []models.Car
 	if err := db.Where("status IN ? AND branch != ''",
 		[]string{"open", "ready", "claimed", "in_progress"}).
@@ -497,18 +480,63 @@ func reconcileStaleCars(db *gorm.DB, repoDir string, out io.Writer) error {
 		return fmt.Errorf("query active cars: %w", err)
 	}
 
-	now := time.Now()
+	if len(activeCars) == 0 {
+		return nil
+	}
+
+	// Group cars by base branch.
+	carsByBase := make(map[string][]models.Car)
 	for _, c := range activeCars {
-		if mergedBranches[c.Branch] {
-			fmt.Fprintf(out, "Reconciled car %s (%s) — branch %s already merged\n", c.ID, c.Title, c.Branch)
-			db.Model(&models.Car{}).Where("id = ?", c.ID).Updates(map[string]interface{}{
-				"status":       "merged",
-				"completed_at": now,
-			})
+		base := c.BaseBranch
+		if base == "" {
+			base = "main"
+		}
+		carsByBase[base] = append(carsByBase[base], c)
+	}
+
+	now := time.Now()
+	for base, cars := range carsByBase {
+		// Get branches merged into origin/{base}.
+		mergedBranches, err := getMergedBranches(repoDir, "origin/"+base)
+		if err != nil {
+			log.Printf("reconcile: skip base %s: %v", base, err)
+			continue
+		}
+
+		for _, c := range cars {
+			if mergedBranches[c.Branch] {
+				fmt.Fprintf(out, "Reconciled car %s (%s) — branch %s already merged into %s\n", c.ID, c.Title, c.Branch, base)
+				db.Model(&models.Car{}).Where("id = ?", c.ID).Updates(map[string]interface{}{
+					"status":       "merged",
+					"completed_at": now,
+				})
+			}
 		}
 	}
 
 	return nil
+}
+
+// getMergedBranches returns a set of branch names that are already merged
+// into the given target ref (e.g. "origin/main").
+func getMergedBranches(repoDir, target string) (map[string]bool, error) {
+	cmd := exec.Command("git", "branch", "-a", "--merged", target)
+	cmd.Dir = repoDir
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("git branch --merged %s: %w", target, err)
+	}
+
+	merged := make(map[string]bool)
+	for _, line := range strings.Split(string(output), "\n") {
+		branch := strings.TrimSpace(line)
+		branch = strings.TrimPrefix(branch, "* ")
+		branch = strings.TrimPrefix(branch, "remotes/origin/")
+		if branch != "" {
+			merged[branch] = true
+		}
+	}
+	return merged, nil
 }
 
 // handleEscalateResult acts on the decision returned by Claude escalation.

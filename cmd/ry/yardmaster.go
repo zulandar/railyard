@@ -90,10 +90,14 @@ func runSwitch(cmd *cobra.Command, configPath, carID string, dryRun bool) error 
 		return fmt.Errorf("get working directory: %w", err)
 	}
 
-	// Look up the car's track to get the configured test commands.
-	var testCommand, preTestCommand string
-	var car struct{ Track string }
-	if err := gormDB.Table("cars").Select("track").Where("id = ?", carID).Scan(&car).Error; err == nil {
+	// Look up the car's track and base branch.
+	var testCommand, preTestCommand, baseBranch string
+	var car struct {
+		Track      string
+		BaseBranch string
+	}
+	if err := gormDB.Table("cars").Select("track, base_branch").Where("id = ?", carID).Scan(&car).Error; err == nil {
+		baseBranch = car.BaseBranch
 		for _, t := range cfg.Tracks {
 			if t.Name == car.Track {
 				preTestCommand = t.PreTestCommand
@@ -105,6 +109,7 @@ func runSwitch(cmd *cobra.Command, configPath, carID string, dryRun bool) error 
 
 	result, err := yardmaster.Switch(gormDB, carID, yardmaster.SwitchOpts{
 		RepoDir:        repoDir,
+		BaseBranch:     baseBranch,
 		DryRun:         dryRun,
 		PreTestCommand: preTestCommand,
 		TestCommand:    testCommand,
@@ -121,7 +126,11 @@ func runSwitch(cmd *cobra.Command, configPath, carID string, dryRun bool) error 
 	}
 
 	if result.Merged {
-		fmt.Fprintf(out, "Merged branch %s to main\n", result.Branch)
+		target := baseBranch
+		if target == "" {
+			target = "main"
+		}
+		fmt.Fprintf(out, "Merged branch %s to %s\n", result.Branch, target)
 	} else if dryRun {
 		fmt.Fprintf(out, "Dry run — branch %s not merged\n", result.Branch)
 	}

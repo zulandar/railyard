@@ -3,6 +3,8 @@ package yardmaster
 import (
 	"bytes"
 	"context"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -221,6 +223,128 @@ func TestProcessInbox_EmptyInbox(t *testing.T) {
 	}
 	if draining {
 		t.Fatal("should NOT drain on empty inbox")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// reconcileStaleCars / getMergedBranches tests
+// ---------------------------------------------------------------------------
+
+func TestGetMergedBranches_InvalidTarget(t *testing.T) {
+	repoDir := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = repoDir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("%v failed: %s: %v", args, out, err)
+		}
+	}
+	run("git", "init", "-b", "main")
+	run("git", "config", "user.email", "test@test.com")
+	run("git", "config", "user.name", "test")
+	run("git", "commit", "--allow-empty", "-m", "init")
+
+	// No remote, so origin/main doesn't exist.
+	_, err := getMergedBranches(repoDir, "origin/main")
+	if err == nil {
+		t.Fatal("expected error for non-existent target ref")
+	}
+}
+
+func TestReconcileStaleCars_PerBaseBranch(t *testing.T) {
+	// Set up a repo with a remote and two base branches.
+	bareDir := t.TempDir()
+	parentDir := t.TempDir()
+	run := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("%v in %s failed: %s: %v", args, dir, out, err)
+		}
+	}
+
+	// Create bare remote.
+	run(bareDir, "git", "init", "--bare", "-b", "main")
+
+	// Clone.
+	run(parentDir, "git", "clone", bareDir, "repo")
+	repoDir := filepath.Join(parentDir, "repo")
+	run(repoDir, "git", "config", "user.email", "test@test.com")
+	run(repoDir, "git", "config", "user.name", "test")
+	run(repoDir, "git", "commit", "--allow-empty", "-m", "init")
+	run(repoDir, "git", "push", "origin", "main")
+
+	// Create a "develop" branch and push it.
+	run(repoDir, "git", "checkout", "-b", "develop")
+	run(repoDir, "git", "commit", "--allow-empty", "-m", "develop base")
+	run(repoDir, "git", "push", "origin", "develop")
+
+	// Create feature branches.
+	// Branch A: merged into main.
+	run(repoDir, "git", "checkout", "main")
+	run(repoDir, "git", "checkout", "-b", "ry/feat-a")
+	run(repoDir, "git", "commit", "--allow-empty", "-m", "feat-a work")
+	run(repoDir, "git", "checkout", "main")
+	run(repoDir, "git", "merge", "--no-ff", "ry/feat-a", "-m", "merge feat-a")
+	run(repoDir, "git", "push", "origin", "main")
+
+	// Branch B: merged into develop (NOT main).
+	run(repoDir, "git", "checkout", "develop")
+	run(repoDir, "git", "checkout", "-b", "ry/feat-b")
+	run(repoDir, "git", "commit", "--allow-empty", "-m", "feat-b work")
+	run(repoDir, "git", "checkout", "develop")
+	run(repoDir, "git", "merge", "--no-ff", "ry/feat-b", "-m", "merge feat-b")
+	run(repoDir, "git", "push", "origin", "develop")
+
+	// Branch C: NOT merged into either.
+	run(repoDir, "git", "checkout", "main")
+	run(repoDir, "git", "checkout", "-b", "ry/feat-c")
+	run(repoDir, "git", "commit", "--allow-empty", "-m", "feat-c work")
+	run(repoDir, "git", "checkout", "main")
+
+	// Set up DB with cars.
+	db := testDB(t)
+	db.Create(&models.Car{ID: "car-a", Branch: "ry/feat-a", BaseBranch: "main", Status: "in_progress", Track: "backend"})
+	db.Create(&models.Car{ID: "car-b", Branch: "ry/feat-b", BaseBranch: "develop", Status: "open", Track: "backend"})
+	db.Create(&models.Car{ID: "car-c", Branch: "ry/feat-c", BaseBranch: "main", Status: "open", Track: "backend"})
+
+	var buf bytes.Buffer
+	if err := reconcileStaleCars(db, repoDir, &buf); err != nil {
+		t.Fatalf("reconcileStaleCars: %v", err)
+	}
+
+	// Car A should be reconciled (merged into main).
+	var carA models.Car
+	db.First(&carA, "id = ?", "car-a")
+	if carA.Status != "merged" {
+		t.Errorf("car-a status = %q, want %q", carA.Status, "merged")
+	}
+
+	// Car B should be reconciled (merged into develop).
+	var carB models.Car
+	db.First(&carB, "id = ?", "car-b")
+	if carB.Status != "merged" {
+		t.Errorf("car-b status = %q, want %q", carB.Status, "merged")
+	}
+
+	// Car C should NOT be reconciled (not merged into main).
+	var carC models.Car
+	db.First(&carC, "id = ?", "car-c")
+	if carC.Status != "open" {
+		t.Errorf("car-c status = %q, want %q", carC.Status, "open")
+	}
+
+	// Verify output mentions both reconciled cars.
+	output := buf.String()
+	if !strings.Contains(output, "car-a") || !strings.Contains(output, "merged into main") {
+		t.Errorf("missing car-a reconciliation in output: %s", output)
+	}
+	if !strings.Contains(output, "car-b") || !strings.Contains(output, "merged into develop") {
+		t.Errorf("missing car-b reconciliation in output: %s", output)
 	}
 }
 
