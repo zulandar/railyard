@@ -5,6 +5,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 // gormTag extracts the gorm tag from a struct field.
@@ -404,6 +408,115 @@ func TestRailyardConfig_Instantiation(t *testing.T) {
 	}
 }
 
+func TestDispatchSession_Fields(t *testing.T) {
+	typ := reflect.TypeOf(DispatchSession{})
+
+	assertGormTag(t, typ, "ID", "primaryKey")
+	assertGormTag(t, typ, "ID", "autoIncrement")
+	assertGormTag(t, typ, "Source", "size:16")
+	assertGormTag(t, typ, "Source", "not null")
+	assertGormTag(t, typ, "Source", "index")
+	assertGormTag(t, typ, "UserName", "size:64")
+	assertGormTag(t, typ, "UserName", "not null")
+	assertGormTag(t, typ, "PlatformThreadID", "size:128")
+	assertGormTag(t, typ, "PlatformThreadID", "idx_thread_channel")
+	assertGormTag(t, typ, "ChannelID", "size:128")
+	assertGormTag(t, typ, "ChannelID", "idx_thread_channel")
+	assertGormTag(t, typ, "Status", "size:16")
+	assertGormTag(t, typ, "Status", "default:active")
+	assertGormTag(t, typ, "Status", "index")
+	assertGormTag(t, typ, "CarsCreated", "type:json")
+	assertGormTag(t, typ, "LastHeartbeat", "index")
+
+	assertFieldType(t, typ, "ID", "uint")
+	assertFieldType(t, typ, "Source", "string")
+	assertFieldType(t, typ, "UserName", "string")
+	assertFieldType(t, typ, "LastHeartbeat", "time.Time")
+	assertFieldType(t, typ, "CreatedAt", "time.Time")
+	assertFieldType(t, typ, "CompletedAt", "*time.Time")
+}
+
+func TestDispatchSession_Relations(t *testing.T) {
+	typ := reflect.TypeOf(DispatchSession{})
+
+	assertGormTag(t, typ, "Conversations", "foreignKey:SessionID")
+	assertFieldType(t, typ, "Conversations", "[]models.TelegraphConversation")
+}
+
+func TestDispatchSession_Instantiation(t *testing.T) {
+	now := time.Now()
+	ds := DispatchSession{
+		ID:               1,
+		Source:           "telegraph",
+		UserName:         "alice",
+		PlatformThreadID: "thread-123",
+		ChannelID:        "C01ABC",
+		Status:           "active",
+		CarsCreated:      `["car-001","car-002"]`,
+		LastHeartbeat:    now,
+		CreatedAt:        now,
+		CompletedAt:      nil,
+	}
+	if ds.Source != "telegraph" {
+		t.Errorf("Source = %q, want %q", ds.Source, "telegraph")
+	}
+	if ds.CompletedAt != nil {
+		t.Error("CompletedAt should be nil for active session")
+	}
+}
+
+func TestTelegraphConversation_Fields(t *testing.T) {
+	typ := reflect.TypeOf(TelegraphConversation{})
+
+	assertGormTag(t, typ, "ID", "primaryKey")
+	assertGormTag(t, typ, "ID", "autoIncrement")
+	assertGormTag(t, typ, "SessionID", "not null")
+	assertGormTag(t, typ, "SessionID", "index")
+	assertGormTag(t, typ, "Sequence", "not null")
+	assertGormTag(t, typ, "Role", "size:16")
+	assertGormTag(t, typ, "Role", "not null")
+	assertGormTag(t, typ, "UserName", "size:64")
+	assertGormTag(t, typ, "Content", "type:mediumtext")
+	assertGormTag(t, typ, "Content", "not null")
+	assertGormTag(t, typ, "PlatformMsgID", "size:128")
+	assertGormTag(t, typ, "CarsReferenced", "type:json")
+
+	assertFieldType(t, typ, "ID", "uint")
+	assertFieldType(t, typ, "SessionID", "uint")
+	assertFieldType(t, typ, "Sequence", "int")
+	assertFieldType(t, typ, "Role", "string")
+	assertFieldType(t, typ, "Content", "string")
+	assertFieldType(t, typ, "CreatedAt", "time.Time")
+}
+
+func TestTelegraphConversation_Relations(t *testing.T) {
+	typ := reflect.TypeOf(TelegraphConversation{})
+
+	assertGormTag(t, typ, "Session", "foreignKey:SessionID")
+	assertFieldType(t, typ, "Session", "models.DispatchSession")
+}
+
+func TestTelegraphConversation_Instantiation(t *testing.T) {
+	now := time.Now()
+	tc := TelegraphConversation{
+		ID:             1,
+		SessionID:      42,
+		Sequence:       1,
+		Role:           "user",
+		UserName:       "alice",
+		Content:        "create a task for fixing the login bug",
+		PlatformMsgID:  "msg-456",
+		CarsReferenced: `["car-001"]`,
+		CreatedAt:      now,
+	}
+	if tc.SessionID != 42 {
+		t.Errorf("SessionID = %d, want 42", tc.SessionID)
+	}
+	if tc.Role != "user" {
+		t.Errorf("Role = %q, want %q", tc.Role, "user")
+	}
+}
+
 func TestReindexJob_Instantiation(t *testing.T) {
 	now := time.Now()
 	rj := ReindexJob{
@@ -423,5 +536,177 @@ func TestReindexJob_Instantiation(t *testing.T) {
 	}
 	if rj.CompletedAt != nil {
 		t.Error("CompletedAt should be nil for pending job")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// CRUD tests — verify AutoMigrate creates tables and basic operations work
+// ---------------------------------------------------------------------------
+
+func openTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		t.Fatalf("open test db: %v", err)
+	}
+	if err := db.AutoMigrate(&DispatchSession{}, &TelegraphConversation{}); err != nil {
+		t.Fatalf("migrate test db: %v", err)
+	}
+	return db
+}
+
+func TestDispatchSession_CRUD(t *testing.T) {
+	db := openTestDB(t)
+	now := time.Now()
+
+	// Create
+	session := DispatchSession{
+		Source:           "telegraph",
+		UserName:         "alice",
+		PlatformThreadID: "thread-100",
+		ChannelID:        "C01ABC",
+		Status:           "active",
+		CarsCreated:      `["car-001"]`,
+		LastHeartbeat:    now,
+	}
+	if err := db.Create(&session).Error; err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if session.ID == 0 {
+		t.Fatal("expected auto-increment ID to be set")
+	}
+
+	// Read
+	var found DispatchSession
+	if err := db.First(&found, session.ID).Error; err != nil {
+		t.Fatalf("First: %v", err)
+	}
+	if found.Source != "telegraph" {
+		t.Errorf("Source = %q, want %q", found.Source, "telegraph")
+	}
+	if found.UserName != "alice" {
+		t.Errorf("UserName = %q, want %q", found.UserName, "alice")
+	}
+
+	// Update
+	completed := time.Now()
+	if err := db.Model(&found).Updates(map[string]interface{}{
+		"status":       "completed",
+		"completed_at": completed,
+	}).Error; err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	var updated DispatchSession
+	db.First(&updated, session.ID)
+	if updated.Status != "completed" {
+		t.Errorf("Status = %q, want %q", updated.Status, "completed")
+	}
+
+	// Delete
+	if err := db.Delete(&DispatchSession{}, session.ID).Error; err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	result := db.First(&DispatchSession{}, session.ID)
+	if result.Error == nil {
+		t.Fatal("expected record not found after delete")
+	}
+}
+
+func TestTelegraphConversation_CRUD(t *testing.T) {
+	db := openTestDB(t)
+	now := time.Now()
+
+	// Create parent session first.
+	session := DispatchSession{
+		Source:        "local",
+		UserName:      "bob",
+		Status:        "active",
+		LastHeartbeat: now,
+	}
+	db.Create(&session)
+
+	// Create conversation message.
+	conv := TelegraphConversation{
+		SessionID:      session.ID,
+		Sequence:       1,
+		Role:           "user",
+		UserName:       "bob",
+		Content:        "please create a bug fix car",
+		PlatformMsgID:  "msg-789",
+		CarsReferenced: `[]`,
+	}
+	if err := db.Create(&conv).Error; err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if conv.ID == 0 {
+		t.Fatal("expected auto-increment ID to be set")
+	}
+
+	// Read
+	var found TelegraphConversation
+	if err := db.First(&found, conv.ID).Error; err != nil {
+		t.Fatalf("First: %v", err)
+	}
+	if found.Role != "user" {
+		t.Errorf("Role = %q, want %q", found.Role, "user")
+	}
+	if found.SessionID != session.ID {
+		t.Errorf("SessionID = %d, want %d", found.SessionID, session.ID)
+	}
+
+	// Update
+	if err := db.Model(&found).Update("content", "updated content").Error; err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	var updated TelegraphConversation
+	db.First(&updated, conv.ID)
+	if updated.Content != "updated content" {
+		t.Errorf("Content = %q, want %q", updated.Content, "updated content")
+	}
+
+	// Delete
+	if err := db.Delete(&TelegraphConversation{}, conv.ID).Error; err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	result := db.First(&TelegraphConversation{}, conv.ID)
+	if result.Error == nil {
+		t.Fatal("expected record not found after delete")
+	}
+}
+
+func TestDispatchSession_PreloadConversations(t *testing.T) {
+	db := openTestDB(t)
+	now := time.Now()
+
+	session := DispatchSession{
+		Source:        "telegraph",
+		UserName:      "carol",
+		Status:        "active",
+		LastHeartbeat: now,
+	}
+	db.Create(&session)
+
+	// Create two conversation messages.
+	for i := 1; i <= 2; i++ {
+		db.Create(&TelegraphConversation{
+			SessionID: session.ID,
+			Sequence:  i,
+			Role:      "user",
+			Content:   "message " + strings.Repeat("x", i),
+		})
+	}
+
+	// Preload conversations.
+	var loaded DispatchSession
+	if err := db.Preload("Conversations").First(&loaded, session.ID).Error; err != nil {
+		t.Fatalf("Preload: %v", err)
+	}
+	if len(loaded.Conversations) != 2 {
+		t.Fatalf("Conversations count = %d, want 2", len(loaded.Conversations))
+	}
+	if loaded.Conversations[0].Sequence != 1 {
+		t.Errorf("first conversation Sequence = %d, want 1", loaded.Conversations[0].Sequence)
 	}
 }
