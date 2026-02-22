@@ -516,6 +516,143 @@ func TestExtractMentionCommand(t *testing.T) {
 	}
 }
 
+// --- Ack message tests ---
+
+func TestHandle_AckOnNewSession(t *testing.T) {
+	db := openRouterTestDB(t)
+	router, adapter, _ := setupRouter(t, db, "bot-123")
+
+	router.Handle(context.Background(), InboundMessage{
+		UserID:    "user-1",
+		UserName:  "bob",
+		ChannelID: "C1",
+		Text:      "@railyard close out the completed epic",
+	})
+
+	// First sent message should be an ack from the ackPhrases list.
+	all := adapter.AllSent()
+	if len(all) == 0 {
+		t.Fatal("expected at least 1 sent message (ack)")
+	}
+	ack := all[0]
+	if ack.ChannelID != "C1" {
+		t.Errorf("ack channel = %q, want C1", ack.ChannelID)
+	}
+	found := false
+	for _, phrase := range ackPhrases {
+		if ack.Text == phrase {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("ack text %q is not in ackPhrases", ack.Text)
+	}
+}
+
+func TestHandle_AckOnResumeSession(t *testing.T) {
+	db := openRouterTestDB(t)
+	router, adapter, _ := setupRouter(t, db, "bot-123")
+
+	// Create a completed session in the DB.
+	now := time.Now()
+	db.Create(&models.DispatchSession{
+		Source:           "telegraph",
+		UserName:         "alice",
+		PlatformThreadID: "T2",
+		ChannelID:        "C1",
+		Status:           "completed",
+		LastHeartbeat:    now,
+		CompletedAt:      &now,
+	})
+
+	router.Handle(context.Background(), InboundMessage{
+		UserID:    "user-1",
+		UserName:  "alice",
+		ChannelID: "C1",
+		ThreadID:  "T2",
+		Text:      "let's pick this back up",
+	})
+
+	all := adapter.AllSent()
+	if len(all) == 0 {
+		t.Fatal("expected at least 1 sent message (ack)")
+	}
+	ack := all[0]
+	if ack.ThreadID != "T2" {
+		t.Errorf("ack thread = %q, want T2", ack.ThreadID)
+	}
+	found := false
+	for _, phrase := range ackPhrases {
+		if ack.Text == phrase {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("ack text %q is not in ackPhrases", ack.Text)
+	}
+}
+
+func TestHandle_AckOnActiveSession(t *testing.T) {
+	db := openRouterTestDB(t)
+	router, adapter, _ := setupRouter(t, db, "bot-123")
+
+	ctx := context.Background()
+	router.sessionMgr.NewSession(ctx, "telegraph", "alice", "T1", "C1")
+
+	// Clear any messages from session creation.
+	adapter.mu.Lock()
+	adapter.sent = nil
+	adapter.mu.Unlock()
+
+	router.Handle(ctx, InboundMessage{
+		UserID:    "user-1",
+		UserName:  "alice",
+		ChannelID: "C1",
+		ThreadID:  "T1",
+		Text:      "do the thing",
+	})
+
+	all := adapter.AllSent()
+	if len(all) == 0 {
+		t.Fatal("expected at least 1 sent message (ack)")
+	}
+	found := false
+	for _, phrase := range ackPhrases {
+		if all[0].Text == phrase {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("ack text %q is not in ackPhrases", all[0].Text)
+	}
+}
+
+func TestHandle_NoAckOnCommand(t *testing.T) {
+	db := openRouterTestDB(t)
+	router, adapter, _ := setupRouter(t, db, "bot-123")
+
+	router.Handle(context.Background(), InboundMessage{
+		UserID:    "user-1",
+		UserName:  "alice",
+		ChannelID: "C1",
+		Text:      "!ry status",
+	})
+
+	// Command responses should NOT have an ack prefix — just the command output.
+	all := adapter.AllSent()
+	if len(all) != 1 {
+		t.Fatalf("expected 1 sent message, got %d", len(all))
+	}
+	for _, phrase := range ackPhrases {
+		if all[0].Text == phrase {
+			t.Errorf("command response should not be an ack phrase, got %q", all[0].Text)
+		}
+	}
+}
+
 // --- Command takes priority over session routing ---
 
 func TestHandle_CommandTakesPriorityOverSession(t *testing.T) {

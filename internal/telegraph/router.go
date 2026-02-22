@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"os"
 	"regexp"
 	"strings"
@@ -89,6 +90,7 @@ func (r *Router) Handle(ctx context.Context, msg InboundMessage) {
 	// 3. Thread reply with active session.
 	if msg.ThreadID != "" && r.sessionMgr.HasSession(msg.ChannelID, msg.ThreadID) {
 		fmt.Fprintf(r.out, "telegraph: router: → active session [ch=%s thread=%s]\n", msg.ChannelID, msg.ThreadID)
+		r.sendAck(ctx, msg.ChannelID, msg.ThreadID)
 		if err := r.sessionMgr.Route(ctx, msg.ChannelID, msg.ThreadID, msg.UserName, text); err != nil {
 			log.Printf("telegraph: router: route to session: %v", err)
 		}
@@ -98,6 +100,7 @@ func (r *Router) Handle(ctx context.Context, msg InboundMessage) {
 	// 4. Thread reply with historic session → resume.
 	if msg.ThreadID != "" && r.sessionMgr.HasHistoricSession(msg.ChannelID, msg.ThreadID) {
 		fmt.Fprintf(r.out, "telegraph: router: → resume session [ch=%s thread=%s]\n", msg.ChannelID, msg.ThreadID)
+		r.sendAck(ctx, msg.ChannelID, msg.ThreadID)
 		_, err := r.sessionMgr.Resume(ctx, msg.ChannelID, msg.ThreadID, msg.UserName)
 		if err != nil {
 			log.Printf("telegraph: router: resume session: %v", err)
@@ -117,6 +120,7 @@ func (r *Router) Handle(ctx context.Context, msg InboundMessage) {
 			threadID = msg.ChannelID // use channel as thread for top-level messages
 		}
 		fmt.Fprintf(r.out, "telegraph: router: → new session [ch=%s thread=%s]\n", msg.ChannelID, threadID)
+		r.sendAck(ctx, msg.ChannelID, threadID)
 		_, err := r.sessionMgr.NewSession(ctx, "telegraph", msg.UserName, threadID, msg.ChannelID)
 		if err != nil {
 			log.Printf("telegraph: router: new session: %v", err)
@@ -150,6 +154,34 @@ func (r *Router) handleCommand(ctx context.Context, msg InboundMessage, text str
 		Text:      response,
 	}); err != nil {
 		log.Printf("telegraph: router: send command response: %v", err)
+	}
+}
+
+// ackPhrases are the random acknowledgment messages the bot sends when it
+// starts working on a dispatch request.
+var ackPhrases = []string{
+	"On it, boss.",
+	"Looking into it...",
+	"Making some juicy stuff happen...",
+	"Copy that, working on it now.",
+	"Roger that. Give me a sec.",
+	"Firing up the engines...",
+	"Let me see what I can do.",
+	"Already on it.",
+	"Hold tight, working my magic...",
+	"Consider it done. Well, almost.",
+}
+
+// sendAck sends a random acknowledgment message to the chat platform so the
+// user knows the bot received their request and is working on it.
+func (r *Router) sendAck(ctx context.Context, channelID, threadID string) {
+	phrase := ackPhrases[rand.Intn(len(ackPhrases))]
+	if err := r.adapter.Send(ctx, OutboundMessage{
+		ChannelID: channelID,
+		ThreadID:  threadID,
+		Text:      phrase,
+	}); err != nil {
+		log.Printf("telegraph: router: send ack: %v", err)
 	}
 }
 
