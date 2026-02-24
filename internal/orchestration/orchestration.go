@@ -17,26 +17,26 @@ type StartOpts struct {
 	ConfigPath string
 	DB         *gorm.DB
 	Engines    int  // 0 = sum of track engine_slots
-	Telegraph  bool // include telegraph pane in main session
+	Telegraph  bool // include telegraph session
 	Tmux       Tmux // defaults to DefaultTmux if nil
 }
 
 // StartResult holds the result of starting the railyard.
 type StartResult struct {
-	Session        string
-	YardmasterPane string
-	TelegraphPane  string // set when Telegraph=true
-	EnginePanes    []EnginePane
+	YardmasterSession string
+	TelegraphSession  string // set when Telegraph=true
+	EngineSessions    []EngineSessionInfo
 }
 
-// EnginePane maps a tmux pane to a track assignment.
-type EnginePane struct {
-	PaneID string
-	Track  string
+// EngineSessionInfo maps a tmux session to a track assignment.
+type EngineSessionInfo struct {
+	Session string
+	Track   string
 }
 
-// Start creates a tmux session with yardmaster, engines, and optionally
-// telegraph. Dispatch is NOT auto-launched; use 'ry dispatch' separately.
+// Start creates individual tmux sessions for yardmaster, each engine, and
+// optionally telegraph. Each component gets its own session named
+// railyard_OWNER_component. Dispatch is NOT auto-launched; use 'ry dispatch'.
 func Start(opts StartOpts) (*StartResult, error) {
 	if opts.Config == nil {
 		return nil, fmt.Errorf("orchestration: config is required")
@@ -54,13 +54,16 @@ func Start(opts StartOpts) (*StartResult, error) {
 		opts.Tmux = DefaultTmux
 	}
 
+	owner := opts.Config.Owner
+
 	// Ensure .claude/settings.json has the permissions engines need.
 	if err := EnsureClaudeSettings(opts.ConfigPath); err != nil {
 		return nil, err
 	}
 
-	// Check if already running.
-	if opts.Tmux.SessionExists(SessionName) {
+	// Check if already running (any session with our prefix).
+	ymSession := YardmasterSession(owner)
+	if opts.Tmux.SessionExists(ymSession) {
 		return nil, fmt.Errorf("orchestration: railyard session already running (use 'ry stop' first)")
 	}
 
@@ -78,62 +81,67 @@ func Start(opts StartOpts) (*StartResult, error) {
 	// Assign tracks to engines.
 	assignment := AssignTracks(opts.Config, totalEngines)
 
-	// Create main session (yardmaster + engines + optional telegraph).
-	if err := opts.Tmux.CreateSession(SessionName); err != nil {
+	// Track created sessions for cleanup on error.
+	var createdSessions []string
+	cleanup := func() {
+		for _, s := range createdSessions {
+			_ = opts.Tmux.KillSession(s)
+		}
+	}
+
+	result := &StartResult{}
+
+	// Create yardmaster session.
+	if err := opts.Tmux.CreateSession(ymSession); err != nil {
 		return nil, err
 	}
+	createdSessions = append(createdSessions, ymSession)
 
-	result := &StartResult{
-		Session: SessionName,
-	}
-
-	// Pane 0 of main session: yardmaster.
-	mainPanes, err := opts.Tmux.ListPanes(SessionName)
-	if err != nil {
-		_ = opts.Tmux.KillSession(SessionName)
-		return nil, fmt.Errorf("orchestration: list main panes: %w", err)
-	}
-	result.YardmasterPane = mainPanes[0]
 	ymCmd := fmt.Sprintf("ry yardmaster --config %s", opts.ConfigPath)
-	if err := opts.Tmux.SendKeys(result.YardmasterPane, ymCmd); err != nil {
-		_ = opts.Tmux.KillSession(SessionName)
+	if err := opts.Tmux.SendKeys(ymSession, ymCmd); err != nil {
+		cleanup()
 		return nil, fmt.Errorf("orchestration: start yardmaster: %w", err)
 	}
+	result.YardmasterSession = ymSession
 
-	// Optional telegraph pane.
+	// Optional telegraph session.
 	if opts.Telegraph {
-		tgPane, err := opts.Tmux.NewPane(SessionName)
-		if err != nil {
-			_ = opts.Tmux.KillSession(SessionName)
-			return nil, fmt.Errorf("orchestration: create telegraph pane: %w", err)
+		tgSession := TelegraphSession(owner)
+		if err := opts.Tmux.CreateSession(tgSession); err != nil {
+			cleanup()
+			return nil, fmt.Errorf("orchestration: create telegraph session: %w", err)
 		}
+		createdSessions = append(createdSessions, tgSession)
+
 		tgCmd := fmt.Sprintf("ry telegraph start --config %s", opts.ConfigPath)
-		if err := opts.Tmux.SendKeys(tgPane, tgCmd); err != nil {
-			_ = opts.Tmux.KillSession(SessionName)
+		if err := opts.Tmux.SendKeys(tgSession, tgCmd); err != nil {
+			cleanup()
 			return nil, fmt.Errorf("orchestration: start telegraph: %w", err)
 		}
-		result.TelegraphPane = tgPane
+		result.TelegraphSession = tgSession
 	}
 
-	// Engine panes in main session.
+	// Engine sessions — one per engine.
+	engineIdx := 0
 	for trackName, count := range assignment {
 		for i := 0; i < count; i++ {
-			pane, err := opts.Tmux.NewPane(SessionName)
-			if err != nil {
-				_ = opts.Tmux.KillSession(SessionName)
-				return nil, fmt.Errorf("orchestration: create engine pane: %w", err)
+			engSession := EngineSession(owner, engineIdx)
+			engineIdx++
+
+			if err := opts.Tmux.CreateSession(engSession); err != nil {
+				cleanup()
+				return nil, fmt.Errorf("orchestration: create engine session: %w", err)
 			}
+			createdSessions = append(createdSessions, engSession)
+
 			engineCmd := fmt.Sprintf("ry engine start --config %s --track %s", opts.ConfigPath, trackName)
-			if err := opts.Tmux.SendKeys(pane, engineCmd); err != nil {
-				_ = opts.Tmux.KillSession(SessionName)
+			if err := opts.Tmux.SendKeys(engSession, engineCmd); err != nil {
+				cleanup()
 				return nil, fmt.Errorf("orchestration: start engine on %s: %w", trackName, err)
 			}
-			result.EnginePanes = append(result.EnginePanes, EnginePane{PaneID: pane, Track: trackName})
+			result.EngineSessions = append(result.EngineSessions, EngineSessionInfo{Session: engSession, Track: trackName})
 		}
 	}
-
-	// Tile the main session layout for visibility.
-	_ = opts.Tmux.TileLayout(SessionName)
 
 	return result, nil
 }
@@ -141,8 +149,9 @@ func Start(opts StartOpts) (*StartResult, error) {
 // StopOpts configures the ry stop command.
 type StopOpts struct {
 	DB      *gorm.DB
-	Timeout time.Duration // max wait for graceful drain (default 60s)
-	Tmux    Tmux          // defaults to DefaultTmux if nil
+	Config  *config.Config // needed for owner-based session prefix
+	Timeout time.Duration  // max wait for graceful drain (default 60s)
+	Tmux    Tmux           // defaults to DefaultTmux if nil
 }
 
 // Stop gracefully shuts down the railyard.
@@ -157,9 +166,25 @@ func Stop(opts StopOpts) error {
 		opts.Tmux = DefaultTmux
 	}
 
-	mainRunning := opts.Tmux.SessionExists(SessionName)
-	dispatchRunning := opts.Tmux.SessionExists(DispatchSessionName)
-	if !mainRunning && !dispatchRunning {
+	// Discover all running railyard sessions.
+	var sessions []string
+	if opts.Config != nil {
+		prefix := SessionPrefix(opts.Config.Owner)
+		found, err := opts.Tmux.ListSessions(prefix)
+		if err == nil {
+			sessions = append(sessions, found...)
+		}
+	}
+
+	// Also check legacy session names for backwards compatibility.
+	if opts.Tmux.SessionExists(legacySessionName) {
+		sessions = appendUnique(sessions, legacySessionName)
+	}
+	if opts.Tmux.SessionExists(legacyDispatchSessionName) {
+		sessions = appendUnique(sessions, legacyDispatchSessionName)
+	}
+
+	if len(sessions) == 0 {
 		return fmt.Errorf("orchestration: no railyard session running")
 	}
 
@@ -180,34 +205,16 @@ func Stop(opts StopOpts) error {
 		time.Sleep(2 * time.Second)
 	}
 
-	// Step 3: Send C-c to all panes in both sessions.
-	if mainRunning {
-		panes, err := opts.Tmux.ListPanes(SessionName)
-		if err == nil {
-			for _, p := range panes {
-				_ = opts.Tmux.SendSignal(p, "C-c")
-			}
-		}
-	}
-	if dispatchRunning {
-		panes, err := opts.Tmux.ListPanes(DispatchSessionName)
-		if err == nil {
-			for _, p := range panes {
-				_ = opts.Tmux.SendSignal(p, "C-c")
-			}
-		}
+	// Step 3: Send C-c to all sessions.
+	for _, s := range sessions {
+		_ = opts.Tmux.SendSignal(s, "C-c")
 	}
 	// Brief pause for processes to exit.
 	time.Sleep(2 * time.Second)
 
-	// Step 4: Kill both tmux sessions.
-	if mainRunning {
-		if err := opts.Tmux.KillSession(SessionName); err != nil {
-			return err
-		}
-	}
-	if dispatchRunning {
-		if err := opts.Tmux.KillSession(DispatchSessionName); err != nil {
+	// Step 4: Kill all sessions.
+	for _, s := range sessions {
+		if err := opts.Tmux.KillSession(s); err != nil {
 			return err
 		}
 	}
@@ -220,10 +227,18 @@ func Stop(opts StopOpts) error {
 	return nil
 }
 
+// StatusOpts configures the Status query.
+type StatusOpts struct {
+	DB     *gorm.DB
+	Config *config.Config // needed for owner-based session prefix
+	Tmux   Tmux
+}
+
 // StatusInfo holds dashboard information.
 type StatusInfo struct {
 	SessionRunning    bool
 	DispatchRunning   bool
+	ComponentSessions []string // all discovered railyard_OWNER_* sessions
 	Engines           []EngineInfo
 	TrackSummary      []TrackSummary
 	MessageDepth      int64
@@ -255,7 +270,7 @@ type TrackSummary struct {
 }
 
 // Status gathers dashboard information.
-func Status(db *gorm.DB, tmux Tmux) (*StatusInfo, error) {
+func Status(db *gorm.DB, tmux Tmux, cfg *config.Config) (*StatusInfo, error) {
 	if db == nil {
 		return nil, fmt.Errorf("orchestration: database connection is required")
 	}
@@ -263,9 +278,21 @@ func Status(db *gorm.DB, tmux Tmux) (*StatusInfo, error) {
 		tmux = DefaultTmux
 	}
 
-	info := &StatusInfo{
-		SessionRunning:  tmux.SessionExists(SessionName),
-		DispatchRunning: tmux.SessionExists(DispatchSessionName),
+	info := &StatusInfo{}
+
+	// Discover component sessions.
+	if cfg != nil {
+		prefix := SessionPrefix(cfg.Owner)
+		sessions, err := tmux.ListSessions(prefix)
+		if err == nil {
+			info.ComponentSessions = sessions
+		}
+		info.SessionRunning = len(sessions) > 0
+		info.DispatchRunning = tmux.SessionExists(DispatchSession(cfg.Owner))
+	} else {
+		// Fallback: check legacy names.
+		info.SessionRunning = tmux.SessionExists(legacySessionName)
+		info.DispatchRunning = tmux.SessionExists(legacyDispatchSessionName)
 	}
 
 	// Gather engine info.
@@ -360,6 +387,15 @@ func FormatStatus(info *StatusInfo) string {
 		b.WriteString("Railyard: STOPPED\n")
 	}
 	b.WriteString("\n")
+
+	// Component sessions.
+	if len(info.ComponentSessions) > 0 {
+		b.WriteString("SESSIONS\n")
+		for _, s := range info.ComponentSessions {
+			b.WriteString(fmt.Sprintf("  %s\n", s))
+		}
+		b.WriteString("\n")
+	}
 
 	// Engine table.
 	b.WriteString("ENGINES\n")
@@ -466,4 +502,14 @@ func formatDuration(d time.Duration) string {
 		return fmt.Sprintf("%dh %dm", h, m)
 	}
 	return fmt.Sprintf("%dm %ds", m, s)
+}
+
+// appendUnique appends s to the slice only if not already present.
+func appendUnique(slice []string, s string) []string {
+	for _, v := range slice {
+		if v == s {
+			return slice
+		}
+	}
+	return append(slice, s)
 }

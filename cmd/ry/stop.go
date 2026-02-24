@@ -31,13 +31,14 @@ func newStopCmd() *cobra.Command {
 }
 
 func runStop(cmd *cobra.Command, configPath string, timeout time.Duration) error {
-	_, gormDB, err := connectFromConfig(configPath)
+	cfg, gormDB, err := connectFromConfig(configPath)
 	if err != nil {
 		return err
 	}
 
 	if err := orchestration.Stop(orchestration.StopOpts{
 		DB:      gormDB,
+		Config:  cfg,
 		Timeout: timeout,
 	}); err != nil {
 		return err

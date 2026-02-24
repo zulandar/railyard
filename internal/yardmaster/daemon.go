@@ -185,7 +185,7 @@ func processInbox(ctx context.Context, db *gorm.DB, cfg *config.Config, configPa
 			}
 			// Restart the stalled engine to spawn a replacement.
 			if msg.FromAgent != "" && msg.FromAgent != YardmasterID {
-				if err := orchestration.RestartEngine(db, configPath, msg.FromAgent, nil); err != nil {
+				if err := orchestration.RestartEngine(db, cfg, configPath, msg.FromAgent, nil); err != nil {
 					log.Printf("restart stalled engine %s: %v", msg.FromAgent, err)
 					fmt.Fprintf(out, "Failed to restart stalled engine %s: %v\n", msg.FromAgent, err)
 				} else {
@@ -298,7 +298,7 @@ func handleStaleEngines(db *gorm.DB, cfg *config.Config, configPath string, out 
 		}
 
 		// Restart the engine to spawn a replacement on the same track.
-		if err := orchestration.RestartEngine(db, configPath, eng.ID, nil); err != nil {
+		if err := orchestration.RestartEngine(db, cfg, configPath, eng.ID, nil); err != nil {
 			log.Printf("restart stale engine %s: %v", eng.ID, err)
 			fmt.Fprintf(out, "Failed to restart engine %s: %v\n", eng.ID, err)
 		}

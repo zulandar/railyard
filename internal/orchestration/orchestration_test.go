@@ -18,29 +18,25 @@ import (
 // ---------------------------------------------------------------------------
 
 type mockTmux struct {
-	sessionExists  bool
-	createErr      error
-	newPaneID      string
-	newPaneErr     error
-	sendKeysErr    error
-	sendSignalErr  error
-	killPaneErr    error
-	killSessionErr error
-	listPanes      []string
-	listPanesErr   error
-	tileErr        error
+	sessionExists   bool
+	createErr       error
+	sendKeysErr     error
+	sendSignalErr   error
+	killSessionErr  error
+	listSessions    []string
+	listSessionsErr error
 
-	// Per-session overrides (take precedence over flat fields above).
-	sessionExistsFunc func(name string) bool
-	listPanesFunc     func(session string) ([]string, error)
+	// Per-call overrides (take precedence over flat fields above).
+	sessionExistsFunc  func(name string) bool
+	createSessionFunc  func(name string) error
+	sendKeysFunc       func(session, keys string) error
+	listSessionsFunc   func(prefix string) ([]string, error)
 
 	// Recording.
 	createdSessions []string
 	sentKeys        []string
 	sentSignals     []string
-	killedPanes     []string
 	killedSessions  []string
-	panesCreated    int
 }
 
 func (m *mockTmux) SessionExists(name string) bool {
@@ -50,40 +46,49 @@ func (m *mockTmux) SessionExists(name string) bool {
 	return m.sessionExists
 }
 func (m *mockTmux) CreateSession(name string) error {
-	m.createdSessions = append(m.createdSessions, name)
-	return m.createErr
-}
-func (m *mockTmux) NewPane(session string) (string, error) {
-	m.panesCreated++
-	id := m.newPaneID
-	if id == "" {
-		id = fmt.Sprintf("%%pane%d", m.panesCreated)
+	if m.createSessionFunc != nil {
+		return m.createSessionFunc(name)
 	}
-	return id, m.newPaneErr
+	if m.createErr != nil {
+		return m.createErr
+	}
+	m.createdSessions = append(m.createdSessions, name)
+	return nil
 }
-func (m *mockTmux) SendKeys(paneID, keys string) error {
+func (m *mockTmux) SendKeys(session, keys string) error {
+	if m.sendKeysFunc != nil {
+		return m.sendKeysFunc(session, keys)
+	}
+	if m.sendKeysErr != nil {
+		return m.sendKeysErr
+	}
 	m.sentKeys = append(m.sentKeys, keys)
-	return m.sendKeysErr
+	return nil
 }
-func (m *mockTmux) SendSignal(paneID, signal string) error {
+func (m *mockTmux) SendSignal(session, signal string) error {
 	m.sentSignals = append(m.sentSignals, signal)
 	return m.sendSignalErr
-}
-func (m *mockTmux) KillPane(paneID string) error {
-	m.killedPanes = append(m.killedPanes, paneID)
-	return m.killPaneErr
 }
 func (m *mockTmux) KillSession(name string) error {
 	m.killedSessions = append(m.killedSessions, name)
 	return m.killSessionErr
 }
-func (m *mockTmux) ListPanes(session string) ([]string, error) {
-	if m.listPanesFunc != nil {
-		return m.listPanesFunc(session)
+func (m *mockTmux) ListSessions(prefix string) ([]string, error) {
+	if m.listSessionsFunc != nil {
+		return m.listSessionsFunc(prefix)
 	}
-	return m.listPanes, m.listPanesErr
+	if m.listSessionsErr != nil {
+		return nil, m.listSessionsErr
+	}
+	// Filter mock sessions by prefix.
+	var result []string
+	for _, s := range m.listSessions {
+		if strings.HasPrefix(s, prefix) {
+			result = append(result, s)
+		}
+	}
+	return result, nil
 }
-func (m *mockTmux) TileLayout(session string) error { return m.tileErr }
 
 // ---------------------------------------------------------------------------
 // testDB — helper to create an in-memory SQLite database with all tables
@@ -107,6 +112,14 @@ func testDB(t *testing.T) *gorm.DB {
 		t.Fatalf("migrate test db: %v", err)
 	}
 	return db
+}
+
+// testConfig returns a minimal config for testing with the given owner.
+func testConfig(owner string, tracks ...config.TrackConfig) *config.Config {
+	return &config.Config{
+		Owner:  owner,
+		Tracks: tracks,
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -282,10 +295,6 @@ func TestAssignTracks_ZeroSlots(t *testing.T) {
 }
 
 func TestAssignTracks_OverAssignment(t *testing.T) {
-	// 5 tracks: one with many slots, four with 1 slot each.
-	// totalEngines = 5 (>= len(tracks)), but floor-of-1 gives each track at least 1.
-	// Track "big": (10*5)/14 = 3. Others: (1*5)/14 = 0, floor to 1 each.
-	// assigned = 3+1+1+1+1 = 7 > 5. Over-assignment should be corrected.
 	cfg := &config.Config{
 		Tracks: []config.TrackConfig{
 			{Name: "big", EngineSlots: 10},
@@ -316,12 +325,6 @@ func TestAssignTracks_NegativeEngines(t *testing.T) {
 }
 
 func TestAssignTracks_RemainderDistribution(t *testing.T) {
-	// 2 tracks: slots 3 and 1, totalEngines=3.
-	// totalSlots=4. Track "a": (3*3)/4=2. Track "b": (1*3)/4=0, floor to 1.
-	// assigned = 3. remaining = 0. No remainder.
-	// But with totalEngines=5: Track "a": (3*5)/4=3. Track "b": (1*5)/4=1.
-	// assigned = 4. remaining = 1. Fractional remainders: a: 3.75-3=0.75, b: 1.25-1=0.25.
-	// a gets the extra. Result: a=4, b=1.
 	cfg := &config.Config{
 		Tracks: []config.TrackConfig{
 			{Name: "a", EngineSlots: 3},
@@ -394,8 +397,9 @@ func TestStart_NoTracks(t *testing.T) {
 func TestStart_AlreadyRunning(t *testing.T) {
 	db := testDB(t)
 	m := &mockTmux{sessionExists: true}
+	cfg := testConfig("test", config.TrackConfig{Name: "a", EngineSlots: 2})
 	_, err := Start(StartOpts{
-		Config:     &config.Config{Tracks: []config.TrackConfig{{Name: "a", EngineSlots: 2}}},
+		Config:     cfg,
 		ConfigPath: "/tmp/test.yaml",
 		DB:         db,
 		Tmux:       m,
@@ -411,11 +415,11 @@ func TestStart_AlreadyRunning(t *testing.T) {
 func TestStart_CreateSessionError(t *testing.T) {
 	db := testDB(t)
 	m := &mockTmux{
-		sessionExists: false,
-		createErr:     fmt.Errorf("tmux not found"),
+		createErr: fmt.Errorf("tmux not found"),
 	}
+	cfg := testConfig("test", config.TrackConfig{Name: "a", EngineSlots: 1})
 	_, err := Start(StartOpts{
-		Config:     &config.Config{Tracks: []config.TrackConfig{{Name: "a", EngineSlots: 1}}},
+		Config:     cfg,
 		ConfigPath: "/tmp/test.yaml",
 		DB:         db,
 		Tmux:       m,
@@ -428,41 +432,10 @@ func TestStart_CreateSessionError(t *testing.T) {
 	}
 }
 
-func TestStart_ListPanesError(t *testing.T) {
-	db := testDB(t)
-	m := &mockTmux{
-		sessionExists: false,
-		listPanesErr:  fmt.Errorf("list panes failed"),
-	}
-	_, err := Start(StartOpts{
-		Config:     &config.Config{Tracks: []config.TrackConfig{{Name: "a", EngineSlots: 1}}},
-		ConfigPath: "/tmp/test.yaml",
-		DB:         db,
-		Tmux:       m,
-	})
-	if err == nil {
-		t.Fatal("expected error for list panes failure")
-	}
-	if !strings.Contains(err.Error(), "list main panes") {
-		t.Errorf("error = %q, want to contain 'list main panes'", err.Error())
-	}
-	// Should have attempted to kill main session on failure.
-	if len(m.killedSessions) != 1 {
-		t.Errorf("killedSessions = %d, want 1", len(m.killedSessions))
-	}
-}
-
 func TestStart_Success(t *testing.T) {
 	db := testDB(t)
-	m := &mockTmux{
-		sessionExists: false,
-		listPanes:     []string{"%0"},
-	}
-	cfg := &config.Config{
-		Tracks: []config.TrackConfig{
-			{Name: "backend", EngineSlots: 2},
-		},
-	}
+	m := &mockTmux{}
+	cfg := testConfig("test", config.TrackConfig{Name: "backend", EngineSlots: 2})
 	result, err := Start(StartOpts{
 		Config:     cfg,
 		ConfigPath: "/tmp/test.yaml",
@@ -472,24 +445,21 @@ func TestStart_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.Session != SessionName {
-		t.Errorf("session = %q, want %q", result.Session, SessionName)
+	if result.YardmasterSession != YardmasterSession("test") {
+		t.Errorf("yardmaster session = %q, want %q", result.YardmasterSession, YardmasterSession("test"))
 	}
-	if result.YardmasterPane == "" {
-		t.Error("yardmaster pane should not be empty")
+	if result.TelegraphSession != "" {
+		t.Errorf("telegraph session = %q, want empty (Telegraph not requested)", result.TelegraphSession)
 	}
-	if result.TelegraphPane != "" {
-		t.Errorf("telegraph pane = %q, want empty (Telegraph not requested)", result.TelegraphPane)
+	if len(result.EngineSessions) != 2 {
+		t.Errorf("engine sessions = %d, want 2", len(result.EngineSessions))
 	}
-	if len(result.EnginePanes) != 2 {
-		t.Errorf("engine panes = %d, want 2", len(result.EnginePanes))
+	// 1 yardmaster + 2 engines = 3 sessions created.
+	if len(m.createdSessions) != 3 {
+		t.Errorf("created sessions = %d, want 3", len(m.createdSessions))
 	}
-	// 1 session created (main only, no dispatch).
-	if len(m.createdSessions) != 1 {
-		t.Errorf("created sessions = %d, want 1", len(m.createdSessions))
-	}
-	if m.createdSessions[0] != SessionName {
-		t.Errorf("first session = %q, want %q", m.createdSessions[0], SessionName)
+	if m.createdSessions[0] != YardmasterSession("test") {
+		t.Errorf("first session = %q, want %q", m.createdSessions[0], YardmasterSession("test"))
 	}
 	// 1 yardmaster + 2 engines = 3 send-keys calls.
 	if len(m.sentKeys) != 3 {
@@ -503,15 +473,8 @@ func TestStart_Success(t *testing.T) {
 
 func TestStart_WithTelegraph(t *testing.T) {
 	db := testDB(t)
-	m := &mockTmux{
-		sessionExists: false,
-		listPanes:     []string{"%0"},
-	}
-	cfg := &config.Config{
-		Tracks: []config.TrackConfig{
-			{Name: "backend", EngineSlots: 1},
-		},
-	}
+	m := &mockTmux{}
+	cfg := testConfig("test", config.TrackConfig{Name: "backend", EngineSlots: 1})
 	result, err := Start(StartOpts{
 		Config:     cfg,
 		ConfigPath: "/tmp/test.yaml",
@@ -522,10 +485,16 @@ func TestStart_WithTelegraph(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.TelegraphPane == "" {
-		t.Error("telegraph pane should not be empty when Telegraph=true")
+	if result.TelegraphSession == "" {
+		t.Error("telegraph session should not be empty when Telegraph=true")
 	}
-	// 1 yardmaster + 1 telegraph + 1 engine = 3 send-keys calls.
+	if result.TelegraphSession != TelegraphSession("test") {
+		t.Errorf("telegraph session = %q, want %q", result.TelegraphSession, TelegraphSession("test"))
+	}
+	// 1 yardmaster + 1 telegraph + 1 engine = 3 sessions, 3 send-keys.
+	if len(m.createdSessions) != 3 {
+		t.Errorf("created sessions = %d, want 3", len(m.createdSessions))
+	}
 	if len(m.sentKeys) != 3 {
 		t.Errorf("sent keys = %d, want 3", len(m.sentKeys))
 	}
@@ -543,16 +512,11 @@ func TestStart_WithTelegraph(t *testing.T) {
 
 func TestStart_EngineCount_Default(t *testing.T) {
 	db := testDB(t)
-	m := &mockTmux{
-		sessionExists: false,
-		listPanes:     []string{"%0"},
-	}
-	cfg := &config.Config{
-		Tracks: []config.TrackConfig{
-			{Name: "a", EngineSlots: 3},
-			{Name: "b", EngineSlots: 2},
-		},
-	}
+	m := &mockTmux{}
+	cfg := testConfig("test",
+		config.TrackConfig{Name: "a", EngineSlots: 3},
+		config.TrackConfig{Name: "b", EngineSlots: 2},
+	)
 	result, err := Start(StartOpts{
 		Config:     cfg,
 		ConfigPath: "/tmp/test.yaml",
@@ -563,23 +527,18 @@ func TestStart_EngineCount_Default(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// Default engines = 3 + 2 = 5.
-	if len(result.EnginePanes) != 5 {
-		t.Errorf("engine panes = %d, want 5", len(result.EnginePanes))
+	if len(result.EngineSessions) != 5 {
+		t.Errorf("engine sessions = %d, want 5", len(result.EngineSessions))
 	}
 }
 
 func TestStart_EngineCount_Custom(t *testing.T) {
 	db := testDB(t)
-	m := &mockTmux{
-		sessionExists: false,
-		listPanes:     []string{"%0"},
-	}
-	cfg := &config.Config{
-		Tracks: []config.TrackConfig{
-			{Name: "a", EngineSlots: 3},
-			{Name: "b", EngineSlots: 2},
-		},
-	}
+	m := &mockTmux{}
+	cfg := testConfig("test",
+		config.TrackConfig{Name: "a", EngineSlots: 3},
+		config.TrackConfig{Name: "b", EngineSlots: 2},
+	)
 	result, err := Start(StartOpts{
 		Config:     cfg,
 		ConfigPath: "/tmp/test.yaml",
@@ -590,80 +549,57 @@ func TestStart_EngineCount_Custom(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(result.EnginePanes) != 3 {
-		t.Errorf("engine panes = %d, want 3", len(result.EnginePanes))
+	if len(result.EngineSessions) != 3 {
+		t.Errorf("engine sessions = %d, want 3", len(result.EngineSessions))
 	}
 }
 
-func TestStart_EnginePaneError(t *testing.T) {
+func TestStart_EngineSessionError(t *testing.T) {
 	db := testDB(t)
+	callCount := 0
 	m := &mockTmux{
-		sessionExists: false,
-		listPanes:     []string{"%0"},
-		newPaneErr:    fmt.Errorf("pane create failed"),
+		createSessionFunc: func(name string) error {
+			callCount++
+			// Fail on 2nd call (first engine session; yardmaster is 1st).
+			if callCount >= 2 {
+				return fmt.Errorf("session create failed")
+			}
+			return nil
+		},
 	}
+	cfg := testConfig("test", config.TrackConfig{Name: "a", EngineSlots: 1})
 	_, err := Start(StartOpts{
-		Config:     &config.Config{Tracks: []config.TrackConfig{{Name: "a", EngineSlots: 1}}},
+		Config:     cfg,
 		ConfigPath: "/tmp/test.yaml",
 		DB:         db,
 		Tmux:       m,
 	})
 	if err == nil {
-		t.Fatal("expected error for engine pane creation failure")
+		t.Fatal("expected error for engine session creation failure")
 	}
-	if !strings.Contains(err.Error(), "create engine pane") {
-		t.Errorf("error = %q, want to contain 'create engine pane'", err.Error())
+	if !strings.Contains(err.Error(), "create engine session") {
+		t.Errorf("error = %q, want to contain 'create engine session'", err.Error())
 	}
-	// Main session should be cleaned up.
-	if len(m.killedSessions) != 1 {
-		t.Errorf("killedSessions = %d, want 1", len(m.killedSessions))
-	}
-}
-
-// conditionalMockTmux wraps mockTmux but can fail NewPane at a specific call count.
-type conditionalMockTmux struct {
-	*mockTmux
-	newPaneFailAt int
-	callCount     *int
-}
-
-func (c *conditionalMockTmux) NewPane(session string) (string, error) {
-	*c.callCount++
-	if *c.callCount >= c.newPaneFailAt {
-		return "", fmt.Errorf("pane create failed")
-	}
-	return c.mockTmux.NewPane(session)
-}
-
-// sendKeysFailMock fails SendKeys on a specific call number.
-type sendKeysFailMock struct {
-	*mockTmux
-	failAt    int
-	callCount int
-}
-
-func (s *sendKeysFailMock) SendKeys(paneID, keys string) error {
-	s.callCount++
-	if s.callCount >= s.failAt {
-		return fmt.Errorf("send keys failed at call %d", s.callCount)
-	}
-	s.mockTmux.sentKeys = append(s.mockTmux.sentKeys, keys)
-	return nil
 }
 
 func TestStart_YardmasterSendKeysError(t *testing.T) {
 	db := testDB(t)
+	callCount := 0
 	m := &mockTmux{
-		sessionExists: false,
-		listPanes:     []string{"%0"},
+		sendKeysFunc: func(session, keys string) error {
+			callCount++
+			if callCount >= 1 {
+				return fmt.Errorf("send keys failed")
+			}
+			return nil
+		},
 	}
-	// Fail on 1st SendKeys call (yardmaster is first now, no dispatch).
-	sm := &sendKeysFailMock{mockTmux: m, failAt: 1}
+	cfg := testConfig("test", config.TrackConfig{Name: "a", EngineSlots: 1})
 	_, err := Start(StartOpts{
-		Config:     &config.Config{Tracks: []config.TrackConfig{{Name: "a", EngineSlots: 1}}},
+		Config:     cfg,
 		ConfigPath: "/tmp/test.yaml",
 		DB:         db,
-		Tmux:       sm,
+		Tmux:       m,
 	})
 	if err == nil {
 		t.Fatal("expected error for yardmaster send keys failure")
@@ -675,17 +611,23 @@ func TestStart_YardmasterSendKeysError(t *testing.T) {
 
 func TestStart_EngineSendKeysError(t *testing.T) {
 	db := testDB(t)
+	callCount := 0
 	m := &mockTmux{
-		sessionExists: false,
-		listPanes:     []string{"%0"},
+		sendKeysFunc: func(session, keys string) error {
+			callCount++
+			// Fail on 2nd SendKeys call (1st=yardmaster, 2nd=engine).
+			if callCount >= 2 {
+				return fmt.Errorf("send keys failed")
+			}
+			return nil
+		},
 	}
-	// Fail on 2nd SendKeys call (1st=yardmaster, 2nd=engine).
-	sm := &sendKeysFailMock{mockTmux: m, failAt: 2}
+	cfg := testConfig("test", config.TrackConfig{Name: "a", EngineSlots: 1})
 	_, err := Start(StartOpts{
-		Config:     &config.Config{Tracks: []config.TrackConfig{{Name: "a", EngineSlots: 1}}},
+		Config:     cfg,
 		ConfigPath: "/tmp/test.yaml",
 		DB:         db,
-		Tmux:       sm,
+		Tmux:       m,
 	})
 	if err == nil {
 		t.Fatal("expected error for engine send keys failure")
@@ -697,15 +639,8 @@ func TestStart_EngineSendKeysError(t *testing.T) {
 
 func TestStart_ZeroEngineSlots(t *testing.T) {
 	db := testDB(t)
-	m := &mockTmux{
-		sessionExists: false,
-		listPanes:     []string{"%0"},
-	}
-	cfg := &config.Config{
-		Tracks: []config.TrackConfig{
-			{Name: "a", EngineSlots: 0},
-		},
-	}
+	m := &mockTmux{}
+	cfg := testConfig("test", config.TrackConfig{Name: "a", EngineSlots: 0})
 	result, err := Start(StartOpts{
 		Config:     cfg,
 		ConfigPath: "/tmp/test.yaml",
@@ -716,8 +651,8 @@ func TestStart_ZeroEngineSlots(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// 0 slots => totalEngines defaults to 1.
-	if len(result.EnginePanes) != 1 {
-		t.Errorf("engine panes = %d, want 1", len(result.EnginePanes))
+	if len(result.EngineSessions) != 1 {
+		t.Errorf("engine sessions = %d, want 1", len(result.EngineSessions))
 	}
 }
 
@@ -753,26 +688,27 @@ func TestStop_Success(t *testing.T) {
 	db.Create(&models.Engine{ID: "eng-1", Track: "backend", Status: "idle"})
 	db.Create(&models.Engine{ID: "eng-2", Track: "backend", Status: "idle"})
 
+	cfg := testConfig("test")
 	m := &mockTmux{
-		sessionExists: true,
-		listPanesFunc: func(session string) ([]string, error) {
-			if session == SessionName {
-				return []string{"%0", "%1", "%2"}, nil
-			}
-			return []string{"%d0"}, nil // dispatch has 1 pane
+		listSessionsFunc: func(prefix string) ([]string, error) {
+			return []string{
+				"railyard_test_yardmaster",
+				"railyard_test_eng000",
+				"railyard_test_eng001",
+			}, nil
 		},
 	}
-	err := Stop(StopOpts{DB: db, Timeout: 1 * time.Millisecond, Tmux: m})
+	err := Stop(StopOpts{DB: db, Config: cfg, Timeout: 1 * time.Millisecond, Tmux: m})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// Should have sent C-c to 3 main panes + 1 dispatch pane = 4.
-	if len(m.sentSignals) != 4 {
-		t.Errorf("sent signals = %d, want 4", len(m.sentSignals))
+	// Should have sent C-c to 3 sessions.
+	if len(m.sentSignals) != 3 {
+		t.Errorf("sent signals = %d, want 3", len(m.sentSignals))
 	}
-	// Both sessions should have been killed.
-	if len(m.killedSessions) != 2 {
-		t.Errorf("killed sessions = %d, want 2", len(m.killedSessions))
+	// All 3 sessions should have been killed.
+	if len(m.killedSessions) != 3 {
+		t.Errorf("killed sessions = %d, want 3", len(m.killedSessions))
 	}
 	// All engines should be marked dead.
 	var count int64
@@ -784,12 +720,14 @@ func TestStop_Success(t *testing.T) {
 
 func TestStop_KillSessionError(t *testing.T) {
 	db := testDB(t)
+	cfg := testConfig("test")
 	m := &mockTmux{
-		sessionExists:  true,
-		listPanes:      []string{"%0"},
+		listSessionsFunc: func(prefix string) ([]string, error) {
+			return []string{"railyard_test_yardmaster"}, nil
+		},
 		killSessionErr: fmt.Errorf("kill failed"),
 	}
-	err := Stop(StopOpts{DB: db, Timeout: 1 * time.Millisecond, Tmux: m})
+	err := Stop(StopOpts{DB: db, Config: cfg, Timeout: 1 * time.Millisecond, Tmux: m})
 	if err == nil {
 		t.Fatal("expected error for kill session failure")
 	}
@@ -798,52 +736,32 @@ func TestStop_KillSessionError(t *testing.T) {
 	}
 }
 
-func TestStop_OnlyDispatchRunning(t *testing.T) {
+func TestStop_OnlyLegacyDispatchRunning(t *testing.T) {
 	db := testDB(t)
 	m := &mockTmux{
 		sessionExistsFunc: func(name string) bool {
-			return name == DispatchSessionName
+			return name == legacyDispatchSessionName
 		},
-		listPanes: []string{"%d0"},
 	}
 	err := Stop(StopOpts{DB: db, Timeout: 1 * time.Millisecond, Tmux: m})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// Only dispatch session should be killed.
+	// Only legacy dispatch session should be killed.
 	if len(m.killedSessions) != 1 {
 		t.Errorf("killed sessions = %d, want 1", len(m.killedSessions))
 	}
-	if m.killedSessions[0] != DispatchSessionName {
-		t.Errorf("killed session = %q, want %q", m.killedSessions[0], DispatchSessionName)
-	}
-}
-
-func TestStop_ListPanesError(t *testing.T) {
-	db := testDB(t)
-	m := &mockTmux{
-		sessionExists: true,
-		listPanesErr:  fmt.Errorf("list failed"),
-	}
-	// Even if list panes fails, stop should continue and kill sessions.
-	err := Stop(StopOpts{DB: db, Timeout: 1 * time.Millisecond, Tmux: m})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	// No signals sent (list panes failed), but both sessions should be killed.
-	if len(m.sentSignals) != 0 {
-		t.Errorf("sent signals = %d, want 0", len(m.sentSignals))
-	}
-	if len(m.killedSessions) != 2 {
-		t.Errorf("killed sessions = %d, want 2", len(m.killedSessions))
+	if m.killedSessions[0] != legacyDispatchSessionName {
+		t.Errorf("killed session = %q, want %q", m.killedSessions[0], legacyDispatchSessionName)
 	}
 }
 
 func TestStop_DefaultTimeout(t *testing.T) {
 	db := testDB(t)
 	m := &mockTmux{
-		sessionExists: true,
-		listPanes:     []string{"%0"},
+		sessionExistsFunc: func(name string) bool {
+			return name == legacySessionName
+		},
 	}
 	// Pass 0 timeout — should default to 60s.
 	// Just verify it doesn't error (won't actually wait 60s since no working engines).
@@ -851,9 +769,9 @@ func TestStop_DefaultTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// Both sessions killed (main + dispatch).
-	if len(m.killedSessions) != 2 {
-		t.Errorf("killed sessions = %d, want 2", len(m.killedSessions))
+	// Legacy session should be killed.
+	if len(m.killedSessions) != 1 {
+		t.Errorf("killed sessions = %d, want 1", len(m.killedSessions))
 	}
 }
 
@@ -862,7 +780,7 @@ func TestStop_DefaultTimeout(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestStatus_NilDB(t *testing.T) {
-	_, err := Status(nil, nil)
+	_, err := Status(nil, nil, nil)
 	if err == nil {
 		t.Fatal("expected error for nil DB")
 	}
@@ -871,7 +789,7 @@ func TestStatus_NilDB(t *testing.T) {
 func TestStatus_EmptyDB(t *testing.T) {
 	db := testDB(t)
 	m := &mockTmux{sessionExists: false}
-	info, err := Status(db, m)
+	info, err := Status(db, m, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -922,8 +840,13 @@ func TestStatus_WithEnginesAndTracks(t *testing.T) {
 	db.Create(&models.Message{FromAgent: "a", ToAgent: "eng-2", Acknowledged: false})
 	db.Create(&models.Message{FromAgent: "a", ToAgent: "broadcast", Acknowledged: false})
 
-	m := &mockTmux{sessionExists: true}
-	info, err := Status(db, m)
+	cfg := testConfig("test")
+	m := &mockTmux{
+		listSessionsFunc: func(prefix string) ([]string, error) {
+			return []string{"railyard_test_yardmaster"}, nil
+		},
+	}
+	info, err := Status(db, m, cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -939,6 +862,27 @@ func TestStatus_WithEnginesAndTracks(t *testing.T) {
 	// 2 non-broadcast unacknowledged messages.
 	if info.MessageDepth != 2 {
 		t.Errorf("message depth = %d, want 2", info.MessageDepth)
+	}
+	// Component sessions should be reported.
+	if len(info.ComponentSessions) != 1 {
+		t.Errorf("component sessions = %d, want 1", len(info.ComponentSessions))
+	}
+}
+
+func TestStatus_LegacyFallback(t *testing.T) {
+	db := testDB(t)
+	m := &mockTmux{
+		sessionExistsFunc: func(name string) bool {
+			return name == legacySessionName
+		},
+	}
+	// No config — falls back to legacy session name check.
+	info, err := Status(db, m, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !info.SessionRunning {
+		t.Error("expected session running via legacy fallback")
 	}
 }
 
@@ -1014,10 +958,11 @@ func TestScale_ExceedsSlots(t *testing.T) {
 
 func TestScale_NoSession(t *testing.T) {
 	db := testDB(t)
+	cfg := testConfig("test", config.TrackConfig{Name: "a", EngineSlots: 5})
 	m := &mockTmux{sessionExists: false}
 	_, err := Scale(ScaleOpts{
 		DB:     db,
-		Config: &config.Config{Tracks: []config.TrackConfig{{Name: "a", EngineSlots: 5}}},
+		Config: cfg,
 		Track:  "a",
 		Count:  2,
 		Tmux:   m,
@@ -1036,10 +981,15 @@ func TestScale_NoChange(t *testing.T) {
 	db.Create(&models.Engine{ID: "eng-1", Track: "backend", Status: "idle", StartedAt: now})
 	db.Create(&models.Engine{ID: "eng-2", Track: "backend", Status: "working", StartedAt: now})
 
-	m := &mockTmux{sessionExists: true}
+	cfg := testConfig("test", config.TrackConfig{Name: "backend", EngineSlots: 5})
+	m := &mockTmux{
+		sessionExistsFunc: func(name string) bool {
+			return name == YardmasterSession("test")
+		},
+	}
 	result, err := Scale(ScaleOpts{
 		DB:     db,
-		Config: &config.Config{Tracks: []config.TrackConfig{{Name: "backend", EngineSlots: 5}}},
+		Config: cfg,
 		Track:  "backend",
 		Count:  2,
 		Tmux:   m,
@@ -1053,8 +1003,8 @@ func TestScale_NoChange(t *testing.T) {
 	if result.Current != 2 {
 		t.Errorf("current = %d, want 2", result.Current)
 	}
-	if len(result.PanesCreated) != 0 {
-		t.Errorf("panes created = %d, want 0", len(result.PanesCreated))
+	if len(result.SessionsCreated) != 0 {
+		t.Errorf("sessions created = %d, want 0", len(result.SessionsCreated))
 	}
 }
 
@@ -1063,13 +1013,15 @@ func TestScale_ScaleUp(t *testing.T) {
 	now := time.Now()
 	db.Create(&models.Engine{ID: "eng-1", Track: "backend", Status: "idle", StartedAt: now})
 
+	cfg := testConfig("test", config.TrackConfig{Name: "backend", EngineSlots: 5})
 	m := &mockTmux{
-		sessionExists: true,
-		listPanes:     []string{"%0"},
+		sessionExistsFunc: func(name string) bool {
+			return name == YardmasterSession("test")
+		},
 	}
 	result, err := Scale(ScaleOpts{
 		DB:         db,
-		Config:     &config.Config{Tracks: []config.TrackConfig{{Name: "backend", EngineSlots: 5}}},
+		Config:     cfg,
 		ConfigPath: "/tmp/test.yaml",
 		Track:      "backend",
 		Count:      3,
@@ -1084,12 +1036,12 @@ func TestScale_ScaleUp(t *testing.T) {
 	if result.Current != 3 {
 		t.Errorf("current = %d, want 3", result.Current)
 	}
-	if len(result.PanesCreated) != 2 {
-		t.Errorf("panes created = %d, want 2", len(result.PanesCreated))
+	if len(result.SessionsCreated) != 2 {
+		t.Errorf("sessions created = %d, want 2", len(result.SessionsCreated))
 	}
-	// Should have created 2 panes and sent 2 keys.
-	if m.panesCreated != 2 {
-		t.Errorf("mock panes created = %d, want 2", m.panesCreated)
+	// Should have created 2 sessions and sent 2 keys.
+	if len(m.createdSessions) != 2 {
+		t.Errorf("mock sessions created = %d, want 2", len(m.createdSessions))
 	}
 	if len(m.sentKeys) != 2 {
 		t.Errorf("sent keys = %d, want 2", len(m.sentKeys))
@@ -1103,10 +1055,15 @@ func TestScale_ScaleDown(t *testing.T) {
 	db.Create(&models.Engine{ID: "eng-2", Track: "backend", Status: "working", StartedAt: now.Add(-5 * time.Minute)})
 	db.Create(&models.Engine{ID: "eng-3", Track: "backend", Status: "idle", StartedAt: now.Add(-1 * time.Minute)})
 
-	m := &mockTmux{sessionExists: true}
+	cfg := testConfig("test", config.TrackConfig{Name: "backend", EngineSlots: 5})
+	m := &mockTmux{
+		sessionExistsFunc: func(name string) bool {
+			return name == YardmasterSession("test")
+		},
+	}
 	result, err := Scale(ScaleOpts{
 		DB:     db,
-		Config: &config.Config{Tracks: []config.TrackConfig{{Name: "backend", EngineSlots: 5}}},
+		Config: cfg,
 		Track:  "backend",
 		Count:  1,
 		Tmux:   m,
@@ -1120,37 +1077,39 @@ func TestScale_ScaleDown(t *testing.T) {
 	if result.Current != 1 {
 		t.Errorf("current = %d, want 1", result.Current)
 	}
-	if len(result.PanesKilled) != 2 {
-		t.Errorf("panes killed = %d, want 2", len(result.PanesKilled))
+	if len(result.SessionsKilled) != 2 {
+		t.Errorf("sessions killed = %d, want 2", len(result.SessionsKilled))
 	}
 	// Newest engines should be killed first (LIFO).
-	// eng-3 started most recently, then eng-2.
-	if result.PanesKilled[0] != "eng-3" {
-		t.Errorf("first killed = %q, want eng-3", result.PanesKilled[0])
+	if result.SessionsKilled[0] != "eng-3" {
+		t.Errorf("first killed = %q, want eng-3", result.SessionsKilled[0])
 	}
-	if result.PanesKilled[1] != "eng-2" {
-		t.Errorf("second killed = %q, want eng-2", result.PanesKilled[1])
+	if result.SessionsKilled[1] != "eng-2" {
+		t.Errorf("second killed = %q, want eng-2", result.SessionsKilled[1])
 	}
 }
 
-func TestScale_ScaleUpNewPaneError(t *testing.T) {
+func TestScale_ScaleUpCreateSessionError(t *testing.T) {
 	db := testDB(t)
+	cfg := testConfig("test", config.TrackConfig{Name: "a", EngineSlots: 5})
 	m := &mockTmux{
-		sessionExists: true,
-		newPaneErr:    fmt.Errorf("pane failed"),
+		sessionExistsFunc: func(name string) bool {
+			return name == YardmasterSession("test")
+		},
+		createErr: fmt.Errorf("session failed"),
 	}
 	result, err := Scale(ScaleOpts{
 		DB:     db,
-		Config: &config.Config{Tracks: []config.TrackConfig{{Name: "a", EngineSlots: 5}}},
+		Config: cfg,
 		Track:  "a",
 		Count:  2,
 		Tmux:   m,
 	})
 	if err == nil {
-		t.Fatal("expected error for new pane failure")
+		t.Fatal("expected error for session creation failure")
 	}
-	if !strings.Contains(err.Error(), "create engine pane") {
-		t.Errorf("error = %q, want to contain 'create engine pane'", err.Error())
+	if !strings.Contains(err.Error(), "create engine session") {
+		t.Errorf("error = %q, want to contain 'create engine session'", err.Error())
 	}
 	// Partial result returned.
 	if result.Previous != 0 {
@@ -1160,13 +1119,16 @@ func TestScale_ScaleUpNewPaneError(t *testing.T) {
 
 func TestScale_ScaleUpSendKeysError(t *testing.T) {
 	db := testDB(t)
+	cfg := testConfig("test", config.TrackConfig{Name: "a", EngineSlots: 5})
 	m := &mockTmux{
-		sessionExists: true,
-		sendKeysErr:   fmt.Errorf("keys failed"),
+		sessionExistsFunc: func(name string) bool {
+			return name == YardmasterSession("test")
+		},
+		sendKeysErr: fmt.Errorf("keys failed"),
 	}
 	_, err := Scale(ScaleOpts{
 		DB:         db,
-		Config:     &config.Config{Tracks: []config.TrackConfig{{Name: "a", EngineSlots: 5}}},
+		Config:     cfg,
 		ConfigPath: "/tmp/test.yaml",
 		Track:      "a",
 		Count:      1,
@@ -1250,23 +1212,35 @@ func TestListEngines_FilterByStatus(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestRestartEngine_NilDB(t *testing.T) {
-	err := RestartEngine(nil, "", "eng-123", nil)
+	err := RestartEngine(nil, nil, "", "eng-123", nil)
 	if err == nil {
 		t.Fatal("expected error for nil DB")
 	}
 }
 
 func TestRestartEngine_EmptyID(t *testing.T) {
-	err := RestartEngine(nil, "", "", nil)
+	err := RestartEngine(nil, nil, "", "", nil)
 	if err == nil {
 		t.Fatal("expected error for empty ID")
 	}
 }
 
+func TestRestartEngine_NilConfig(t *testing.T) {
+	db := testDB(t)
+	err := RestartEngine(db, nil, "/tmp/test.yaml", "eng-123", nil)
+	if err == nil {
+		t.Fatal("expected error for nil config")
+	}
+	if !strings.Contains(err.Error(), "config is required") {
+		t.Errorf("error = %q, want to contain 'config is required'", err.Error())
+	}
+}
+
 func TestRestartEngine_NoSession(t *testing.T) {
 	db := testDB(t)
+	cfg := testConfig("test")
 	m := &mockTmux{sessionExists: false}
-	err := RestartEngine(db, "/tmp/test.yaml", "eng-123", m)
+	err := RestartEngine(db, cfg, "/tmp/test.yaml", "eng-123", m)
 	if err == nil {
 		t.Fatal("expected error for no session")
 	}
@@ -1277,8 +1251,13 @@ func TestRestartEngine_NoSession(t *testing.T) {
 
 func TestRestartEngine_EngineNotFound(t *testing.T) {
 	db := testDB(t)
-	m := &mockTmux{sessionExists: true}
-	err := RestartEngine(db, "/tmp/test.yaml", "nonexistent", m)
+	cfg := testConfig("test")
+	m := &mockTmux{
+		sessionExistsFunc: func(name string) bool {
+			return name == YardmasterSession("test")
+		},
+	}
+	err := RestartEngine(db, cfg, "/tmp/test.yaml", "nonexistent", m)
 	if err == nil {
 		t.Fatal("expected error for engine not found")
 	}
@@ -1292,8 +1271,13 @@ func TestRestartEngine_Success(t *testing.T) {
 	now := time.Now()
 	db.Create(&models.Engine{ID: "eng-1", Track: "backend", Status: "idle", StartedAt: now, LastActivity: now})
 
-	m := &mockTmux{sessionExists: true}
-	err := RestartEngine(db, "/tmp/test.yaml", "eng-1", m)
+	cfg := testConfig("test")
+	m := &mockTmux{
+		sessionExistsFunc: func(name string) bool {
+			return name == YardmasterSession("test")
+		},
+	}
+	err := RestartEngine(db, cfg, "/tmp/test.yaml", "eng-1", m)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1303,9 +1287,9 @@ func TestRestartEngine_Success(t *testing.T) {
 	if eng.Status != "dead" {
 		t.Errorf("old engine status = %q, want dead", eng.Status)
 	}
-	// A new pane should have been created and keys sent.
-	if m.panesCreated != 1 {
-		t.Errorf("panes created = %d, want 1", m.panesCreated)
+	// A new session should have been created and keys sent.
+	if len(m.createdSessions) != 1 {
+		t.Errorf("sessions created = %d, want 1", len(m.createdSessions))
 	}
 	if len(m.sentKeys) != 1 {
 		t.Errorf("sent keys = %d, want 1", len(m.sentKeys))
@@ -1315,21 +1299,24 @@ func TestRestartEngine_Success(t *testing.T) {
 	}
 }
 
-func TestRestartEngine_NewPaneError(t *testing.T) {
+func TestRestartEngine_CreateSessionError(t *testing.T) {
 	db := testDB(t)
 	now := time.Now()
 	db.Create(&models.Engine{ID: "eng-1", Track: "backend", Status: "idle", StartedAt: now, LastActivity: now})
 
+	cfg := testConfig("test")
 	m := &mockTmux{
-		sessionExists: true,
-		newPaneErr:    fmt.Errorf("pane failed"),
+		sessionExistsFunc: func(name string) bool {
+			return name == YardmasterSession("test")
+		},
+		createErr: fmt.Errorf("session failed"),
 	}
-	err := RestartEngine(db, "/tmp/test.yaml", "eng-1", m)
+	err := RestartEngine(db, cfg, "/tmp/test.yaml", "eng-1", m)
 	if err == nil {
-		t.Fatal("expected error for new pane failure")
+		t.Fatal("expected error for session creation failure")
 	}
-	if !strings.Contains(err.Error(), "create replacement pane") {
-		t.Errorf("error = %q, want to contain 'create replacement pane'", err.Error())
+	if !strings.Contains(err.Error(), "create replacement session") {
+		t.Errorf("error = %q, want to contain 'create replacement session'", err.Error())
 	}
 }
 
@@ -1338,11 +1325,14 @@ func TestRestartEngine_SendKeysError(t *testing.T) {
 	now := time.Now()
 	db.Create(&models.Engine{ID: "eng-1", Track: "backend", Status: "idle", StartedAt: now, LastActivity: now})
 
+	cfg := testConfig("test")
 	m := &mockTmux{
-		sessionExists: true,
-		sendKeysErr:   fmt.Errorf("keys failed"),
+		sessionExistsFunc: func(name string) bool {
+			return name == YardmasterSession("test")
+		},
+		sendKeysErr: fmt.Errorf("keys failed"),
 	}
-	err := RestartEngine(db, "/tmp/test.yaml", "eng-1", m)
+	err := RestartEngine(db, cfg, "/tmp/test.yaml", "eng-1", m)
 	if err == nil {
 		t.Fatal("expected error for send keys failure")
 	}
@@ -1359,6 +1349,10 @@ func TestFormatStatus_Running(t *testing.T) {
 	info := &StatusInfo{
 		SessionRunning:  true,
 		DispatchRunning: true,
+		ComponentSessions: []string{
+			"railyard_test_yardmaster",
+			"railyard_test_eng000",
+		},
 		Engines: []EngineInfo{
 			{
 				ID:           "eng-abcd1234",
@@ -1387,6 +1381,13 @@ func TestFormatStatus_Running(t *testing.T) {
 	}
 	if !strings.Contains(out, "3 unacknowledged") {
 		t.Errorf("expected message depth, got: %s", out)
+	}
+	// Component sessions should be listed.
+	if !strings.Contains(out, "SESSIONS") {
+		t.Errorf("expected SESSIONS section, got: %s", out)
+	}
+	if !strings.Contains(out, "railyard_test_yardmaster") {
+		t.Errorf("expected yardmaster session in output, got: %s", out)
 	}
 }
 
@@ -1429,37 +1430,6 @@ func TestFormatStatus_NoTracks(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// formatDuration tests
-// ---------------------------------------------------------------------------
-
-func TestFormatDuration_Hours(t *testing.T) {
-	d := 2*time.Hour + 30*time.Minute
-	got := formatDuration(d)
-	if got != "2h 30m" {
-		t.Errorf("formatDuration(%v) = %q, want %q", d, got, "2h 30m")
-	}
-}
-
-func TestFormatDuration_Minutes(t *testing.T) {
-	d := 5*time.Minute + 15*time.Second
-	got := formatDuration(d)
-	if got != "5m 15s" {
-		t.Errorf("formatDuration(%v) = %q, want %q", d, got, "5m 15s")
-	}
-}
-
-func TestFormatDuration_Zero(t *testing.T) {
-	got := formatDuration(0)
-	if got != "0m 0s" {
-		t.Errorf("formatDuration(0) = %q, want %q", got, "0m 0s")
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Tmux interface sanity check — verify DefaultTmux is set
-// ---------------------------------------------------------------------------
-
 func TestFormatStatus_MultipleBaseBranches(t *testing.T) {
 	info := &StatusInfo{
 		SessionRunning:  true,
@@ -1493,6 +1463,10 @@ func TestFormatStatus_SingleBaseBranch(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// hasMultipleBases tests
+// ---------------------------------------------------------------------------
+
 func TestHasMultipleBases_Mixed(t *testing.T) {
 	tracks := []TrackSummary{
 		{Track: "a", BaseBranches: []string{"main"}},
@@ -1522,6 +1496,62 @@ func TestHasMultipleBases_TrackWithMultiple(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// formatDuration tests
+// ---------------------------------------------------------------------------
+
+func TestFormatDuration_Hours(t *testing.T) {
+	d := 2*time.Hour + 30*time.Minute
+	got := formatDuration(d)
+	if got != "2h 30m" {
+		t.Errorf("formatDuration(%v) = %q, want %q", d, got, "2h 30m")
+	}
+}
+
+func TestFormatDuration_Minutes(t *testing.T) {
+	d := 5*time.Minute + 15*time.Second
+	got := formatDuration(d)
+	if got != "5m 15s" {
+		t.Errorf("formatDuration(%v) = %q, want %q", d, got, "5m 15s")
+	}
+}
+
+func TestFormatDuration_Zero(t *testing.T) {
+	got := formatDuration(0)
+	if got != "0m 0s" {
+		t.Errorf("formatDuration(0) = %q, want %q", got, "0m 0s")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Session naming tests
+// ---------------------------------------------------------------------------
+
+func TestSessionNaming(t *testing.T) {
+	if got := SessionPrefix("testuser"); got != "railyard_testuser" {
+		t.Errorf("SessionPrefix = %q, want railyard_testuser", got)
+	}
+	if got := YardmasterSession("testuser"); got != "railyard_testuser_yardmaster" {
+		t.Errorf("YardmasterSession = %q, want railyard_testuser_yardmaster", got)
+	}
+	if got := TelegraphSession("testuser"); got != "railyard_testuser_telegraph" {
+		t.Errorf("TelegraphSession = %q, want railyard_testuser_telegraph", got)
+	}
+	if got := EngineSession("testuser", 0); got != "railyard_testuser_eng000" {
+		t.Errorf("EngineSession(0) = %q, want railyard_testuser_eng000", got)
+	}
+	if got := EngineSession("testuser", 42); got != "railyard_testuser_eng042" {
+		t.Errorf("EngineSession(42) = %q, want railyard_testuser_eng042", got)
+	}
+	if got := DispatchSession("testuser"); got != "railyard_testuser_dispatch" {
+		t.Errorf("DispatchSession = %q, want railyard_testuser_dispatch", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tmux interface sanity check — verify DefaultTmux is set
+// ---------------------------------------------------------------------------
+
 func TestDefaultTmux_IsSet(t *testing.T) {
 	if DefaultTmux == nil {
 		t.Fatal("DefaultTmux should not be nil")
@@ -1529,5 +1559,49 @@ func TestDefaultTmux_IsSet(t *testing.T) {
 	_, ok := DefaultTmux.(RealTmux)
 	if !ok {
 		t.Fatalf("DefaultTmux is %T, want RealTmux", DefaultTmux)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// nextEngineIndex tests
+// ---------------------------------------------------------------------------
+
+func TestNextEngineIndex_NoExisting(t *testing.T) {
+	m := &mockTmux{}
+	idx := nextEngineIndex(m, "test")
+	if idx != 0 {
+		t.Errorf("nextEngineIndex = %d, want 0", idx)
+	}
+}
+
+func TestNextEngineIndex_WithExisting(t *testing.T) {
+	m := &mockTmux{
+		listSessions: []string{
+			"railyard_test_eng000",
+			"railyard_test_eng001",
+			"railyard_test_eng003",
+		},
+	}
+	idx := nextEngineIndex(m, "test")
+	if idx != 4 {
+		t.Errorf("nextEngineIndex = %d, want 4", idx)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// appendUnique tests
+// ---------------------------------------------------------------------------
+
+func TestAppendUnique_NewItem(t *testing.T) {
+	s := appendUnique([]string{"a", "b"}, "c")
+	if len(s) != 3 || s[2] != "c" {
+		t.Errorf("appendUnique = %v, want [a b c]", s)
+	}
+}
+
+func TestAppendUnique_Duplicate(t *testing.T) {
+	s := appendUnique([]string{"a", "b"}, "a")
+	if len(s) != 2 {
+		t.Errorf("appendUnique = %v, want [a b]", s)
 	}
 }

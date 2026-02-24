@@ -79,7 +79,7 @@ func runDoctor(cmd *cobra.Command, configPath string) error {
 	}
 
 	// 7. tmux sessions
-	results = append(results, checkTmuxSession()...)
+	results = append(results, checkTmuxSession(cfg)...)
 
 	// 8. Git repo
 	results = append(results, checkGitRepo())
@@ -233,20 +233,24 @@ func checkTracks(cfg *config.Config) checkResult {
 	return checkResult{"Tracks", "PASS", fmt.Sprintf("%d configured, %d seeded", configured, count)}
 }
 
-func checkTmuxSession() []checkResult {
+func checkTmuxSession(cfg *config.Config) []checkResult {
 	if orchestration.DefaultTmux == nil {
 		return []checkResult{{"tmux session", "WARN", "tmux interface not available"}}
 	}
-	var results []checkResult
-	if orchestration.DefaultTmux.SessionExists(orchestration.SessionName) {
-		results = append(results, checkResult{"tmux session (main)", "PASS", fmt.Sprintf("%q running", orchestration.SessionName)})
-	} else {
-		results = append(results, checkResult{"tmux session (main)", "FAIL", fmt.Sprintf("%q not running", orchestration.SessionName)})
+	if cfg == nil {
+		return []checkResult{{"tmux session", "FAIL", "skipped (no config)"}}
 	}
-	if orchestration.DefaultTmux.SessionExists(orchestration.DispatchSessionName) {
-		results = append(results, checkResult{"tmux session (dispatch)", "PASS", fmt.Sprintf("%q running", orchestration.DispatchSessionName)})
+	var results []checkResult
+	prefix := orchestration.SessionPrefix(cfg.Owner)
+	sessions, err := orchestration.DefaultTmux.ListSessions(prefix)
+	if err != nil {
+		results = append(results, checkResult{"tmux sessions", "WARN", fmt.Sprintf("could not list sessions: %v", err)})
+		return results
+	}
+	if len(sessions) > 0 {
+		results = append(results, checkResult{"tmux sessions", "PASS", fmt.Sprintf("%d running: %s", len(sessions), strings.Join(sessions, ", "))})
 	} else {
-		results = append(results, checkResult{"tmux session (dispatch)", "FAIL", fmt.Sprintf("%q not running", orchestration.DispatchSessionName)})
+		results = append(results, checkResult{"tmux sessions", "FAIL", fmt.Sprintf("no %s_* sessions running", prefix)})
 	}
 	return results
 }

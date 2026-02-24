@@ -61,16 +61,16 @@ func runStart(cmd *cobra.Command, configPath string, engines int, withTelegraph 
 	}
 
 	out := cmd.OutOrStdout()
-	fmt.Fprintf(out, "Railyard started (session: %s)\n", result.Session)
-	fmt.Fprintf(out, "  Yardmaster:  %s\n", result.YardmasterPane)
-	if result.TelegraphPane != "" {
-		fmt.Fprintf(out, "  Telegraph:   %s\n", result.TelegraphPane)
+	fmt.Fprintf(out, "Railyard started\n")
+	fmt.Fprintf(out, "  Yardmaster:  %s\n", result.YardmasterSession)
+	if result.TelegraphSession != "" {
+		fmt.Fprintf(out, "  Telegraph:   %s\n", result.TelegraphSession)
 	}
-	fmt.Fprintf(out, "  Engines:     %d\n", len(result.EnginePanes))
-	for _, ep := range result.EnginePanes {
-		fmt.Fprintf(out, "    %s → %s\n", ep.PaneID, ep.Track)
+	fmt.Fprintf(out, "  Engines:     %d\n", len(result.EngineSessions))
+	for _, es := range result.EngineSessions {
+		fmt.Fprintf(out, "    %s → %s\n", es.Session, es.Track)
 	}
-	fmt.Fprintf(out, "\nAttach with: tmux attach -t %s\n", result.Session)
+	fmt.Fprintf(out, "\nAttach with: tmux attach -t <session-name>\n")
 	fmt.Fprintf(out, "Start Dispatch separately: ry dispatch --config %s\n", configPath)
 	return nil
 }

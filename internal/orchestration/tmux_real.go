@@ -39,35 +39,18 @@ func envWithoutTMUX() []string {
 	return env
 }
 
-func (RealTmux) NewPane(session string) (string, error) {
-	cmd := exec.Command("tmux", "split-window", "-t", session, "-d", "-P", "-F", "#{pane_id}")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("new tmux pane in %q: %s: %w", session, strings.TrimSpace(string(out)), err)
-	}
-	return strings.TrimSpace(string(out)), nil
-}
-
-func (RealTmux) SendKeys(paneID, keys string) error {
-	cmd := exec.Command("tmux", "send-keys", "-t", paneID, keys, "Enter")
+func (RealTmux) SendKeys(session, keys string) error {
+	cmd := exec.Command("tmux", "send-keys", "-t", session, keys, "Enter")
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("send keys to %q: %s: %w", paneID, strings.TrimSpace(string(out)), err)
+		return fmt.Errorf("send keys to %q: %s: %w", session, strings.TrimSpace(string(out)), err)
 	}
 	return nil
 }
 
-func (RealTmux) SendSignal(paneID, signal string) error {
-	cmd := exec.Command("tmux", "send-keys", "-t", paneID, signal)
+func (RealTmux) SendSignal(session, signal string) error {
+	cmd := exec.Command("tmux", "send-keys", "-t", session, signal)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("send signal to %q: %s: %w", paneID, strings.TrimSpace(string(out)), err)
-	}
-	return nil
-}
-
-func (RealTmux) KillPane(paneID string) error {
-	cmd := exec.Command("tmux", "kill-pane", "-t", paneID)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("kill pane %q: %s: %w", paneID, strings.TrimSpace(string(out)), err)
+		return fmt.Errorf("send signal to %q: %s: %w", session, strings.TrimSpace(string(out)), err)
 	}
 	return nil
 }
@@ -80,26 +63,24 @@ func (RealTmux) KillSession(name string) error {
 	return nil
 }
 
-func (RealTmux) ListPanes(session string) ([]string, error) {
-	cmd := exec.Command("tmux", "list-panes", "-t", session, "-F", "#{pane_id}")
+// ListSessions returns all tmux session names matching the given prefix.
+func (RealTmux) ListSessions(prefix string) ([]string, error) {
+	cmd := exec.Command("tmux", "list-sessions", "-F", "#{session_name}")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return nil, fmt.Errorf("list panes in %q: %s: %w", session, strings.TrimSpace(string(out)), err)
+		// tmux returns error when server is not running (no sessions).
+		if strings.Contains(string(out), "no server running") || strings.Contains(string(out), "no sessions") {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("list tmux sessions: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	var panes []string
+	var sessions []string
 	for _, l := range lines {
-		if l = strings.TrimSpace(l); l != "" {
-			panes = append(panes, l)
+		l = strings.TrimSpace(l)
+		if l != "" && strings.HasPrefix(l, prefix) {
+			sessions = append(sessions, l)
 		}
 	}
-	return panes, nil
-}
-
-func (RealTmux) TileLayout(session string) error {
-	cmd := exec.Command("tmux", "select-layout", "-t", session, "tiled")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("tile layout for %q: %s: %w", session, strings.TrimSpace(string(out)), err)
-	}
-	return nil
+	return sessions, nil
 }

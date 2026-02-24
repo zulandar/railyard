@@ -40,23 +40,20 @@ func testDB(t *testing.T) *gorm.DB {
 
 // mockTmux is a test double for orchestration.Tmux.
 type mockTmux struct {
-	sessionExists bool
-	panesCreated  int
-	sentKeys      []string
+	sessionExists   bool
+	sessionsCreated int
+	sentKeys        []string
 }
 
-func (m *mockTmux) SessionExists(name string) bool         { return m.sessionExists }
-func (m *mockTmux) CreateSession(name string) error        { return nil }
-func (m *mockTmux) NewPane(session string) (string, error) { m.panesCreated++; return "%mock", nil }
-func (m *mockTmux) SendKeys(paneID, keys string) error {
+func (m *mockTmux) SessionExists(name string) bool      { return m.sessionExists }
+func (m *mockTmux) CreateSession(name string) error      { m.sessionsCreated++; return nil }
+func (m *mockTmux) SendKeys(session, keys string) error {
 	m.sentKeys = append(m.sentKeys, keys)
 	return nil
 }
-func (m *mockTmux) SendSignal(paneID, signal string) error     { return nil }
-func (m *mockTmux) KillPane(paneID string) error               { return nil }
-func (m *mockTmux) KillSession(name string) error              { return nil }
-func (m *mockTmux) ListPanes(session string) ([]string, error) { return nil, nil }
-func (m *mockTmux) TileLayout(session string) error            { return nil }
+func (m *mockTmux) SendSignal(session, signal string) error      { return nil }
+func (m *mockTmux) KillSession(name string) error                { return nil }
+func (m *mockTmux) ListSessions(prefix string) ([]string, error) { return nil, nil }
 
 func twoTrackConfig() *config.Config {
 	return &config.Config{
@@ -91,8 +88,8 @@ func TestRebalanceEngines_CooldownSkip(t *testing.T) {
 	if buf.Len() != 0 {
 		t.Errorf("expected no output during cooldown, got: %s", buf.String())
 	}
-	if tmux.panesCreated != 0 {
-		t.Errorf("expected no panes created during cooldown, got %d", tmux.panesCreated)
+	if tmux.sessionsCreated != 0 {
+		t.Errorf("expected no sessions created during cooldown, got %d", tmux.sessionsCreated)
 	}
 }
 
@@ -111,8 +108,8 @@ func TestRebalanceEngines_NoSurplusNoDeficit(t *testing.T) {
 	if err := rebalanceEngines(db, cfg, "test.yaml", state, &buf); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if tmux.panesCreated != 0 {
-		t.Errorf("expected no panes created, got %d", tmux.panesCreated)
+	if tmux.sessionsCreated != 0 {
+		t.Errorf("expected no sessions created, got %d", tmux.sessionsCreated)
 	}
 }
 
@@ -152,8 +149,8 @@ func TestRebalanceEngines_SingleMove(t *testing.T) {
 	}
 
 	// Scale should have been called (1 pane created).
-	if tmux.panesCreated != 1 {
-		t.Errorf("panes created = %d, want 1", tmux.panesCreated)
+	if tmux.sessionsCreated != 1 {
+		t.Errorf("sessions created = %d, want 1", tmux.sessionsCreated)
 	}
 }
 
@@ -188,8 +185,8 @@ func TestRebalanceEngines_RespectsEngineSlots(t *testing.T) {
 	}
 
 	// Frontend is at max slots (2 live == 2 max), so it's not a deficit track.
-	if tmux.panesCreated != 0 {
-		t.Errorf("panes created = %d, want 0 (at engine_slots cap)", tmux.panesCreated)
+	if tmux.sessionsCreated != 0 {
+		t.Errorf("sessions created = %d, want 0 (at engine_slots cap)", tmux.sessionsCreated)
 	}
 }
 
@@ -214,8 +211,8 @@ func TestRebalanceEngines_IdleThresholdNotMet(t *testing.T) {
 	}
 
 	// Engine idle < 2 min → not counted as surplus.
-	if tmux.panesCreated != 0 {
-		t.Errorf("panes created = %d, want 0 (idle threshold not met)", tmux.panesCreated)
+	if tmux.sessionsCreated != 0 {
+		t.Errorf("sessions created = %d, want 0 (idle threshold not met)", tmux.sessionsCreated)
 	}
 }
 
@@ -244,8 +241,8 @@ func TestRebalanceEngines_TrackCooldown(t *testing.T) {
 	}
 
 	// Backend donor is on cooldown — should skip.
-	if tmux.panesCreated != 0 {
-		t.Errorf("panes created = %d, want 0 (track on cooldown)", tmux.panesCreated)
+	if tmux.sessionsCreated != 0 {
+		t.Errorf("sessions created = %d, want 0 (track on cooldown)", tmux.sessionsCreated)
 	}
 }
 
@@ -344,8 +341,8 @@ func TestRebalanceMove_Success(t *testing.T) {
 	}
 
 	// Scale called on frontend (1 pane created: from 1 → 2).
-	if tmux.panesCreated != 1 {
-		t.Errorf("panes created = %d, want 1", tmux.panesCreated)
+	if tmux.sessionsCreated != 1 {
+		t.Errorf("sessions created = %d, want 1", tmux.sessionsCreated)
 	}
 	if len(tmux.sentKeys) != 1 {
 		t.Errorf("sent keys = %d, want 1", len(tmux.sentKeys))
@@ -376,8 +373,8 @@ func TestRebalanceEngines_YardmasterExcluded(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Yardmaster should NOT be moved — no panes created.
-	if tmux.panesCreated != 0 {
-		t.Errorf("panes created = %d, want 0 (yardmaster should be excluded)", tmux.panesCreated)
+	// Yardmaster should NOT be moved — no sessions created.
+	if tmux.sessionsCreated != 0 {
+		t.Errorf("sessions created = %d, want 0 (yardmaster should be excluded)", tmux.sessionsCreated)
 	}
 }
