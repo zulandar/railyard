@@ -1,6 +1,10 @@
-# Railyard
+<p align="center">
+  <img src="assets/logo.svg" alt="Railyard" width="500"/>
+</p>
 
-**[therailyard.io](https://therailyard.io)**
+<p align="center">
+  <a href="https://therailyard.io"><strong>therailyard.io</strong></a>
+</p>
 
 Multi-agent AI orchestration for coding. Railyard coordinates multiple Claude Code agents across tracks (backend, frontend, infra) with per-branch isolation, a version-controlled SQL database, semantic code search, and automated supervision.
 

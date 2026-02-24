@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 200" width="600" height="200">
+  <defs>
+    <!-- Accent gradient — cyan/teal matching therailyard.io -->
+    <linearGradient id="accentGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#22D3EE"/>
+      <stop offset="100%" stop-color="#06B6D4"/>
+    </linearGradient>
+    <!-- Subtle glow -->
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="2" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- === ICON: Converging rail tracks with switch node === -->
+
+  <!-- Three parallel tracks converging into one -->
+  <!-- Top track -->
+  <path d="M 20 50 C 60 50, 80 70, 110 82"
+        stroke="#1E293B" stroke-width="3.5" fill="none" stroke-linecap="round"/>
+  <!-- Middle track -->
+  <path d="M 20 85 L 110 85"
+        stroke="#1E293B" stroke-width="3.5" fill="none" stroke-linecap="round"/>
+  <!-- Bottom track -->
+  <path d="M 20 120 C 60 120, 80 100, 110 88"
+        stroke="#1E293B" stroke-width="3.5" fill="none" stroke-linecap="round"/>
+
+  <!-- Cross ties on top track -->
+  <line x1="30" y1="47" x2="30" y2="53" stroke="#94A3B8" stroke-width="2" stroke-linecap="round"/>
+  <line x1="50" y1="47" x2="50" y2="55" stroke="#94A3B8" stroke-width="2" stroke-linecap="round"/>
+  <line x1="70" y1="52" x2="70" y2="62" stroke="#94A3B8" stroke-width="2" stroke-linecap="round"/>
+  <line x1="90" y1="63" x2="90" y2="73" stroke="#94A3B8" stroke-width="2" stroke-linecap="round"/>
+
+  <!-- Cross ties on middle track -->
+  <line x1="30" y1="82" x2="30" y2="88" stroke="#94A3B8" stroke-width="2" stroke-linecap="round"/>
+  <line x1="50" y1="82" x2="50" y2="88" stroke="#94A3B8" stroke-width="2" stroke-linecap="round"/>
+  <line x1="70" y1="82" x2="70" y2="88" stroke="#94A3B8" stroke-width="2" stroke-linecap="round"/>
+  <line x1="90" y1="82" x2="90" y2="88" stroke="#94A3B8" stroke-width="2" stroke-linecap="round"/>
+
+  <!-- Cross ties on bottom track -->
+  <line x1="30" y1="117" x2="30" y2="123" stroke="#94A3B8" stroke-width="2" stroke-linecap="round"/>
+  <line x1="50" y1="115" x2="50" y2="123" stroke="#94A3B8" stroke-width="2" stroke-linecap="round"/>
+  <line x1="70" y1="108" x2="70" y2="118" stroke="#94A3B8" stroke-width="2" stroke-linecap="round"/>
+  <line x1="90" y1="97" x2="90" y2="107" stroke="#94A3B8" stroke-width="2" stroke-linecap="round"/>
+
+  <!-- Convergence point / switch node -->
+  <circle cx="118" cy="85" r="9" fill="url(#accentGrad)" filter="url(#glow)"/>
+  <circle cx="118" cy="85" r="4.5" fill="#CFFAFE"/>
+
+  <!-- Output track from switch -->
+  <path d="M 127 85 L 160 85"
+        stroke="#1E293B" stroke-width="3.5" fill="none" stroke-linecap="round"/>
+  <!-- Ties on output -->
+  <line x1="135" y1="82" x2="135" y2="88" stroke="#94A3B8" stroke-width="2" stroke-linecap="round"/>
+  <line x1="148" y1="82" x2="148" y2="88" stroke="#94A3B8" stroke-width="2" stroke-linecap="round"/>
+
+  <!-- Small agent dots on each input track — site palette: cyan, emerald, amber -->
+  <circle cx="40" cy="50" r="3.5" fill="#22D3EE" opacity="0.9"/>
+  <circle cx="55" cy="85" r="3.5" fill="#34D399" opacity="0.9"/>
+  <circle cx="40" cy="120" r="3.5" fill="#F59E0B" opacity="0.9"/>
+
+  <!-- === WORDMARK === -->
+  <text x="178" y="103"
+        font-family="'SF Pro Display', 'Helvetica Neue', 'Segoe UI', sans-serif"
+        font-size="56"
+        font-weight="700"
+        letter-spacing="-1.5"
+        fill="#1E293B">
+    Rail<tspan fill="url(#accentGrad)">yard</tspan>
+  </text>
+
+  <!-- Tagline -->
+  <text x="182" y="125"
+        font-family="'SF Mono', 'Fira Code', 'Consolas', monospace"
+        font-size="12"
+        font-weight="400"
+        letter-spacing="3"
+        fill="#94A3B8">
+    MULTI-AGENT ORCHESTRATION
+  </text>
+
+</svg>
