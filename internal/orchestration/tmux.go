@@ -7,9 +7,10 @@ const legacySessionName = "railyard"
 const legacyDispatchSessionName = "railyard-dispatch"
 
 // SessionPrefix returns the prefix for all tmux sessions belonging to this owner.
-// Format: railyard_OWNER
+// Format: railyard_OWNER_ (trailing underscore prevents matching other owners,
+// e.g. "railyard_alice_" won't match "railyard_alice2_eng000").
 func SessionPrefix(owner string) string {
-	return fmt.Sprintf("railyard_%s", owner)
+	return fmt.Sprintf("railyard_%s_", owner)
 }
 
 // YardmasterSession returns the tmux session name for the yardmaster.

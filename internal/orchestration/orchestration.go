@@ -62,10 +62,13 @@ func Start(opts StartOpts) (*StartResult, error) {
 	}
 
 	// Check if already running (any session with our prefix).
-	ymSession := YardmasterSession(owner)
-	if opts.Tmux.SessionExists(ymSession) {
-		return nil, fmt.Errorf("orchestration: railyard session already running (use 'ry stop' first)")
+	prefix := SessionPrefix(owner)
+	existing, _ := opts.Tmux.ListSessions(prefix)
+	if len(existing) > 0 {
+		return nil, fmt.Errorf("orchestration: railyard session already running (%d session(s) found, use 'ry stop' first)", len(existing))
 	}
+
+	ymSession := YardmasterSession(owner)
 
 	// Determine engine count.
 	totalEngines := opts.Engines

@@ -396,7 +396,9 @@ func TestStart_NoTracks(t *testing.T) {
 
 func TestStart_AlreadyRunning(t *testing.T) {
 	db := testDB(t)
-	m := &mockTmux{sessionExists: true}
+	m := &mockTmux{
+		listSessions: []string{"railyard_test_yardmaster", "railyard_test_eng000"},
+	}
 	cfg := testConfig("test", config.TrackConfig{Name: "a", EngineSlots: 2})
 	_, err := Start(StartOpts{
 		Config:     cfg,
@@ -1528,8 +1530,8 @@ func TestFormatDuration_Zero(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestSessionNaming(t *testing.T) {
-	if got := SessionPrefix("testuser"); got != "railyard_testuser" {
-		t.Errorf("SessionPrefix = %q, want railyard_testuser", got)
+	if got := SessionPrefix("testuser"); got != "railyard_testuser_" {
+		t.Errorf("SessionPrefix = %q, want railyard_testuser_", got)
 	}
 	if got := YardmasterSession("testuser"); got != "railyard_testuser_yardmaster" {
 		t.Errorf("YardmasterSession = %q, want railyard_testuser_yardmaster", got)
