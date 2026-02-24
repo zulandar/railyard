@@ -45,8 +45,8 @@ type mockTmux struct {
 	sentKeys        []string
 }
 
-func (m *mockTmux) SessionExists(name string) bool      { return m.sessionExists }
-func (m *mockTmux) CreateSession(name string) error      { m.sessionsCreated++; return nil }
+func (m *mockTmux) SessionExists(name string) bool  { return m.sessionExists }
+func (m *mockTmux) CreateSession(name string) error { m.sessionsCreated++; return nil }
 func (m *mockTmux) SendKeys(session, keys string) error {
 	m.sentKeys = append(m.sentKeys, keys)
 	return nil

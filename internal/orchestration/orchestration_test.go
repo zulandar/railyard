@@ -27,10 +27,10 @@ type mockTmux struct {
 	listSessionsErr error
 
 	// Per-call overrides (take precedence over flat fields above).
-	sessionExistsFunc  func(name string) bool
-	createSessionFunc  func(name string) error
-	sendKeysFunc       func(session, keys string) error
-	listSessionsFunc   func(prefix string) ([]string, error)
+	sessionExistsFunc func(name string) bool
+	createSessionFunc func(name string) error
+	sendKeysFunc      func(session, keys string) error
+	listSessionsFunc  func(prefix string) ([]string, error)
 
 	// Recording.
 	createdSessions []string

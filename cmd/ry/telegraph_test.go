@@ -144,9 +144,9 @@ type mockTelegraphTmux struct {
 	signals       []string
 }
 
-func (m *mockTelegraphTmux) SessionExists(name string) bool         { return m.sessionExists }
-func (m *mockTelegraphTmux) CreateSession(name string) error        { return nil }
-func (m *mockTelegraphTmux) SendKeys(session, keys string) error    { return nil }
+func (m *mockTelegraphTmux) SessionExists(name string) bool      { return m.sessionExists }
+func (m *mockTelegraphTmux) CreateSession(name string) error     { return nil }
+func (m *mockTelegraphTmux) SendKeys(session, keys string) error { return nil }
 func (m *mockTelegraphTmux) SendSignal(session, signal string) error {
 	m.signals = append(m.signals, signal)
 	return nil
