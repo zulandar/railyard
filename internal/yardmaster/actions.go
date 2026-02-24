@@ -17,7 +17,7 @@ import (
 // handleRestartEngine restarts the engine assigned to the car in msg.CarID.
 // It looks up the engine via the car's assignee, reassigns the car back to the
 // pool, and launches a replacement engine on the same track.
-func handleRestartEngine(_ context.Context, db *gorm.DB, _ *config.Config, configPath string, msg models.Message, out io.Writer) {
+func handleRestartEngine(_ context.Context, db *gorm.DB, cfg *config.Config, configPath string, msg models.Message, out io.Writer) {
 	if msg.CarID == "" {
 		fmt.Fprintf(out, "Action restart-engine: no car-id provided, skipping\n")
 		return
@@ -38,7 +38,7 @@ func handleRestartEngine(_ context.Context, db *gorm.DB, _ *config.Config, confi
 	}
 
 	// Launch a replacement engine on the same track.
-	if err := orchestration.RestartEngine(db, configPath, eng.ID, nil); err != nil {
+	if err := orchestration.RestartEngine(db, cfg, configPath, eng.ID, nil); err != nil {
 		log.Printf("restart-engine: restart engine %s: %v", eng.ID, err)
 		fmt.Fprintf(out, "Action restart-engine: failed to restart %s: %v\n", eng.ID, err)
 	}

@@ -450,11 +450,11 @@ func runEngineScale(cmd *cobra.Command, configPath, track string, count int) err
 
 	out := cmd.OutOrStdout()
 	fmt.Fprintf(out, "Track %s: %d → %d engines\n", result.Track, result.Previous, result.Current)
-	if len(result.PanesCreated) > 0 {
-		fmt.Fprintf(out, "  Created %d new engine panes\n", len(result.PanesCreated))
+	if len(result.SessionsCreated) > 0 {
+		fmt.Fprintf(out, "  Created %d new engine sessions\n", len(result.SessionsCreated))
 	}
-	if len(result.PanesKilled) > 0 {
-		fmt.Fprintf(out, "  Removed %d engines\n", len(result.PanesKilled))
+	if len(result.SessionsKilled) > 0 {
+		fmt.Fprintf(out, "  Removed %d engines\n", len(result.SessionsKilled))
 	}
 	return nil
 }
@@ -536,12 +536,12 @@ func newEngineRestartCmd() *cobra.Command {
 }
 
 func runEngineRestart(cmd *cobra.Command, configPath, engineID string) error {
-	_, gormDB, err := connectFromConfig(configPath)
+	cfg, gormDB, err := connectFromConfig(configPath)
 	if err != nil {
 		return err
 	}
 
-	if err := orchestration.RestartEngine(gormDB, configPath, engineID, nil); err != nil {
+	if err := orchestration.RestartEngine(gormDB, cfg, configPath, engineID, nil); err != nil {
 		return err
 	}
 

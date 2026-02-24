@@ -122,11 +122,11 @@ type ScaleOpts struct {
 
 // ScaleResult holds the outcome of a scale operation.
 type ScaleResult struct {
-	Track        string
-	Previous     int
-	Current      int
-	PanesCreated []string
-	PanesKilled  []string
+	Track           string
+	Previous        int
+	Current         int
+	SessionsCreated []string
+	SessionsKilled  []string
 }
 
 // Scale adjusts the engine count for a track.
@@ -147,6 +147,8 @@ func Scale(opts ScaleOpts) (*ScaleResult, error) {
 		opts.Tmux = DefaultTmux
 	}
 
+	owner := opts.Config.Owner
+
 	// Validate track exists.
 	var maxSlots int
 	found := false
@@ -164,7 +166,9 @@ func Scale(opts ScaleOpts) (*ScaleResult, error) {
 		return nil, fmt.Errorf("orchestration: count %d exceeds max engine_slots %d for track %q", opts.Count, maxSlots, opts.Track)
 	}
 
-	if !opts.Tmux.SessionExists(SessionName) {
+	// Check that at least the yardmaster session is running.
+	ymSession := YardmasterSession(owner)
+	if !opts.Tmux.SessionExists(ymSession) {
 		return nil, fmt.Errorf("orchestration: no railyard session running")
 	}
 
@@ -185,19 +189,21 @@ func Scale(opts ScaleOpts) (*ScaleResult, error) {
 	}
 
 	if delta > 0 {
-		// Scale up: create new panes.
+		// Scale up: find next available engine index and create new sessions.
+		nextIdx := nextEngineIndex(opts.Tmux, owner)
 		for i := 0; i < delta; i++ {
-			pane, err := opts.Tmux.NewPane(SessionName)
-			if err != nil {
-				return result, fmt.Errorf("orchestration: create engine pane: %w", err)
+			engSession := EngineSession(owner, nextIdx)
+			nextIdx++
+
+			if err := opts.Tmux.CreateSession(engSession); err != nil {
+				return result, fmt.Errorf("orchestration: create engine session: %w", err)
 			}
 			engineCmd := fmt.Sprintf("ry engine start --config %s --track %s", opts.ConfigPath, opts.Track)
-			if err := opts.Tmux.SendKeys(pane, engineCmd); err != nil {
+			if err := opts.Tmux.SendKeys(engSession, engineCmd); err != nil {
 				return result, fmt.Errorf("orchestration: start engine on %s: %w", opts.Track, err)
 			}
-			result.PanesCreated = append(result.PanesCreated, pane)
+			result.SessionsCreated = append(result.SessionsCreated, engSession)
 		}
-		_ = opts.Tmux.TileLayout(SessionName)
 	} else {
 		// Scale down: drain newest engines first (LIFO by StartedAt).
 		sort.Slice(currentEngines, func(i, j int) bool {
@@ -209,11 +215,33 @@ func Scale(opts ScaleOpts) (*ScaleResult, error) {
 			// Mark as dead.
 			opts.DB.Model(&models.Engine{}).Where("id = ?", eng.ID).
 				Update("status", "dead")
-			result.PanesKilled = append(result.PanesKilled, eng.ID)
+			result.SessionsKilled = append(result.SessionsKilled, eng.ID)
 		}
 	}
 
 	return result, nil
+}
+
+// nextEngineIndex finds the next available engine session index by scanning
+// existing sessions with the railyard_OWNER_eng prefix.
+func nextEngineIndex(tmux Tmux, owner string) int {
+	prefix := fmt.Sprintf("railyard_%s_eng", owner)
+	sessions, err := tmux.ListSessions(prefix)
+	if err != nil || len(sessions) == 0 {
+		return 0
+	}
+	maxIdx := -1
+	for _, s := range sessions {
+		// Extract the NNN suffix from railyard_OWNER_engNNN.
+		suffix := s[len(prefix):]
+		var idx int
+		if _, err := fmt.Sscanf(suffix, "%d", &idx); err == nil {
+			if idx > maxIdx {
+				maxIdx = idx
+			}
+		}
+	}
+	return maxIdx + 1
 }
 
 // EngineListOpts configures ry engine list.
@@ -259,18 +287,24 @@ func ListEngines(opts EngineListOpts) ([]EngineInfo, error) {
 	return infos, nil
 }
 
-// RestartEngine kills an engine's process and launches a replacement.
-func RestartEngine(db *gorm.DB, configPath, engineID string, tmux Tmux) error {
+// RestartEngine kills an engine's process and launches a replacement in a new session.
+func RestartEngine(db *gorm.DB, cfg *config.Config, configPath, engineID string, tmux Tmux) error {
 	if db == nil {
 		return fmt.Errorf("orchestration: database connection is required")
 	}
 	if engineID == "" {
 		return fmt.Errorf("orchestration: engine ID is required")
 	}
+	if cfg == nil {
+		return fmt.Errorf("orchestration: config is required")
+	}
 	if tmux == nil {
 		tmux = DefaultTmux
 	}
-	if !tmux.SessionExists(SessionName) {
+
+	owner := cfg.Owner
+	ymSession := YardmasterSession(owner)
+	if !tmux.SessionExists(ymSession) {
 		return fmt.Errorf("orchestration: no railyard session running")
 	}
 
@@ -284,16 +318,16 @@ func RestartEngine(db *gorm.DB, configPath, engineID string, tmux Tmux) error {
 	db.Model(&models.Engine{}).Where("id = ?", engineID).
 		Update("status", "dead")
 
-	// Create new pane with same track.
-	pane, err := tmux.NewPane(SessionName)
-	if err != nil {
-		return fmt.Errorf("orchestration: create replacement pane: %w", err)
+	// Create new session with same track.
+	nextIdx := nextEngineIndex(tmux, owner)
+	engSession := EngineSession(owner, nextIdx)
+	if err := tmux.CreateSession(engSession); err != nil {
+		return fmt.Errorf("orchestration: create replacement session: %w", err)
 	}
 	engineCmd := fmt.Sprintf("ry engine start --config %s --track %s", configPath, eng.Track)
-	if err := tmux.SendKeys(pane, engineCmd); err != nil {
+	if err := tmux.SendKeys(engSession, engineCmd); err != nil {
 		return fmt.Errorf("orchestration: start replacement engine on %s: %w", eng.Track, err)
 	}
 
-	_ = tmux.TileLayout(SessionName)
 	return nil
 }

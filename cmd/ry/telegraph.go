@@ -274,13 +274,8 @@ func runTelegraphStop(cmd *cobra.Command) error {
 		return fmt.Errorf("telegraph: no telegraph session running")
 	}
 
-	// Send C-c to all panes in the telegraph session.
-	panes, err := tmux.ListPanes(telegraphSessionName)
-	if err == nil {
-		for _, p := range panes {
-			_ = tmux.SendSignal(p, "C-c")
-		}
-	}
+	// Send C-c to the telegraph session.
+	_ = tmux.SendSignal(telegraphSessionName, "C-c")
 
 	fmt.Fprintf(out, "Telegraph shutdown signal sent to session %s\n", telegraphSessionName)
 	return nil

@@ -141,22 +141,18 @@ func TestTelegraphStartCmd_Help(t *testing.T) {
 
 type mockTelegraphTmux struct {
 	sessionExists bool
-	panes         []string
 	signals       []string
 }
 
-func (m *mockTelegraphTmux) SessionExists(name string) bool         { return m.sessionExists }
-func (m *mockTelegraphTmux) CreateSession(name string) error        { return nil }
-func (m *mockTelegraphTmux) NewPane(session string) (string, error) { return "", nil }
-func (m *mockTelegraphTmux) SendKeys(paneID, keys string) error     { return nil }
-func (m *mockTelegraphTmux) SendSignal(paneID, signal string) error {
+func (m *mockTelegraphTmux) SessionExists(name string) bool      { return m.sessionExists }
+func (m *mockTelegraphTmux) CreateSession(name string) error     { return nil }
+func (m *mockTelegraphTmux) SendKeys(session, keys string) error { return nil }
+func (m *mockTelegraphTmux) SendSignal(session, signal string) error {
 	m.signals = append(m.signals, signal)
 	return nil
 }
-func (m *mockTelegraphTmux) KillPane(paneID string) error               { return nil }
-func (m *mockTelegraphTmux) KillSession(name string) error              { return nil }
-func (m *mockTelegraphTmux) ListPanes(session string) ([]string, error) { return m.panes, nil }
-func (m *mockTelegraphTmux) TileLayout(session string) error            { return nil }
+func (m *mockTelegraphTmux) KillSession(name string) error                { return nil }
+func (m *mockTelegraphTmux) ListSessions(prefix string) ([]string, error) { return nil, nil }
 
 func TestTelegraphStatus_Running(t *testing.T) {
 	mock := &mockTelegraphTmux{sessionExists: true}
@@ -230,7 +226,6 @@ func TestTelegraphStop_NoSession(t *testing.T) {
 func TestTelegraphStop_SendsSignal(t *testing.T) {
 	mock := &mockTelegraphTmux{
 		sessionExists: true,
-		panes:         []string{"%0"},
 	}
 	orig := tmuxForTelegraph
 	tmuxForTelegraph = func() orchestration.Tmux { return mock }

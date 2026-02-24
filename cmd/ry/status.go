@@ -29,7 +29,7 @@ func newStatusCmd() *cobra.Command {
 }
 
 func runStatus(cmd *cobra.Command, configPath string, watch bool) error {
-	_, gormDB, err := connectFromConfig(configPath)
+	cfg, gormDB, err := connectFromConfig(configPath)
 	if err != nil {
 		return err
 	}
@@ -37,7 +37,7 @@ func runStatus(cmd *cobra.Command, configPath string, watch bool) error {
 	out := cmd.OutOrStdout()
 
 	for {
-		info, err := orchestration.Status(gormDB, nil)
+		info, err := orchestration.Status(gormDB, nil, cfg)
 		if err != nil {
 			return err
 		}

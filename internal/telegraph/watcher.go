@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zulandar/railyard/internal/config"
 	"github.com/zulandar/railyard/internal/models"
 	"github.com/zulandar/railyard/internal/orchestration"
 	"gorm.io/gorm"
@@ -20,10 +21,11 @@ type StatusProvider interface {
 type defaultStatusProvider struct {
 	db   *gorm.DB
 	tmux orchestration.Tmux
+	cfg  *config.Config
 }
 
 func (p *defaultStatusProvider) Status() (*orchestration.StatusInfo, error) {
-	return orchestration.Status(p.db, p.tmux)
+	return orchestration.Status(p.db, p.tmux, p.cfg)
 }
 
 // Default watcher intervals.
