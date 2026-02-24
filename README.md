@@ -1,5 +1,7 @@
 # Railyard
 
+**[therailyard.io](https://therailyard.io)**
+
 Multi-agent AI orchestration for coding. Railyard coordinates multiple Claude Code agents across tracks (backend, frontend, infra) with per-branch isolation, a version-controlled SQL database, semantic code search, and automated supervision.
 
 Each developer runs their own Railyard instance against the same repo. Agents work on isolated branches (`ry/{owner}/{track}/{car-id}`), and a supervisor (Yardmaster) handles merges, stall detection, and dependency management.
