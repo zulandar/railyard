@@ -124,6 +124,20 @@ func TestDetectOwner(t *testing.T) {
 	}
 }
 
+func TestDetectOwner_NonASCIIFallsThrough(t *testing.T) {
+	dir := initGitRepo(t)
+	// Set user.name to something that sanitizes to empty.
+	cmd := exec.Command("git", "config", "user.name", "日本語")
+	cmd.Dir = dir
+	cmd.Run()
+
+	owner := detectOwner(dir)
+	// Should fall through to $USER or "railyard", never empty.
+	if owner == "" {
+		t.Fatal("detectOwner returned empty string for non-ASCII name")
+	}
+}
+
 // TestDetectLanguages_GoRepo verifies that detectLanguages identifies a Go
 // repository by the presence of a go.mod file.
 func TestDetectLanguages_GoRepo(t *testing.T) {
@@ -533,6 +547,48 @@ func TestInitCmd_InteractiveOverwrite(t *testing.T) {
 	}
 	if !strings.Contains(output, "Wrote") {
 		t.Error("should confirm config was written")
+	}
+}
+
+func TestInitCmd_FailsOnEmptyRepo(t *testing.T) {
+	// Create a git repo with NO remote.
+	dir := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		c := exec.Command("git", args...)
+		c.Dir = dir
+		out, err := c.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %s: %v", args, out, err)
+		}
+	}
+	run("init", "-b", "main")
+	run("config", "user.name", "Test")
+	run("config", "user.email", "test@test.com")
+	os.WriteFile(filepath.Join(dir, "README.md"), []byte("# test"), 0644)
+	run("add", ".")
+	run("commit", "-m", "init")
+
+	// Must chdir into the no-remote repo so detectGitRoot finds it.
+	orig, _ := os.Getwd()
+	os.Chdir(dir)
+	t.Cleanup(func() { os.Chdir(orig) })
+
+	cmd := newRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"init", "--yes", "--skip-db"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when repo URL is empty")
+	}
+	if !strings.Contains(err.Error(), "repo URL is required") {
+		t.Errorf("error should mention repo URL: %v", err)
+	}
+	// Config file should NOT have been written.
+	if _, statErr := os.Stat(filepath.Join(dir, "railyard.yaml")); statErr == nil {
+		t.Error("config file should not be written when repo URL is empty")
 	}
 }
 

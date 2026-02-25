@@ -58,13 +58,15 @@ func detectOwner(dir string) string {
 	cmd := exec.Command("git", "config", "user.name")
 	cmd.Dir = dir
 	if out, err := cmd.Output(); err == nil {
-		if name := strings.TrimSpace(string(out)); name != "" {
-			return sanitizeOwner(name)
+		if s := sanitizeOwner(strings.TrimSpace(string(out))); s != "" {
+			return s
 		}
 	}
 
 	if user := os.Getenv("USER"); user != "" {
-		return sanitizeOwner(user)
+		if s := sanitizeOwner(user); s != "" {
+			return s
+		}
 	}
 
 	return "railyard"
@@ -412,11 +414,13 @@ func runInit(cmd *cobra.Command, configPath string, yes, skipDB, skipCoco bool) 
 	if !yes {
 		fmt.Fprintln(out, "\nConfigure Railyard:")
 		owner = promptValue(in, out, "Owner", owner)
-		if remote == "" {
-			remote = promptValue(in, out, "Git remote URL", "")
-		} else {
-			remote = promptValue(in, out, "Git remote URL", remote)
-		}
+		remote = promptValue(in, out, "Git remote URL", remote)
+	}
+
+	// Fail fast if repo URL is still empty — config.Load will reject it,
+	// so don't write an unusable file.
+	if remote == "" {
+		return fmt.Errorf("repo URL is required (no origin remote detected and none provided)")
 	}
 
 	// Generate tracks.
