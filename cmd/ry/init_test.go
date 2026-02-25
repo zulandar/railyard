@@ -280,6 +280,69 @@ func TestEnsureDoltDataDir(t *testing.T) {
 	}
 }
 
+func TestLanguagePreset(t *testing.T) {
+	tests := []struct {
+		lang        string
+		wantName    string
+		wantTest    string
+		wantPattern string // first file_pattern
+	}{
+		{"go", "backend", "go test ./...", "**/*.go"},
+		{"typescript", "frontend", "npm test", "**/*.ts"},
+		{"python", "backend", "pytest", "**/*.py"},
+		{"rust", "backend", "cargo test", "**/*.rs"},
+		{"unknown-lang", "unknown-lang", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.lang, func(t *testing.T) {
+			track := languagePreset(tt.lang)
+			if track.Name != tt.wantName {
+				t.Errorf("Name = %q, want %q", track.Name, tt.wantName)
+			}
+			if track.TestCommand != tt.wantTest {
+				t.Errorf("TestCommand = %q, want %q", track.TestCommand, tt.wantTest)
+			}
+			if tt.wantPattern != "" && (len(track.FilePatterns) == 0 || track.FilePatterns[0] != tt.wantPattern) {
+				t.Errorf("FilePatterns[0] = %v, want %q", track.FilePatterns, tt.wantPattern)
+			}
+		})
+	}
+}
+
+func TestGenerateTracks(t *testing.T) {
+	tracks := generateTracks([]string{"go", "typescript"})
+	if len(tracks) != 2 {
+		t.Fatalf("expected 2 tracks, got %d", len(tracks))
+	}
+	if tracks[0].Name != "backend" {
+		t.Errorf("tracks[0].Name = %q, want %q", tracks[0].Name, "backend")
+	}
+	if tracks[1].Name != "frontend" {
+		t.Errorf("tracks[1].Name = %q, want %q", tracks[1].Name, "frontend")
+	}
+}
+
+func TestGenerateTracks_NamingConflict(t *testing.T) {
+	tracks := generateTracks([]string{"go", "python"})
+	if len(tracks) != 2 {
+		t.Fatalf("expected 2 tracks, got %d", len(tracks))
+	}
+	names := map[string]bool{}
+	for _, tr := range tracks {
+		if names[tr.Name] {
+			t.Errorf("duplicate track name: %q", tr.Name)
+		}
+		names[tr.Name] = true
+	}
+}
+
+func TestGenerateTracks_Empty(t *testing.T) {
+	tracks := generateTracks(nil)
+	if len(tracks) != 0 {
+		t.Errorf("expected 0 tracks, got %d", len(tracks))
+	}
+}
+
 func TestEnsureDoltRunning_AlreadyRunning(t *testing.T) {
 	// We can't easily test the full startup without a real Dolt server,
 	// so we test the error path: connection to a dead port should return

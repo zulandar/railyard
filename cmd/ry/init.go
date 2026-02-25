@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zulandar/railyard/internal/config"
 	"github.com/zulandar/railyard/internal/db"
 )
 
@@ -186,4 +187,82 @@ func ensureDoltRunning(out io.Writer, host string, port int) error {
 		}
 	}
 	return fmt.Errorf("dolt did not become ready within 10s — check %s", logFile)
+}
+
+// languagePreset returns a sensible default TrackConfig for a given language.
+func languagePreset(lang string) config.TrackConfig {
+	switch lang {
+	case "go":
+		return config.TrackConfig{
+			Name: "backend", Language: "go",
+			FilePatterns: []string{"**/*.go"},
+			EngineSlots:  2,
+			TestCommand:  "go test ./...",
+			Conventions:  map[string]interface{}{"style": "stdlib-first"},
+		}
+	case "typescript":
+		return config.TrackConfig{
+			Name: "frontend", Language: "typescript",
+			FilePatterns: []string{"**/*.ts", "**/*.tsx"},
+			EngineSlots:  2,
+			TestCommand:  "npm test",
+		}
+	case "javascript":
+		return config.TrackConfig{
+			Name: "frontend", Language: "javascript",
+			FilePatterns: []string{"**/*.js", "**/*.jsx"},
+			EngineSlots:  2,
+			TestCommand:  "npm test",
+		}
+	case "python":
+		return config.TrackConfig{
+			Name: "backend", Language: "python",
+			FilePatterns: []string{"**/*.py"},
+			EngineSlots:  2,
+			TestCommand:  "pytest",
+		}
+	case "rust":
+		return config.TrackConfig{
+			Name: "backend", Language: "rust",
+			FilePatterns: []string{"**/*.rs"},
+			EngineSlots:  2,
+			TestCommand:  "cargo test",
+		}
+	case "java":
+		return config.TrackConfig{
+			Name: "backend", Language: "java",
+			FilePatterns: []string{"**/*.java"},
+			EngineSlots:  2,
+			TestCommand:  "mvn test",
+		}
+	case "ruby":
+		return config.TrackConfig{
+			Name: "backend", Language: "ruby",
+			FilePatterns: []string{"**/*.rb"},
+			EngineSlots:  2,
+			TestCommand:  "bundle exec rspec",
+		}
+	default:
+		return config.TrackConfig{
+			Name: lang, Language: lang,
+			EngineSlots: 2,
+		}
+	}
+}
+
+// generateTracks builds TrackConfig entries from detected languages,
+// resolving name conflicts by suffixing with the language name.
+func generateTracks(languages []string) []config.TrackConfig {
+	var tracks []config.TrackConfig
+	usedNames := map[string]bool{}
+
+	for _, lang := range languages {
+		track := languagePreset(lang)
+		if usedNames[track.Name] {
+			track.Name = track.Name + "-" + lang
+		}
+		usedNames[track.Name] = true
+		tracks = append(tracks, track)
+	}
+	return tracks
 }
