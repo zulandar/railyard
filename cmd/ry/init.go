@@ -7,13 +7,19 @@ import (
 	"strings"
 )
 
+// Pre-compiled regexps for sanitizeOwner.
+var (
+	reNonAlphanumHyphen = regexp.MustCompile(`[^a-z0-9-]`)
+	reMultipleHyphens   = regexp.MustCompile(`-{2,}`)
+)
+
 // detectGitRoot runs `git rev-parse --show-toplevel` from dir and returns
 // the trimmed absolute path to the repository root, or an error if dir is
 // not inside a git repository.
 func detectGitRoot(dir string) (string, error) {
 	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
 	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
+	out, err := cmd.Output()
 	if err != nil {
 		return "", err
 	}
@@ -26,7 +32,7 @@ func detectGitRoot(dir string) (string, error) {
 func detectGitRemote(dir string) (string, error) {
 	cmd := exec.Command("git", "remote", "get-url", "origin")
 	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
+	out, err := cmd.Output()
 	if err != nil {
 		// No remote configured is not an error for our purposes.
 		return "", nil
@@ -40,7 +46,7 @@ func detectGitRemote(dir string) (string, error) {
 func detectOwner(dir string) string {
 	cmd := exec.Command("git", "config", "user.name")
 	cmd.Dir = dir
-	if out, err := cmd.CombinedOutput(); err == nil {
+	if out, err := cmd.Output(); err == nil {
 		if name := strings.TrimSpace(string(out)); name != "" {
 			return sanitizeOwner(name)
 		}
@@ -50,7 +56,7 @@ func detectOwner(dir string) string {
 		return sanitizeOwner(user)
 	}
 
-	return sanitizeOwner("railyard")
+	return "railyard"
 }
 
 // sanitizeOwner normalises a human name into a lowercase, hyphen-separated
@@ -63,13 +69,8 @@ func sanitizeOwner(s string) string {
 	s = strings.ReplaceAll(s, " ", "-")
 	s = strings.ReplaceAll(s, "_", "-")
 
-	// Strip characters that are not alphanumeric or hyphens.
-	re := regexp.MustCompile(`[^a-z0-9-]`)
-	s = re.ReplaceAllString(s, "")
-
-	// Collapse consecutive hyphens.
-	multi := regexp.MustCompile(`-{2,}`)
-	s = multi.ReplaceAllString(s, "-")
+	s = reNonAlphanumHyphen.ReplaceAllString(s, "")
+	s = reMultipleHyphens.ReplaceAllString(s, "-")
 
 	// Trim leading/trailing hyphens.
 	s = strings.Trim(s, "-")
