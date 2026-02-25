@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/zulandar/railyard/internal/config"
 )
 
 // initGitRepo creates a temporary git repository with user.name "TestUser",
@@ -360,5 +362,53 @@ func TestEnsureDoltRunning_AlreadyRunning(t *testing.T) {
 	errStr := err.Error()
 	if !strings.Contains(errStr, "dolt") && !strings.Contains(errStr, "Dolt") {
 		t.Errorf("error should mention dolt: %v", err)
+	}
+}
+
+func TestRenderConfig(t *testing.T) {
+	tracks := []config.TrackConfig{
+		{
+			Name: "backend", Language: "go",
+			FilePatterns: []string{"**/*.go"},
+			EngineSlots:  2,
+			TestCommand:  "go test ./...",
+		},
+	}
+	yamlStr, err := renderConfig("alice", "git@github.com:org/repo.git", 3306, tracks)
+	if err != nil {
+		t.Fatalf("renderConfig: %v", err)
+	}
+
+	// Validate the output can be parsed by config.Parse.
+	cfg, err := config.Parse([]byte(yamlStr))
+	if err != nil {
+		t.Fatalf("config.Parse failed on rendered YAML: %v\n---\n%s", err, yamlStr)
+	}
+	if cfg.Owner != "alice" {
+		t.Errorf("Owner = %q, want %q", cfg.Owner, "alice")
+	}
+	if cfg.Repo != "git@github.com:org/repo.git" {
+		t.Errorf("Repo = %q, want %q", cfg.Repo, "git@github.com:org/repo.git")
+	}
+	if len(cfg.Tracks) != 1 || cfg.Tracks[0].Name != "backend" {
+		t.Errorf("Tracks = %+v, want 1 track named 'backend'", cfg.Tracks)
+	}
+}
+
+func TestRenderConfig_MultipleTracks(t *testing.T) {
+	tracks := []config.TrackConfig{
+		{Name: "backend", Language: "go", FilePatterns: []string{"**/*.go"}, EngineSlots: 2, TestCommand: "go test ./..."},
+		{Name: "frontend", Language: "typescript", FilePatterns: []string{"**/*.ts", "**/*.tsx"}, EngineSlots: 2, TestCommand: "npm test"},
+	}
+	yamlStr, err := renderConfig("bob", "git@github.com:org/app.git", 3306, tracks)
+	if err != nil {
+		t.Fatalf("renderConfig: %v", err)
+	}
+	cfg, err := config.Parse([]byte(yamlStr))
+	if err != nil {
+		t.Fatalf("config.Parse: %v\n---\n%s", err, yamlStr)
+	}
+	if len(cfg.Tracks) != 2 {
+		t.Fatalf("expected 2 tracks, got %d", len(cfg.Tracks))
 	}
 }
