@@ -412,3 +412,96 @@ func TestRenderConfig_MultipleTracks(t *testing.T) {
 		t.Fatalf("expected 2 tracks, got %d", len(cfg.Tracks))
 	}
 }
+
+func TestInitCmd_Help(t *testing.T) {
+	cmd := newRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{"init", "--help"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("init --help: %v", err)
+	}
+	output := out.String()
+	if !strings.Contains(output, "Initialize Railyard") {
+		t.Errorf("help should mention 'Initialize Railyard': %s", output)
+	}
+	if !strings.Contains(output, "--yes") {
+		t.Errorf("help should show --yes flag: %s", output)
+	}
+	if !strings.Contains(output, "--config") {
+		t.Errorf("help should show --config flag: %s", output)
+	}
+	if !strings.Contains(output, "--skip-db") {
+		t.Errorf("help should show --skip-db flag: %s", output)
+	}
+}
+
+func TestInitCmd_AlreadyExists_Abort(t *testing.T) {
+	dir := initGitRepo(t)
+	configPath := filepath.Join(dir, "railyard.yaml")
+	os.WriteFile(configPath, []byte("owner: existing\nrepo: x\ntracks:\n  - name: t\n    language: go\n"), 0644)
+
+	cmd := newRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetIn(strings.NewReader("n\n"))
+	cmd.SetArgs([]string{"init", "--config", configPath})
+	cmd.Execute()
+	output := out.String()
+	if !strings.Contains(output, "already exists") {
+		t.Errorf("expected 'already exists' warning: %s", output)
+	}
+	if !strings.Contains(output, "Aborted") {
+		t.Errorf("expected 'Aborted' message: %s", output)
+	}
+}
+
+func TestInitCmd_NonInteractive_SkipDB(t *testing.T) {
+	dir := initGitRepo(t)
+	configPath := filepath.Join(dir, "railyard.yaml")
+
+	cmd := newRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"init", "--yes", "--skip-db", "--config", configPath})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("init --yes --skip-db: %v", err)
+	}
+	output := out.String()
+	if !strings.Contains(output, "Wrote") {
+		t.Errorf("expected 'Wrote' message: %s", output)
+	}
+	if !strings.Contains(output, "Skipped database") {
+		t.Errorf("expected 'Skipped database' message: %s", output)
+	}
+	// Verify config file was created and is valid.
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	cfg, err := config.Parse(data)
+	if err != nil {
+		t.Fatalf("parse generated config: %v\n---\n%s", err, string(data))
+	}
+	if cfg.Owner == "" {
+		t.Error("owner should not be empty")
+	}
+	if len(cfg.Tracks) == 0 {
+		t.Error("should have at least one track")
+	}
+}
+
+func TestInitCmd_NonGitDir(t *testing.T) {
+	dir := t.TempDir()
+	cmd := newRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"init", "--yes", "--skip-db", "--config", filepath.Join(dir, "railyard.yaml")})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for non-git directory")
+	}
+}

@@ -13,6 +13,7 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/spf13/cobra"
 	"github.com/zulandar/railyard/internal/config"
 	"github.com/zulandar/railyard/internal/db"
 )
@@ -326,4 +327,195 @@ func renderConfig(owner, repo string, doltPort int, tracks []config.TrackConfig)
 		return "", fmt.Errorf("render config: %w", err)
 	}
 	return buf.String(), nil
+}
+
+// newInitCmd creates the "ry init" cobra command.
+func newInitCmd() *cobra.Command {
+	var (
+		configPath string
+		yes        bool
+		skipDB     bool
+		skipCoco   bool
+	)
+
+	cmd := &cobra.Command{
+		Use:   "init",
+		Short: "Initialize Railyard in this repository",
+		Long: `Initialize Railyard in this repository.
+
+Detects your repo's languages, generates railyard.yaml, starts Dolt,
+initializes the database, and optionally sets up CocoIndex semantic search.
+
+Run this once in any git repository to get started with Railyard.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runInit(cmd, configPath, yes, skipDB, skipCoco)
+		},
+	}
+
+	cmd.Flags().StringVarP(&configPath, "config", "c", "railyard.yaml", "path to write the config file")
+	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "accept all defaults without prompting")
+	cmd.Flags().BoolVar(&skipDB, "skip-db", false, "skip Dolt startup and database initialization")
+	cmd.Flags().BoolVar(&skipCoco, "skip-cocoindex", false, "skip CocoIndex setup prompt")
+	return cmd
+}
+
+// runInit is the main orchestrator for the "ry init" command.
+func runInit(cmd *cobra.Command, configPath string, yes, skipDB, skipCoco bool) error {
+	out := cmd.OutOrStdout()
+	in := cmd.InOrStdin()
+
+	// Resolve configPath to absolute.
+	if !filepath.IsAbs(configPath) {
+		wd, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("get working directory: %w", err)
+		}
+		configPath = filepath.Join(wd, configPath)
+	}
+	configDir := filepath.Dir(configPath)
+
+	// Step 1: Detect git root.
+	gitRoot, err := detectGitRoot(configDir)
+	if err != nil {
+		return fmt.Errorf("ry init must be run inside a git repository: %w", err)
+	}
+	fmt.Fprintf(out, "Detected git repository: %s\n", gitRoot)
+
+	// Step 2: Check if config already exists.
+	if _, err := os.Stat(configPath); err == nil {
+		if yes {
+			fmt.Fprintf(out, "Config %s already exists — overwriting (--yes).\n", configPath)
+		} else {
+			fmt.Fprintf(out, "Config %s already exists.\n", configPath)
+			if !promptYesNo(in, out, "Overwrite?", false) {
+				fmt.Fprintln(out, "Aborted.")
+				return nil
+			}
+		}
+	}
+
+	// Step 3: Detect repo info.
+	remote, _ := detectGitRemote(gitRoot)
+	owner := detectOwner(gitRoot)
+	langs := detectLanguages(gitRoot)
+
+	fmt.Fprintf(out, "Detected remote: %s\n", remote)
+	fmt.Fprintf(out, "Detected owner: %s\n", owner)
+	if len(langs) > 0 {
+		fmt.Fprintf(out, "Detected languages: %s\n", strings.Join(langs, ", "))
+	} else {
+		fmt.Fprintln(out, "No languages detected — you can add tracks manually later.")
+	}
+
+	// Step 4: Interactive confirmation (unless --yes).
+	doltPort := 3306
+	if !yes {
+		fmt.Fprintln(out, "\nConfigure Railyard:")
+		owner = promptValue(in, out, "Owner", owner)
+		if remote == "" {
+			remote = promptValue(in, out, "Git remote URL", "")
+		} else {
+			remote = promptValue(in, out, "Git remote URL", remote)
+		}
+	}
+
+	// Generate tracks.
+	tracks := generateTracks(langs)
+	if len(tracks) == 0 {
+		tracks = []config.TrackConfig{
+			{Name: "default", Language: "mixed", EngineSlots: 2},
+		}
+	}
+
+	if !yes && len(tracks) > 0 {
+		fmt.Fprintf(out, "\nGenerated %d track(s):\n", len(tracks))
+		for _, tr := range tracks {
+			fmt.Fprintf(out, "  - %s (%s)\n", tr.Name, tr.Language)
+		}
+		if !promptYesNo(in, out, "Use these tracks?", true) {
+			fmt.Fprintln(out, "Edit the generated railyard.yaml manually after init completes.")
+		}
+	}
+
+	// Step 5: Render and write config.
+	yamlContent, err := renderConfig(owner, remote, doltPort, tracks)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(configPath, []byte(yamlContent), 0644); err != nil {
+		return fmt.Errorf("write config: %w", err)
+	}
+	fmt.Fprintf(out, "\nWrote %s\n", configPath)
+
+	if skipDB {
+		fmt.Fprintln(out, "\nSkipped database initialization (--skip-db).")
+		fmt.Fprintln(out, "Run these when ready:")
+		fmt.Fprintf(out, "  ry db start -c %s\n", configPath)
+		fmt.Fprintf(out, "  ry db init -c %s\n", configPath)
+		return nil
+	}
+
+	// Step 6: Ensure Dolt is running.
+	fmt.Fprintln(out, "")
+	if err := ensureDoltRunning(out, "127.0.0.1", doltPort); err != nil {
+		return fmt.Errorf("ensure dolt: %w", err)
+	}
+
+	// Step 7: Initialize the database.
+	fmt.Fprintln(out, "")
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		return fmt.Errorf("load generated config: %w", err)
+	}
+
+	adminDB, err := db.ConnectAdmin(cfg.Dolt.Host, cfg.Dolt.Port)
+	if err != nil {
+		return fmt.Errorf("connect to Dolt: %w", err)
+	}
+	if err := db.CreateDatabase(adminDB, cfg.Dolt.Database); err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "Database %s ready\n", cfg.Dolt.Database)
+
+	gormDB, err := db.Connect(cfg.Dolt.Host, cfg.Dolt.Port, cfg.Dolt.Database)
+	if err != nil {
+		return fmt.Errorf("connect to %s: %w", cfg.Dolt.Database, err)
+	}
+	if err := db.AutoMigrate(gormDB); err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "Migrated %d tables\n", len(db.AllModels()))
+
+	if err := db.SeedTracks(gormDB, cfg.Tracks); err != nil {
+		return err
+	}
+	if err := db.SeedConfig(gormDB, cfg); err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "Seeded %d track(s) and config for owner %q\n", len(cfg.Tracks), cfg.Owner)
+
+	// Step 8: Optionally set up CocoIndex.
+	if !skipCoco && !yes {
+		if promptYesNo(in, out, "\nSet up CocoIndex semantic search? (requires Docker)", false) {
+			fmt.Fprintln(out, "\nSetting up CocoIndex...")
+			cocoCmd := newRootCmd()
+			cocoCmd.SetOut(out)
+			cocoCmd.SetErr(cmd.ErrOrStderr())
+			cocoCmd.SetArgs([]string{"cocoindex", "init", "-c", configPath})
+			if err := cocoCmd.Execute(); err != nil {
+				fmt.Fprintf(out, "CocoIndex setup failed: %v\n", err)
+				fmt.Fprintln(out, "You can retry later with: ry cocoindex init -c "+configPath)
+			}
+		}
+	}
+
+	// Step 9: Summary.
+	fmt.Fprintln(out, "\n"+strings.Repeat("─", 50))
+	fmt.Fprintln(out, "Railyard initialized successfully!")
+	fmt.Fprintln(out, "")
+	fmt.Fprintln(out, "Next steps:")
+	fmt.Fprintf(out, "  ry start -c %s --engines 2   # Start orchestration\n", configPath)
+	fmt.Fprintf(out, "  ry status -c %s              # Check status\n", configPath)
+	fmt.Fprintln(out, "  tmux attach -t railyard                # Watch agents work")
+	return nil
 }
