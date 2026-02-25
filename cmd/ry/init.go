@@ -364,20 +364,20 @@ func runInit(cmd *cobra.Command, configPath string, yes, skipDB, skipCoco bool) 
 	out := cmd.OutOrStdout()
 	in := cmd.InOrStdin()
 
-	// Resolve configPath to absolute.
-	if !filepath.IsAbs(configPath) {
-		wd, err := os.Getwd()
-		if err != nil {
-			return fmt.Errorf("get working directory: %w", err)
-		}
-		configPath = filepath.Join(wd, configPath)
+	// Step 1: Detect git root from the current directory.
+	wd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("get working directory: %w", err)
 	}
-	configDir := filepath.Dir(configPath)
-
-	// Step 1: Detect git root.
-	gitRoot, err := detectGitRoot(configDir)
+	gitRoot, err := detectGitRoot(wd)
 	if err != nil {
 		return fmt.Errorf("ry init must be run inside a git repository: %w", err)
+	}
+
+	// Anchor the config path to the git root (not cwd) so that running
+	// `ry init` from a subdirectory still writes to the repo root.
+	if !filepath.IsAbs(configPath) {
+		configPath = filepath.Join(gitRoot, configPath)
 	}
 	fmt.Fprintf(out, "Detected git repository: %s\n", gitRoot)
 
@@ -495,7 +495,10 @@ func runInit(cmd *cobra.Command, configPath string, yes, skipDB, skipCoco bool) 
 	fmt.Fprintf(out, "Seeded %d track(s) and config for owner %q\n", len(cfg.Tracks), cfg.Owner)
 
 	// Step 8: Optionally set up CocoIndex.
-	if !skipCoco && !yes {
+	if skipCoco || yes {
+		fmt.Fprintln(out, "\nSkipped CocoIndex setup.")
+		fmt.Fprintf(out, "To set up later: ry cocoindex init -c %s\n", configPath)
+	} else {
 		if promptYesNo(in, out, "\nSet up CocoIndex semantic search? (requires Docker)", false) {
 			fmt.Fprintln(out, "\nSetting up CocoIndex...")
 			cocoCmd := newRootCmd()

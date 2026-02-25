@@ -493,15 +493,31 @@ func TestInitCmd_NonInteractive_SkipDB(t *testing.T) {
 	}
 }
 
-func TestInitCmd_NonGitDir(t *testing.T) {
-	dir := t.TempDir()
+func TestInitCmd_ConfigAnchoredToGitRoot(t *testing.T) {
+	// When given a relative config path, the file should be written
+	// to the git root, not the current working directory.
+	dir := initGitRepo(t)
+	sub := filepath.Join(dir, "deep", "sub", "dir")
+	os.MkdirAll(sub, 0755)
+
+	// Change to subdirectory for this test.
+	orig, _ := os.Getwd()
+	os.Chdir(sub)
+	t.Cleanup(func() { os.Chdir(orig) })
+
 	cmd := newRootCmd()
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
-	cmd.SetArgs([]string{"init", "--yes", "--skip-db", "--config", filepath.Join(dir, "railyard.yaml")})
-	err := cmd.Execute()
-	if err == nil {
-		t.Fatal("expected error for non-git directory")
+	cmd.SetArgs([]string{"init", "--yes", "--skip-db"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("init from subdirectory: %v", err)
+	}
+	// Config should be at the git root, not in the subdirectory.
+	if _, err := os.Stat(filepath.Join(dir, "railyard.yaml")); err != nil {
+		t.Errorf("expected railyard.yaml at git root %s: %v", dir, err)
+	}
+	if _, err := os.Stat(filepath.Join(sub, "railyard.yaml")); err == nil {
+		t.Error("railyard.yaml should NOT be in the subdirectory")
 	}
 }
