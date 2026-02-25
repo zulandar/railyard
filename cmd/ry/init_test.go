@@ -493,6 +493,65 @@ func TestInitCmd_NonInteractive_SkipDB(t *testing.T) {
 	}
 }
 
+func TestDetectLanguages_SkipsDirs(t *testing.T) {
+	dir := t.TempDir()
+	// Files in skipped directories should not count.
+	// detectLanguages (from gitignore.go) uses manifest file detection,
+	// so put manifest files in dirs that should be ignored.
+	os.MkdirAll(filepath.Join(dir, "vendor"), 0755)
+	os.WriteFile(filepath.Join(dir, "vendor", "go.mod"), []byte("module vendor"), 0644)
+
+	langs := detectLanguages(dir)
+	// vendor/go.mod should not be detected as a language.
+	for _, l := range langs {
+		if l == "go" {
+			t.Error("should not detect languages from vendor/ directory")
+		}
+	}
+}
+
+func TestInitCmd_InteractiveOverwrite(t *testing.T) {
+	dir := initGitRepo(t)
+	configPath := filepath.Join(dir, "railyard.yaml")
+	// Write an existing config.
+	os.WriteFile(configPath, []byte("owner: old\nrepo: x\ntracks:\n  - name: t\n    language: go\n"), 0644)
+
+	cmd := newRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	// Answer "yes" to overwrite, then accept defaults for owner and remote,
+	// then accept tracks.
+	cmd.SetIn(strings.NewReader("yes\n\n\ny\n"))
+	cmd.SetArgs([]string{"init", "--skip-db", "--config", configPath})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("init with overwrite: %v", err)
+	}
+	output := out.String()
+	if !strings.Contains(output, "already exists") {
+		t.Error("should mention existing config")
+	}
+	if !strings.Contains(output, "Wrote") {
+		t.Error("should confirm config was written")
+	}
+}
+
+func TestRenderConfig_EmptyRepo(t *testing.T) {
+	// Config with empty repo field should fail validation.
+	tracks := []config.TrackConfig{
+		{Name: "test", Language: "go", EngineSlots: 2},
+	}
+	yamlStr, err := renderConfig("alice", "", 3306, tracks)
+	if err != nil {
+		t.Fatalf("renderConfig: %v", err)
+	}
+	// The rendered YAML with empty repo should fail config.Parse validation.
+	_, err = config.Parse([]byte(yamlStr))
+	if err == nil {
+		t.Error("expected config.Parse to fail with empty repo")
+	}
+}
+
 func TestInitCmd_ConfigAnchoredToGitRoot(t *testing.T) {
 	// When given a relative config path, the file should be written
 	// to the git root, not the current working directory.
