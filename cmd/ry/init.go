@@ -338,6 +338,7 @@ func newInitCmd() *cobra.Command {
 		yes        bool
 		skipDB     bool
 		skipCoco   bool
+		doltPort   int
 	)
 
 	cmd := &cobra.Command{
@@ -350,7 +351,7 @@ initializes the database, and optionally sets up CocoIndex semantic search.
 
 Run this once in any git repository to get started with Railyard.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runInit(cmd, configPath, yes, skipDB, skipCoco)
+			return runInit(cmd, configPath, yes, skipDB, skipCoco, doltPort)
 		},
 	}
 
@@ -358,11 +359,12 @@ Run this once in any git repository to get started with Railyard.`,
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "accept all defaults without prompting")
 	cmd.Flags().BoolVar(&skipDB, "skip-db", false, "skip Dolt startup and database initialization")
 	cmd.Flags().BoolVar(&skipCoco, "skip-cocoindex", false, "skip CocoIndex setup prompt")
+	cmd.Flags().IntVarP(&doltPort, "port", "p", 3306, "Dolt SQL server port")
 	return cmd
 }
 
 // runInit is the main orchestrator for the "ry init" command.
-func runInit(cmd *cobra.Command, configPath string, yes, skipDB, skipCoco bool) error {
+func runInit(cmd *cobra.Command, configPath string, yes, skipDB, skipCoco bool, doltPort int) error {
 	out := cmd.OutOrStdout()
 	in := cmd.InOrStdin()
 
@@ -410,11 +412,14 @@ func runInit(cmd *cobra.Command, configPath string, yes, skipDB, skipCoco bool) 
 	}
 
 	// Step 4: Interactive confirmation (unless --yes).
-	doltPort := 3306
 	if !yes {
 		fmt.Fprintln(out, "\nConfigure Railyard:")
 		owner = promptValue(in, out, "Owner", owner)
 		remote = promptValue(in, out, "Git remote URL", remote)
+		portStr := promptValue(in, out, "Dolt port", fmt.Sprintf("%d", doltPort))
+		if v, err := fmt.Sscanf(portStr, "%d", &doltPort); v != 1 || err != nil {
+			return fmt.Errorf("invalid port: %s", portStr)
+		}
 	}
 
 	// Fail fast if repo URL is still empty — config.Load will reject it,

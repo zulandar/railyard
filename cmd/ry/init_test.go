@@ -448,6 +448,9 @@ func TestInitCmd_Help(t *testing.T) {
 	if !strings.Contains(output, "--skip-db") {
 		t.Errorf("help should show --skip-db flag: %s", output)
 	}
+	if !strings.Contains(output, "--port") {
+		t.Errorf("help should show --port flag: %s", output)
+	}
 }
 
 func TestInitCmd_AlreadyExists_Abort(t *testing.T) {
@@ -479,9 +482,9 @@ func TestInitCmd_NonInteractive_SkipDB(t *testing.T) {
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
-	cmd.SetArgs([]string{"init", "--yes", "--skip-db", "--config", configPath})
+	cmd.SetArgs([]string{"init", "--yes", "--skip-db", "--port", "3307", "--config", configPath})
 	if err := cmd.Execute(); err != nil {
-		t.Fatalf("init --yes --skip-db: %v", err)
+		t.Fatalf("init --yes --skip-db --port 3307: %v", err)
 	}
 	output := out.String()
 	if !strings.Contains(output, "Wrote") {
@@ -504,6 +507,9 @@ func TestInitCmd_NonInteractive_SkipDB(t *testing.T) {
 	}
 	if len(cfg.Tracks) == 0 {
 		t.Error("should have at least one track")
+	}
+	if cfg.Dolt.Port != 3307 {
+		t.Errorf("Dolt.Port = %d, want 3307", cfg.Dolt.Port)
 	}
 }
 
@@ -534,9 +540,9 @@ func TestInitCmd_InteractiveOverwrite(t *testing.T) {
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
-	// Answer "yes" to overwrite, then accept defaults for owner and remote,
-	// then accept tracks.
-	cmd.SetIn(strings.NewReader("yes\n\n\ny\n"))
+	// Answer "yes" to overwrite, then accept defaults for owner, remote,
+	// and port, then accept tracks.
+	cmd.SetIn(strings.NewReader("yes\n\n\n\ny\n"))
 	cmd.SetArgs([]string{"init", "--skip-db", "--config", configPath})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("init with overwrite: %v", err)
