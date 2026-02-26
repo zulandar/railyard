@@ -62,6 +62,8 @@ type DoltConfig struct {
 	Host     string `yaml:"host"`
 	Port     int    `yaml:"port"`
 	Database string `yaml:"database"`
+	Username string `yaml:"username"`
+	Password string `yaml:"password"`
 }
 
 // TrackConfig defines an area of concern within the repo.
@@ -171,6 +173,11 @@ func (c *Config) applyDefaults() {
 	if c.Dolt.Database == "" && c.Owner != "" {
 		c.Dolt.Database = "railyard_" + c.Owner
 	}
+	if c.Dolt.Username == "" {
+		c.Dolt.Username = "root"
+	}
+	c.Dolt.Username = resolveEnvVars(c.Dolt.Username)
+	c.Dolt.Password = resolveEnvVars(c.Dolt.Password)
 	if c.Stall.StdoutTimeoutSec == 0 {
 		c.Stall.StdoutTimeoutSec = 120
 	}

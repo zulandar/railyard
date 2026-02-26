@@ -13,7 +13,7 @@ import (
 func setupDepsDB(t *testing.T, name string) *gorm.DB {
 	t.Helper()
 	srv := setupTestDB(t, name)
-	gormDB, err := db.Connect("127.0.0.1", srv.Port, name)
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, name, "root", "")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}

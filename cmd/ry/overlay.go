@@ -373,7 +373,7 @@ print(json.dumps([r[0] for r in rows]))
 
 // getActiveEngineIDs queries the Dolt engines table for active engine IDs.
 func getActiveEngineIDs(cfg *config.Config) ([]string, error) {
-	gormDB, err := db.ConnectAdmin(cfg.Dolt.Host, cfg.Dolt.Port)
+	gormDB, err := db.ConnectAdmin(cfg.Dolt.Host, cfg.Dolt.Port, cfg.Dolt.Username, cfg.Dolt.Password)
 	if err != nil {
 		return nil, fmt.Errorf("connect to Dolt: %w", err)
 	}

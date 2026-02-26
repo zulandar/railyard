@@ -52,7 +52,7 @@ func runDBInit(cmd *cobra.Command, configPath string) error {
 	fmt.Fprintf(out, "Loaded config for owner %q from %s\n", cfg.Owner, configPath)
 
 	// Connect to Dolt server (admin, no database selected)
-	adminDB, err := db.ConnectAdmin(cfg.Dolt.Host, cfg.Dolt.Port)
+	adminDB, err := db.ConnectAdmin(cfg.Dolt.Host, cfg.Dolt.Port, cfg.Dolt.Username, cfg.Dolt.Password)
 	if err != nil {
 		return fmt.Errorf("connect to Dolt at %s:%d: %w", cfg.Dolt.Host, cfg.Dolt.Port, err)
 	}
@@ -65,7 +65,7 @@ func runDBInit(cmd *cobra.Command, configPath string) error {
 	fmt.Fprintf(out, "Database %s ready\n", cfg.Dolt.Database)
 
 	// Connect to the railyard database
-	gormDB, err := db.Connect(cfg.Dolt.Host, cfg.Dolt.Port, cfg.Dolt.Database)
+	gormDB, err := db.Connect(cfg.Dolt.Host, cfg.Dolt.Port, cfg.Dolt.Database, cfg.Dolt.Username, cfg.Dolt.Password)
 	if err != nil {
 		return fmt.Errorf("connect to %s: %w", cfg.Dolt.Database, err)
 	}
@@ -157,12 +157,16 @@ func runDBReset(cmd *cobra.Command, configPath, dbName string, skipConfirm bool)
 	// Connect to Dolt admin.
 	host := "127.0.0.1"
 	port := 3306
+	username := "root"
+	password := ""
 	if cfg != nil {
 		host = cfg.Dolt.Host
 		port = cfg.Dolt.Port
+		username = cfg.Dolt.Username
+		password = cfg.Dolt.Password
 	}
 
-	adminDB, err := db.ConnectAdmin(host, port)
+	adminDB, err := db.ConnectAdmin(host, port, username, password)
 	if err != nil {
 		return fmt.Errorf("connect to Dolt at %s:%d: %w", host, port, err)
 	}
@@ -185,7 +189,7 @@ func runDBReset(cmd *cobra.Command, configPath, dbName string, skipConfirm bool)
 	}
 	fmt.Fprintf(out, "Database %s re-created\n", dbName)
 
-	gormDB, err := db.Connect(host, port, dbName)
+	gormDB, err := db.Connect(host, port, dbName, username, password)
 	if err != nil {
 		return fmt.Errorf("connect to %s: %w", dbName, err)
 	}
@@ -245,7 +249,7 @@ func runDBStart(cmd *cobra.Command, configPath string) error {
 	dataDir := os.ExpandEnv("${HOME}/.railyard/dolt-data")
 
 	// Check if Dolt is already running.
-	_, connErr := db.ConnectAdmin(host, port)
+	_, connErr := db.ConnectAdmin(host, port, cfg.Dolt.Username, cfg.Dolt.Password)
 	if connErr == nil {
 		fmt.Fprintf(out, "Dolt is already running on %s:%d\n", host, port)
 		return nil
@@ -286,7 +290,7 @@ func runDBStart(cmd *cobra.Command, configPath string) error {
 	// Wait for readiness.
 	for i := range 20 {
 		time.Sleep(500 * time.Millisecond)
-		if _, err := db.ConnectAdmin(host, port); err == nil {
+		if _, err := db.ConnectAdmin(host, port, cfg.Dolt.Username, cfg.Dolt.Password); err == nil {
 			fmt.Fprintf(out, "Dolt is ready (took %dms)\n", (i+1)*500)
 			fmt.Fprintf(out, "Log: %s\n", logFile)
 			return nil
