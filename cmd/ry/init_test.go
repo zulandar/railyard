@@ -638,6 +638,27 @@ func TestPromptChoice_Override(t *testing.T) {
 	}
 }
 
+func TestPromptChoice_InvalidThenValid(t *testing.T) {
+	in := strings.NewReader("slcak\ndiscord\n")
+	var out bytes.Buffer
+	got := promptChoice(in, &out, "Platform", []string{"slack", "discord"}, "slack")
+	if got != "discord" {
+		t.Errorf("got %q, want %q", got, "discord")
+	}
+	if !strings.Contains(out.String(), "Invalid choice") {
+		t.Errorf("output should show invalid choice message: %q", out.String())
+	}
+}
+
+func TestPromptChoice_InvalidExhausted(t *testing.T) {
+	in := strings.NewReader("bad1\nbad2\nbad3\n")
+	var out bytes.Buffer
+	got := promptChoice(in, &out, "Platform", []string{"slack", "discord"}, "slack")
+	if got != "slack" {
+		t.Errorf("got %q, want default %q after 3 invalid attempts", got, "slack")
+	}
+}
+
 func TestRenderConfig_WithTelegraphSlack(t *testing.T) {
 	tracks := []config.TrackConfig{
 		{Name: "backend", Language: "go", FilePatterns: []string{"**/*.go"}, EngineSlots: 2, TestCommand: "go test ./..."},

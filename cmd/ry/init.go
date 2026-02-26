@@ -104,15 +104,29 @@ func (b byteReader) Read(p []byte) (int, error) {
 }
 
 // promptChoice asks the user to pick from a set of choices, showing a default.
-// Returns the default if the user presses Enter without typing.
+// Returns the default if the user presses Enter without typing. If the input
+// is not one of the valid choices, it re-prompts (up to 3 attempts) and then
+// falls back to the default.
 func promptChoice(in io.Reader, out io.Writer, label string, choices []string, defaultVal string) string {
-	fmt.Fprintf(out, "  %s (%s) [%s]: ", label, strings.Join(choices, "/"), defaultVal)
+	valid := make(map[string]bool, len(choices))
+	for _, c := range choices {
+		valid[c] = true
+	}
 	scanner := bufio.NewScanner(in)
-	if scanner.Scan() {
-		val := strings.TrimSpace(scanner.Text())
-		if val != "" {
-			return val
+	for range 3 {
+		fmt.Fprintf(out, "  %s (%s) [%s]: ", label, strings.Join(choices, "/"), defaultVal)
+		if scanner.Scan() {
+			val := strings.TrimSpace(scanner.Text())
+			if val == "" {
+				return defaultVal
+			}
+			if valid[val] {
+				return val
+			}
+			fmt.Fprintf(out, "  Invalid choice %q — must be one of: %s\n", val, strings.Join(choices, ", "))
+			continue
 		}
+		break
 	}
 	return defaultVal
 }
