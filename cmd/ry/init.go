@@ -171,7 +171,7 @@ func ensureDoltDataDir(dataDir string) error {
 // starts dolt sql-server in the background using ~/.railyard/dolt-data.
 func ensureDoltRunning(out io.Writer, host string, port int) error {
 	// Check if already running.
-	if _, err := db.ConnectAdmin(host, port); err == nil {
+	if _, err := db.ConnectAdmin(host, port, "root", ""); err == nil {
 		fmt.Fprintf(out, "Dolt is already running on %s:%d\n", host, port)
 		return nil
 	}
@@ -212,7 +212,7 @@ func ensureDoltRunning(out io.Writer, host string, port int) error {
 	// Wait for readiness.
 	for i := range 20 {
 		time.Sleep(500 * time.Millisecond)
-		if _, err := db.ConnectAdmin(host, port); err == nil {
+		if _, err := db.ConnectAdmin(host, port, "root", ""); err == nil {
 			fmt.Fprintf(out, "Dolt is ready (took %dms)\n", (i+1)*500)
 			return nil
 		}
@@ -580,7 +580,7 @@ func runInit(cmd *cobra.Command, configPath string, yes, skipDB, skipCoco, skipT
 		return fmt.Errorf("load generated config: %w", err)
 	}
 
-	adminDB, err := db.ConnectAdmin(cfg.Dolt.Host, cfg.Dolt.Port)
+	adminDB, err := db.ConnectAdmin(cfg.Dolt.Host, cfg.Dolt.Port, cfg.Dolt.Username, cfg.Dolt.Password)
 	if err != nil {
 		return fmt.Errorf("connect to Dolt: %w", err)
 	}
@@ -589,7 +589,7 @@ func runInit(cmd *cobra.Command, configPath string, yes, skipDB, skipCoco, skipT
 	}
 	fmt.Fprintf(out, "Database %s ready\n", cfg.Dolt.Database)
 
-	gormDB, err := db.Connect(cfg.Dolt.Host, cfg.Dolt.Port, cfg.Dolt.Database)
+	gormDB, err := db.Connect(cfg.Dolt.Host, cfg.Dolt.Port, cfg.Dolt.Database, cfg.Dolt.Username, cfg.Dolt.Password)
 	if err != nil {
 		return fmt.Errorf("connect to %s: %w", cfg.Dolt.Database, err)
 	}
