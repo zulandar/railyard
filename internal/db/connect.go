@@ -9,13 +9,17 @@ import (
 )
 
 // DSN builds a MySQL-compatible DSN for connecting to a Dolt database.
-func DSN(host string, port int, database string) string {
-	return fmt.Sprintf("root@tcp(%s:%d)/%s?parseTime=true", host, port, database)
+func DSN(host string, port int, database, username, password string) string {
+	creds := username
+	if password != "" {
+		creds = username + ":" + password
+	}
+	return fmt.Sprintf("%s@tcp(%s:%d)/%s?parseTime=true", creds, host, port, database)
 }
 
 // Connect opens a GORM connection to a Dolt database.
-func Connect(host string, port int, database string) (*gorm.DB, error) {
-	dsn := DSN(host, port, database)
+func Connect(host string, port int, database, username, password string) (*gorm.DB, error) {
+	dsn := DSN(host, port, database, username, password)
 	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
@@ -27,8 +31,12 @@ func Connect(host string, port int, database string) (*gorm.DB, error) {
 
 // ConnectAdmin opens a GORM connection to the Dolt server without selecting
 // a specific database, used for CREATE DATABASE operations.
-func ConnectAdmin(host string, port int) (*gorm.DB, error) {
-	dsn := fmt.Sprintf("root@tcp(%s:%d)/?parseTime=true", host, port)
+func ConnectAdmin(host string, port int, username, password string) (*gorm.DB, error) {
+	creds := username
+	if password != "" {
+		creds = username + ":" + password
+	}
+	dsn := fmt.Sprintf("%s@tcp(%s:%d)/?parseTime=true", creds, host, port)
 	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})

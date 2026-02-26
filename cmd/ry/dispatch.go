@@ -38,7 +38,7 @@ func runDispatch(cmd *cobra.Command, configPath string) error {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	gormDB, err := db.Connect(cfg.Dolt.Host, cfg.Dolt.Port, cfg.Dolt.Database)
+	gormDB, err := db.Connect(cfg.Dolt.Host, cfg.Dolt.Port, cfg.Dolt.Database, cfg.Dolt.Username, cfg.Dolt.Password)
 	if err != nil {
 		return fmt.Errorf("connect to %s: %w", cfg.Dolt.Database, err)
 	}

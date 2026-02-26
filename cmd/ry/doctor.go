@@ -52,14 +52,14 @@ func runDoctor(cmd *cobra.Command, configPath string) error {
 
 	// 3. Dolt server
 	if cfg != nil {
-		results = append(results, checkDoltServer(cfg.Dolt.Host, cfg.Dolt.Port))
+		results = append(results, checkDoltServer(cfg.Dolt.Host, cfg.Dolt.Port, cfg.Dolt.Username, cfg.Dolt.Password))
 	} else {
 		results = append(results, checkResult{"Dolt server", "FAIL", "skipped (no config)"})
 	}
 
 	// 4. Database
 	if cfg != nil {
-		results = append(results, checkDatabase(cfg.Dolt.Host, cfg.Dolt.Port, cfg.Dolt.Database))
+		results = append(results, checkDatabase(cfg.Dolt.Host, cfg.Dolt.Port, cfg.Dolt.Database, cfg.Dolt.Username, cfg.Dolt.Password))
 	} else {
 		results = append(results, checkResult{"Database", "FAIL", "skipped (no config)"})
 	}
@@ -169,8 +169,8 @@ func binaryLabel(name string) string {
 	}
 }
 
-func checkDoltServer(host string, port int) checkResult {
-	adminDB, err := db.ConnectAdmin(host, port)
+func checkDoltServer(host string, port int, username, password string) checkResult {
+	adminDB, err := db.ConnectAdmin(host, port, username, password)
 	if err != nil {
 		return checkResult{"Dolt server", "FAIL", fmt.Sprintf("%s:%d unreachable: %v", host, port, err)}
 	}
@@ -184,8 +184,8 @@ func checkDoltServer(host string, port int) checkResult {
 	return checkResult{"Dolt server", "PASS", fmt.Sprintf("%s:%d reachable", host, port)}
 }
 
-func checkDatabase(host string, port int, dbName string) checkResult {
-	gormDB, err := db.Connect(host, port, dbName)
+func checkDatabase(host string, port int, dbName, username, password string) checkResult {
+	gormDB, err := db.Connect(host, port, dbName, username, password)
 	if err != nil {
 		return checkResult{"Database", "FAIL", fmt.Sprintf("%s: %v", dbName, err)}
 	}
@@ -200,7 +200,7 @@ func checkDatabase(host string, port int, dbName string) checkResult {
 }
 
 func checkSchema(cfg *config.Config) checkResult {
-	gormDB, err := db.Connect(cfg.Dolt.Host, cfg.Dolt.Port, cfg.Dolt.Database)
+	gormDB, err := db.Connect(cfg.Dolt.Host, cfg.Dolt.Port, cfg.Dolt.Database, cfg.Dolt.Username, cfg.Dolt.Password)
 	if err != nil {
 		return checkResult{"Schema", "FAIL", fmt.Sprintf("connect: %v", err)}
 	}
@@ -219,7 +219,7 @@ func checkSchema(cfg *config.Config) checkResult {
 }
 
 func checkTracks(cfg *config.Config) checkResult {
-	gormDB, err := db.Connect(cfg.Dolt.Host, cfg.Dolt.Port, cfg.Dolt.Database)
+	gormDB, err := db.Connect(cfg.Dolt.Host, cfg.Dolt.Port, cfg.Dolt.Database, cfg.Dolt.Username, cfg.Dolt.Password)
 	if err != nil {
 		return checkResult{"Tracks", "FAIL", fmt.Sprintf("connect: %v", err)}
 	}

@@ -41,7 +41,7 @@ func TestDSN(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := DSN(tt.host, tt.port, tt.database)
+			got := DSN(tt.host, tt.port, tt.database, "root", "")
 			if got != tt.want {
 				t.Errorf("DSN() = %q, want %q", got, tt.want)
 			}
@@ -49,15 +49,31 @@ func TestDSN(t *testing.T) {
 	}
 }
 
+func TestDSN_WithPassword(t *testing.T) {
+	got := DSN("127.0.0.1", 3306, "mydb", "admin", "secret")
+	want := "admin:secret@tcp(127.0.0.1:3306)/mydb?parseTime=true"
+	if got != want {
+		t.Errorf("DSN() = %q, want %q", got, want)
+	}
+}
+
+func TestDSN_CustomUsername(t *testing.T) {
+	got := DSN("127.0.0.1", 3306, "mydb", "deploy", "")
+	want := "deploy@tcp(127.0.0.1:3306)/mydb?parseTime=true"
+	if got != want {
+		t.Errorf("DSN() = %q, want %q", got, want)
+	}
+}
+
 func TestDSN_ParseTimeFlag(t *testing.T) {
-	dsn := DSN("localhost", 3306, "test")
+	dsn := DSN("localhost", 3306, "test", "root", "")
 	if !strings.Contains(dsn, "parseTime=true") {
 		t.Errorf("DSN missing parseTime=true: %s", dsn)
 	}
 }
 
 func TestDSN_Format(t *testing.T) {
-	dsn := DSN("myhost", 9999, "mydb")
+	dsn := DSN("myhost", 9999, "mydb", "root", "")
 	if !strings.HasPrefix(dsn, "root@tcp(") {
 		t.Errorf("DSN should start with root@tcp(: %s", dsn)
 	}
@@ -73,14 +89,14 @@ func TestConnect_RequiresDolt(t *testing.T) {
 	// Connect requires a running Dolt server; verify the function signature
 	// compiles and returns (*gorm.DB, error). Full integration tests are in
 	// the Foundation Test Suite (d88.5).
-	var fn func(string, int, string) (*gorm.DB, error) = Connect
+	var fn func(string, int, string, string, string) (*gorm.DB, error) = Connect
 	if fn == nil {
 		t.Fatal("Connect function is nil")
 	}
 }
 
 func TestConnectAdmin_RequiresDolt(t *testing.T) {
-	var fn func(string, int) (*gorm.DB, error) = ConnectAdmin
+	var fn func(string, int, string, string) (*gorm.DB, error) = ConnectAdmin
 	if fn == nil {
 		t.Fatal("ConnectAdmin function is nil")
 	}
@@ -154,7 +170,7 @@ func TestSeedTracks_EmptySlice(t *testing.T) {
 
 func TestConnect_Error(t *testing.T) {
 	// Port 1 is unlikely to have a MySQL server; expect connection error.
-	_, err := Connect("127.0.0.1", 1, "nonexistent")
+	_, err := Connect("127.0.0.1", 1, "nonexistent", "root", "")
 	if err == nil {
 		t.Fatal("expected error connecting to invalid port")
 	}
@@ -164,7 +180,7 @@ func TestConnect_Error(t *testing.T) {
 }
 
 func TestConnectAdmin_Error(t *testing.T) {
-	_, err := ConnectAdmin("127.0.0.1", 1)
+	_, err := ConnectAdmin("127.0.0.1", 1, "root", "")
 	if err == nil {
 		t.Fatal("expected error connecting to invalid port")
 	}

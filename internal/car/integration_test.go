@@ -94,14 +94,14 @@ func setupTestDB(t *testing.T, dbName string) *testDoltServer {
 	t.Helper()
 	srv := startDoltServer(t)
 
-	adminDB, err := db.ConnectAdmin("127.0.0.1", srv.Port)
+	adminDB, err := db.ConnectAdmin("127.0.0.1", srv.Port, "root", "")
 	if err != nil {
 		t.Fatalf("ConnectAdmin: %v", err)
 	}
 	if err := db.CreateDatabase(adminDB, dbName); err != nil {
 		t.Fatalf("CreateDatabase: %v", err)
 	}
-	gormDB, err := db.Connect("127.0.0.1", srv.Port, dbName)
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, dbName, "root", "")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -113,7 +113,7 @@ func setupTestDB(t *testing.T, dbName string) *testDoltServer {
 
 func TestIntegration_Create(t *testing.T) {
 	srv := setupTestDB(t, "railyard_car_create")
-	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_create")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_create", "root", "")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -148,7 +148,7 @@ func TestIntegration_Create(t *testing.T) {
 
 func TestIntegration_Create_WithType(t *testing.T) {
 	srv := setupTestDB(t, "railyard_car_type")
-	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_type")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_type", "root", "")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -169,7 +169,7 @@ func TestIntegration_Create_WithType(t *testing.T) {
 
 func TestIntegration_Create_WithParent(t *testing.T) {
 	srv := setupTestDB(t, "railyard_car_parent")
-	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_parent")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_parent", "root", "")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -200,7 +200,7 @@ func TestIntegration_Create_WithParent(t *testing.T) {
 
 func TestIntegration_Create_ValidationErrors(t *testing.T) {
 	srv := setupTestDB(t, "railyard_car_val")
-	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_val")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_val", "root", "")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -237,7 +237,7 @@ func TestIntegration_Create_ValidationErrors(t *testing.T) {
 
 func TestIntegration_Get(t *testing.T) {
 	srv := setupTestDB(t, "railyard_car_get")
-	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_get")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_get", "root", "")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -272,7 +272,7 @@ func TestIntegration_Get(t *testing.T) {
 
 func TestIntegration_Get_NotFound(t *testing.T) {
 	srv := setupTestDB(t, "railyard_car_getnf")
-	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_getnf")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_getnf", "root", "")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -288,7 +288,7 @@ func TestIntegration_Get_NotFound(t *testing.T) {
 
 func TestIntegration_List(t *testing.T) {
 	srv := setupTestDB(t, "railyard_car_list")
-	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_list")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_list", "root", "")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -339,7 +339,7 @@ func TestIntegration_List(t *testing.T) {
 
 func TestIntegration_List_Empty(t *testing.T) {
 	srv := setupTestDB(t, "railyard_car_empty")
-	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_empty")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_empty", "root", "")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -355,7 +355,7 @@ func TestIntegration_List_Empty(t *testing.T) {
 
 func TestIntegration_Update_Status(t *testing.T) {
 	srv := setupTestDB(t, "railyard_car_upd")
-	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_upd")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_upd", "root", "")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -399,7 +399,7 @@ func TestIntegration_Update_Status(t *testing.T) {
 
 func TestIntegration_Update_InvalidTransition(t *testing.T) {
 	srv := setupTestDB(t, "railyard_car_inv")
-	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_inv")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_inv", "root", "")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -425,7 +425,7 @@ func TestIntegration_Update_InvalidTransition(t *testing.T) {
 
 func TestIntegration_Update_Blocked(t *testing.T) {
 	srv := setupTestDB(t, "railyard_car_blk")
-	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_blk")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_blk", "root", "")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -452,7 +452,7 @@ func TestIntegration_Update_Blocked(t *testing.T) {
 
 func TestIntegration_Update_NotFound(t *testing.T) {
 	srv := setupTestDB(t, "railyard_car_updnf")
-	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_updnf")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_updnf", "root", "")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -468,7 +468,7 @@ func TestIntegration_Update_NotFound(t *testing.T) {
 
 func TestIntegration_Update_NonStatusFields(t *testing.T) {
 	srv := setupTestDB(t, "railyard_car_fld")
-	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_fld")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_fld", "root", "")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -503,7 +503,7 @@ func TestIntegration_Update_NonStatusFields(t *testing.T) {
 
 func TestIntegration_List_FilterByStatus(t *testing.T) {
 	srv := setupTestDB(t, "railyard_car_lstat")
-	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_lstat")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_lstat", "root", "")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -543,7 +543,7 @@ func TestIntegration_List_FilterByStatus(t *testing.T) {
 
 func TestIntegration_List_FilterByType(t *testing.T) {
 	srv := setupTestDB(t, "railyard_car_ltype")
-	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_ltype")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_ltype", "root", "")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -578,7 +578,7 @@ func TestIntegration_List_FilterByType(t *testing.T) {
 
 func TestIntegration_List_FilterByAssignee(t *testing.T) {
 	srv := setupTestDB(t, "railyard_car_lassn")
-	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_lassn")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_lassn", "root", "")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -612,7 +612,7 @@ func TestIntegration_List_FilterByAssignee(t *testing.T) {
 
 func TestIntegration_List_MultipleFilters(t *testing.T) {
 	srv := setupTestDB(t, "railyard_car_lmulti")
-	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_lmulti")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_lmulti", "root", "")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -645,7 +645,7 @@ func TestIntegration_List_MultipleFilters(t *testing.T) {
 
 func TestIntegration_Update_Cancelled(t *testing.T) {
 	srv := setupTestDB(t, "railyard_car_cancel")
-	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_cancel")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_cancel", "root", "")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -673,7 +673,7 @@ func TestIntegration_Update_Cancelled(t *testing.T) {
 
 func TestIntegration_Create_InvalidParent(t *testing.T) {
 	srv := setupTestDB(t, "railyard_car_invpar")
-	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_invpar")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_invpar", "root", "")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -694,7 +694,7 @@ func TestIntegration_Create_InvalidParent(t *testing.T) {
 
 func TestIntegration_Create_NonEpicParent(t *testing.T) {
 	srv := setupTestDB(t, "railyard_car_neppar")
-	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_neppar")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_neppar", "root", "")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -725,7 +725,7 @@ func TestIntegration_Create_NonEpicParent(t *testing.T) {
 
 func TestIntegration_Create_TrackInheritance(t *testing.T) {
 	srv := setupTestDB(t, "railyard_car_trackinh")
-	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_trackinh")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_trackinh", "root", "")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -759,7 +759,7 @@ func TestIntegration_Create_TrackInheritance(t *testing.T) {
 
 func TestIntegration_GetChildren(t *testing.T) {
 	srv := setupTestDB(t, "railyard_car_getchi")
-	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_getchi")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_getchi", "root", "")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -805,7 +805,7 @@ func TestIntegration_GetChildren(t *testing.T) {
 
 func TestIntegration_ChildrenSummary(t *testing.T) {
 	srv := setupTestDB(t, "railyard_car_chsum")
-	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_chsum")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_chsum", "root", "")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -884,7 +884,7 @@ func TestIntegration_ChildrenSummary(t *testing.T) {
 func closedGormDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	srv := setupTestDB(t, "railyard_car_closed")
-	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_closed")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_closed", "root", "")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -940,7 +940,7 @@ func TestIntegration_Update_DBError(t *testing.T) {
 
 func TestIntegration_FullLifecycle(t *testing.T) {
 	srv := setupTestDB(t, "railyard_car_life")
-	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_life")
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, "railyard_car_life", "root", "")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}

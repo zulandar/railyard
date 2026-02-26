@@ -91,14 +91,14 @@ func setupTestDB(t *testing.T, dbName string) *gorm.DB {
 	t.Helper()
 	srv := startDoltServer(t)
 
-	adminDB, err := db.ConnectAdmin("127.0.0.1", srv.Port)
+	adminDB, err := db.ConnectAdmin("127.0.0.1", srv.Port, "root", "")
 	if err != nil {
 		t.Fatalf("ConnectAdmin: %v", err)
 	}
 	if err := db.CreateDatabase(adminDB, dbName); err != nil {
 		t.Fatalf("CreateDatabase: %v", err)
 	}
-	gormDB, err := db.Connect("127.0.0.1", srv.Port, dbName)
+	gormDB, err := db.Connect("127.0.0.1", srv.Port, dbName, "root", "")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}

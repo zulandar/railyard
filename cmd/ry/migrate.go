@@ -141,7 +141,7 @@ func checkRunningEngines(out io.Writer, configPath string) error {
 		return nil
 	}
 
-	gormDB, err := db.Connect(cfg.Dolt.Host, cfg.Dolt.Port, cfg.Dolt.Database)
+	gormDB, err := db.Connect(cfg.Dolt.Host, cfg.Dolt.Port, cfg.Dolt.Database, cfg.Dolt.Username, cfg.Dolt.Password)
 	if err != nil {
 		// Can't connect to DB — engines probably aren't running.
 		return nil

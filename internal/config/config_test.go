@@ -120,6 +120,60 @@ func TestParse_MinimalConfig_AppliesDefaults(t *testing.T) {
 	if cfg.Tracks[0].EngineSlots != 3 {
 		t.Errorf("Tracks[0].EngineSlots = %d, want %d (default)", cfg.Tracks[0].EngineSlots, 3)
 	}
+	if cfg.Dolt.Username != "root" {
+		t.Errorf("Dolt.Username = %q, want %q (default)", cfg.Dolt.Username, "root")
+	}
+	if cfg.Dolt.Password != "" {
+		t.Errorf("Dolt.Password = %q, want %q (default)", cfg.Dolt.Password, "")
+	}
+}
+
+func TestParse_DoltCredentials(t *testing.T) {
+	yaml := `
+owner: carol
+repo: git@github.com:org/app.git
+dolt:
+  username: admin
+  password: secret123
+tracks:
+  - name: api
+    language: go
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Dolt.Username != "admin" {
+		t.Errorf("Dolt.Username = %q, want %q", cfg.Dolt.Username, "admin")
+	}
+	if cfg.Dolt.Password != "secret123" {
+		t.Errorf("Dolt.Password = %q, want %q", cfg.Dolt.Password, "secret123")
+	}
+}
+
+func TestParse_DoltCredentials_EnvVar(t *testing.T) {
+	t.Setenv("TEST_DOLT_USER", "envuser")
+	t.Setenv("TEST_DOLT_PASS", "envpass")
+	yaml := `
+owner: carol
+repo: git@github.com:org/app.git
+dolt:
+  username: ${TEST_DOLT_USER}
+  password: ${TEST_DOLT_PASS}
+tracks:
+  - name: api
+    language: go
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Dolt.Username != "envuser" {
+		t.Errorf("Dolt.Username = %q, want %q", cfg.Dolt.Username, "envuser")
+	}
+	if cfg.Dolt.Password != "envpass" {
+		t.Errorf("Dolt.Password = %q, want %q", cfg.Dolt.Password, "envpass")
+	}
 }
 
 func TestParse_ExplicitBranchPrefix_NotOverridden(t *testing.T) {

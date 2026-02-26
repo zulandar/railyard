@@ -100,7 +100,7 @@ func waitForServer(t *testing.T, port int) {
 
 func TestIntegration_ConnectAdmin(t *testing.T) {
 	srv := startDoltServer(t)
-	db, err := ConnectAdmin("127.0.0.1", srv.Port)
+	db, err := ConnectAdmin("127.0.0.1", srv.Port, "root", "")
 	if err != nil {
 		t.Fatalf("ConnectAdmin: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestIntegration_ConnectAdmin(t *testing.T) {
 
 func TestIntegration_CreateDatabase(t *testing.T) {
 	srv := startDoltServer(t)
-	adminDB, err := ConnectAdmin("127.0.0.1", srv.Port)
+	adminDB, err := ConnectAdmin("127.0.0.1", srv.Port, "root", "")
 	if err != nil {
 		t.Fatalf("ConnectAdmin: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestIntegration_CreateDatabase(t *testing.T) {
 	}
 
 	// Verify database exists by connecting to it
-	db, err := Connect("127.0.0.1", srv.Port, "railyard_test")
+	db, err := Connect("127.0.0.1", srv.Port, "railyard_test", "root", "")
 	if err != nil {
 		t.Fatalf("Connect to new database: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestIntegration_CreateDatabase(t *testing.T) {
 
 func TestIntegration_Connect(t *testing.T) {
 	srv := startDoltServer(t)
-	adminDB, err := ConnectAdmin("127.0.0.1", srv.Port)
+	adminDB, err := ConnectAdmin("127.0.0.1", srv.Port, "root", "")
 	if err != nil {
 		t.Fatalf("ConnectAdmin: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestIntegration_Connect(t *testing.T) {
 		t.Fatalf("CreateDatabase: %v", err)
 	}
 
-	db, err := Connect("127.0.0.1", srv.Port, "railyard_connect")
+	db, err := Connect("127.0.0.1", srv.Port, "railyard_connect", "root", "")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -162,14 +162,14 @@ func TestIntegration_Connect(t *testing.T) {
 
 func TestIntegration_AutoMigrate(t *testing.T) {
 	srv := startDoltServer(t)
-	adminDB, err := ConnectAdmin("127.0.0.1", srv.Port)
+	adminDB, err := ConnectAdmin("127.0.0.1", srv.Port, "root", "")
 	if err != nil {
 		t.Fatalf("ConnectAdmin: %v", err)
 	}
 	if err := CreateDatabase(adminDB, "railyard_migrate"); err != nil {
 		t.Fatalf("CreateDatabase: %v", err)
 	}
-	db, err := Connect("127.0.0.1", srv.Port, "railyard_migrate")
+	db, err := Connect("127.0.0.1", srv.Port, "railyard_migrate", "root", "")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -210,14 +210,14 @@ func TestIntegration_AutoMigrate(t *testing.T) {
 
 func TestIntegration_AutoMigrate_TableColumns(t *testing.T) {
 	srv := startDoltServer(t)
-	adminDB, err := ConnectAdmin("127.0.0.1", srv.Port)
+	adminDB, err := ConnectAdmin("127.0.0.1", srv.Port, "root", "")
 	if err != nil {
 		t.Fatalf("ConnectAdmin: %v", err)
 	}
 	if err := CreateDatabase(adminDB, "railyard_cols"); err != nil {
 		t.Fatalf("CreateDatabase: %v", err)
 	}
-	db, err := Connect("127.0.0.1", srv.Port, "railyard_cols")
+	db, err := Connect("127.0.0.1", srv.Port, "railyard_cols", "root", "")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -264,14 +264,14 @@ func TestIntegration_AutoMigrate_TableColumns(t *testing.T) {
 
 func TestIntegration_SeedTracks(t *testing.T) {
 	srv := startDoltServer(t)
-	adminDB, err := ConnectAdmin("127.0.0.1", srv.Port)
+	adminDB, err := ConnectAdmin("127.0.0.1", srv.Port, "root", "")
 	if err != nil {
 		t.Fatalf("ConnectAdmin: %v", err)
 	}
 	if err := CreateDatabase(adminDB, "railyard_seed"); err != nil {
 		t.Fatalf("CreateDatabase: %v", err)
 	}
-	db, err := Connect("127.0.0.1", srv.Port, "railyard_seed")
+	db, err := Connect("127.0.0.1", srv.Port, "railyard_seed", "root", "")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -326,14 +326,14 @@ func TestIntegration_SeedTracks(t *testing.T) {
 
 func TestIntegration_SeedConfig(t *testing.T) {
 	srv := startDoltServer(t)
-	adminDB, err := ConnectAdmin("127.0.0.1", srv.Port)
+	adminDB, err := ConnectAdmin("127.0.0.1", srv.Port, "root", "")
 	if err != nil {
 		t.Fatalf("ConnectAdmin: %v", err)
 	}
 	if err := CreateDatabase(adminDB, "railyard_seedcfg"); err != nil {
 		t.Fatalf("CreateDatabase: %v", err)
 	}
-	db, err := Connect("127.0.0.1", srv.Port, "railyard_seedcfg")
+	db, err := Connect("127.0.0.1", srv.Port, "railyard_seedcfg", "root", "")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -367,7 +367,7 @@ func TestIntegration_SeedConfig(t *testing.T) {
 
 func TestIntegration_Idempotent(t *testing.T) {
 	srv := startDoltServer(t)
-	adminDB, err := ConnectAdmin("127.0.0.1", srv.Port)
+	adminDB, err := ConnectAdmin("127.0.0.1", srv.Port, "root", "")
 	if err != nil {
 		t.Fatalf("ConnectAdmin: %v", err)
 	}
@@ -380,7 +380,7 @@ func TestIntegration_Idempotent(t *testing.T) {
 		t.Fatalf("CreateDatabase (2nd): %v", err)
 	}
 
-	db, err := Connect("127.0.0.1", srv.Port, "railyard_idem")
+	db, err := Connect("127.0.0.1", srv.Port, "railyard_idem", "root", "")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -439,14 +439,14 @@ func TestIntegration_Idempotent(t *testing.T) {
 func closedGormDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	srv := startDoltServer(t)
-	adminDB, err := ConnectAdmin("127.0.0.1", srv.Port)
+	adminDB, err := ConnectAdmin("127.0.0.1", srv.Port, "root", "")
 	if err != nil {
 		t.Fatalf("ConnectAdmin: %v", err)
 	}
 	if err := CreateDatabase(adminDB, "railyard_closed"); err != nil {
 		t.Fatalf("CreateDatabase: %v", err)
 	}
-	db, err := Connect("127.0.0.1", srv.Port, "railyard_closed")
+	db, err := Connect("127.0.0.1", srv.Port, "railyard_closed", "root", "")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -508,14 +508,14 @@ func TestIntegration_SeedConfig_Error(t *testing.T) {
 
 func TestIntegration_SeedTracks_UpdateExisting(t *testing.T) {
 	srv := startDoltServer(t)
-	adminDB, err := ConnectAdmin("127.0.0.1", srv.Port)
+	adminDB, err := ConnectAdmin("127.0.0.1", srv.Port, "root", "")
 	if err != nil {
 		t.Fatalf("ConnectAdmin: %v", err)
 	}
 	if err := CreateDatabase(adminDB, "railyard_upsert"); err != nil {
 		t.Fatalf("CreateDatabase: %v", err)
 	}
-	db, err := Connect("127.0.0.1", srv.Port, "railyard_upsert")
+	db, err := Connect("127.0.0.1", srv.Port, "railyard_upsert", "root", "")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
