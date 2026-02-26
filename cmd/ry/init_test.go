@@ -388,7 +388,7 @@ func TestRenderConfig(t *testing.T) {
 			TestCommand:  "go test ./...",
 		},
 	}
-	yamlStr, err := renderConfig("alice", "git@github.com:org/repo.git", 3306, tracks)
+	yamlStr, err := renderConfig("alice", "git@github.com:org/repo.git", 3306, tracks, nil)
 	if err != nil {
 		t.Fatalf("renderConfig: %v", err)
 	}
@@ -414,7 +414,7 @@ func TestRenderConfig_MultipleTracks(t *testing.T) {
 		{Name: "backend", Language: "go", FilePatterns: []string{"**/*.go"}, EngineSlots: 2, TestCommand: "go test ./..."},
 		{Name: "frontend", Language: "typescript", FilePatterns: []string{"**/*.ts", "**/*.tsx"}, EngineSlots: 2, TestCommand: "npm test"},
 	}
-	yamlStr, err := renderConfig("bob", "git@github.com:org/app.git", 3306, tracks)
+	yamlStr, err := renderConfig("bob", "git@github.com:org/app.git", 3306, tracks, nil)
 	if err != nil {
 		t.Fatalf("renderConfig: %v", err)
 	}
@@ -450,6 +450,9 @@ func TestInitCmd_Help(t *testing.T) {
 	}
 	if !strings.Contains(output, "--port") {
 		t.Errorf("help should show --port flag: %s", output)
+	}
+	if !strings.Contains(output, "--skip-telegraph") {
+		t.Errorf("help should show --skip-telegraph flag: %s", output)
 	}
 }
 
@@ -541,8 +544,8 @@ func TestInitCmd_InteractiveOverwrite(t *testing.T) {
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
 	// Answer "yes" to overwrite, then accept defaults for owner, remote,
-	// and port, then accept tracks.
-	cmd.SetIn(strings.NewReader("yes\n\n\n\ny\n"))
+	// and port, then accept tracks, then decline telegraph.
+	cmd.SetIn(strings.NewReader("yes\n\n\n\ny\nn\n"))
 	cmd.SetArgs([]string{"init", "--skip-db", "--config", configPath})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("init with overwrite: %v", err)
@@ -603,7 +606,7 @@ func TestRenderConfig_EmptyRepo(t *testing.T) {
 	tracks := []config.TrackConfig{
 		{Name: "test", Language: "go", EngineSlots: 2},
 	}
-	yamlStr, err := renderConfig("alice", "", 3306, tracks)
+	yamlStr, err := renderConfig("alice", "", 3306, tracks, nil)
 	if err != nil {
 		t.Fatalf("renderConfig: %v", err)
 	}
@@ -611,6 +614,211 @@ func TestRenderConfig_EmptyRepo(t *testing.T) {
 	_, err = config.Parse([]byte(yamlStr))
 	if err == nil {
 		t.Error("expected config.Parse to fail with empty repo")
+	}
+}
+
+func TestPromptChoice_Default(t *testing.T) {
+	in := strings.NewReader("\n")
+	var out bytes.Buffer
+	got := promptChoice(in, &out, "Platform", []string{"slack", "discord"}, "slack")
+	if got != "slack" {
+		t.Errorf("got %q, want %q", got, "slack")
+	}
+	if !strings.Contains(out.String(), "slack/discord") {
+		t.Errorf("output should show choices: %q", out.String())
+	}
+}
+
+func TestPromptChoice_Override(t *testing.T) {
+	in := strings.NewReader("discord\n")
+	var out bytes.Buffer
+	got := promptChoice(in, &out, "Platform", []string{"slack", "discord"}, "slack")
+	if got != "discord" {
+		t.Errorf("got %q, want %q", got, "discord")
+	}
+}
+
+func TestRenderConfig_WithTelegraphSlack(t *testing.T) {
+	tracks := []config.TrackConfig{
+		{Name: "backend", Language: "go", FilePatterns: []string{"**/*.go"}, EngineSlots: 2, TestCommand: "go test ./..."},
+	}
+	tg := &telegraphTemplateData{
+		Platform:    "slack",
+		Channel:     "C123456",
+		SlackBotVar: "SLACK_BOT_TOKEN",
+		SlackAppVar: "SLACK_APP_TOKEN",
+	}
+	yamlStr, err := renderConfig("alice", "git@github.com:org/repo.git", 3306, tracks, tg)
+	if err != nil {
+		t.Fatalf("renderConfig: %v", err)
+	}
+	// Verify the telegraph section is present with correct values.
+	if !strings.Contains(yamlStr, "telegraph:") {
+		t.Error("rendered YAML missing telegraph section")
+	}
+	if !strings.Contains(yamlStr, "platform: slack") {
+		t.Error("rendered YAML missing platform: slack")
+	}
+	if !strings.Contains(yamlStr, "channel: C123456") {
+		t.Error("rendered YAML missing channel")
+	}
+	if !strings.Contains(yamlStr, "${SLACK_BOT_TOKEN}") {
+		t.Error("rendered YAML missing ${SLACK_BOT_TOKEN}")
+	}
+	if !strings.Contains(yamlStr, "${SLACK_APP_TOKEN}") {
+		t.Error("rendered YAML missing ${SLACK_APP_TOKEN}")
+	}
+
+	// Set env vars so config.Parse can validate.
+	t.Setenv("SLACK_BOT_TOKEN", "xoxb-test")
+	t.Setenv("SLACK_APP_TOKEN", "xapp-test")
+	cfg, err := config.Parse([]byte(yamlStr))
+	if err != nil {
+		t.Fatalf("config.Parse: %v\n---\n%s", err, yamlStr)
+	}
+	if cfg.Telegraph.Platform != "slack" {
+		t.Errorf("Telegraph.Platform = %q, want %q", cfg.Telegraph.Platform, "slack")
+	}
+	if cfg.Telegraph.Channel != "C123456" {
+		t.Errorf("Telegraph.Channel = %q, want %q", cfg.Telegraph.Channel, "C123456")
+	}
+}
+
+func TestRenderConfig_WithTelegraphDiscord(t *testing.T) {
+	tracks := []config.TrackConfig{
+		{Name: "backend", Language: "go", FilePatterns: []string{"**/*.go"}, EngineSlots: 2, TestCommand: "go test ./..."},
+	}
+	tg := &telegraphTemplateData{
+		Platform:      "discord",
+		Channel:       "123456789",
+		DiscordBotVar: "DISCORD_BOT_TOKEN",
+		GuildID:       "guild-123",
+		DiscordChanID: "chan-456",
+	}
+	yamlStr, err := renderConfig("alice", "git@github.com:org/repo.git", 3306, tracks, tg)
+	if err != nil {
+		t.Fatalf("renderConfig: %v", err)
+	}
+	if !strings.Contains(yamlStr, "platform: discord") {
+		t.Error("rendered YAML missing platform: discord")
+	}
+	if !strings.Contains(yamlStr, "${DISCORD_BOT_TOKEN}") {
+		t.Error("rendered YAML missing ${DISCORD_BOT_TOKEN}")
+	}
+	if !strings.Contains(yamlStr, "guild_id: guild-123") {
+		t.Error("rendered YAML missing guild_id")
+	}
+	if !strings.Contains(yamlStr, "channel_id: chan-456") {
+		t.Error("rendered YAML missing channel_id")
+	}
+
+	// Set env vars so config.Parse can validate.
+	t.Setenv("DISCORD_BOT_TOKEN", "discord-test-token")
+	cfg, err := config.Parse([]byte(yamlStr))
+	if err != nil {
+		t.Fatalf("config.Parse: %v\n---\n%s", err, yamlStr)
+	}
+	if cfg.Telegraph.Platform != "discord" {
+		t.Errorf("Telegraph.Platform = %q, want %q", cfg.Telegraph.Platform, "discord")
+	}
+}
+
+func TestRenderConfig_WithoutTelegraph(t *testing.T) {
+	tracks := []config.TrackConfig{
+		{Name: "backend", Language: "go", FilePatterns: []string{"**/*.go"}, EngineSlots: 2, TestCommand: "go test ./..."},
+	}
+	yamlStr, err := renderConfig("alice", "git@github.com:org/repo.git", 3306, tracks, nil)
+	if err != nil {
+		t.Fatalf("renderConfig: %v", err)
+	}
+	if strings.Contains(yamlStr, "telegraph:") {
+		t.Error("rendered YAML should not contain telegraph section when nil")
+	}
+}
+
+func TestInitCmd_InteractiveWithTelegraphSlack(t *testing.T) {
+	dir := initGitRepo(t)
+	configPath := filepath.Join(dir, "railyard.yaml")
+
+	cmd := newRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	// Prompts: owner, remote, port, tracks, telegraph yes, platform, channel,
+	// bot token var, app token var.
+	cmd.SetIn(strings.NewReader("\n\n\ny\ny\nslack\nC999\n\n\n"))
+	cmd.SetArgs([]string{"init", "--skip-db", "--config", configPath})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("init with telegraph slack: %v", err)
+	}
+	output := out.String()
+	if !strings.Contains(output, "export SLACK_BOT_TOKEN") {
+		t.Error("should show export instructions for SLACK_BOT_TOKEN")
+	}
+	if !strings.Contains(output, "export SLACK_APP_TOKEN") {
+		t.Error("should show export instructions for SLACK_APP_TOKEN")
+	}
+	if !strings.Contains(output, "telegraph-setup.md") {
+		t.Error("should reference telegraph-setup.md")
+	}
+	// Verify config file contains telegraph section.
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if !strings.Contains(string(data), "telegraph:") {
+		t.Error("config file should contain telegraph section")
+	}
+	if !strings.Contains(string(data), "platform: slack") {
+		t.Error("config file should contain platform: slack")
+	}
+}
+
+func TestInitCmd_SkipTelegraphFlag(t *testing.T) {
+	dir := initGitRepo(t)
+	configPath := filepath.Join(dir, "railyard.yaml")
+
+	cmd := newRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"init", "--yes", "--skip-db", "--skip-telegraph", "--config", configPath})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("init --skip-telegraph: %v", err)
+	}
+	// Verify config file does NOT contain telegraph section.
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if strings.Contains(string(data), "telegraph:") {
+		t.Error("config file should NOT contain telegraph section with --skip-telegraph")
+	}
+}
+
+func TestInitCmd_YesSkipsTelegraph(t *testing.T) {
+	dir := initGitRepo(t)
+	configPath := filepath.Join(dir, "railyard.yaml")
+
+	cmd := newRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"init", "--yes", "--skip-db", "--config", configPath})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("init --yes: %v", err)
+	}
+	output := out.String()
+	if !strings.Contains(output, "Telegraph chat bridge: skipped") {
+		t.Error("should show telegraph skipped message")
+	}
+	// Verify config file does NOT contain telegraph section.
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if strings.Contains(string(data), "telegraph:") {
+		t.Error("config file should NOT contain telegraph section with --yes")
 	}
 }
 

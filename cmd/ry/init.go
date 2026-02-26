@@ -91,6 +91,32 @@ func sanitizeOwner(s string) string {
 	return s
 }
 
+// byteReader wraps an io.Reader so that each Read returns at most one byte.
+// This prevents bufio.Scanner from buffering ahead and consuming input
+// intended for subsequent prompts.
+type byteReader struct{ r io.Reader }
+
+func (b byteReader) Read(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	return b.r.Read(p[:1])
+}
+
+// promptChoice asks the user to pick from a set of choices, showing a default.
+// Returns the default if the user presses Enter without typing.
+func promptChoice(in io.Reader, out io.Writer, label string, choices []string, defaultVal string) string {
+	fmt.Fprintf(out, "  %s (%s) [%s]: ", label, strings.Join(choices, "/"), defaultVal)
+	scanner := bufio.NewScanner(in)
+	if scanner.Scan() {
+		val := strings.TrimSpace(scanner.Text())
+		if val != "" {
+			return val
+		}
+	}
+	return defaultVal
+}
+
 // promptValue asks the user for a value, showing a default.
 // Returns the default if the user presses Enter without typing.
 func promptValue(in io.Reader, out io.Writer, label, defaultVal string) string {
@@ -306,24 +332,58 @@ tracks:
     test_command: "{{ .TestCommand }}"
 {{- end }}
 {{- end }}
+{{- if .Telegraph }}
+
+telegraph:
+  platform: {{ .Telegraph.Platform }}
+  channel: {{ .Telegraph.Channel }}
+{{- if eq .Telegraph.Platform "slack" }}
+  slack:
+    bot_token: {{ printf "${%s}" .Telegraph.SlackBotVar }}
+    app_token: {{ printf "${%s}" .Telegraph.SlackAppVar }}
+{{- end }}
+{{- if eq .Telegraph.Platform "discord" }}
+  discord:
+    bot_token: {{ printf "${%s}" .Telegraph.DiscordBotVar }}
+{{- if .Telegraph.GuildID }}
+    guild_id: {{ .Telegraph.GuildID }}
+{{- end }}
+{{- if .Telegraph.DiscordChanID }}
+    channel_id: {{ .Telegraph.DiscordChanID }}
+{{- end }}
+{{- end }}
+{{- end }}
 `))
+
+// telegraphTemplateData holds the values for rendering the telegraph section.
+type telegraphTemplateData struct {
+	Platform      string // "slack" or "discord"
+	Channel       string
+	SlackBotVar   string // env var name, e.g. "SLACK_BOT_TOKEN"
+	SlackAppVar   string // env var name, e.g. "SLACK_APP_TOKEN"
+	DiscordBotVar string // env var name, e.g. "DISCORD_BOT_TOKEN"
+	GuildID       string
+	DiscordChanID string
+}
 
 // configTemplateData holds the values for rendering railyard.yaml.
 type configTemplateData struct {
-	Owner    string
-	Repo     string
-	DoltPort int
-	Tracks   []config.TrackConfig
+	Owner     string
+	Repo      string
+	DoltPort  int
+	Tracks    []config.TrackConfig
+	Telegraph *telegraphTemplateData
 }
 
 // renderConfig generates a railyard.yaml string from the given parameters.
-func renderConfig(owner, repo string, doltPort int, tracks []config.TrackConfig) (string, error) {
+func renderConfig(owner, repo string, doltPort int, tracks []config.TrackConfig, tg *telegraphTemplateData) (string, error) {
 	var buf bytes.Buffer
 	data := configTemplateData{
-		Owner:    owner,
-		Repo:     repo,
-		DoltPort: doltPort,
-		Tracks:   tracks,
+		Owner:     owner,
+		Repo:      repo,
+		DoltPort:  doltPort,
+		Tracks:    tracks,
+		Telegraph: tg,
 	}
 	if err := configTemplate.Execute(&buf, data); err != nil {
 		return "", fmt.Errorf("render config: %w", err)
@@ -334,11 +394,12 @@ func renderConfig(owner, repo string, doltPort int, tracks []config.TrackConfig)
 // newInitCmd creates the "ry init" cobra command.
 func newInitCmd() *cobra.Command {
 	var (
-		configPath string
-		yes        bool
-		skipDB     bool
-		skipCoco   bool
-		doltPort   int
+		configPath    string
+		yes           bool
+		skipDB        bool
+		skipCoco      bool
+		skipTelegraph bool
+		doltPort      int
 	)
 
 	cmd := &cobra.Command{
@@ -347,11 +408,12 @@ func newInitCmd() *cobra.Command {
 		Long: `Initialize Railyard in this repository.
 
 Detects your repo's languages, generates railyard.yaml, starts Dolt,
-initializes the database, and optionally sets up CocoIndex semantic search.
+initializes the database, and optionally sets up CocoIndex semantic search
+and Telegraph chat bridge (Slack/Discord).
 
 Run this once in any git repository to get started with Railyard.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runInit(cmd, configPath, yes, skipDB, skipCoco, doltPort)
+			return runInit(cmd, configPath, yes, skipDB, skipCoco, skipTelegraph, doltPort)
 		},
 	}
 
@@ -359,14 +421,15 @@ Run this once in any git repository to get started with Railyard.`,
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "accept all defaults without prompting")
 	cmd.Flags().BoolVar(&skipDB, "skip-db", false, "skip Dolt startup and database initialization")
 	cmd.Flags().BoolVar(&skipCoco, "skip-cocoindex", false, "skip CocoIndex setup prompt")
+	cmd.Flags().BoolVar(&skipTelegraph, "skip-telegraph", false, "skip Telegraph chat bridge setup")
 	cmd.Flags().IntVarP(&doltPort, "port", "p", 3306, "Dolt SQL server port")
 	return cmd
 }
 
 // runInit is the main orchestrator for the "ry init" command.
-func runInit(cmd *cobra.Command, configPath string, yes, skipDB, skipCoco bool, doltPort int) error {
+func runInit(cmd *cobra.Command, configPath string, yes, skipDB, skipCoco, skipTelegraph bool, doltPort int) error {
 	out := cmd.OutOrStdout()
-	in := cmd.InOrStdin()
+	in := io.Reader(byteReader{cmd.InOrStdin()})
 
 	// Step 1: Detect git root from the current directory.
 	wd, err := os.Getwd()
@@ -446,8 +509,48 @@ func runInit(cmd *cobra.Command, configPath string, yes, skipDB, skipCoco bool, 
 		}
 	}
 
+	// Step 4b: Telegraph chat bridge setup.
+	var tg *telegraphTemplateData
+	if skipTelegraph {
+		// Silent skip — no message needed.
+	} else if yes {
+		fmt.Fprintln(out, "\nTelegraph chat bridge: skipped (--yes)")
+		fmt.Fprintln(out, "You can set up Telegraph later by editing railyard.yaml.")
+		fmt.Fprintln(out, "See docs/telegraph-setup.md for details.")
+	} else {
+		if promptYesNo(in, out, "\nSet up Telegraph chat bridge? (Slack/Discord)", false) {
+			platform := promptChoice(in, out, "Platform", []string{"slack", "discord"}, "slack")
+			channel := promptValue(in, out, "Default channel ID", "")
+			if channel == "" {
+				return fmt.Errorf("channel ID is required for Telegraph setup")
+			}
+			tg = &telegraphTemplateData{
+				Platform: platform,
+				Channel:  channel,
+			}
+			switch platform {
+			case "slack":
+				tg.SlackBotVar = promptValue(in, out, "Slack bot token env var", "SLACK_BOT_TOKEN")
+				tg.SlackAppVar = promptValue(in, out, "Slack app token env var", "SLACK_APP_TOKEN")
+				fmt.Fprintln(out, "\n  Set these environment variables before running Telegraph:")
+				fmt.Fprintf(out, "    export %s=\"xoxb-...\"\n", tg.SlackBotVar)
+				fmt.Fprintf(out, "    export %s=\"xapp-...\"\n", tg.SlackAppVar)
+			case "discord":
+				tg.DiscordBotVar = promptValue(in, out, "Discord bot token env var", "DISCORD_BOT_TOKEN")
+				tg.GuildID = promptValue(in, out, "Guild ID (optional)", "")
+				tg.DiscordChanID = promptValue(in, out, "Channel ID (optional)", "")
+				fmt.Fprintln(out, "\n  Set this environment variable before running Telegraph:")
+				fmt.Fprintf(out, "    export %s=\"your-bot-token\"\n", tg.DiscordBotVar)
+			}
+			fmt.Fprintln(out, "\n  See docs/telegraph-setup.md for full setup instructions.")
+		} else {
+			fmt.Fprintln(out, "You can set up Telegraph later by editing railyard.yaml.")
+			fmt.Fprintln(out, "See docs/telegraph-setup.md for details.")
+		}
+	}
+
 	// Step 5: Render and write config.
-	yamlContent, err := renderConfig(owner, remote, doltPort, tracks)
+	yamlContent, err := renderConfig(owner, remote, doltPort, tracks, tg)
 	if err != nil {
 		return err
 	}
