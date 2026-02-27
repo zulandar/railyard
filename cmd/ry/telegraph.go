@@ -190,7 +190,7 @@ func runTelegraphStart(cmd *cobra.Command, configPath string) error {
 			fmt.Fprintf(out, "telegraph: dispatch worktree failed, dispatch disabled: %v\n", wtErr)
 		} else {
 			baseBranch := engine.DetectBaseBranch(repoDir, cfg.DefaultBranch)
-			if syncErr := engine.SyncWorktreeToBranch(worktreeDir, baseBranch); syncErr != nil {
+			if syncErr := engine.SyncWorktreeToBranch(worktreeDir, baseBranch, repoDir); syncErr != nil {
 				log.Printf("telegraph: sync worktree to %s: %v (continuing anyway)", baseBranch, syncErr)
 			}
 

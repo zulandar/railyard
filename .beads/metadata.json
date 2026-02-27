@@ -3,6 +3,6 @@
   "jsonl_export": "issues.jsonl",
   "backend": "dolt",
   "dolt_mode": "server",
-  "dolt_server_port": 3308,
+  "dolt_server_port": 3306,
   "dolt_database": "beads_railyard"
 }

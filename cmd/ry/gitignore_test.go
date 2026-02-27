@@ -322,10 +322,9 @@ func TestRailyardPatterns(t *testing.T) {
 	for _, p := range patterns {
 		has[p] = true
 	}
-	if !has[".claude"] {
-		t.Error("missing .claude")
-	}
-	if !has[".railyard/"] {
-		t.Error("missing .railyard/")
+	for _, want := range []string{".claude", ".railyard/", ".claudeignore", ".mcp.json", ".beads/"} {
+		if !has[want] {
+			t.Errorf("missing pattern %q", want)
+		}
 	}
 }

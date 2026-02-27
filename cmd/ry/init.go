@@ -573,6 +573,19 @@ func runInit(cmd *cobra.Command, configPath string, yes, skipDB, skipCoco, skipT
 	}
 	fmt.Fprintf(out, "\nWrote %s\n", configPath)
 
+	// Commit railyard.yaml so it's tracked and survives git clean in worktrees.
+	gitAdd := exec.Command("git", "add", filepath.Base(configPath))
+	gitAdd.Dir = gitRoot
+	if addOut, err := gitAdd.CombinedOutput(); err != nil {
+		fmt.Fprintf(out, "Warning: could not stage %s: %s\n", configPath, strings.TrimSpace(string(addOut)))
+	} else {
+		gitCommit := exec.Command("git", "commit", "-m", "Add railyard configuration")
+		gitCommit.Dir = gitRoot
+		if commitOut, err := gitCommit.CombinedOutput(); err != nil {
+			fmt.Fprintf(out, "Warning: could not commit %s: %s\n", configPath, strings.TrimSpace(string(commitOut)))
+		}
+	}
+
 	if skipDB {
 		fmt.Fprintln(out, "\nSkipped database initialization (--skip-db).")
 		fmt.Fprintln(out, "Run these when ready:")

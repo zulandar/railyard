@@ -277,6 +277,9 @@ func railyardPatterns() []string {
 	return []string{
 		".claude",
 		".railyard/",
+		".claudeignore",
+		".mcp.json",
+		".beads/",
 		"cocoindex/.venv/",
 		"cocoindex/__pycache__/",
 	}

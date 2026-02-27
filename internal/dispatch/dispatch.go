@@ -44,7 +44,7 @@ func Start(opts StartOpts) error {
 	} else {
 		// Sync worktree to the primary repo's current branch.
 		branch := engine.DetectBaseBranch(workDir, opts.Config.DefaultBranch)
-		if err := engine.SyncWorktreeToBranch(wtDir, branch); err != nil {
+		if err := engine.SyncWorktreeToBranch(wtDir, branch, opts.RepoDir); err != nil {
 			log.Printf("dispatch: worktree sync warning: %v", err)
 		}
 		workDir = wtDir

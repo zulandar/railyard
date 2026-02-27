@@ -865,7 +865,7 @@ func TestSyncWorktreeToBranch(t *testing.T) {
 	}
 
 	// Sync to develop branch.
-	if err := SyncWorktreeToBranch(wtDir, "develop"); err != nil {
+	if err := SyncWorktreeToBranch(wtDir, "develop", dir); err != nil {
 		t.Fatalf("SyncWorktreeToBranch: %v", err)
 	}
 
@@ -875,7 +875,7 @@ func TestSyncWorktreeToBranch(t *testing.T) {
 	}
 
 	// Sync back to main.
-	if err := SyncWorktreeToBranch(wtDir, "main"); err != nil {
+	if err := SyncWorktreeToBranch(wtDir, "main", dir); err != nil {
 		t.Fatalf("SyncWorktreeToBranch main: %v", err)
 	}
 
@@ -886,7 +886,7 @@ func TestSyncWorktreeToBranch(t *testing.T) {
 }
 
 func TestSyncWorktreeToBranch_EmptyDir(t *testing.T) {
-	err := SyncWorktreeToBranch("", "main")
+	err := SyncWorktreeToBranch("", "main", "")
 	if err == nil {
 		t.Fatal("expected error for empty dir")
 	}
@@ -900,7 +900,85 @@ func TestSyncWorktreeToBranch_EmptyBranchDefaultsToMain(t *testing.T) {
 	}
 
 	// Should not error with empty branch (defaults to "main").
-	if err := SyncWorktreeToBranch(wtDir, ""); err != nil {
+	if err := SyncWorktreeToBranch(wtDir, "", dir); err != nil {
 		t.Fatalf("SyncWorktreeToBranch empty branch: %v", err)
+	}
+}
+
+func TestResetWorktree_PreservesRailyardFiles(t *testing.T) {
+	dir := initTestRepo(t)
+
+	wtDir, err := EnsureWorktree(dir, "eng-preserve01")
+	if err != nil {
+		t.Fatalf("EnsureWorktree: %v", err)
+	}
+
+	// Create files that should be preserved and one that should not.
+	os.WriteFile(filepath.Join(wtDir, ".claudeignore"), []byte("railyard.yaml\n"), 0644)
+	os.WriteFile(filepath.Join(wtDir, ".mcp.json"), []byte(`{"mcpServers":{}}`), 0644)
+	os.WriteFile(filepath.Join(wtDir, "junk.txt"), []byte("delete me"), 0644)
+
+	if err := ResetWorktree(wtDir, ""); err != nil {
+		t.Fatalf("ResetWorktree: %v", err)
+	}
+
+	// .claudeignore should be preserved (excluded from clean, then re-written).
+	if _, err := os.Stat(filepath.Join(wtDir, ".claudeignore")); err != nil {
+		t.Error("expected .claudeignore to survive git clean")
+	}
+
+	// .mcp.json should be preserved (excluded from clean).
+	if _, err := os.Stat(filepath.Join(wtDir, ".mcp.json")); err != nil {
+		t.Error("expected .mcp.json to survive git clean")
+	}
+
+	// junk.txt should be removed.
+	if _, err := os.Stat(filepath.Join(wtDir, "junk.txt")); !os.IsNotExist(err) {
+		t.Error("expected junk.txt to be removed by git clean")
+	}
+}
+
+func TestSyncWorktreeToBranch_PreservesRailyardFiles(t *testing.T) {
+	dir := initTestRepo(t)
+
+	wtDir, err := EnsureYardmasterWorktree(dir)
+	if err != nil {
+		t.Fatalf("EnsureYardmasterWorktree: %v", err)
+	}
+
+	// Create files that should be preserved and one that should not.
+	os.WriteFile(filepath.Join(wtDir, ".claudeignore"), []byte("railyard.yaml\n"), 0644)
+	os.WriteFile(filepath.Join(wtDir, ".mcp.json"), []byte(`{"mcpServers":{}}`), 0644)
+	os.WriteFile(filepath.Join(wtDir, "junk.txt"), []byte("delete me"), 0644)
+
+	// Create railyard.yaml in repo root for symlink test.
+	os.WriteFile(filepath.Join(dir, "railyard.yaml"), []byte("owner: test\n"), 0644)
+
+	if err := SyncWorktreeToBranch(wtDir, "main", dir); err != nil {
+		t.Fatalf("SyncWorktreeToBranch: %v", err)
+	}
+
+	// .claudeignore should be present (excluded from clean, then re-written).
+	if _, err := os.Stat(filepath.Join(wtDir, ".claudeignore")); err != nil {
+		t.Error("expected .claudeignore to survive sync")
+	}
+
+	// .mcp.json should be preserved (excluded from clean).
+	if _, err := os.Stat(filepath.Join(wtDir, ".mcp.json")); err != nil {
+		t.Error("expected .mcp.json to survive sync")
+	}
+
+	// junk.txt should be removed.
+	if _, err := os.Stat(filepath.Join(wtDir, "junk.txt")); !os.IsNotExist(err) {
+		t.Error("expected junk.txt to be removed by sync")
+	}
+
+	// railyard.yaml symlink should exist in worktree.
+	linkTarget, err := os.Readlink(filepath.Join(wtDir, "railyard.yaml"))
+	if err != nil {
+		t.Fatalf("expected railyard.yaml symlink: %v", err)
+	}
+	if linkTarget != filepath.Join(dir, "railyard.yaml") {
+		t.Errorf("symlink target = %q, want %q", linkTarget, filepath.Join(dir, "railyard.yaml"))
 	}
 }

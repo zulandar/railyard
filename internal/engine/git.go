@@ -9,6 +9,18 @@ import (
 	"time"
 )
 
+// cleanExcludes lists untracked files that git clean should preserve in worktrees.
+var cleanExcludes = []string{".claudeignore", ".mcp.json"}
+
+// gitCleanArgs returns the arguments for git clean that exclude railyard files.
+func gitCleanArgs() []string {
+	args := []string{"clean", "-fd"}
+	for _, e := range cleanExcludes {
+		args = append(args, "-e", e)
+	}
+	return args
+}
+
 // DetectBaseBranch returns the base branch to use for new cars.
 // Fallback chain:
 //  1. git symbolic-ref --short HEAD on repoDir (current branch)
@@ -154,8 +166,8 @@ func ResetWorktree(wtDir, baseBranch string) error {
 		return fmt.Errorf("engine: detach HEAD: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 
-	// Step 3: Remove untracked files and directories.
-	clean := exec.Command("git", "clean", "-fd")
+	// Step 3: Remove untracked files and directories (preserving railyard files).
+	clean := exec.Command("git", gitCleanArgs()...)
 	clean.Dir = wtDir
 	if out, err := clean.CombinedOutput(); err != nil {
 		return fmt.Errorf("engine: git clean: %s: %w", strings.TrimSpace(string(out)), err)
@@ -175,6 +187,7 @@ func ResetWorktree(wtDir, baseBranch string) error {
 		return fmt.Errorf("engine: reset to %s: %s: %w", target, strings.TrimSpace(string(out)), err)
 	}
 
+	writeClaudeIgnore(wtDir)
 	return nil
 }
 
@@ -378,7 +391,8 @@ func RemoveYardmasterWorktree(repoDir string) error {
 
 // SyncWorktreeToBranch resets a worktree to match a given branch.
 // Fetches first, then resets to origin/{branch} (falls back to local {branch}).
-func SyncWorktreeToBranch(wtDir, branch string) error {
+// repoDir is the main repository root, used to re-create the railyard.yaml symlink.
+func SyncWorktreeToBranch(wtDir, branch, repoDir string) error {
 	if wtDir == "" {
 		return fmt.Errorf("engine: worktree directory is required")
 	}
@@ -396,8 +410,8 @@ func SyncWorktreeToBranch(wtDir, branch string) error {
 	detach.Dir = wtDir
 	detach.CombinedOutput() // ignore error
 
-	// Clean untracked files.
-	clean := exec.Command("git", "clean", "-fd")
+	// Clean untracked files (preserving railyard files).
+	clean := exec.Command("git", gitCleanArgs()...)
 	clean.Dir = wtDir
 	clean.CombinedOutput() // ignore error
 
@@ -415,6 +429,10 @@ func SyncWorktreeToBranch(wtDir, branch string) error {
 		return fmt.Errorf("engine: sync worktree to %s: %s: %w", target, strings.TrimSpace(string(out)), err)
 	}
 
+	writeClaudeIgnore(wtDir)
+	if repoDir != "" {
+		symlinkRailyardYaml(repoDir, wtDir)
+	}
 	return nil
 }
 

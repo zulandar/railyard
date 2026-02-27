@@ -327,7 +327,7 @@ func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, r
 			baseBranch = "main"
 		}
 		if ymDir != repoDir {
-			if err := engine.SyncWorktreeToBranch(ymDir, baseBranch); err != nil {
+			if err := engine.SyncWorktreeToBranch(ymDir, baseBranch, repoDir); err != nil {
 				log.Printf("reset yardmaster worktree for %s: %v", c.ID, err)
 			}
 		}
