@@ -56,8 +56,8 @@ func WriteDispatchMCPConfig(workDir string, cfg *config.Config) error {
 		tables = append(tables, fmt.Sprintf("main_%s_embeddings", t.Name))
 	}
 
-	pythonPath := filepath.Join(cfg.CocoIndex.VenvPath, "bin", "python")
-	scriptPath := filepath.Join(cfg.CocoIndex.ScriptsPath, "mcp_server.py")
+	pythonPath, _ := filepath.Abs(filepath.Join(cfg.CocoIndex.VenvPath, "bin", "python"))
+	scriptPath, _ := filepath.Abs(filepath.Join(cfg.CocoIndex.ScriptsPath, "mcp_server.py"))
 
 	mcpCfg.MCPServers["railyard_cocoindex"] = mcpServer{
 		Command: pythonPath,
