@@ -315,6 +315,11 @@ func runCocoIndexInit(cmd *cobra.Command, configPath string, port int, skipMigra
 		return fmt.Errorf("ensure cocoindex scripts: %w", err)
 	}
 
+	// Ensure docker compose and init SQL files exist on disk.
+	if err := ensureDockerFiles("docker"); err != nil {
+		return fmt.Errorf("ensure docker files: %w", err)
+	}
+
 	// Step 2: Set up Python venv with dependencies.
 	if !skipVenv {
 		fmt.Fprintln(out, "Setting up Python venv...")
