@@ -671,3 +671,65 @@ func TestUnknownRoute_Returns404(t *testing.T) {
 		t.Errorf("status = %d, want 404", resp.StatusCode)
 	}
 }
+
+func TestCompletedToday_NilDB(t *testing.T) {
+	count := CompletedToday(nil)
+	if count != 0 {
+		t.Errorf("count = %d, want 0", count)
+	}
+}
+
+func TestTotalTokenUsage_NilDB(t *testing.T) {
+	count := TotalTokenUsage(nil)
+	if count != 0 {
+		t.Errorf("count = %d, want 0", count)
+	}
+}
+
+func TestComputeStats_NilDB(t *testing.T) {
+	stats := ComputeStats(nil, nil, nil)
+	if stats.ActiveEngines != 0 {
+		t.Errorf("ActiveEngines = %d, want 0", stats.ActiveEngines)
+	}
+	if stats.OpenCars != 0 {
+		t.Errorf("OpenCars = %d, want 0", stats.OpenCars)
+	}
+	if stats.InProgressCars != 0 {
+		t.Errorf("InProgressCars = %d, want 0", stats.InProgressCars)
+	}
+	if stats.BlockedCars != 0 {
+		t.Errorf("BlockedCars = %d, want 0", stats.BlockedCars)
+	}
+	if stats.CompletedToday != 0 {
+		t.Errorf("CompletedToday = %d, want 0", stats.CompletedToday)
+	}
+	if stats.TotalTokens != 0 {
+		t.Errorf("TotalTokens = %d, want 0", stats.TotalTokens)
+	}
+}
+
+func TestComputeStats_WithData(t *testing.T) {
+	engines := []EngineRow{
+		{ID: "e1", Status: "idle"},
+		{ID: "e2", Status: "working"},
+		{ID: "e3", Status: "dead"},
+		{ID: "e4", Status: "stopped"},
+	}
+	tracks := []TrackStatusCount{
+		{Track: "backend", Open: 3, InProgress: 2, Blocked: 1},
+		{Track: "frontend", Open: 1, InProgress: 4, Blocked: 0},
+	}
+	stats := ComputeStats(engines, tracks, nil)
+	if stats.ActiveEngines != 2 {
+		t.Errorf("ActiveEngines = %d, want 2", stats.ActiveEngines)
+	}
+	if stats.OpenCars != 4 {
+		t.Errorf("OpenCars = %d, want 4", stats.OpenCars)
+	}
+	if stats.InProgressCars != 6 {
+		t.Errorf("InProgressCars = %d, want 6", stats.InProgressCars)
+	}
+	if stats.BlockedCars != 1 {
+		t.Errorf("BlockedCars = %d, want 1", stats.BlockedCars)
+	}
+}

@@ -581,3 +581,57 @@ func PendingEscalationCount(db *gorm.DB) int64 {
 		Count(&count)
 	return count
 }
+
+// DashboardStats holds aggregate numbers for the summary stats bar.
+type DashboardStats struct {
+	ActiveEngines  int
+	OpenCars       int
+	InProgressCars int
+	BlockedCars    int
+	CompletedToday int64
+	TotalTokens    int64
+}
+
+// CompletedToday returns the count of cars completed (status=done) since midnight today.
+func CompletedToday(db *gorm.DB) int64 {
+	if db == nil {
+		return 0
+	}
+	now := time.Now()
+	midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	var count int64
+	db.Model(&models.Car{}).
+		Where("status = ? AND completed_at >= ?", "done", midnight).
+		Count(&count)
+	return count
+}
+
+// TotalTokenUsage returns the sum of output tokens across all agent logs.
+func TotalTokenUsage(db *gorm.DB) int64 {
+	if db == nil {
+		return 0
+	}
+	var total int64
+	db.Model(&models.AgentLog{}).
+		Select("COALESCE(SUM(output_tokens), 0)").
+		Scan(&total)
+	return total
+}
+
+// ComputeStats builds DashboardStats from already-fetched engines/tracks plus DB queries.
+func ComputeStats(engines []EngineRow, tracks []TrackStatusCount, db *gorm.DB) DashboardStats {
+	var s DashboardStats
+	for _, e := range engines {
+		if e.Status != "dead" && e.Status != "stopped" {
+			s.ActiveEngines++
+		}
+	}
+	for _, tc := range tracks {
+		s.OpenCars += tc.Open
+		s.InProgressCars += tc.InProgress
+		s.BlockedCars += tc.Blocked
+	}
+	s.CompletedToday = CompletedToday(db)
+	s.TotalTokens = TotalTokenUsage(db)
+	return s
+}
