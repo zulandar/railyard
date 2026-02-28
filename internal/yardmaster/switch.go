@@ -495,6 +495,66 @@ func gitResetToCommit(repoDir, commitHash string) {
 	cmd.CombinedOutput() // best-effort — error logged by caller
 }
 
+// gitMergeAbort aborts a failed merge, returning the repo to pre-merge state.
+func gitMergeAbort(repoDir string) {
+	cmd := exec.Command("git", "merge", "--abort")
+	cmd.Dir = repoDir
+	cmd.CombinedOutput() // best-effort
+}
+
+// gitRebaseAbort aborts a failed rebase, returning the repo to pre-rebase state.
+func gitRebaseAbort(repoDir string) {
+	cmd := exec.Command("git", "rebase", "--abort")
+	cmd.Dir = repoDir
+	cmd.CombinedOutput() // best-effort
+}
+
+// getConflictFiles returns the list of files with unresolved conflicts.
+// Works during both merge and rebase conflicts.
+func getConflictFiles(repoDir string) []string {
+	cmd := exec.Command("git", "diff", "--name-only", "--diff-filter=U")
+	cmd.Dir = repoDir
+	out, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	var files []string
+	for _, l := range lines {
+		l = strings.TrimSpace(l)
+		if l != "" {
+			files = append(files, l)
+		}
+	}
+	return files
+}
+
+// getConflictContext builds a human-readable summary of the conflict for
+// escalation. Includes the file list and abbreviated conflict markers.
+func getConflictContext(repoDir string, files []string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Conflicting files (%d):\n", len(files))
+	for _, f := range files {
+		fmt.Fprintf(&b, "  - %s\n", f)
+	}
+	// Show abbreviated conflict diff for each file (first 30 lines).
+	for _, f := range files {
+		cmd := exec.Command("git", "diff", "--", f)
+		cmd.Dir = repoDir
+		out, err := cmd.Output()
+		if err != nil {
+			continue
+		}
+		diff := string(out)
+		lines := strings.Split(diff, "\n")
+		if len(lines) > 30 {
+			lines = append(lines[:30], "... (truncated)")
+		}
+		fmt.Fprintf(&b, "\n--- %s ---\n%s\n", f, strings.Join(lines, "\n"))
+	}
+	return b.String()
+}
+
 // gitPush pushes the current HEAD to the base branch on the remote.
 // Uses HEAD:{baseBranch} refspec which works in both normal repos and worktrees.
 func gitPush(repoDir, baseBranch string) error {

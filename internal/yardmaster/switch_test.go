@@ -1083,3 +1083,101 @@ func TestRunTests_RealTestFailure(t *testing.T) {
 		t.Errorf("error = %q, want to contain %q", err.Error(), "tests failed")
 	}
 }
+
+// writeFile is a test helper that writes content to a file in the repo.
+func writeFile(t *testing.T, repoDir, name, content string) {
+	t.Helper()
+	path := filepath.Join(repoDir, name)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestGitMergeAbort(t *testing.T) {
+	repoDir, run := initTestRepo(t)
+
+	// Create a branch that will conflict with main.
+	run("git", "checkout", "-b", "feature")
+	writeFile(t, repoDir, "file.txt", "feature content\n")
+	run("git", "add", "file.txt")
+	run("git", "commit", "-m", "feature adds file")
+	run("git", "checkout", "main")
+	writeFile(t, repoDir, "file.txt", "main content\n")
+	run("git", "add", "file.txt")
+	run("git", "commit", "-m", "main adds file")
+
+	// Start a merge that will conflict.
+	cmd := exec.Command("git", "merge", "feature")
+	cmd.Dir = repoDir
+	cmd.CombinedOutput() // ignore error — we want the conflict
+
+	// Abort should clean up.
+	gitMergeAbort(repoDir)
+
+	// Verify clean state after abort.
+	statusCmd := exec.Command("git", "status", "--porcelain")
+	statusCmd.Dir = repoDir
+	out, _ := statusCmd.Output()
+	if strings.TrimSpace(string(out)) != "" {
+		t.Errorf("expected clean state after abort, got: %s", out)
+	}
+}
+
+func TestGetConflictFiles(t *testing.T) {
+	repoDir, run := initTestRepo(t)
+
+	// Create conflicting branches.
+	run("git", "checkout", "-b", "feature")
+	writeFile(t, repoDir, "a.txt", "feature-a\n")
+	writeFile(t, repoDir, "b.txt", "feature-b\n")
+	run("git", "add", ".")
+	run("git", "commit", "-m", "feature adds files")
+	run("git", "checkout", "main")
+	writeFile(t, repoDir, "a.txt", "main-a\n")
+	writeFile(t, repoDir, "b.txt", "main-b\n")
+	run("git", "add", ".")
+	run("git", "commit", "-m", "main adds files")
+
+	// Start conflicting merge.
+	cmd := exec.Command("git", "merge", "feature")
+	cmd.Dir = repoDir
+	cmd.CombinedOutput()
+
+	files := getConflictFiles(repoDir)
+	if len(files) != 2 {
+		t.Fatalf("expected 2 conflict files, got %d: %v", len(files), files)
+	}
+
+	// Clean up.
+	gitMergeAbort(repoDir)
+}
+
+func TestGetConflictContext(t *testing.T) {
+	repoDir, run := initTestRepo(t)
+
+	run("git", "checkout", "-b", "feature")
+	writeFile(t, repoDir, "file.txt", "feature content\n")
+	run("git", "add", "file.txt")
+	run("git", "commit", "-m", "feature")
+	run("git", "checkout", "main")
+	writeFile(t, repoDir, "file.txt", "main content\n")
+	run("git", "add", "file.txt")
+	run("git", "commit", "-m", "main")
+
+	cmd := exec.Command("git", "merge", "feature")
+	cmd.Dir = repoDir
+	cmd.CombinedOutput()
+
+	ctx := getConflictContext(repoDir, []string{"file.txt"})
+	if ctx == "" {
+		t.Error("expected non-empty conflict context")
+	}
+	if !strings.Contains(ctx, "file.txt") {
+		t.Error("conflict context should mention the file name")
+	}
+
+	gitMergeAbort(repoDir)
+}
