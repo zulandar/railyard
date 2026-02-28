@@ -176,41 +176,32 @@ func runTelegraphStart(cmd *cobra.Command, configPath string) error {
 		return err
 	}
 
-	// Set up dispatch spawner: render prompt, ensure worktree, write MCP config.
+	// Set up lazy dispatch spawner: defers worktree/prompt/MCP setup to each
+	// Spawn() call so telegraph can recover from transient startup failures.
 	out := cmd.OutOrStdout()
-	var spawner telegraph.ProcessSpawner
 
-	dispatchPrompt, err := dispatch.RenderPrompt(cfg)
+	repoDir, err := os.Getwd()
 	if err != nil {
-		fmt.Fprintf(out, "telegraph: dispatch prompt render failed, dispatch disabled: %v\n", err)
-	} else {
-		// Determine repo directory (cwd).
-		repoDir, wdErr := os.Getwd()
-		if wdErr != nil {
-			return fmt.Errorf("telegraph: getwd: %w", wdErr)
-		}
-
-		worktreeDir, wtErr := engine.EnsureDispatchWorktree(repoDir)
-		if wtErr != nil {
-			fmt.Fprintf(out, "telegraph: dispatch worktree failed, dispatch disabled: %v\n", wtErr)
-		} else {
-			baseBranch := engine.DetectBaseBranch(repoDir, cfg.DefaultBranch)
-			if syncErr := engine.SyncWorktreeToBranch(worktreeDir, baseBranch, repoDir); syncErr != nil {
-				log.Printf("telegraph: sync worktree to %s: %v (continuing anyway)", baseBranch, syncErr)
-			}
-
-			// Write MCP config (non-fatal).
-			if mcpErr := dispatch.WriteDispatchMCPConfig(worktreeDir, cfg); mcpErr != nil {
-				log.Printf("telegraph: write dispatch MCP config: %v (continuing without MCP)", mcpErr)
-			}
-
-			spawner = &telegraph.ClaudeSpawner{
-				SystemPrompt: dispatchPrompt,
-				WorkDir:      worktreeDir,
-			}
-			fmt.Fprintf(out, "telegraph: dispatch enabled (worktree: %s)\n", worktreeDir)
-		}
+		return fmt.Errorf("telegraph: getwd: %w", err)
 	}
+
+	var spawner telegraph.ProcessSpawner
+	spawner = &telegraph.LazySpawner{
+		RenderPrompt: func() (string, error) {
+			return dispatch.RenderPrompt(cfg)
+		},
+		EnsureWorktree: func() (string, error) {
+			return engine.EnsureDispatchWorktree(repoDir)
+		},
+		SyncWorktree: func(worktreeDir string) error {
+			baseBranch := engine.DetectBaseBranch(repoDir, cfg.DefaultBranch)
+			return engine.SyncWorktreeToBranch(worktreeDir, baseBranch, repoDir)
+		},
+		WriteMCPConfig: func(worktreeDir string) error {
+			return dispatch.WriteDispatchMCPConfig(worktreeDir, cfg)
+		},
+	}
+	fmt.Fprintf(out, "telegraph: dispatch enabled (lazy spawner)\n")
 
 	daemon, err := telegraph.NewDaemon(telegraph.DaemonOpts{
 		DB:      gormDB,
