@@ -437,7 +437,7 @@ func TestMaybeSwitchEscalate_BelowThreshold(t *testing.T) {
 
 	var buf bytes.Buffer
 	// This should NOT escalate (below threshold), so no "escalating" in output.
-	maybeSwitchEscalate(context.Background(), db, cfg, "car-esc1", SwitchFailMerge, nil, &buf)
+	maybeSwitchEscalate(context.Background(), db, cfg, "car-esc1", SwitchFailMerge, nil, "", &buf)
 
 	if strings.Contains(buf.String(), "escalating") {
 		t.Errorf("should not escalate below threshold, got: %s", buf.String())
@@ -459,7 +459,7 @@ func TestMaybeSwitchEscalate_AtThreshold(t *testing.T) {
 	var buf bytes.Buffer
 	// Escalation will fire (at threshold). The actual Claude call will fail
 	// since there's no `claude` binary in CI, but we can verify the log output.
-	maybeSwitchEscalate(context.Background(), db, cfg, "car-esc2", SwitchFailFetch, nil, &buf)
+	maybeSwitchEscalate(context.Background(), db, cfg, "car-esc2", SwitchFailFetch, nil, "", &buf)
 
 	if !strings.Contains(buf.String(), "escalating") {
 		t.Errorf("should escalate at threshold, got: %s", buf.String())
@@ -478,7 +478,7 @@ func TestMaybeSwitchEscalate_InfraEscalatesImmediately(t *testing.T) {
 	cfg.Stall.MaxSwitchFailures = 3
 
 	var buf bytes.Buffer
-	maybeSwitchEscalate(context.Background(), db, cfg, "car-infra1", SwitchFailInfra, nil, &buf)
+	maybeSwitchEscalate(context.Background(), db, cfg, "car-infra1", SwitchFailInfra, nil, "", &buf)
 
 	if !strings.Contains(buf.String(), "infra failure") {
 		t.Errorf("should escalate immediately for infra, got: %s", buf.String())
@@ -501,7 +501,7 @@ func TestMaybeSwitchEscalate_SetsCarToMergeFailed(t *testing.T) {
 	cfg.Stall.MaxSwitchFailures = 3
 
 	var buf bytes.Buffer
-	maybeSwitchEscalate(context.Background(), db, cfg, "car-esc3", SwitchFailMerge, nil, &buf)
+	maybeSwitchEscalate(context.Background(), db, cfg, "car-esc3", SwitchFailMerge, nil, "", &buf)
 
 	// Car status should change to "merge-failed" to break the retry loop.
 	var car models.Car
@@ -521,7 +521,7 @@ func TestMaybeSwitchEscalate_InfraSetsCarToMergeFailed(t *testing.T) {
 	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
 
 	var buf bytes.Buffer
-	maybeSwitchEscalate(context.Background(), db, cfg, "car-infra2", SwitchFailInfra, nil, &buf)
+	maybeSwitchEscalate(context.Background(), db, cfg, "car-infra2", SwitchFailInfra, nil, "", &buf)
 
 	// Infra failures should also set merge-failed.
 	var car models.Car

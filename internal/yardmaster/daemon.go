@@ -363,19 +363,29 @@ func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, r
 			log.Printf("switch car %s: %v", c.ID, err)
 
 			if failCategory != SwitchFailNone {
-				writeProgressNote(db, c.ID, YardmasterID,
-					fmt.Sprintf("switch:%s: %v", failCategory, err))
+				note := fmt.Sprintf("switch:%s: %v", failCategory, err)
+				if result != nil && result.ConflictDetails != "" {
+					note += "\n" + result.ConflictDetails
+				}
+				writeProgressNote(db, c.ID, YardmasterID, note)
 			}
 
-			maybeSwitchEscalate(ctx, db, cfg, c.ID, failCategory, err, out)
+			conflictDetails := ""
+			if result != nil {
+				conflictDetails = result.ConflictDetails
+			}
+			maybeSwitchEscalate(ctx, db, cfg, c.ID, failCategory, err, conflictDetails, out)
 			continue
 		}
 
 		// Test failures return result with nil error but FailureCategory set.
 		if failCategory != SwitchFailNone {
-			writeProgressNote(db, c.ID, YardmasterID,
-				fmt.Sprintf("switch:%s: %v", failCategory, result.Error))
-			maybeSwitchEscalate(ctx, db, cfg, c.ID, failCategory, result.Error, out)
+			note := fmt.Sprintf("switch:%s: %v", failCategory, result.Error)
+			if result.ConflictDetails != "" {
+				note += "\n" + result.ConflictDetails
+			}
+			writeProgressNote(db, c.ID, YardmasterID, note)
+			maybeSwitchEscalate(ctx, db, cfg, c.ID, failCategory, result.Error, result.ConflictDetails, out)
 		}
 
 		if result.PRCreated {
@@ -619,7 +629,7 @@ func switchFailureReason(cat SwitchFailureCategory) string {
 
 // maybeSwitchEscalate checks whether a car has exceeded the switch failure
 // threshold and, if so, escalates to Claude with the failure category.
-func maybeSwitchEscalate(ctx context.Context, db *gorm.DB, cfg *config.Config, carID string, cat SwitchFailureCategory, switchErr error, out io.Writer) {
+func maybeSwitchEscalate(ctx context.Context, db *gorm.DB, cfg *config.Config, carID string, cat SwitchFailureCategory, switchErr error, conflictDetails string, out io.Writer) {
 	// Infrastructure failures escalate immediately — no threshold needed.
 	// The human message was already sent by Switch(); here we also escalate
 	// to Claude for a suggested action.
@@ -670,7 +680,7 @@ func maybeSwitchEscalate(ctx context.Context, db *gorm.DB, cfg *config.Config, c
 		res, escErr := EscalateToClaude(ctx, EscalateOpts{
 			CarID:   carID,
 			Reason:  reason,
-			Details: fmt.Sprintf("Car %s has failed %d times. Latest: %v", carID, failCount, switchErr),
+			Details: fmt.Sprintf("Car %s has failed %d times. Latest: %v\n%s", carID, failCount, switchErr, conflictDetails),
 			DB:      db,
 		})
 		if escErr != nil {
