@@ -487,3 +487,160 @@ func TestMaybeSwitchEscalate_InfraEscalatesImmediately(t *testing.T) {
 		t.Errorf("output should say 'escalating immediately', got: %s", buf.String())
 	}
 }
+
+func TestMaybeSwitchEscalate_SetsCarToMergeFailed(t *testing.T) {
+	db := testDB(t)
+	db.Create(&models.Car{ID: "car-esc3", Status: "done", Track: "backend"})
+
+	// 3 failures at threshold.
+	writeProgressNote(db, "car-esc3", "yardmaster", "switch:merge-conflict: conflict 1")
+	writeProgressNote(db, "car-esc3", "yardmaster", "switch:merge-conflict: conflict 2")
+	writeProgressNote(db, "car-esc3", "yardmaster", "switch:merge-conflict: conflict 3")
+
+	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
+	cfg.Stall.MaxSwitchFailures = 3
+
+	var buf bytes.Buffer
+	maybeSwitchEscalate(context.Background(), db, cfg, "car-esc3", SwitchFailMerge, nil, &buf)
+
+	// Car status should change to "merge-failed" to break the retry loop.
+	var car models.Car
+	db.Where("id = ?", "car-esc3").First(&car)
+	if car.Status != "merge-failed" {
+		t.Errorf("car status = %q, want %q", car.Status, "merge-failed")
+	}
+	if !strings.Contains(buf.String(), "merge-failed") {
+		t.Errorf("output should mention status change, got: %s", buf.String())
+	}
+}
+
+func TestMaybeSwitchEscalate_InfraSetsCarToMergeFailed(t *testing.T) {
+	db := testDB(t)
+	db.Create(&models.Car{ID: "car-infra2", Status: "done", Track: "backend"})
+
+	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
+
+	var buf bytes.Buffer
+	maybeSwitchEscalate(context.Background(), db, cfg, "car-infra2", SwitchFailInfra, nil, &buf)
+
+	// Infra failures should also set merge-failed.
+	var car models.Car
+	db.Where("id = ?", "car-infra2").First(&car)
+	if car.Status != "merge-failed" {
+		t.Errorf("car status = %q, want %q", car.Status, "merge-failed")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// handleEscalateResult tests
+// ---------------------------------------------------------------------------
+
+func TestHandleEscalateResult_GuidanceWithoutEngine_FallsBackToHuman(t *testing.T) {
+	db := testDB(t)
+
+	var buf bytes.Buffer
+	handleEscalateResult(db, "", "car-001", &EscalateResult{
+		Action:  EscalateGuidance,
+		Message: "Try rebasing onto main",
+	}, &buf)
+
+	output := buf.String()
+	// Should mention falling back to human.
+	if !strings.Contains(output, "no engine") {
+		t.Errorf("should mention no engine, got: %s", output)
+	}
+	if !strings.Contains(output, "alerting human") {
+		t.Errorf("should alert human as fallback, got: %s", output)
+	}
+
+	// Should have sent a message to "human".
+	var msg models.Message
+	db.Where("to_agent = ? AND car_id = ?", "human", "car-001").First(&msg)
+	if msg.ID == 0 {
+		t.Fatal("expected message to human")
+	}
+	if msg.Subject != "escalate" {
+		t.Errorf("subject = %q, want %q", msg.Subject, "escalate")
+	}
+	if !strings.Contains(msg.Body, "Try rebasing onto main") {
+		t.Errorf("body = %q, should contain guidance message", msg.Body)
+	}
+}
+
+func TestHandleEscalateResult_ReassignWithoutEngine_FallsBackToHuman(t *testing.T) {
+	db := testDB(t)
+
+	var buf bytes.Buffer
+	handleEscalateResult(db, "", "car-002", &EscalateResult{
+		Action:  EscalateReassign,
+		Message: "Reassign to a different engine",
+	}, &buf)
+
+	output := buf.String()
+	if !strings.Contains(output, "no engine") {
+		t.Errorf("should mention no engine, got: %s", output)
+	}
+	if !strings.Contains(output, "alerting human") {
+		t.Errorf("should alert human as fallback, got: %s", output)
+	}
+}
+
+func TestHandleEscalateResult_GuidanceWithEngine_SendsGuidance(t *testing.T) {
+	db := testDB(t)
+
+	var buf bytes.Buffer
+	handleEscalateResult(db, "eng-001", "car-003", &EscalateResult{
+		Action:  EscalateGuidance,
+		Message: "Try a different approach",
+	}, &buf)
+
+	output := buf.String()
+	if !strings.Contains(output, "sending guidance to eng-001") {
+		t.Errorf("should send guidance to engine, got: %s", output)
+	}
+
+	// Should have sent a message to the engine.
+	var msg models.Message
+	db.Where("to_agent = ? AND car_id = ?", "eng-001", "car-003").First(&msg)
+	if msg.ID == 0 {
+		t.Fatal("expected message to engine")
+	}
+	if msg.Subject != "guidance" {
+		t.Errorf("subject = %q, want %q", msg.Subject, "guidance")
+	}
+}
+
+func TestHandleEscalateResult_HumanAlwaysWorks(t *testing.T) {
+	db := testDB(t)
+
+	var buf bytes.Buffer
+	handleEscalateResult(db, "", "car-004", &EscalateResult{
+		Action:  EscalateHuman,
+		Message: "Needs manual merge resolution",
+	}, &buf)
+
+	output := buf.String()
+	if !strings.Contains(output, "alerting human") {
+		t.Errorf("should alert human, got: %s", output)
+	}
+
+	var msg models.Message
+	db.Where("to_agent = ? AND car_id = ?", "human", "car-004").First(&msg)
+	if msg.ID == 0 {
+		t.Fatal("expected message to human")
+	}
+	if msg.Priority != "urgent" {
+		t.Errorf("priority = %q, want %q", msg.Priority, "urgent")
+	}
+}
+
+func TestHandleEscalateResult_NilResult(t *testing.T) {
+	db := testDB(t)
+
+	var buf bytes.Buffer
+	handleEscalateResult(db, "eng-001", "car-005", nil, &buf)
+
+	if buf.Len() != 0 {
+		t.Errorf("expected no output for nil result, got: %s", buf.String())
+	}
+}

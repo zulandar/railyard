@@ -545,18 +545,22 @@ func handleEscalateResult(db *gorm.DB, engineID, carID string, result *EscalateR
 		return
 	}
 
+	// When there's no engine (e.g. switch escalations), Guidance and Reassign
+	// have no valid recipient. Fall back to EscalateHuman so the escalation
+	// is never silently dropped.
+	if engineID == "" && (result.Action == EscalateGuidance || result.Action == EscalateReassign) {
+		fmt.Fprintf(out, "Escalation: no engine for %s action on car %s — alerting human instead\n", result.Action, carID)
+		result = &EscalateResult{Action: EscalateHuman, Message: result.Message}
+	}
+
 	switch result.Action {
 	case EscalateReassign:
 		fmt.Fprintf(out, "Escalation: reassigning car %s\n", carID)
-		if engineID != "" {
-			ReassignCar(db, carID, engineID, "escalation: "+result.Message)
-		}
+		ReassignCar(db, carID, engineID, "escalation: "+result.Message)
 	case EscalateGuidance:
 		fmt.Fprintf(out, "Escalation: sending guidance to %s\n", engineID)
-		if engineID != "" {
-			messaging.Send(db, YardmasterID, engineID, "guidance", result.Message,
-				messaging.SendOpts{CarID: carID})
-		}
+		messaging.Send(db, YardmasterID, engineID, "guidance", result.Message,
+			messaging.SendOpts{CarID: carID})
 	case EscalateHuman:
 		fmt.Fprintf(out, "Escalation: alerting human — %s\n", result.Message)
 		messaging.Send(db, YardmasterID, "human", "escalate", result.Message,
@@ -621,6 +625,11 @@ func maybeSwitchEscalate(ctx context.Context, db *gorm.DB, cfg *config.Config, c
 		reason := switchFailureReason(cat)
 		fmt.Fprintf(out, "Car %s infra failure (%s) — escalating immediately\n", carID, reason)
 
+		// Move car out of "done" to stop the retry loop. Can be retried
+		// via the "retry-merge" action after the underlying issue is resolved.
+		db.Model(&models.Car{}).Where("id = ?", carID).Update("status", "merge-failed")
+		fmt.Fprintf(out, "Car %s status → merge-failed\n", carID)
+
 		go func(carID, reason string) {
 			res, escErr := EscalateToClaude(ctx, EscalateOpts{
 				CarID:   carID,
@@ -649,6 +658,11 @@ func maybeSwitchEscalate(ctx context.Context, db *gorm.DB, cfg *config.Config, c
 
 	reason := switchFailureReason(cat)
 	fmt.Fprintf(out, "Car %s has %d switch failures (%s) — escalating\n", carID, failures, reason)
+
+	// Move car out of "done" to stop the retry loop. Can be retried
+	// via the "retry-merge" action after the underlying issue is resolved.
+	db.Model(&models.Car{}).Where("id = ?", carID).Update("status", "merge-failed")
+	fmt.Fprintf(out, "Car %s status → merge-failed\n", carID)
 
 	go func(carID string, failCount int, reason string) {
 		res, escErr := EscalateToClaude(ctx, EscalateOpts{
