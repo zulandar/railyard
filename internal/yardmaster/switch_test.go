@@ -1291,3 +1291,58 @@ func TestIsOnlyGoModConflict(t *testing.T) {
 		}
 	}
 }
+
+func TestResolveGoModConflict(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go not in PATH")
+	}
+
+	repoDir, run := initTestRepo(t)
+
+	// Create a base Go module.
+	writeFile(t, repoDir, "go.mod", "module example.com/test\n\ngo 1.21\n")
+	writeFile(t, repoDir, "main.go", "package main\n\nfunc main() {}\n")
+	run("git", "add", ".")
+	run("git", "commit", "-m", "base module")
+
+	// Feature branch adds a dependency (simulated by adding a require line).
+	run("git", "checkout", "-b", "feature")
+	writeFile(t, repoDir, "go.mod", "module example.com/test\n\ngo 1.21\n\nrequire golang.org/x/text v0.14.0\n")
+	writeFile(t, repoDir, "go.sum", "")
+	run("git", "add", ".")
+	run("git", "commit", "-m", "feature adds dependency")
+
+	// Main also modifies go.mod (adds a different require).
+	run("git", "checkout", "main")
+	writeFile(t, repoDir, "go.mod", "module example.com/test\n\ngo 1.21\n\nrequire golang.org/x/sys v0.17.0\n")
+	writeFile(t, repoDir, "go.sum", "")
+	run("git", "add", ".")
+	run("git", "commit", "-m", "main adds different dependency")
+
+	// Start rebase — this should conflict on go.mod.
+	checkout := exec.Command("git", "checkout", "feature")
+	checkout.Dir = repoDir
+	checkout.CombinedOutput()
+
+	rebase := exec.Command("git", "rebase", "main")
+	rebase.Dir = repoDir
+	rebase.CombinedOutput() // will conflict
+
+	files := getConflictFiles(repoDir)
+	if !isOnlyGoModConflict(files) {
+		t.Fatalf("expected only go.mod conflict, got: %v", files)
+	}
+
+	err := resolveGoModConflict(repoDir)
+	if err != nil {
+		t.Fatalf("resolveGoModConflict failed: %v", err)
+	}
+
+	// Verify rebase completed (not in rebase state).
+	statusCmd := exec.Command("git", "status")
+	statusCmd.Dir = repoDir
+	out, _ := statusCmd.Output()
+	if strings.Contains(string(out), "rebase in progress") {
+		t.Error("expected rebase to be complete after go.mod resolution")
+	}
+}

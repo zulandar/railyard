@@ -590,10 +590,45 @@ func isOnlyGoModConflict(files []string) bool {
 	return true
 }
 
-// resolveGoModConflict auto-resolves go.mod/go.sum conflicts during a rebase.
-// Stub — full implementation in Task 4.
+// resolveGoModConflict auto-resolves go.mod/go.sum conflicts during a rebase
+// by taking the base branch's version and running `go mod tidy` to regenerate
+// from actual imports. Assumes rebase is in progress with go.mod/go.sum conflicts.
 func resolveGoModConflict(repoDir string) error {
-	return fmt.Errorf("resolveGoModConflict not yet implemented")
+	// Take the upstream (base branch) version of go.mod and go.sum.
+	for _, f := range []string{"go.mod", "go.sum"} {
+		path := filepath.Join(repoDir, f)
+		if _, err := os.Stat(path); err != nil {
+			continue // file doesn't exist in this conflict
+		}
+		checkout := exec.Command("git", "checkout", "--theirs", f)
+		checkout.Dir = repoDir
+		if out, err := checkout.CombinedOutput(); err != nil {
+			return fmt.Errorf("checkout --theirs %s: %s: %w", f, string(out), err)
+		}
+	}
+
+	// Run go mod tidy to regenerate from actual imports.
+	tidy := exec.Command("go", "mod", "tidy")
+	tidy.Dir = repoDir
+	if out, err := tidy.CombinedOutput(); err != nil {
+		return fmt.Errorf("go mod tidy: %s: %w", string(out), err)
+	}
+
+	// Stage the resolved files.
+	add := exec.Command("git", "add", "go.mod", "go.sum")
+	add.Dir = repoDir
+	if out, err := add.CombinedOutput(); err != nil {
+		return fmt.Errorf("git add go.mod go.sum: %s: %w", string(out), err)
+	}
+
+	// Continue the rebase.
+	cont := exec.Command("git", "-c", "core.editor=true", "rebase", "--continue")
+	cont.Dir = repoDir
+	if out, err := cont.CombinedOutput(); err != nil {
+		return fmt.Errorf("rebase --continue: %s: %w", string(out), err)
+	}
+
+	return nil
 }
 
 // tryResolveConflict attempts to resolve a merge conflict by rebasing the
