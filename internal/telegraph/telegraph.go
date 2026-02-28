@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/zulandar/railyard/internal/config"
+	"github.com/zulandar/railyard/internal/logutil"
 	"gorm.io/gorm"
 )
 
@@ -49,6 +50,7 @@ func NewDaemon(opts DaemonOpts) (*Daemon, error) {
 	if out == nil {
 		out = os.Stdout
 	}
+	out = logutil.NewTimestampWriter(out)
 	if opts.Spawner == nil {
 		fmt.Fprintf(out, "telegraph: no spawner configured; dispatch sessions disabled\n")
 	}
