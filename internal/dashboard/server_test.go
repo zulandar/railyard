@@ -821,3 +821,95 @@ func TestTokenUsageSummary_NilDB(t *testing.T) {
 		t.Errorf("TotalAll = %d, want 0", result.TotalAll)
 	}
 }
+
+func TestLogsRoute_Returns200(t *testing.T) {
+	baseURL, cleanup := setupTestRouter(t)
+	defer cleanup()
+
+	resp, err := http.Get(baseURL + "/logs")
+	if err != nil {
+		t.Fatalf("GET /logs: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+}
+
+func TestLogsRoute_ContainsContent(t *testing.T) {
+	baseURL, cleanup := setupTestRouter(t)
+	defer cleanup()
+
+	resp, err := http.Get(baseURL + "/logs")
+	if err != nil {
+		t.Fatalf("GET /logs: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body := make([]byte, 16384)
+	n, _ := resp.Body.Read(body)
+	html := string(body[:n])
+
+	for _, want := range []string{
+		"Logs",
+		"Token Usage",
+		"Input Tokens",
+		"Output Tokens",
+		"Total Tokens",
+		"Log Entries",
+		"Engine:",
+		"Car:",
+		"Direction:",
+		"Showing 0 log(s)",
+		"No logs found",
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("logs page missing %q", want)
+		}
+	}
+}
+
+func TestLogsRoute_WithFilters(t *testing.T) {
+	baseURL, cleanup := setupTestRouter(t)
+	defer cleanup()
+
+	resp, err := http.Get(baseURL + "/logs?engine=test&car=car-1&direction=out")
+	if err != nil {
+		t.Fatalf("GET /logs?filters: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+}
+
+func TestNavContainsLogsLink(t *testing.T) {
+	baseURL, cleanup := setupTestRouter(t)
+	defer cleanup()
+
+	resp, err := http.Get(baseURL + "/")
+	if err != nil {
+		t.Fatalf("GET /: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body := make([]byte, 16384)
+	n, _ := resp.Body.Read(body)
+	html := string(body[:n])
+
+	if !strings.Contains(html, `href="/logs"`) {
+		t.Error("nav missing /logs link")
+	}
+}
+
+func TestEmbeddedTemplates_Logs(t *testing.T) {
+	data, err := templatesFS.ReadFile("templates/logs.html")
+	if err != nil {
+		t.Fatalf("logs.html not embedded: %v", err)
+	}
+	if !strings.Contains(string(data), "Token Usage") {
+		t.Error("logs.html does not contain 'Token Usage'")
+	}
+}
