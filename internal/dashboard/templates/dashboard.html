@@ -6,6 +6,10 @@
     {{template "alerts_fragment" .}}
 </div>
 
+<div id="stats-bar" hx-get="/partials/stats" hx-trigger="every 3s" hx-swap="innerHTML">
+    {{template "stats_fragment" .}}
+</div>
+
 <h2>Engines</h2>
 <div class="card" id="engines-table" hx-get="/partials/engines" hx-trigger="every 3s" hx-swap="innerHTML">
     {{template "engines_fragment" .}}
@@ -28,6 +32,35 @@
     <a href="/messages">View messages</a>
 </div>
 {{end}}
+{{end}}
+
+{{define "stats_fragment"}}
+<div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));">
+    <div class="card stat">
+        <div class="value" style="color: var(--green);">{{.Stats.ActiveEngines}}</div>
+        <div class="label">Active Engines</div>
+    </div>
+    <div class="card stat">
+        <div class="value" style="color: var(--accent);">{{.Stats.OpenCars}}</div>
+        <div class="label">Open Cars</div>
+    </div>
+    <div class="card stat">
+        <div class="value" style="color: var(--yellow);">{{.Stats.InProgressCars}}</div>
+        <div class="label">In Progress</div>
+    </div>
+    <div class="card stat">
+        <div class="value" style="color: var(--red);">{{.Stats.BlockedCars}}</div>
+        <div class="label">Blocked</div>
+    </div>
+    <div class="card stat">
+        <div class="value" style="color: var(--green);">{{.Stats.CompletedToday}}</div>
+        <div class="label">Completed Today</div>
+    </div>
+    <div class="card stat">
+        <div class="value" style="color: var(--accent);">{{.Stats.TotalTokens}}</div>
+        <div class="label">Total Tokens</div>
+    </div>
+</div>
 {{end}}
 
 {{define "engines_fragment"}}
