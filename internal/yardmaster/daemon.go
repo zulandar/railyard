@@ -11,6 +11,7 @@ import (
 
 	"github.com/zulandar/railyard/internal/car"
 	"github.com/zulandar/railyard/internal/config"
+	"github.com/zulandar/railyard/internal/logutil"
 	"github.com/zulandar/railyard/internal/engine"
 	"github.com/zulandar/railyard/internal/messaging"
 	"github.com/zulandar/railyard/internal/models"
@@ -44,6 +45,7 @@ func RunDaemon(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath,
 	if out == nil {
 		out = io.Discard
 	}
+	out = logutil.NewTimestampWriter(out)
 
 	startedAt := time.Now()
 	if err := registerYardmaster(db); err != nil {
