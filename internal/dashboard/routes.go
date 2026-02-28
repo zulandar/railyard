@@ -27,6 +27,7 @@ func registerRoutes(router *gin.Engine, db *gorm.DB) {
 	router.GET("/partials/engines", handlePartialsEngines(db))
 	router.GET("/partials/tracks", handlePartialsTracks(db))
 	router.GET("/partials/alerts", handlePartialsAlerts(db))
+	router.GET("/partials/stats", handlePartialsStats(db))
 
 	// SSE endpoint for real-time escalation alerts.
 	router.GET("/api/events", handleSSE(db))
@@ -40,6 +41,7 @@ func dashboardData(db *gorm.DB) gin.H {
 			"Tracks":      []TrackStatusCount{},
 			"Escalations": []Escalation{},
 			"QueueDepth":  int64(0),
+			"Stats":       DashboardStats{},
 		}
 	}
 
@@ -60,11 +62,14 @@ func dashboardData(db *gorm.DB) gin.H {
 		log.Printf("dashboard: escalations query: %v", err)
 	}
 
+	stats := ComputeStats(engines, tracks, db)
+
 	return gin.H{
 		"Engines":     engines,
 		"Tracks":      tracks,
 		"Escalations": escalations,
 		"QueueDepth":  queueDepth,
+		"Stats":       stats,
 	}
 }
 
@@ -92,6 +97,13 @@ func handlePartialsAlerts(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		data := dashboardData(db)
 		c.HTML(http.StatusOK, "alerts_fragment", data)
+	}
+}
+
+func handlePartialsStats(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		data := dashboardData(db)
+		c.HTML(http.StatusOK, "stats_fragment", data)
 	}
 }
 

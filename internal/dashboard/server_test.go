@@ -733,3 +733,17 @@ func TestComputeStats_WithData(t *testing.T) {
 		t.Errorf("BlockedCars = %d, want 1", stats.BlockedCars)
 	}
 }
+
+func TestDashboardData_ContainsStats(t *testing.T) {
+	data := dashboardData(nil)
+	if data["Stats"] == nil {
+		t.Error("Stats should not be nil")
+	}
+	stats, ok := data["Stats"].(DashboardStats)
+	if !ok {
+		t.Fatalf("Stats is not DashboardStats: %T", data["Stats"])
+	}
+	if stats.ActiveEngines != 0 {
+		t.Errorf("ActiveEngines = %d, want 0", stats.ActiveEngines)
+	}
+}
