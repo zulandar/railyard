@@ -115,6 +115,7 @@ func (r *Router) Handle(ctx context.Context, msg InboundMessage) {
 			_, err := r.sessionMgr.Resume(ctx, msg.ChannelID, msg.ThreadID, msg.UserName, text)
 			if err != nil {
 				log.Printf("telegraph: router: resume session: %v", err)
+				r.sendUnavailable(ctx, msg.ChannelID, msg.ThreadID)
 			}
 			return
 		}
@@ -126,6 +127,7 @@ func (r *Router) Handle(ctx context.Context, msg InboundMessage) {
 			_, err := r.sessionMgr.NewSession(ctx, "telegraph", msg.UserName, msg.ThreadID, msg.ChannelID)
 			if err != nil {
 				log.Printf("telegraph: router: new session: %v", err)
+				r.sendUnavailable(ctx, msg.ChannelID, msg.ThreadID)
 				return
 			}
 			if err := r.sessionMgr.Route(ctx, msg.ChannelID, msg.ThreadID, msg.UserName, text); err != nil {
@@ -162,6 +164,7 @@ func (r *Router) Handle(ctx context.Context, msg InboundMessage) {
 		_, err := r.sessionMgr.NewSession(ctx, "telegraph", msg.UserName, sessionThreadID, msg.ChannelID)
 		if err != nil {
 			log.Printf("telegraph: router: new session: %v", err)
+			r.sendUnavailable(ctx, msg.ChannelID, sessionThreadID)
 			return
 		}
 		if err := r.sessionMgr.Route(ctx, msg.ChannelID, sessionThreadID, msg.UserName, text); err != nil {
@@ -213,6 +216,18 @@ var ackPhrases = []string{
 	"Already on it.",
 	"Hold tight, working my magic...",
 	"Consider it done. Well, almost.",
+}
+
+// sendUnavailable notifies the user in-thread that a dispatch session could
+// not be started, so they aren't left waiting after the initial ack.
+func (r *Router) sendUnavailable(ctx context.Context, channelID, threadID string) {
+	if err := r.adapter.Send(ctx, OutboundMessage{
+		ChannelID: channelID,
+		ThreadID:  threadID,
+		Text:      "Sorry, I can't start a dispatch session right now. Please try again later.",
+	}); err != nil {
+		log.Printf("telegraph: router: send unavailable notice: %v", err)
+	}
 }
 
 // sendAck sends a random acknowledgment message to the chat platform so the

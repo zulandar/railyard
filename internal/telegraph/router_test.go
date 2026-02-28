@@ -976,6 +976,110 @@ func TestHandle_TopLevelMentionIgnoresHistoricChannelSession(t *testing.T) {
 	}
 }
 
+// --- Session unavailable notification ---
+
+func TestHandle_NewSessionError_NotifiesUser(t *testing.T) {
+	db := openRouterTestDB(t)
+	router, adapter, spawner := setupRouter(t, db, "bot-123")
+
+	// Make the spawner fail (simulates no spawner configured / sessions locked).
+	spawner.err = fmt.Errorf("dispatch sessions not available")
+
+	router.Handle(context.Background(), InboundMessage{
+		UserID:    "user-1",
+		UserName:  "alice",
+		ChannelID: "C1",
+		Text:      "@railyard what is the status?",
+	})
+
+	// Should have sent an ack (via StartThread) + an unavailable notice.
+	all := adapter.AllSent()
+	var foundUnavailable bool
+	for _, msg := range all {
+		if msg.Text == "Sorry, I can't start a dispatch session right now. Please try again later." {
+			foundUnavailable = true
+			break
+		}
+	}
+	if !foundUnavailable {
+		t.Error("expected unavailable notice to be sent to user")
+	}
+}
+
+func TestHandle_NewSessionErrorInThread_NotifiesUser(t *testing.T) {
+	db := openRouterTestDB(t)
+	router, adapter, spawner := setupRouter(t, db, "bot-123")
+
+	spawner.err = fmt.Errorf("dispatch sessions not available")
+
+	// @mention inside a thread with no session.
+	router.Handle(context.Background(), InboundMessage{
+		UserID:    "user-1",
+		UserName:  "alice",
+		ChannelID: "C1",
+		ThreadID:  "T1",
+		Text:      "@railyard do the thing",
+	})
+
+	all := adapter.AllSent()
+	var foundUnavailable bool
+	for _, msg := range all {
+		if msg.Text == "Sorry, I can't start a dispatch session right now. Please try again later." {
+			if msg.ThreadID != "T1" {
+				t.Errorf("unavailable notice thread = %q, want T1", msg.ThreadID)
+			}
+			foundUnavailable = true
+			break
+		}
+	}
+	if !foundUnavailable {
+		t.Error("expected unavailable notice to be sent to user in thread")
+	}
+}
+
+func TestHandle_ResumeError_NotifiesUser(t *testing.T) {
+	db := openRouterTestDB(t)
+	router, adapter, spawner := setupRouter(t, db, "bot-123")
+
+	// Create a completed session in the DB.
+	now := time.Now()
+	db.Create(&models.DispatchSession{
+		Source:           "telegraph",
+		UserName:         "alice",
+		PlatformThreadID: "T2",
+		ChannelID:        "C1",
+		Status:           "completed",
+		LastHeartbeat:    now,
+		CompletedAt:      &now,
+	})
+
+	// Make the spawner fail.
+	spawner.err = fmt.Errorf("dispatch sessions not available")
+
+	router.Handle(context.Background(), InboundMessage{
+		UserID:    "user-1",
+		UserName:  "alice",
+		ChannelID: "C1",
+		ThreadID:  "T2",
+		Text:      "resume this please",
+	})
+
+	all := adapter.AllSent()
+	var foundUnavailable bool
+	for _, msg := range all {
+		if msg.Text == "Sorry, I can't start a dispatch session right now. Please try again later." {
+			if msg.ThreadID != "T2" {
+				t.Errorf("unavailable notice thread = %q, want T2", msg.ThreadID)
+			}
+			foundUnavailable = true
+			break
+		}
+	}
+	if !foundUnavailable {
+		t.Error("expected unavailable notice on resume failure")
+	}
+}
+
 func TestHandle_LongCommandResponseIsChunked(t *testing.T) {
 	db := openRouterTestDB(t)
 
