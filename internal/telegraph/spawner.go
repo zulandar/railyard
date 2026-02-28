@@ -179,3 +179,55 @@ func (p *claudeProcess) Close() error {
 	p.cancel()
 	return nil
 }
+
+// LazySpawner implements ProcessSpawner by performing dispatch setup (worktree,
+// prompt, MCP config) lazily on each Spawn() call. This allows telegraph to
+// recover from transient startup failures and worktree corruption without
+// requiring a restart.
+//
+// Function fields are used instead of importing internal/engine and
+// internal/dispatch — wiring happens in cmd/ry/telegraph.go.
+type LazySpawner struct {
+	// RenderPrompt returns the dispatch system prompt.
+	RenderPrompt func() (string, error)
+	// EnsureWorktree creates or verifies the dispatch worktree exists.
+	EnsureWorktree func() (string, error)
+	// SyncWorktree resets the worktree to the base branch.
+	SyncWorktree func(worktreeDir string) error
+	// WriteMCPConfig writes .mcp.json into the worktree.
+	WriteMCPConfig func(worktreeDir string) error
+	// ClaudeBinary is the path to the claude binary; defaults to "claude".
+	ClaudeBinary string
+}
+
+// Spawn performs full dispatch setup then delegates to ClaudeSpawner.
+func (ls *LazySpawner) Spawn(ctx context.Context, prompt string) (Process, error) {
+	systemPrompt, err := ls.RenderPrompt()
+	if err != nil {
+		return nil, fmt.Errorf("telegraph: lazy spawn: render prompt: %w", err)
+	}
+
+	worktreeDir, err := ls.EnsureWorktree()
+	if err != nil {
+		return nil, fmt.Errorf("telegraph: lazy spawn: ensure worktree: %w", err)
+	}
+
+	if ls.SyncWorktree != nil {
+		if err := ls.SyncWorktree(worktreeDir); err != nil {
+			log.Printf("telegraph: lazy spawn: sync worktree: %v (continuing anyway)", err)
+		}
+	}
+
+	if ls.WriteMCPConfig != nil {
+		if err := ls.WriteMCPConfig(worktreeDir); err != nil {
+			log.Printf("telegraph: lazy spawn: write MCP config: %v (continuing without MCP)", err)
+		}
+	}
+
+	delegate := &ClaudeSpawner{
+		SystemPrompt: systemPrompt,
+		WorkDir:      worktreeDir,
+		ClaudeBinary: ls.ClaudeBinary,
+	}
+	return delegate.Spawn(ctx, prompt)
+}

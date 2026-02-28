@@ -2,6 +2,7 @@ package telegraph
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -229,4 +230,181 @@ func TestClaudeSpawner_MissingBinary(t *testing.T) {
 	if !strings.Contains(err.Error(), "start claude") {
 		t.Errorf("error = %q, want to contain %q", err.Error(), "start claude")
 	}
+}
+
+func TestLazySpawner_SpawnDelegates(t *testing.T) {
+	dir := t.TempDir()
+	binary := writeMockBinary(t, dir, "claude", `echo "lazy output"`)
+
+	spawner := &LazySpawner{
+		RenderPrompt: func() (string, error) {
+			return "test system prompt", nil
+		},
+		EnsureWorktree: func() (string, error) {
+			return dir, nil
+		},
+		SyncWorktree: func(worktreeDir string) error {
+			return nil
+		},
+		WriteMCPConfig: func(worktreeDir string) error {
+			return nil
+		},
+		ClaudeBinary: binary,
+	}
+
+	proc, err := spawner.Spawn(context.Background(), "hello")
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	defer proc.Close()
+
+	var lines []string
+	for line := range proc.Recv() {
+		lines = append(lines, line)
+	}
+	<-proc.Done()
+
+	if len(lines) != 1 || lines[0] != "lazy output" {
+		t.Errorf("lines = %v, want [\"lazy output\"]", lines)
+	}
+}
+
+func TestLazySpawner_RenderPromptError(t *testing.T) {
+	spawner := &LazySpawner{
+		RenderPrompt: func() (string, error) {
+			return "", fmt.Errorf("config not found")
+		},
+		EnsureWorktree: func() (string, error) {
+			return t.TempDir(), nil
+		},
+	}
+
+	_, err := spawner.Spawn(context.Background(), "hello")
+	if err == nil {
+		t.Fatal("expected error when RenderPrompt fails")
+	}
+	if !strings.Contains(err.Error(), "render prompt") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "render prompt")
+	}
+	if !strings.Contains(err.Error(), "config not found") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "config not found")
+	}
+}
+
+func TestLazySpawner_WorktreeError(t *testing.T) {
+	spawner := &LazySpawner{
+		RenderPrompt: func() (string, error) {
+			return "prompt", nil
+		},
+		EnsureWorktree: func() (string, error) {
+			return "", fmt.Errorf("worktree locked by another process")
+		},
+	}
+
+	_, err := spawner.Spawn(context.Background(), "hello")
+	if err == nil {
+		t.Fatal("expected error when EnsureWorktree fails")
+	}
+	if !strings.Contains(err.Error(), "ensure worktree") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "ensure worktree")
+	}
+}
+
+func TestLazySpawner_RecoveryAfterFailure(t *testing.T) {
+	dir := t.TempDir()
+	binary := writeMockBinary(t, dir, "claude", `echo "recovered"`)
+
+	callCount := 0
+	spawner := &LazySpawner{
+		RenderPrompt: func() (string, error) {
+			callCount++
+			if callCount == 1 {
+				return "", fmt.Errorf("transient error")
+			}
+			return "system prompt", nil
+		},
+		EnsureWorktree: func() (string, error) {
+			return dir, nil
+		},
+		SyncWorktree:   func(string) error { return nil },
+		WriteMCPConfig: func(string) error { return nil },
+		ClaudeBinary:   binary,
+	}
+
+	// First call fails.
+	_, err := spawner.Spawn(context.Background(), "hello")
+	if err == nil {
+		t.Fatal("expected first Spawn to fail")
+	}
+
+	// Second call succeeds (recovery).
+	proc, err := spawner.Spawn(context.Background(), "hello")
+	if err != nil {
+		t.Fatalf("expected second Spawn to succeed: %v", err)
+	}
+	defer proc.Close()
+
+	var lines []string
+	for line := range proc.Recv() {
+		lines = append(lines, line)
+	}
+	<-proc.Done()
+
+	if len(lines) != 1 || lines[0] != "recovered" {
+		t.Errorf("lines = %v, want [\"recovered\"]", lines)
+	}
+}
+
+func TestLazySpawner_SyncWorktreeErrorNonFatal(t *testing.T) {
+	dir := t.TempDir()
+	binary := writeMockBinary(t, dir, "claude", `echo "ok"`)
+
+	spawner := &LazySpawner{
+		RenderPrompt: func() (string, error) {
+			return "prompt", nil
+		},
+		EnsureWorktree: func() (string, error) {
+			return dir, nil
+		},
+		SyncWorktree: func(string) error {
+			return fmt.Errorf("sync failed")
+		},
+		WriteMCPConfig: func(string) error { return nil },
+		ClaudeBinary:   binary,
+	}
+
+	// Should succeed despite SyncWorktree error (non-fatal).
+	proc, err := spawner.Spawn(context.Background(), "hello")
+	if err != nil {
+		t.Fatalf("Spawn should succeed despite sync error: %v", err)
+	}
+	defer proc.Close()
+	<-proc.Done()
+}
+
+func TestLazySpawner_WriteMCPConfigErrorNonFatal(t *testing.T) {
+	dir := t.TempDir()
+	binary := writeMockBinary(t, dir, "claude", `echo "ok"`)
+
+	spawner := &LazySpawner{
+		RenderPrompt: func() (string, error) {
+			return "prompt", nil
+		},
+		EnsureWorktree: func() (string, error) {
+			return dir, nil
+		},
+		SyncWorktree: func(string) error { return nil },
+		WriteMCPConfig: func(string) error {
+			return fmt.Errorf("mcp write failed")
+		},
+		ClaudeBinary: binary,
+	}
+
+	// Should succeed despite WriteMCPConfig error (non-fatal).
+	proc, err := spawner.Spawn(context.Background(), "hello")
+	if err != nil {
+		t.Fatalf("Spawn should succeed despite MCP config error: %v", err)
+	}
+	defer proc.Close()
+	<-proc.Done()
 }
