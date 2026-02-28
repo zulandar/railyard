@@ -101,7 +101,7 @@ func TestRootCmd_HasEngineSubcommand(t *testing.T) {
 	}
 }
 
-func TestRunEngineStart_SyncsCocoIndexScripts(t *testing.T) {
+func TestEnsureCocoIndexScripts_WritesExpectedFiles(t *testing.T) {
 	dir := t.TempDir()
 	scriptsDir := filepath.Join(dir, "cocoindex")
 	if err := ensureCocoIndexScripts(scriptsDir); err != nil {
