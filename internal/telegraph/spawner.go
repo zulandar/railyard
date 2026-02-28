@@ -202,6 +202,13 @@ type LazySpawner struct {
 
 // Spawn performs full dispatch setup then delegates to ClaudeSpawner.
 func (ls *LazySpawner) Spawn(ctx context.Context, prompt string) (Process, error) {
+	if ls.RenderPrompt == nil {
+		return nil, fmt.Errorf("telegraph: lazy spawn: RenderPrompt function not configured")
+	}
+	if ls.EnsureWorktree == nil {
+		return nil, fmt.Errorf("telegraph: lazy spawn: EnsureWorktree function not configured")
+	}
+
 	systemPrompt, err := ls.RenderPrompt()
 	if err != nil {
 		return nil, fmt.Errorf("telegraph: lazy spawn: render prompt: %w", err)
