@@ -1181,3 +1181,113 @@ func TestGetConflictContext(t *testing.T) {
 
 	gitMergeAbort(repoDir)
 }
+
+func TestTryResolveConflict_CleanRebase(t *testing.T) {
+	repoDir, run := initTestRepo(t)
+
+	// Create base file on main.
+	writeFile(t, repoDir, "shared.txt", "line1\nline2\nline3\n")
+	run("git", "add", ".")
+	run("git", "commit", "-m", "base file")
+
+	// Branch and modify end of file (append).
+	run("git", "checkout", "-b", "feature")
+	writeFile(t, repoDir, "shared.txt", "line1\nline2\nline3\nfeature-line4\n")
+	run("git", "add", ".")
+	run("git", "commit", "-m", "feature appends line")
+
+	// Advance main with different non-overlapping change (prepend).
+	run("git", "checkout", "main")
+	writeFile(t, repoDir, "shared.txt", "main-line0\nline1\nline2\nline3\n")
+	run("git", "add", ".")
+	run("git", "commit", "-m", "main prepends line")
+
+	// Start a merge that conflicts (both modified shared.txt from same base).
+	mergeCmd := exec.Command("git", "merge", "--no-ff", "feature", "-m", "test merge")
+	mergeCmd.Dir = repoDir
+	mergeCmd.CombinedOutput() // will conflict
+
+	// Try to resolve via rebase.
+	resolved, err := tryResolveConflict(repoDir, "feature", "main")
+	if err != nil {
+		t.Fatalf("tryResolveConflict error: %v", err)
+	}
+	if !resolved {
+		t.Error("expected resolved=true for cleanly rebaseable conflict")
+	}
+
+	// Verify we can merge cleanly now.
+	mergeCmd = exec.Command("git", "merge", "--no-ff", "feature", "-m", "test merge after rebase")
+	mergeCmd.Dir = repoDir
+	out, err := mergeCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("merge after rebase should succeed: %s: %v", out, err)
+	}
+}
+
+func TestTryResolveConflict_Unresolvable(t *testing.T) {
+	repoDir, run := initTestRepo(t)
+
+	// Create base file.
+	writeFile(t, repoDir, "config.go", "package config\n\nvar Name = \"base\"\n")
+	run("git", "add", ".")
+	run("git", "commit", "-m", "base config")
+
+	// Branch and replace content.
+	run("git", "checkout", "-b", "feature")
+	writeFile(t, repoDir, "config.go", "package config\n\nvar Name = \"feature\"\n")
+	run("git", "add", ".")
+	run("git", "commit", "-m", "feature changes Name")
+
+	// Main also replaces content (true conflict — same line).
+	run("git", "checkout", "main")
+	writeFile(t, repoDir, "config.go", "package config\n\nvar Name = \"main\"\n")
+	run("git", "add", ".")
+	run("git", "commit", "-m", "main changes Name")
+
+	// Start failing merge.
+	mergeCmd := exec.Command("git", "merge", "--no-ff", "feature", "-m", "test merge")
+	mergeCmd.Dir = repoDir
+	mergeCmd.CombinedOutput()
+
+	resolved, err := tryResolveConflict(repoDir, "feature", "main")
+	if resolved {
+		t.Error("expected resolved=false for true same-line conflict")
+	}
+	if err == nil {
+		t.Error("expected error with conflict context")
+	}
+	if err != nil && !strings.Contains(err.Error(), "config.go") {
+		t.Errorf("error should mention conflicting file, got: %v", err)
+	}
+
+	// Verify repo is in a clean state (rebase was aborted).
+	statusCmd := exec.Command("git", "status", "--porcelain")
+	statusCmd.Dir = repoDir
+	out, _ := statusCmd.Output()
+	status := strings.TrimSpace(string(out))
+	if status != "" {
+		t.Errorf("expected clean state after abort, got: %s", status)
+	}
+}
+
+func TestIsOnlyGoModConflict(t *testing.T) {
+	tests := []struct {
+		files []string
+		want  bool
+	}{
+		{[]string{"go.mod"}, true},
+		{[]string{"go.sum"}, true},
+		{[]string{"go.mod", "go.sum"}, true},
+		{[]string{"go.mod", "main.go"}, false},
+		{[]string{"config.go"}, false},
+		{nil, false},
+		{[]string{}, false},
+	}
+	for _, tt := range tests {
+		got := isOnlyGoModConflict(tt.files)
+		if got != tt.want {
+			t.Errorf("isOnlyGoModConflict(%v) = %v, want %v", tt.files, got, tt.want)
+		}
+	}
+}

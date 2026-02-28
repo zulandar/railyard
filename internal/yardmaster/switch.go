@@ -555,6 +555,85 @@ func getConflictContext(repoDir string, files []string) string {
 	return b.String()
 }
 
+// gitRebaseBranch checks out the given branch and rebases it onto baseBranch.
+// Returns nil on clean rebase. On conflict, returns an error (the rebase is
+// left in progress so the caller can inspect/resolve conflicts).
+func gitRebaseBranch(repoDir, branch, baseBranch string) error {
+	// Checkout the branch.
+	checkout := exec.Command("git", "checkout", branch)
+	checkout.Dir = repoDir
+	if out, err := checkout.CombinedOutput(); err != nil {
+		return fmt.Errorf("checkout %s: %s: %w", branch, string(out), err)
+	}
+
+	// Rebase onto the base branch.
+	rebase := exec.Command("git", "rebase", baseBranch)
+	rebase.Dir = repoDir
+	if out, err := rebase.CombinedOutput(); err != nil {
+		return fmt.Errorf("rebase %s onto %s: %s: %w", branch, baseBranch, string(out), err)
+	}
+
+	return nil
+}
+
+// isOnlyGoModConflict returns true if the only conflicted files are go.mod
+// and/or go.sum.
+func isOnlyGoModConflict(files []string) bool {
+	if len(files) == 0 {
+		return false
+	}
+	for _, f := range files {
+		if f != "go.mod" && f != "go.sum" {
+			return false
+		}
+	}
+	return true
+}
+
+// resolveGoModConflict auto-resolves go.mod/go.sum conflicts during a rebase.
+// Stub — full implementation in Task 4.
+func resolveGoModConflict(repoDir string) error {
+	return fmt.Errorf("resolveGoModConflict not yet implemented")
+}
+
+// tryResolveConflict attempts to resolve a merge conflict by rebasing the
+// car branch onto the current base branch. On success, returns (true, nil)
+// and the caller can retry gitMerge(). On failure, aborts the rebase and
+// returns (false, error) with conflict context for escalation.
+func tryResolveConflict(repoDir, branch, baseBranch string) (bool, error) {
+	// Abort the failed merge first.
+	gitMergeAbort(repoDir)
+
+	// Attempt to rebase the branch onto current base.
+	if err := gitRebaseBranch(repoDir, branch, baseBranch); err != nil {
+		// Rebase conflicted. Check what files are in conflict.
+		conflictFiles := getConflictFiles(repoDir)
+
+		if isOnlyGoModConflict(conflictFiles) {
+			// Try go.mod/go.sum auto-resolution.
+			if resolveErr := resolveGoModConflict(repoDir); resolveErr == nil {
+				// Return to base branch for the merge.
+				checkoutBase(repoDir, baseBranch)
+				return true, nil
+			}
+			// go mod tidy failed — fall through to abort.
+		}
+
+		// Collect conflict context before aborting.
+		ctx := getConflictContext(repoDir, conflictFiles)
+		gitRebaseAbort(repoDir)
+
+		// Return to base branch.
+		checkoutBase(repoDir, baseBranch)
+
+		return false, fmt.Errorf("unresolvable conflict:\n%s", ctx)
+	}
+
+	// Clean rebase — return to base branch for the merge.
+	checkoutBase(repoDir, baseBranch)
+	return true, nil
+}
+
 // gitPush pushes the current HEAD to the base branch on the remote.
 // Uses HEAD:{baseBranch} refspec which works in both normal repos and worktrees.
 func gitPush(repoDir, baseBranch string) error {
