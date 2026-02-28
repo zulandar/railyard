@@ -228,9 +228,22 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 
 	// Merge to the base branch.
 	if err := gitMerge(opts.RepoDir, car.Branch, baseBranch); err != nil {
-		result.FailureCategory = SwitchFailMerge
-		result.Error = fmt.Errorf("merge: %w", err)
-		return result, result.Error
+		// Attempt conflict resolution: abort failed merge, rebase branch, retry.
+		resolved, resolveErr := tryResolveConflict(opts.RepoDir, car.Branch, baseBranch)
+		if !resolved {
+			result.FailureCategory = SwitchFailMerge
+			if resolveErr != nil {
+				result.ConflictDetails = resolveErr.Error()
+			}
+			result.Error = fmt.Errorf("merge: %w", err)
+			return result, result.Error
+		}
+		// Rebase succeeded — retry the merge (should be clean now).
+		if retryErr := gitMerge(opts.RepoDir, car.Branch, baseBranch); retryErr != nil {
+			result.FailureCategory = SwitchFailMerge
+			result.Error = fmt.Errorf("merge after rebase: %w", retryErr)
+			return result, result.Error
+		}
 	}
 
 	// Push to remote before marking merged — the car should only be

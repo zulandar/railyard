@@ -1292,6 +1292,116 @@ func TestIsOnlyGoModConflict(t *testing.T) {
 	}
 }
 
+func TestSwitch_MergeConflict_RebaseResolves(t *testing.T) {
+	repoDir, bareDir, run := initTestRepoWithRemote(t)
+
+	// Create base file on main.
+	writeFile(t, repoDir, "shared.txt", "line1\nline2\nline3\n")
+	run(repoDir, "git", "add", ".")
+	run(repoDir, "git", "commit", "-m", "base file")
+	run(repoDir, "git", "push", "origin", "main")
+
+	// Create feature branch that appends a line.
+	run(repoDir, "git", "checkout", "-b", "ry/alice/backend/car-cr1")
+	writeFile(t, repoDir, "shared.txt", "line1\nline2\nline3\nfeature-line4\n")
+	run(repoDir, "git", "add", ".")
+	run(repoDir, "git", "commit", "-m", "feature appends line")
+
+	// Advance main with a non-overlapping change (prepend a line).
+	run(repoDir, "git", "checkout", "main")
+	writeFile(t, repoDir, "shared.txt", "main-line0\nline1\nline2\nline3\n")
+	run(repoDir, "git", "add", ".")
+	run(repoDir, "git", "commit", "-m", "main prepends line")
+	run(repoDir, "git", "push", "origin", "main")
+
+	db := testDB(t)
+	db.Create(&models.Car{
+		ID:     "car-cr1",
+		Title:  "Conflict resolution test",
+		Track:  "backend",
+		Branch: "ry/alice/backend/car-cr1",
+		Status: "done",
+	})
+
+	result, err := Switch(db, "car-cr1", SwitchOpts{
+		RepoDir:     repoDir,
+		TestCommand: "true",
+	})
+	if err != nil {
+		t.Fatalf("Switch returned error: %v (conflict details: %s)", err, result.ConflictDetails)
+	}
+	if !result.Merged {
+		t.Error("expected Merged=true after rebase-resolved conflict")
+	}
+
+	// Verify the remote has the merge commit.
+	cmd := exec.Command("git", "log", "--oneline", "main")
+	cmd.Dir = bareDir
+	out, _ := cmd.CombinedOutput()
+	if !strings.Contains(string(out), "Switch: merge") {
+		t.Errorf("remote missing merge commit, got: %s", out)
+	}
+}
+
+func TestSwitch_MergeConflict_UnresolvableEscalates(t *testing.T) {
+	repoDir, run := initTestRepo(t)
+
+	// Create base file.
+	writeFile(t, repoDir, "config.go", "package config\n\nvar Name = \"base\"\n")
+	run("git", "add", ".")
+	run("git", "commit", "-m", "base config")
+
+	// Branch replaces content.
+	run("git", "checkout", "-b", "ry/alice/backend/car-ue1")
+	writeFile(t, repoDir, "config.go", "package config\n\nvar Name = \"feature\"\n")
+	run("git", "add", ".")
+	run("git", "commit", "-m", "feature changes Name")
+
+	// Main also replaces content (true same-line conflict).
+	run("git", "checkout", "main")
+	writeFile(t, repoDir, "config.go", "package config\n\nvar Name = \"main\"\n")
+	run("git", "add", ".")
+	run("git", "commit", "-m", "main changes Name")
+
+	db := testDB(t)
+	db.Create(&models.Car{
+		ID:     "car-ue1",
+		Title:  "Unresolvable conflict test",
+		Track:  "backend",
+		Branch: "ry/alice/backend/car-ue1",
+		Status: "done",
+	})
+
+	result, err := Switch(db, "car-ue1", SwitchOpts{
+		RepoDir:     repoDir,
+		TestCommand: "true",
+	})
+
+	// Should fail with merge-conflict category.
+	if err == nil {
+		t.Fatal("expected error for unresolvable conflict")
+	}
+	if result.FailureCategory != SwitchFailMerge {
+		t.Errorf("FailureCategory = %q, want %q", result.FailureCategory, SwitchFailMerge)
+	}
+
+	// ConflictDetails should contain the conflicting file name.
+	if result.ConflictDetails == "" {
+		t.Error("expected ConflictDetails to be populated")
+	}
+	if !strings.Contains(result.ConflictDetails, "config.go") {
+		t.Errorf("ConflictDetails should mention config.go, got: %s", result.ConflictDetails)
+	}
+
+	// Verify the repo is in a clean state (no leftover rebase/merge state).
+	statusCmd := exec.Command("git", "status", "--porcelain")
+	statusCmd.Dir = repoDir
+	out, _ := statusCmd.Output()
+	if strings.TrimSpace(string(out)) != "" {
+		t.Errorf("expected clean repo state, got: %s", out)
+	}
+}
+
 func TestResolveGoModConflict(t *testing.T) {
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go not in PATH")
