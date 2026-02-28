@@ -38,6 +38,11 @@ func runDispatch(cmd *cobra.Command, configPath string) error {
 		return fmt.Errorf("load config: %w", err)
 	}
 
+	// Sync embedded CocoIndex scripts for dispatch MCP config.
+	if err := ensureCocoIndexScripts(cfg.CocoIndex.ScriptsPath); err != nil {
+		log.Printf("cocoindex scripts sync warning: %v", err)
+	}
+
 	gormDB, err := db.Connect(cfg.Dolt.Host, cfg.Dolt.Port, cfg.Dolt.Database, cfg.Dolt.Username, cfg.Dolt.Password)
 	if err != nil {
 		return fmt.Errorf("connect to %s: %w", cfg.Dolt.Database, err)

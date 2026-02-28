@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
 	"syscall"
@@ -31,6 +32,11 @@ func runYardmaster(cmd *cobra.Command, configPath string) error {
 	cfg, gormDB, err := connectFromConfig(configPath)
 	if err != nil {
 		return err
+	}
+
+	// Sync embedded CocoIndex scripts so overlay cleanup works.
+	if err := ensureCocoIndexScripts(cfg.CocoIndex.ScriptsPath); err != nil {
+		log.Printf("cocoindex scripts sync warning: %v", err)
 	}
 
 	repoDir, err := os.Getwd()

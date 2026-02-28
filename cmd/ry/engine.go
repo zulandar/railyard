@@ -69,6 +69,12 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 		return fmt.Errorf("load config: %w", err)
 	}
 
+	// Sync embedded CocoIndex scripts to disk so overlay/MCP operations
+	// find them without requiring a prior 'ry cocoindex init'.
+	if err := ensureCocoIndexScripts(cfg.CocoIndex.ScriptsPath); err != nil {
+		log.Printf("cocoindex scripts sync warning: %v", err)
+	}
+
 	// Validate that the track exists in config.
 	var trackCfg *config.TrackConfig
 	for i := range cfg.Tracks {

@@ -157,6 +157,11 @@ func runTelegraphStart(cmd *cobra.Command, configPath string) error {
 		return fmt.Errorf("load config: %w", err)
 	}
 
+	// Sync embedded CocoIndex scripts for dispatch MCP config.
+	if err := ensureCocoIndexScripts(cfg.CocoIndex.ScriptsPath); err != nil {
+		log.Printf("cocoindex scripts sync warning: %v", err)
+	}
+
 	if cfg.Telegraph.Platform == "" {
 		return fmt.Errorf("telegraph: no platform configured in %s (add telegraph.platform)", configPath)
 	}

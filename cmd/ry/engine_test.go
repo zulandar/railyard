@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -96,5 +98,19 @@ func TestRootCmd_HasEngineSubcommand(t *testing.T) {
 
 	if !strings.Contains(buf.String(), "engine") {
 		t.Error("root help should list 'engine' subcommand")
+	}
+}
+
+func TestRunEngineStart_SyncsCocoIndexScripts(t *testing.T) {
+	dir := t.TempDir()
+	scriptsDir := filepath.Join(dir, "cocoindex")
+	if err := ensureCocoIndexScripts(scriptsDir); err != nil {
+		t.Fatalf("ensureCocoIndexScripts() error: %v", err)
+	}
+	for _, name := range []string{"overlay.py", "mcp_server.py"} {
+		path := filepath.Join(scriptsDir, name)
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("expected %s to exist after sync: %v", name, err)
+		}
 	}
 }

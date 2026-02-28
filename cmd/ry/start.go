@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -39,6 +40,11 @@ func runStart(cmd *cobra.Command, configPath string, engines int, withTelegraph 
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
+	}
+
+	// Sync embedded CocoIndex scripts before orchestrated startup.
+	if err := ensureCocoIndexScripts(cfg.CocoIndex.ScriptsPath); err != nil {
+		log.Printf("cocoindex scripts sync warning: %v", err)
 	}
 
 	gormDB, err := db.Connect(cfg.Dolt.Host, cfg.Dolt.Port, cfg.Dolt.Database, cfg.Dolt.Username, cfg.Dolt.Password)
