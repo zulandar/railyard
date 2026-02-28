@@ -240,7 +240,6 @@ type StatusOpts struct {
 // StatusInfo holds dashboard information.
 type StatusInfo struct {
 	SessionRunning    bool
-	DispatchRunning   bool
 	ComponentSessions []string // all discovered railyard_OWNER_* sessions
 	Engines           []EngineInfo
 	TrackSummary      []TrackSummary
@@ -291,11 +290,9 @@ func Status(db *gorm.DB, tmux Tmux, cfg *config.Config) (*StatusInfo, error) {
 			info.ComponentSessions = sessions
 		}
 		info.SessionRunning = len(sessions) > 0
-		info.DispatchRunning = tmux.SessionExists(DispatchSession(cfg.Owner))
 	} else {
 		// Fallback: check legacy names.
 		info.SessionRunning = tmux.SessionExists(legacySessionName)
-		info.DispatchRunning = tmux.SessionExists(legacyDispatchSessionName)
 	}
 
 	// Gather engine info.
@@ -382,10 +379,8 @@ func Status(db *gorm.DB, tmux Tmux, cfg *config.Config) (*StatusInfo, error) {
 func FormatStatus(info *StatusInfo) string {
 	var b strings.Builder
 
-	if info.SessionRunning && info.DispatchRunning {
+	if info.SessionRunning {
 		b.WriteString("Railyard: RUNNING\n")
-	} else if info.SessionRunning || info.DispatchRunning {
-		b.WriteString("Railyard: PARTIAL\n")
 	} else {
 		b.WriteString("Railyard: STOPPED\n")
 	}

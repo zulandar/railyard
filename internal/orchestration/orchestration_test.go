@@ -1349,8 +1349,7 @@ func TestRestartEngine_SendKeysError(t *testing.T) {
 
 func TestFormatStatus_Running(t *testing.T) {
 	info := &StatusInfo{
-		SessionRunning:  true,
-		DispatchRunning: true,
+		SessionRunning: true,
 		ComponentSessions: []string{
 			"railyard_test_yardmaster",
 			"railyard_test_eng000",
@@ -1425,7 +1424,7 @@ func TestFormatStatus_EmptyCar(t *testing.T) {
 }
 
 func TestFormatStatus_NoTracks(t *testing.T) {
-	info := &StatusInfo{SessionRunning: true, DispatchRunning: true}
+	info := &StatusInfo{SessionRunning: true}
 	out := FormatStatus(info)
 	if !strings.Contains(out, "no active tracks") {
 		t.Errorf("expected 'no active tracks', got: %s", out)
@@ -1434,8 +1433,7 @@ func TestFormatStatus_NoTracks(t *testing.T) {
 
 func TestFormatStatus_MultipleBaseBranches(t *testing.T) {
 	info := &StatusInfo{
-		SessionRunning:  true,
-		DispatchRunning: true,
+		SessionRunning: true,
 		TrackSummary: []TrackSummary{
 			{Track: "backend", Open: 3, BaseBranches: []string{"main", "develop"}},
 			{Track: "frontend", Open: 2, BaseBranches: []string{"main"}},
@@ -1452,8 +1450,7 @@ func TestFormatStatus_MultipleBaseBranches(t *testing.T) {
 
 func TestFormatStatus_SingleBaseBranch(t *testing.T) {
 	info := &StatusInfo{
-		SessionRunning:  true,
-		DispatchRunning: true,
+		SessionRunning: true,
 		TrackSummary: []TrackSummary{
 			{Track: "backend", Open: 3, BaseBranches: []string{"main"}},
 			{Track: "frontend", Open: 2, BaseBranches: []string{"main"}},
