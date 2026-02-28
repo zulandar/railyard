@@ -1,0 +1,122 @@
+{{define "logs.html"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    {{template "page_head"}}
+    <title>Logs — Railyard</title>
+</head>
+<body>
+    {{template "page_nav"}}
+    <div class="container">
+
+<h1>Logs</h1>
+
+<h2>Token Usage</h2>
+<div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); margin-bottom: 1.5rem;">
+    <div class="card stat">
+        <div class="value" style="color: var(--accent);">{{.TotalInput}}</div>
+        <div class="label">Input Tokens</div>
+    </div>
+    <div class="card stat">
+        <div class="value" style="color: var(--green);">{{.TotalOutput}}</div>
+        <div class="label">Output Tokens</div>
+    </div>
+    <div class="card stat">
+        <div class="value" style="color: var(--purple);">{{.TotalAll}}</div>
+        <div class="label">Total Tokens</div>
+    </div>
+</div>
+
+{{if .TokenByEngine}}
+<div class="card">
+<table>
+    <thead>
+        <tr>
+            <th>Engine</th>
+            <th>Track</th>
+            <th>Input Tokens</th>
+            <th>Output Tokens</th>
+            <th>Total</th>
+            <th>Model</th>
+        </tr>
+    </thead>
+    <tbody>
+    {{range .TokenByEngine}}
+        <tr>
+            <td><a href="/engines/{{.EngineID}}">{{.EngineID}}</a></td>
+            <td>{{if .Track}}{{.Track}}{{else}}—{{end}}</td>
+            <td>{{.InputTokens}}</td>
+            <td>{{.OutputTokens}}</td>
+            <td>{{.TotalTokens}}</td>
+            <td>{{if .Model}}{{.Model}}{{else}}—{{end}}</td>
+        </tr>
+    {{end}}
+    </tbody>
+</table>
+</div>
+{{end}}
+
+<h2>Log Entries</h2>
+
+<div class="filters">
+    <form method="get" action="/logs">
+        <label>Engine:
+            <select name="engine" onchange="this.form.submit()">
+                <option value="">All</option>
+                {{range .Engines}}<option value="{{.}}"{{if eq . $.ActiveEngine}} selected{{end}}>{{.}}</option>{{end}}
+            </select>
+        </label>
+        <label>Car:
+            <select name="car" onchange="this.form.submit()">
+                <option value="">All</option>
+                {{range .Cars}}<option value="{{.}}"{{if eq . $.ActiveCar}} selected{{end}}>{{.}}</option>{{end}}
+            </select>
+        </label>
+        <label>Direction:
+            <select name="direction" onchange="this.form.submit()">
+                <option value="">All</option>
+                {{range .Directions}}<option value="{{.}}"{{if eq . $.ActiveDirection}} selected{{end}}>{{.}}</option>{{end}}
+            </select>
+        </label>
+    </form>
+</div>
+
+<p style="color: var(--text-muted); font-size: 0.85rem;">Showing {{len .Logs}} log(s)</p>
+
+<div class="card">
+<table>
+    <thead>
+        <tr>
+            <th>Time</th>
+            <th>Engine</th>
+            <th>Car</th>
+            <th>Dir</th>
+            <th>Content</th>
+            <th>Tokens</th>
+            <th>Latency</th>
+            <th>Model</th>
+        </tr>
+    </thead>
+    <tbody>
+    {{range .Logs}}
+        <tr>
+            <td>{{timeAgo .CreatedAt}}</td>
+            <td><a href="/engines/{{.EngineID}}">{{truncate .EngineID 16}}</a></td>
+            <td>{{if .CarID}}<a href="/cars/{{.CarID}}">{{truncate .CarID 16}}</a>{{else}}—{{end}}</td>
+            <td><span class="badge badge-{{.Direction}}">{{.Direction}}</span></td>
+            <td title="{{.Content}}">{{truncate .Content 60}}</td>
+            <td>{{.OutputTokens}}</td>
+            <td>{{if .LatencyMs}}{{.LatencyMs}}ms{{else}}—{{end}}</td>
+            <td>{{if .Model}}{{.Model}}{{else}}—{{end}}</td>
+        </tr>
+    {{else}}
+        <tr><td colspan="8" style="color: var(--text-muted);">No logs found</td></tr>
+    {{end}}
+    </tbody>
+</table>
+</div>
+
+    </div>
+</body>
+</html>
+{{end}}
