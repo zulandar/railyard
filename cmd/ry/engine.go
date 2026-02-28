@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/zulandar/railyard/internal/car"
 	"github.com/zulandar/railyard/internal/config"
+	"github.com/zulandar/railyard/internal/logutil"
 	"github.com/zulandar/railyard/internal/db"
 	"github.com/zulandar/railyard/internal/engine"
 	"github.com/zulandar/railyard/internal/messaging"
@@ -61,7 +62,7 @@ func newEngineStartCmd() *cobra.Command {
 }
 
 func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval time.Duration) error {
-	out := cmd.OutOrStdout()
+	out := logutil.NewTimestampWriter(cmd.OutOrStdout())
 
 	cfg, err := config.Load(configPath)
 	if err != nil {
