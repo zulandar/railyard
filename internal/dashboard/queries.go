@@ -635,3 +635,92 @@ func ComputeStats(engines []EngineRow, tracks []TrackStatusCount, db *gorm.DB) D
 	s.TotalTokens = TotalTokenUsage(db)
 	return s
 }
+
+// LogRow holds an agent log entry for display.
+type LogRow struct {
+	ID           uint
+	EngineID     string
+	SessionID    string
+	CarID        string
+	Direction    string
+	Content      string
+	TokenCount   int
+	InputTokens  int
+	OutputTokens int
+	Model        string
+	LatencyMs    int
+	CreatedAt    time.Time
+}
+
+// AgentLogFilters holds optional filters for the logs list.
+type AgentLogFilters struct {
+	EngineID  string
+	CarID     string
+	Direction string
+}
+
+// AgentLogListResult holds the log list plus metadata for filter dropdowns.
+type AgentLogListResult struct {
+	Logs       []LogRow
+	Engines    []string
+	Cars       []string
+	Directions []string
+}
+
+// AgentLogList returns the latest 200 agent log entries matching filters.
+func AgentLogList(db *gorm.DB, filters AgentLogFilters) AgentLogListResult {
+	if db == nil {
+		return AgentLogListResult{Logs: []LogRow{}}
+	}
+
+	q := db.Model(&models.AgentLog{})
+	if filters.EngineID != "" {
+		q = q.Where("engine_id = ?", filters.EngineID)
+	}
+	if filters.CarID != "" {
+		q = q.Where("car_id = ?", filters.CarID)
+	}
+	if filters.Direction != "" {
+		q = q.Where("direction = ?", filters.Direction)
+	}
+
+	var logs []models.AgentLog
+	q.Order("created_at DESC").Limit(200).Find(&logs)
+
+	rows := make([]LogRow, len(logs))
+	for i, l := range logs {
+		content := l.Content
+		if len(content) > 200 {
+			content = content[:200] + "..."
+		}
+		rows[i] = LogRow{
+			ID:           l.ID,
+			EngineID:     l.EngineID,
+			SessionID:    l.SessionID,
+			CarID:        l.CarID,
+			Direction:    l.Direction,
+			Content:      content,
+			TokenCount:   l.TokenCount,
+			InputTokens:  l.InputTokens,
+			OutputTokens: l.OutputTokens,
+			Model:        l.Model,
+			LatencyMs:    l.LatencyMs,
+			CreatedAt:    l.CreatedAt,
+		}
+	}
+
+	// Distinct values for filter dropdowns.
+	var engines []string
+	db.Model(&models.AgentLog{}).Distinct("engine_id").Order("engine_id ASC").Pluck("engine_id", &engines)
+	var cars []string
+	db.Model(&models.AgentLog{}).Distinct("car_id").Where("car_id != ''").Order("car_id ASC").Pluck("car_id", &cars)
+	var directions []string
+	db.Model(&models.AgentLog{}).Distinct("direction").Order("direction ASC").Pluck("direction", &directions)
+
+	return AgentLogListResult{
+		Logs:       rows,
+		Engines:    engines,
+		Cars:       cars,
+		Directions: directions,
+	}
+}

@@ -792,3 +792,13 @@ func TestIndex_ContainsStatsBar(t *testing.T) {
 		}
 	}
 }
+
+func TestAgentLogList_NilDB(t *testing.T) {
+	result := AgentLogList(nil, AgentLogFilters{})
+	if result.Logs == nil {
+		t.Error("Logs should not be nil")
+	}
+	if len(result.Logs) != 0 {
+		t.Errorf("Logs = %d, want 0", len(result.Logs))
+	}
+}
