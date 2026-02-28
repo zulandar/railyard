@@ -398,6 +398,134 @@ func TestHandle_FollowUpInThreadResumesSession(t *testing.T) {
 	}
 }
 
+// --- Undetected thread fallback (step 3.5) ---
+
+func TestHandle_UndetectedThread_ResumesHistoricSession(t *testing.T) {
+	db := openRouterTestDB(t)
+	router, adapter, spawner := setupRouter(t, db, "bot-123")
+
+	ctx := context.Background()
+
+	// 1. Initial @mention creates a thread and session.
+	router.Handle(ctx, InboundMessage{
+		UserID:    "user-1",
+		UserName:  "alice",
+		ChannelID: "C1",
+		Text:      "@railyard what is the status of car-66975?",
+	})
+
+	if len(spawner.processes) != 1 {
+		t.Fatalf("expected 1 process, got %d", len(spawner.processes))
+	}
+
+	threadID := "thread-1" // MockAdapter's StartThread returns "thread-1"
+
+	// 2. Simulate process exit (one-shot model).
+	proc := spawner.lastProcess()
+	close(proc.recvCh)
+	proc.Close()
+	time.Sleep(50 * time.Millisecond)
+
+	// Verify session is historic.
+	if router.sessionMgr.HasSession("C1", threadID) {
+		t.Fatal("session should be removed after process exit")
+	}
+	if !router.sessionMgr.HasHistoricSession("C1", threadID) {
+		t.Fatal("expected historic session")
+	}
+
+	adapter.mu.Lock()
+	adapter.sent = nil
+	adapter.mu.Unlock()
+
+	// 3. User follows up but adapter fails to detect thread context.
+	//    Discord sets ChannelID to the thread ID, ThreadID is empty.
+	router.Handle(ctx, InboundMessage{
+		UserID:    "user-1",
+		UserName:  "alice",
+		ChannelID: threadID, // thread ID appears as channel ID
+		ThreadID:  "",       // adapter failed to detect thread
+		Text:      "@railyard yes please publish them",
+	})
+
+	// Should have resumed — spawner now has 2 processes.
+	if len(spawner.processes) != 2 {
+		t.Fatalf("expected 2 processes (original + resumed via recovery), got %d", len(spawner.processes))
+	}
+
+	// Ack should be sent to the correct thread.
+	all := adapter.AllSent()
+	if len(all) == 0 {
+		t.Fatal("expected ack message on resume")
+	}
+	if all[0].ChannelID != "C1" {
+		t.Errorf("ack channelID = %q, want C1", all[0].ChannelID)
+	}
+	if all[0].ThreadID != threadID {
+		t.Errorf("ack threadID = %q, want %q", all[0].ThreadID, threadID)
+	}
+}
+
+func TestHandle_UndetectedThread_RoutesToActiveSession(t *testing.T) {
+	db := openRouterTestDB(t)
+	router, _, spawner := setupRouter(t, db, "bot-123")
+
+	ctx := context.Background()
+
+	// Create an active session keyed by C1:T1.
+	router.sessionMgr.NewSession(ctx, "telegraph", "alice", "T1", "C1")
+
+	// Message arrives with ChannelID=T1, ThreadID="" (undetected thread).
+	router.Handle(ctx, InboundMessage{
+		UserID:    "user-1",
+		UserName:  "alice",
+		ChannelID: "T1",
+		ThreadID:  "",
+		Text:      "continue working",
+	})
+
+	// Should route to the active session, not spawn a new one.
+	proc := spawner.lastProcess()
+	sent := proc.sentMessages()
+	if len(sent) != 1 || sent[0] != "continue working" {
+		t.Errorf("sent = %v, want [\"continue working\"]", sent)
+	}
+}
+
+func TestHandle_UndetectedThread_IgnoresLegacyChannelSession(t *testing.T) {
+	db := openRouterTestDB(t)
+	router, _, spawner := setupRouter(t, db, "bot-123")
+
+	// Legacy session where channelID == threadID (not a real thread).
+	now := time.Now()
+	db.Create(&models.DispatchSession{
+		Source:           "telegraph",
+		UserName:         "alice",
+		PlatformThreadID: "C1",
+		ChannelID:        "C1",
+		Status:           "completed",
+		CarsCreated:      "[]",
+		LastHeartbeat:    now,
+		CompletedAt:      &now,
+	})
+
+	// Top-level mention should still create a NEW thread, not resume the legacy session.
+	router.Handle(context.Background(), InboundMessage{
+		UserID:    "user-1",
+		UserName:  "alice",
+		ChannelID: "C1",
+		Text:      "@railyard what is the status?",
+	})
+
+	if len(spawner.processes) == 0 {
+		t.Fatal("expected process to be spawned")
+	}
+	// Should create a new session via StartThread, not resume.
+	if !router.sessionMgr.HasSession("C1", "thread-1") {
+		t.Error("expected new session keyed by thread-1")
+	}
+}
+
 // --- Unknown/unhandled message ---
 
 func TestHandle_IgnoresUnknownMessage(t *testing.T) {

@@ -258,6 +258,24 @@ func (sm *SessionManager) HasHistoricSession(channelID, threadID string) bool {
 	return count > 0
 }
 
+// LookupThreadChannel checks if the given ID was used as a platform_thread_id
+// in any prior session and returns the associated channel_id. This enables
+// the router to recover thread context when the adapter fails to detect that
+// a message was sent inside a thread (e.g. Discord state cache miss).
+func (sm *SessionManager) LookupThreadChannel(threadID string) (string, bool) {
+	var channelID string
+	result := sm.db.Model(&models.DispatchSession{}).
+		Where("platform_thread_id = ?", threadID).
+		Select("channel_id").
+		Order("id DESC").
+		Limit(1).
+		Scan(&channelID)
+	if result.Error != nil || channelID == "" {
+		return "", false
+	}
+	return channelID, true
+}
+
 // ClearSessionHistory deletes all telegraph session history from the database.
 // It removes all TelegraphConversation rows for telegraph sessions, then
 // removes the DispatchSession rows themselves. Returns the number of sessions

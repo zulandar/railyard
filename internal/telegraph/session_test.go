@@ -369,6 +369,82 @@ func TestHasHistoricSession_NotFound(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// LookupThreadChannel tests
+// ---------------------------------------------------------------------------
+
+func TestLookupThreadChannel_Found(t *testing.T) {
+	db := openSessionTestDB(t)
+	sm, _ := NewSessionManager(SessionManagerOpts{DB: db, Spawner: &mockSpawner{}})
+
+	now := time.Now()
+	db.Create(&models.DispatchSession{
+		Source:           "telegraph",
+		UserName:         "alice",
+		PlatformThreadID: "thread-42",
+		ChannelID:        "C01",
+		Status:           "completed",
+		CarsCreated:      "[]",
+		LastHeartbeat:    now,
+		CompletedAt:      &now,
+	})
+
+	channelID, found := sm.LookupThreadChannel("thread-42")
+	if !found {
+		t.Fatal("expected to find thread channel")
+	}
+	if channelID != "C01" {
+		t.Errorf("channelID = %q, want %q", channelID, "C01")
+	}
+}
+
+func TestLookupThreadChannel_NotFound(t *testing.T) {
+	db := openSessionTestDB(t)
+	sm, _ := NewSessionManager(SessionManagerOpts{DB: db, Spawner: &mockSpawner{}})
+
+	_, found := sm.LookupThreadChannel("nonexistent")
+	if found {
+		t.Error("expected not to find thread channel for nonexistent thread")
+	}
+}
+
+func TestLookupThreadChannel_ReturnsMostRecent(t *testing.T) {
+	db := openSessionTestDB(t)
+	sm, _ := NewSessionManager(SessionManagerOpts{DB: db, Spawner: &mockSpawner{}})
+
+	now := time.Now()
+	// Older session with a different channel.
+	db.Create(&models.DispatchSession{
+		Source:           "telegraph",
+		UserName:         "alice",
+		PlatformThreadID: "thread-42",
+		ChannelID:        "old-channel",
+		Status:           "completed",
+		CarsCreated:      "[]",
+		LastHeartbeat:    now,
+		CompletedAt:      &now,
+	})
+	// Newer session with the correct channel.
+	db.Create(&models.DispatchSession{
+		Source:           "telegraph",
+		UserName:         "alice",
+		PlatformThreadID: "thread-42",
+		ChannelID:        "new-channel",
+		Status:           "completed",
+		CarsCreated:      "[]",
+		LastHeartbeat:    now,
+		CompletedAt:      &now,
+	})
+
+	channelID, found := sm.LookupThreadChannel("thread-42")
+	if !found {
+		t.Fatal("expected to find thread channel")
+	}
+	if channelID != "new-channel" {
+		t.Errorf("channelID = %q, want %q (most recent)", channelID, "new-channel")
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Resume tests
 // ---------------------------------------------------------------------------
 

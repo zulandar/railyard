@@ -49,7 +49,13 @@ func (r *realSession) Close() error {
 	return r.s.Close()
 }
 func (r *realSession) Channel(channelID string) (*discordgo.Channel, error) {
-	return r.s.State.Channel(channelID)
+	ch, err := r.s.State.Channel(channelID)
+	if err == nil {
+		return ch, nil
+	}
+	// State cache miss — fall back to REST API so thread detection
+	// still works when the gateway hasn't tracked this channel.
+	return r.s.Channel(channelID)
 }
 func (r *realSession) ChannelMessageSend(channelID, content string, options ...discordgo.RequestOption) (*discordgo.Message, error) {
 	return r.s.ChannelMessageSend(channelID, content, options...)

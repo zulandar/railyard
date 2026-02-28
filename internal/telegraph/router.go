@@ -141,6 +141,34 @@ func (r *Router) Handle(ctx context.Context, msg InboundMessage) {
 		return
 	}
 
+	// 3.5. Undetected thread — adapter may have failed to detect thread context
+	//      (e.g. Discord state cache miss). If msg.ChannelID is actually a known
+	//      threadID from a prior session, recover the original channelID and route
+	//      through the thread path. Skip when channelID == threadID (legacy
+	//      channel-level session, not a real thread).
+	if channelID, found := r.sessionMgr.LookupThreadChannel(msg.ChannelID); found && channelID != msg.ChannelID {
+		threadID := msg.ChannelID
+		fmt.Fprintf(r.out, "telegraph: router: → recovered thread context [ch=%s thread=%s]\n", channelID, threadID)
+
+		if r.sessionMgr.HasSession(channelID, threadID) {
+			r.sendAck(ctx, channelID, threadID)
+			if err := r.sessionMgr.Route(ctx, channelID, threadID, msg.UserName, text); err != nil {
+				log.Printf("telegraph: router: route to session (recovered): %v", err)
+			}
+			return
+		}
+
+		if r.sessionMgr.HasHistoricSession(channelID, threadID) {
+			r.sendAck(ctx, channelID, threadID)
+			_, err := r.sessionMgr.Resume(ctx, channelID, threadID, msg.UserName, text)
+			if err != nil {
+				log.Printf("telegraph: router: resume session (recovered): %v", err)
+				r.sendUnavailable(ctx, channelID, threadID)
+			}
+			return
+		}
+	}
+
 	// 4. Top-level @mention or !ry → always create a new thread and session.
 	//    This ensures every top-level mention gets its own conversation thread,
 	//    regardless of any historic channel-level sessions.
