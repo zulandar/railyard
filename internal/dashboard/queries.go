@@ -724,3 +724,72 @@ func AgentLogList(db *gorm.DB, filters AgentLogFilters) AgentLogListResult {
 		Directions: directions,
 	}
 }
+
+// TokenUsageRow holds aggregated token data for one engine.
+type TokenUsageRow struct {
+	EngineID     string
+	Track        string
+	InputTokens  int64
+	OutputTokens int64
+	TotalTokens  int64
+	Model        string
+}
+
+// TokenUsageResult holds per-engine token data plus overall totals.
+type TokenUsageResult struct {
+	ByEngine    []TokenUsageRow
+	TotalInput  int64
+	TotalOutput int64
+	TotalAll    int64
+}
+
+// TokenUsageSummary returns token usage aggregated by engine, plus overall totals.
+func TokenUsageSummary(db *gorm.DB) TokenUsageResult {
+	if db == nil {
+		return TokenUsageResult{ByEngine: []TokenUsageRow{}}
+	}
+
+	type row struct {
+		EngineID     string `gorm:"column:engine_id"`
+		InputTokens  int64  `gorm:"column:input_tokens"`
+		OutputTokens int64  `gorm:"column:output_tokens"`
+		TotalTokens  int64  `gorm:"column:total_tokens"`
+	}
+
+	var rows []row
+	db.Model(&models.AgentLog{}).
+		Select("engine_id, COALESCE(SUM(input_tokens),0) as input_tokens, COALESCE(SUM(output_tokens),0) as output_tokens, COALESCE(SUM(token_count),0) as total_tokens").
+		Where("direction = ?", "out").
+		Group("engine_id").
+		Order("total_tokens DESC").
+		Scan(&rows)
+
+	result := TokenUsageResult{
+		ByEngine: make([]TokenUsageRow, len(rows)),
+	}
+
+	for i, r := range rows {
+		result.ByEngine[i] = TokenUsageRow{
+			EngineID:     r.EngineID,
+			InputTokens:  r.InputTokens,
+			OutputTokens: r.OutputTokens,
+			TotalTokens:  r.TotalTokens,
+		}
+		result.TotalInput += r.InputTokens
+		result.TotalOutput += r.OutputTokens
+		result.TotalAll += r.TotalTokens
+
+		// Look up engine track and most recent model.
+		var eng models.Engine
+		if err := db.Select("track").Where("id = ?", r.EngineID).First(&eng).Error; err == nil {
+			result.ByEngine[i].Track = eng.Track
+		}
+		var log models.AgentLog
+		if err := db.Where("engine_id = ? AND direction = ? AND model != ?", r.EngineID, "out", "").
+			Order("created_at DESC").First(&log).Error; err == nil {
+			result.ByEngine[i].Model = log.Model
+		}
+	}
+
+	return result
+}

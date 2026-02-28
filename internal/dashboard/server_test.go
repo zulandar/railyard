@@ -802,3 +802,22 @@ func TestAgentLogList_NilDB(t *testing.T) {
 		t.Errorf("Logs = %d, want 0", len(result.Logs))
 	}
 }
+
+func TestTokenUsageSummary_NilDB(t *testing.T) {
+	result := TokenUsageSummary(nil)
+	if result.ByEngine == nil {
+		t.Error("ByEngine should not be nil")
+	}
+	if len(result.ByEngine) != 0 {
+		t.Errorf("ByEngine = %d, want 0", len(result.ByEngine))
+	}
+	if result.TotalInput != 0 {
+		t.Errorf("TotalInput = %d, want 0", result.TotalInput)
+	}
+	if result.TotalOutput != 0 {
+		t.Errorf("TotalOutput = %d, want 0", result.TotalOutput)
+	}
+	if result.TotalAll != 0 {
+		t.Errorf("TotalAll = %d, want 0", result.TotalAll)
+	}
+}
