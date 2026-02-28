@@ -51,6 +51,7 @@ type SwitchResult struct {
 	PRCreated       bool
 	PRUrl           string
 	FailureCategory SwitchFailureCategory // set on error for categorized escalation
+	ConflictDetails string                // conflict file list + diff context for escalation
 	Error           error
 }
 
