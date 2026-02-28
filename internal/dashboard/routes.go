@@ -22,6 +22,7 @@ func registerRoutes(router *gin.Engine, db *gorm.DB) {
 	router.GET("/cars/:id", handleCarDetail(db))
 	router.GET("/engines/:id", handleEngineDetail(db))
 	router.GET("/messages", handleMessages(db))
+	router.GET("/logs", handleLogs(db))
 
 	// HTMX partial endpoints for live refresh.
 	router.GET("/partials/engines", handlePartialsEngines(db))
@@ -189,6 +190,36 @@ func handleMessages(db *gorm.DB) gin.HandlerFunc {
 			"ActiveAgent":    agent,
 			"ActivePriority": priority,
 			"ActiveUnacked":  unacked,
+		})
+	}
+}
+
+func handleLogs(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		engineID := c.Query("engine")
+		carID := c.Query("car")
+		direction := c.Query("direction")
+
+		filters := AgentLogFilters{
+			EngineID:  engineID,
+			CarID:     carID,
+			Direction: direction,
+		}
+		logResult := AgentLogList(db, filters)
+		tokenResult := TokenUsageSummary(db)
+
+		c.HTML(http.StatusOK, "logs.html", gin.H{
+			"Logs":            logResult.Logs,
+			"Engines":         logResult.Engines,
+			"Cars":            logResult.Cars,
+			"Directions":      logResult.Directions,
+			"TokenByEngine":   tokenResult.ByEngine,
+			"TotalInput":      tokenResult.TotalInput,
+			"TotalOutput":     tokenResult.TotalOutput,
+			"TotalAll":        tokenResult.TotalAll,
+			"ActiveEngine":    engineID,
+			"ActiveCar":       carID,
+			"ActiveDirection": direction,
 		})
 	}
 }
