@@ -10,6 +10,10 @@
     {{template "stats_fragment" .}}
 </div>
 
+<div id="yardmaster" hx-get="/partials/yardmaster" hx-trigger="every 3s" hx-swap="innerHTML">
+    {{template "yardmaster_fragment" .}}
+</div>
+
 <h2>Engines</h2>
 <div class="card" id="engines-table" hx-get="/partials/engines" hx-trigger="every 3s" hx-swap="innerHTML">
     {{template "engines_fragment" .}}
@@ -110,5 +114,40 @@
 {{else}}
     <p style="color: var(--text-muted);">No tracks configured</p>
 {{end}}
+</div>
+{{end}}
+
+{{define "yardmaster_fragment"}}
+<div class="card" style="display: flex; align-items: center; gap: 1.5rem; flex-wrap: wrap;">
+    <div>
+        <strong>Yardmaster</strong>
+    </div>
+    {{if .Yardmaster}}
+    <div>
+        {{if or (eq .Yardmaster.Status "idle") (eq .Yardmaster.Status "working")}}
+            <span class="badge badge-idle">{{.Yardmaster.Status}}</span>
+        {{else}}
+            <span class="badge badge-dead">{{.Yardmaster.Status}}</span>
+        {{end}}
+    </div>
+    <div>
+        <span style="color: var(--text-muted); font-size: 0.85rem;">Heartbeat:</span>
+        {{timeAgo .Yardmaster.LastActivity}}
+    </div>
+    <div>
+        <span style="color: var(--text-muted); font-size: 0.85rem;">Uptime:</span>
+        {{.Yardmaster.Uptime}}
+    </div>
+    {{if .Yardmaster.CurrentCar}}
+    <div>
+        <span style="color: var(--text-muted); font-size: 0.85rem;">Car:</span>
+        <a href="/cars/{{.Yardmaster.CurrentCar}}">{{.Yardmaster.CurrentCar}}</a>
+    </div>
+    {{end}}
+    {{else}}
+    <div>
+        <span class="badge badge-draft">not running</span>
+    </div>
+    {{end}}
 </div>
 {{end}}
