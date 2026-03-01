@@ -920,3 +920,10 @@ func TestYardmasterStatus_NilDB(t *testing.T) {
 		t.Errorf("expected nil, got %+v", result)
 	}
 }
+
+func TestDashboardData_ContainsYardmaster(t *testing.T) {
+	data := dashboardData(nil)
+	if _, ok := data["Yardmaster"]; !ok {
+		t.Error("Yardmaster key should exist in dashboardData")
+	}
+}
