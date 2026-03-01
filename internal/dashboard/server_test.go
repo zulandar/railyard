@@ -927,3 +927,44 @@ func TestDashboardData_ContainsYardmaster(t *testing.T) {
 		t.Error("Yardmaster key should exist in dashboardData")
 	}
 }
+
+func TestPartialsYardmaster_Returns200(t *testing.T) {
+	baseURL, cleanup := setupTestRouter(t)
+	defer cleanup()
+
+	resp, err := http.Get(baseURL + "/partials/yardmaster")
+	if err != nil {
+		t.Fatalf("GET /partials/yardmaster: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+}
+
+func TestIndex_ContainsYardmasterCard(t *testing.T) {
+	baseURL, cleanup := setupTestRouter(t)
+	defer cleanup()
+
+	resp, err := http.Get(baseURL + "/")
+	if err != nil {
+		t.Fatalf("GET /: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body := make([]byte, 16384)
+	n, _ := resp.Body.Read(body)
+	html := string(body[:n])
+
+	for _, want := range []string{
+		"yardmaster",
+		"/partials/yardmaster",
+		"Yardmaster",
+		"not running",
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("index page missing %q", want)
+		}
+	}
+}
