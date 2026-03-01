@@ -1061,6 +1061,91 @@ func TestEmbeddedTemplates_Sessions(t *testing.T) {
 	}
 }
 
+func TestCarDetail_Breadcrumbs(t *testing.T) {
+	data, err := templatesFS.ReadFile("templates/car_detail.html")
+	if err != nil {
+		t.Fatalf("car_detail.html not embedded: %v", err)
+	}
+	if !strings.Contains(string(data), "breadcrumbs") {
+		t.Error("car_detail.html does not contain breadcrumbs")
+	}
+	if !strings.Contains(string(data), "/cars?track=") {
+		t.Error("car_detail.html breadcrumbs missing track link")
+	}
+}
+
+func TestEngineDetail_Breadcrumbs(t *testing.T) {
+	data, err := templatesFS.ReadFile("templates/engine_detail.html")
+	if err != nil {
+		t.Fatalf("engine_detail.html not embedded: %v", err)
+	}
+	if !strings.Contains(string(data), "breadcrumbs") {
+		t.Error("engine_detail.html does not contain breadcrumbs")
+	}
+	if !strings.Contains(string(data), `href="/"`) {
+		t.Error("engine_detail.html breadcrumbs missing Dashboard link")
+	}
+}
+
+func TestSessionDetail_Breadcrumbs(t *testing.T) {
+	data, err := templatesFS.ReadFile("templates/session_detail.html")
+	if err != nil {
+		t.Fatalf("session_detail.html not embedded: %v", err)
+	}
+	if !strings.Contains(string(data), "breadcrumbs") {
+		t.Error("session_detail.html does not contain breadcrumbs")
+	}
+	if !strings.Contains(string(data), `href="/sessions"`) {
+		t.Error("session_detail.html breadcrumbs missing sessions link")
+	}
+}
+
+func TestBreadcrumbCSS(t *testing.T) {
+	data, err := assetsFS.ReadFile("assets/style.css")
+	if err != nil {
+		t.Fatalf("style.css not embedded: %v", err)
+	}
+	if !strings.Contains(string(data), ".breadcrumbs") {
+		t.Error("style.css does not contain .breadcrumbs")
+	}
+}
+
+func TestDependencyGraph_NilDB(t *testing.T) {
+	result := DependencyGraph(nil, "test-car")
+	if result.Nodes != nil && len(result.Nodes) != 0 {
+		t.Errorf("Nodes = %d, want 0", len(result.Nodes))
+	}
+	if result.Edges != nil && len(result.Edges) != 0 {
+		t.Errorf("Edges = %d, want 0", len(result.Edges))
+	}
+	if result.Tree != nil && len(result.Tree) != 0 {
+		t.Errorf("Tree = %d, want 0", len(result.Tree))
+	}
+}
+
+func TestCarDetail_ContainsDepTreeTemplate(t *testing.T) {
+	data, err := templatesFS.ReadFile("templates/car_detail.html")
+	if err != nil {
+		t.Fatalf("car_detail.html not embedded: %v", err)
+	}
+	if !strings.Contains(string(data), "Dependency Tree") {
+		t.Error("car_detail.html does not contain 'Dependency Tree'")
+	}
+	if !strings.Contains(string(data), "dep-tree") {
+		t.Error("car_detail.html does not contain 'dep-tree' class")
+	}
+}
+
+func TestDepTreeCSS(t *testing.T) {
+	data, err := assetsFS.ReadFile("assets/style.css")
+	if err != nil {
+		t.Fatalf("style.css not embedded: %v", err)
+	}
+	if !strings.Contains(string(data), ".dep-tree") {
+		t.Error("style.css does not contain .dep-tree")
+	}
+}
+
 func TestYardmasterStatus_NilDB(t *testing.T) {
 	result := YardmasterStatus(nil)
 	if result != nil {

@@ -205,6 +205,26 @@ dl.meta code { background: var(--bg); padding: 0.1rem 0.4rem; border-radius: 3px
     line-height: 1.5;
 }
 
+/* Breadcrumbs */
+.breadcrumbs {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 1rem 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    font-size: 0.85rem;
+}
+.breadcrumbs li { display: flex; align-items: center; gap: 0.3rem; }
+.breadcrumbs li + li::before { content: "/"; color: var(--text-muted); }
+.breadcrumbs li:last-child { color: var(--text-muted); }
+
+/* Dependency tree */
+.dep-tree { font-family: monospace; font-size: 0.85rem; line-height: 1.8; }
+.dep-tree-node { display: flex; align-items: center; gap: 0.5rem; }
+.dep-tree-indent { color: var(--text-muted); white-space: pre; }
+.dep-tree-relation { color: var(--text-muted); font-size: 0.75rem; font-style: italic; }
+
 /* HTMX loading indicator */
 .htmx-indicator { opacity: 0; transition: opacity 200ms; }
 .htmx-request .htmx-indicator { opacity: 1; }

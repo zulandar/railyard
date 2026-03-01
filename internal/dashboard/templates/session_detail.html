@@ -9,7 +9,10 @@
     {{template "page_nav"}}
     <div class="container">
 
-<p><a href="/sessions">&larr; Back to sessions</a></p>
+<ul class="breadcrumbs">
+    <li><a href="/sessions">Sessions</a></li>
+    <li>Session #{{.Session.ID}}</li>
+</ul>
 
 <div class="car-header">
     <h1>

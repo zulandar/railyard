@@ -9,7 +9,12 @@
     {{template "page_nav"}}
     <div class="container">
 
-<p><a href="/cars">&larr; Back to cars</a></p>
+<ul class="breadcrumbs">
+    <li><a href="/cars">Cars</a></li>
+    {{if .Car.Track}}<li><a href="/cars?track={{.Car.Track}}">{{.Car.Track}}</a></li>{{end}}
+    {{if .Car.ParentID}}<li><a href="/cars/{{.Car.ParentID}}">{{.Car.ParentTitle}}</a></li>{{end}}
+    <li>{{.Car.ID}}</li>
+</ul>
 
 <div class="car-header">
     <h1>
@@ -118,6 +123,23 @@
     {{end}}
 </div>
 {{end}}
+
+{{if and .Graph .Graph.Tree}}{{if gt (len .Graph.Tree) 1}}
+<div class="card">
+    <h3>Dependency Tree</h3>
+    <div class="dep-tree">
+        {{range .Graph.Tree}}
+        <div class="dep-tree-node">
+            <span class="dep-tree-indent">{{if eq .Indent 0}}{{else if eq .Indent 1}}├── {{else if eq .Indent 2}}│   ├── {{else}}│   │   ├── {{end}}</span>
+            {{if eq .Indent 0}}<strong>{{end}}<a href="/cars/{{.CarID}}">{{truncate .CarID 20}}</a>{{if eq .Indent 0}}</strong>{{end}}
+            <span class="badge badge-{{.Status}}">{{.Status}}</span>
+            <span style="color: var(--text-muted); font-size: 0.85rem;">{{truncate .Title 30}}</span>
+            {{if .Relation}}<span class="dep-tree-relation">({{.Relation}})</span>{{end}}
+        </div>
+        {{end}}
+    </div>
+</div>
+{{end}}{{end}}
 
 {{if .Car.Progress}}
 <div class="card">

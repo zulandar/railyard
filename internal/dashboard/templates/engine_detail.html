@@ -9,7 +9,11 @@
     {{template "page_nav"}}
     <div class="container">
 
-<p><a href="/">&larr; Back to dashboard</a></p>
+<ul class="breadcrumbs">
+    <li><a href="/">Dashboard</a></li>
+    <li>Engines</li>
+    <li>{{.Engine.ID}}</li>
+</ul>
 
 <div class="car-header">
     <h1>

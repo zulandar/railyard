@@ -343,6 +343,169 @@ func GetCarDetail(db *gorm.DB, id string) (*CarDetail, error) {
 	return detail, nil
 }
 
+// GraphNode holds a car node for the dependency graph.
+type GraphNode struct {
+	CarID  string
+	Title  string
+	Status string
+	Type   string
+	Depth  int
+	IsRoot bool
+}
+
+// GraphEdge holds a directed edge from blocker to blocked car.
+type GraphEdge struct {
+	From string
+	To   string
+}
+
+// DepGraphResult holds the dependency graph data for rendering.
+type DepGraphResult struct {
+	Nodes []GraphNode
+	Edges []GraphEdge
+	Tree  []DepTreeNode
+}
+
+// DepTreeNode holds a node in the rendered tree structure.
+type DepTreeNode struct {
+	CarID    string
+	Title    string
+	Status   string
+	Indent   int
+	IsLast   bool
+	Prefix   string
+	Relation string // "blocks" or "blocked by"
+}
+
+// DependencyGraph builds a dependency tree for a car, walking both up
+// (what blocks this car) and down (what this car blocks). Max depth is 3.
+func DependencyGraph(db *gorm.DB, carID string) DepGraphResult {
+	if db == nil {
+		return DepGraphResult{}
+	}
+
+	nodes := make(map[string]GraphNode)
+	var edges []GraphEdge
+
+	// Load the root car.
+	var rootCar models.Car
+	if err := db.Select("id, title, status, type").Where("id = ?", carID).First(&rootCar).Error; err != nil {
+		return DepGraphResult{}
+	}
+	nodes[carID] = GraphNode{CarID: carID, Title: rootCar.Title, Status: rootCar.Status, Type: rootCar.Type, Depth: 0, IsRoot: true}
+
+	// Walk "blocked by" (upstream) — what must complete before this car.
+	walkDeps(db, carID, 1, 3, "up", nodes, &edges)
+	// Walk "blocks" (downstream) — what this car blocks.
+	walkDeps(db, carID, 1, 3, "down", nodes, &edges)
+
+	// Build tree representation.
+	var tree []DepTreeNode
+	tree = append(tree, DepTreeNode{CarID: carID, Title: rootCar.Title, Status: rootCar.Status, Indent: 0})
+
+	// Add "blocked by" items.
+	var blockedBy []models.CarDep
+	db.Where("car_id = ?", carID).Find(&blockedBy)
+	for i, dep := range blockedBy {
+		isLast := i == len(blockedBy)-1
+		if n, ok := nodes[dep.BlockedBy]; ok {
+			tree = append(tree, DepTreeNode{
+				CarID: n.CarID, Title: n.Title, Status: n.Status,
+				Indent: 1, IsLast: isLast, Relation: "blocks this",
+			})
+			addSubTree(db, dep.BlockedBy, 2, 3, "up", nodes, &tree)
+		}
+	}
+
+	// Add "blocks" items.
+	var blocks []models.CarDep
+	db.Where("blocked_by = ?", carID).Find(&blocks)
+	for i, dep := range blocks {
+		isLast := i == len(blocks)-1
+		if n, ok := nodes[dep.CarID]; ok {
+			tree = append(tree, DepTreeNode{
+				CarID: n.CarID, Title: n.Title, Status: n.Status,
+				Indent: 1, IsLast: isLast, Relation: "blocked by this",
+			})
+			addSubTree(db, dep.CarID, 2, 3, "down", nodes, &tree)
+		}
+	}
+
+	nodeSlice := make([]GraphNode, 0, len(nodes))
+	for _, n := range nodes {
+		nodeSlice = append(nodeSlice, n)
+	}
+
+	return DepGraphResult{Nodes: nodeSlice, Edges: edges, Tree: tree}
+}
+
+// walkDeps recursively walks the dependency graph in the given direction.
+func walkDeps(db *gorm.DB, carID string, depth, maxDepth int, direction string, nodes map[string]GraphNode, edges *[]GraphEdge) {
+	if depth > maxDepth {
+		return
+	}
+
+	var deps []models.CarDep
+	if direction == "up" {
+		db.Where("car_id = ?", carID).Find(&deps)
+		for _, dep := range deps {
+			*edges = append(*edges, GraphEdge{From: dep.BlockedBy, To: carID})
+			if _, seen := nodes[dep.BlockedBy]; !seen {
+				var car models.Car
+				if err := db.Select("id, title, status, type").Where("id = ?", dep.BlockedBy).First(&car).Error; err == nil {
+					nodes[dep.BlockedBy] = GraphNode{CarID: car.ID, Title: car.Title, Status: car.Status, Type: car.Type, Depth: depth}
+					walkDeps(db, dep.BlockedBy, depth+1, maxDepth, direction, nodes, edges)
+				}
+			}
+		}
+	} else {
+		db.Where("blocked_by = ?", carID).Find(&deps)
+		for _, dep := range deps {
+			*edges = append(*edges, GraphEdge{From: carID, To: dep.CarID})
+			if _, seen := nodes[dep.CarID]; !seen {
+				var car models.Car
+				if err := db.Select("id, title, status, type").Where("id = ?", dep.CarID).First(&car).Error; err == nil {
+					nodes[dep.CarID] = GraphNode{CarID: car.ID, Title: car.Title, Status: car.Status, Type: car.Type, Depth: depth}
+					walkDeps(db, dep.CarID, depth+1, maxDepth, direction, nodes, edges)
+				}
+			}
+		}
+	}
+}
+
+// addSubTree recursively adds children to the tree.
+func addSubTree(db *gorm.DB, carID string, depth, maxDepth int, direction string, nodes map[string]GraphNode, tree *[]DepTreeNode) {
+	if depth > maxDepth {
+		return
+	}
+
+	var deps []models.CarDep
+	if direction == "up" {
+		db.Where("car_id = ?", carID).Find(&deps)
+	} else {
+		db.Where("blocked_by = ?", carID).Find(&deps)
+	}
+
+	for i, dep := range deps {
+		targetID := dep.BlockedBy
+		if direction == "down" {
+			targetID = dep.CarID
+		}
+		isLast := i == len(deps)-1
+		if n, ok := nodes[targetID]; ok {
+			rel := "blocks this"
+			if direction == "down" {
+				rel = "blocked by this"
+			}
+			*tree = append(*tree, DepTreeNode{
+				CarID: n.CarID, Title: n.Title, Status: n.Status,
+				Indent: depth, IsLast: isLast, Relation: rel,
+			})
+			addSubTree(db, targetID, depth+1, maxDepth, direction, nodes, tree)
+		}
+	}
+}
+
 // EngineDetail holds full engine data for the detail view.
 type EngineDetail struct {
 	ID            string

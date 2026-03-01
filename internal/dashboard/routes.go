@@ -152,8 +152,10 @@ func handleCarDetail(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
+		graph := DependencyGraph(db, id)
 		c.HTML(http.StatusOK, "car_detail.html", gin.H{
-			"Car": detail,
+			"Car":   detail,
+			"Graph": graph,
 		})
 	}
 }
