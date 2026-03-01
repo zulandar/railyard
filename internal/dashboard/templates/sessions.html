@@ -1,0 +1,73 @@
+{{define "sessions.html"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    {{template "page_head"}}
+    <title>Sessions — Railyard</title>
+</head>
+<body>
+    {{template "page_nav"}}
+    <div class="container">
+
+<h1>Dispatch Sessions</h1>
+
+<div class="filters">
+    <form method="get" action="/sessions">
+        <label>Source:
+            <select name="source" onchange="this.form.submit()">
+                <option value="">All</option>
+                {{range .Sources}}<option value="{{.}}"{{if eq . $.ActiveSource}} selected{{end}}>{{.}}</option>{{end}}
+            </select>
+        </label>
+        <label>Status:
+            <select name="status" onchange="this.form.submit()">
+                <option value="">All</option>
+                {{range .Statuses}}<option value="{{.}}"{{if eq . $.ActiveStatus}} selected{{end}}>{{.}}</option>{{end}}
+            </select>
+        </label>
+        <label>User:
+            <select name="user" onchange="this.form.submit()">
+                <option value="">All</option>
+                {{range .Users}}<option value="{{.}}"{{if eq . $.ActiveUser}} selected{{end}}>{{.}}</option>{{end}}
+            </select>
+        </label>
+    </form>
+</div>
+
+<p style="color: var(--text-muted); font-size: 0.85rem;">Showing {{len .Sessions}} session(s)</p>
+
+<div class="card">
+<table>
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>Source</th>
+            <th>User</th>
+            <th>Status</th>
+            <th>Cars Created</th>
+            <th>Duration</th>
+            <th>Created</th>
+        </tr>
+    </thead>
+    <tbody>
+    {{range .Sessions}}
+        <tr>
+            <td><a href="/sessions/{{.ID}}">{{.ID}}</a></td>
+            <td><span class="badge badge-source-{{.Source}}">{{.Source}}</span></td>
+            <td>{{if .UserName}}{{.UserName}}{{else}}—{{end}}</td>
+            <td><span class="badge badge-{{.Status}}">{{.Status}}</span></td>
+            <td>{{.CarsCreatedCount}}</td>
+            <td>{{.Duration}}</td>
+            <td>{{timeAgo .CreatedAt}}</td>
+        </tr>
+    {{else}}
+        <tr><td colspan="7" style="color: var(--text-muted);">No sessions found</td></tr>
+    {{end}}
+    </tbody>
+</table>
+</div>
+
+    </div>
+</body>
+</html>
+{{end}}

@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -792,6 +793,191 @@ func TokenUsageSummary(db *gorm.DB) TokenUsageResult {
 	}
 
 	return result
+}
+
+// SessionRow holds session data for display in the list view.
+type SessionRow struct {
+	ID               uint
+	Source           string
+	UserName         string
+	Status           string
+	CarsCreatedCount int
+	Duration         string
+	CreatedAt        time.Time
+}
+
+// SessionFilters holds optional filters for the session list.
+type SessionFilters struct {
+	Source   string
+	Status   string
+	UserName string
+}
+
+// SessionListResult holds the session list plus metadata for filter dropdowns.
+type SessionListResult struct {
+	Sessions []SessionRow
+	Sources  []string
+	Statuses []string
+	Users    []string
+}
+
+// SessionList returns sessions matching filters, newest first.
+func SessionList(db *gorm.DB, filters SessionFilters) SessionListResult {
+	if db == nil {
+		return SessionListResult{Sessions: []SessionRow{}}
+	}
+
+	q := db.Model(&models.DispatchSession{})
+	if filters.Source != "" {
+		q = q.Where("source = ?", filters.Source)
+	}
+	if filters.Status != "" {
+		q = q.Where("status = ?", filters.Status)
+	}
+	if filters.UserName != "" {
+		q = q.Where("user_name = ?", filters.UserName)
+	}
+
+	var sessions []models.DispatchSession
+	q.Order("created_at DESC").Limit(200).Find(&sessions)
+
+	rows := make([]SessionRow, len(sessions))
+	for i, s := range sessions {
+		rows[i] = SessionRow{
+			ID:               s.ID,
+			Source:           s.Source,
+			UserName:         s.UserName,
+			Status:           s.Status,
+			CarsCreatedCount: countJSONArray(s.CarsCreated),
+			CreatedAt:        s.CreatedAt,
+		}
+		if s.CompletedAt != nil {
+			rows[i].Duration = formatDuration(s.CompletedAt.Sub(s.CreatedAt))
+		} else if s.Status == "active" {
+			rows[i].Duration = formatDuration(time.Since(s.CreatedAt))
+		} else {
+			rows[i].Duration = "—"
+		}
+	}
+
+	// Distinct values for filter dropdowns.
+	var sources []string
+	db.Model(&models.DispatchSession{}).Distinct("source").Order("source ASC").Pluck("source", &sources)
+	var statuses []string
+	db.Model(&models.DispatchSession{}).Distinct("status").Order("status ASC").Pluck("status", &statuses)
+	var users []string
+	db.Model(&models.DispatchSession{}).Distinct("user_name").Order("user_name ASC").Pluck("user_name", &users)
+
+	return SessionListResult{
+		Sessions: rows,
+		Sources:  sources,
+		Statuses: statuses,
+		Users:    users,
+	}
+}
+
+// countJSONArray returns the number of elements in a JSON array string.
+func countJSONArray(jsonStr string) int {
+	if jsonStr == "" || jsonStr == "null" || jsonStr == "[]" {
+		return 0
+	}
+	var arr []json.RawMessage
+	if err := json.Unmarshal([]byte(jsonStr), &arr); err != nil {
+		return 0
+	}
+	return len(arr)
+}
+
+// SessionDetailData holds the full session data for the detail page.
+type SessionDetailData struct {
+	ID               uint
+	Source           string
+	UserName         string
+	PlatformThreadID string
+	ChannelID        string
+	Status           string
+	CarsCreated      []string
+	LastHeartbeat    time.Time
+	CreatedAt        time.Time
+	CompletedAt      *time.Time
+	Duration         string
+	Conversations    []ConversationRow
+}
+
+// ConversationRow holds a single conversation message for display.
+type ConversationRow struct {
+	ID        uint
+	Sequence  int
+	Role      string
+	UserName  string
+	Content   string
+	CreatedAt time.Time
+}
+
+// GetSessionDetail returns full session data including conversations.
+func GetSessionDetail(db *gorm.DB, id string) (*SessionDetailData, error) {
+	if db == nil {
+		return nil, fmt.Errorf("no database connection")
+	}
+
+	var s models.DispatchSession
+	if err := db.Preload("Conversations", func(tx *gorm.DB) *gorm.DB {
+		return tx.Order("sequence ASC")
+	}).Where("id = ?", id).First(&s).Error; err != nil {
+		return nil, err
+	}
+
+	var cars []string
+	if s.CarsCreated != "" && s.CarsCreated != "null" {
+		json.Unmarshal([]byte(s.CarsCreated), &cars)
+	}
+
+	detail := &SessionDetailData{
+		ID:               s.ID,
+		Source:           s.Source,
+		UserName:         s.UserName,
+		PlatformThreadID: s.PlatformThreadID,
+		ChannelID:        s.ChannelID,
+		Status:           s.Status,
+		CarsCreated:      cars,
+		LastHeartbeat:    s.LastHeartbeat,
+		CreatedAt:        s.CreatedAt,
+		CompletedAt:      s.CompletedAt,
+	}
+
+	if s.CompletedAt != nil {
+		detail.Duration = formatDuration(s.CompletedAt.Sub(s.CreatedAt))
+	} else if s.Status == "active" {
+		detail.Duration = formatDuration(time.Since(s.CreatedAt))
+	} else {
+		detail.Duration = "—"
+	}
+
+	detail.Conversations = make([]ConversationRow, len(s.Conversations))
+	for i, c := range s.Conversations {
+		detail.Conversations[i] = ConversationRow{
+			ID:        c.ID,
+			Sequence:  c.Sequence,
+			Role:      c.Role,
+			UserName:  c.UserName,
+			Content:   c.Content,
+			CreatedAt: c.CreatedAt,
+		}
+	}
+
+	return detail, nil
+}
+
+// ActiveSessionCount returns the count of sessions with status='active'.
+func ActiveSessionCount(db *gorm.DB) int64 {
+	if db == nil {
+		return 0
+	}
+	var count int64
+	db.Model(&models.DispatchSession{}).
+		Where("status = ?", "active").
+		Count(&count)
+	return count
 }
 
 // YardmasterInfo holds yardmaster engine data for the status card.

@@ -1,0 +1,83 @@
+{{define "session_detail.html"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    {{template "page_head"}}
+    <title>Session {{.Session.ID}} — Railyard</title>
+</head>
+<body>
+    {{template "page_nav"}}
+    <div class="container">
+
+<p><a href="/sessions">&larr; Back to sessions</a></p>
+
+<div class="car-header">
+    <h1>
+        Session #{{.Session.ID}}
+        <span class="badge badge-source-{{.Session.Source}}">{{.Session.Source}}</span>
+        <span class="badge badge-{{.Session.Status}}">{{.Session.Status}}</span>
+    </h1>
+    <p style="color: var(--text-muted); font-size: 0.85rem;">
+        User: {{.Session.UserName}} · Duration: {{.Session.Duration}}
+    </p>
+</div>
+
+<div class="grid grid-detail">
+    <div class="card">
+        <h3>Metadata</h3>
+        <dl class="meta">
+            <dt>Source</dt>
+            <dd><span class="badge badge-source-{{.Session.Source}}">{{.Session.Source}}</span></dd>
+            <dt>User</dt>
+            <dd>{{if .Session.UserName}}{{.Session.UserName}}{{else}}—{{end}}</dd>
+            <dt>Status</dt>
+            <dd><span class="badge badge-{{.Session.Status}}">{{.Session.Status}}</span></dd>
+            <dt>Created</dt>
+            <dd>{{timeAgo .Session.CreatedAt}}</dd>
+            {{if .Session.CompletedAt}}<dt>Completed</dt>
+            <dd>{{timeAgo (deref .Session.CompletedAt)}}</dd>{{end}}
+            <dt>Last Heartbeat</dt>
+            <dd>{{timeAgo .Session.LastHeartbeat}}</dd>
+            {{if .Session.PlatformThreadID}}<dt>Thread ID</dt>
+            <dd><code>{{.Session.PlatformThreadID}}</code></dd>{{end}}
+            {{if .Session.ChannelID}}<dt>Channel ID</dt>
+            <dd><code>{{.Session.ChannelID}}</code></dd>{{end}}
+        </dl>
+    </div>
+
+    {{if .Session.CarsCreated}}
+    <div class="card">
+        <h3>Cars Created ({{len .Session.CarsCreated}})</h3>
+        <ul class="dep-list">
+            {{range .Session.CarsCreated}}
+            <li><a href="/cars/{{.}}">{{.}}</a></li>
+            {{end}}
+        </ul>
+    </div>
+    {{end}}
+</div>
+
+{{if .Session.Conversations}}
+<div class="card">
+    <h3>Conversation ({{len .Session.Conversations}} messages)</h3>
+    <div class="conversation">
+        {{range .Session.Conversations}}
+        <div class="msg msg-{{.Role}}">
+            <div class="msg-meta">
+                {{.Role}}{{if .UserName}} ({{.UserName}}){{end}} · {{timeAgo .CreatedAt}}
+            </div>
+            <div class="msg-content">{{.Content}}</div>
+        </div>
+        {{end}}
+    </div>
+</div>
+{{else}}
+<div class="card">
+    <p style="color: var(--text-muted);">No conversation messages</p>
+</div>
+{{end}}
+
+    </div>
+</body>
+</html>
+{{end}}

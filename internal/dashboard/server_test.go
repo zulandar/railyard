@@ -914,6 +914,153 @@ func TestEmbeddedTemplates_Logs(t *testing.T) {
 	}
 }
 
+func TestSessionsRoute_Returns200(t *testing.T) {
+	baseURL, cleanup := setupTestRouter(t)
+	defer cleanup()
+
+	resp, err := http.Get(baseURL + "/sessions")
+	if err != nil {
+		t.Fatalf("GET /sessions: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+}
+
+func TestSessionsRoute_ContainsSessionTable(t *testing.T) {
+	baseURL, cleanup := setupTestRouter(t)
+	defer cleanup()
+
+	resp, err := http.Get(baseURL + "/sessions")
+	if err != nil {
+		t.Fatalf("GET /sessions: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body := make([]byte, 16384)
+	n, _ := resp.Body.Read(body)
+	html := string(body[:n])
+
+	for _, want := range []string{
+		"Dispatch Sessions",
+		"No sessions found",
+		"Source:",
+		"Status:",
+		"User:",
+		"Showing 0 session(s)",
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("sessions page missing %q", want)
+		}
+	}
+}
+
+func TestSessionsRoute_WithFilters(t *testing.T) {
+	baseURL, cleanup := setupTestRouter(t)
+	defer cleanup()
+
+	resp, err := http.Get(baseURL + "/sessions?source=telegraph&status=active&user=testuser")
+	if err != nil {
+		t.Fatalf("GET /sessions?filters: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+}
+
+func TestSessionDetail_NotFound(t *testing.T) {
+	baseURL, cleanup := setupTestRouter(t)
+	defer cleanup()
+
+	resp, err := http.Get(baseURL + "/sessions/999999")
+	if err != nil {
+		t.Fatalf("GET /sessions/999999: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestSessionList_NilDB(t *testing.T) {
+	result := SessionList(nil, SessionFilters{})
+	if result.Sessions == nil {
+		t.Error("Sessions should not be nil")
+	}
+	if len(result.Sessions) != 0 {
+		t.Errorf("Sessions = %d, want 0", len(result.Sessions))
+	}
+}
+
+func TestActiveSessionCount_NilDB(t *testing.T) {
+	count := ActiveSessionCount(nil)
+	if count != 0 {
+		t.Errorf("count = %d, want 0", count)
+	}
+}
+
+func TestCountJSONArray(t *testing.T) {
+	tests := []struct {
+		input string
+		want  int
+	}{
+		{"", 0},
+		{"null", 0},
+		{"[]", 0},
+		{`["car-1"]`, 1},
+		{`["car-1","car-2","car-3"]`, 3},
+		{"invalid json", 0},
+	}
+	for _, tt := range tests {
+		got := countJSONArray(tt.input)
+		if got != tt.want {
+			t.Errorf("countJSONArray(%q) = %d, want %d", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestNavContainsSessionsLink(t *testing.T) {
+	baseURL, cleanup := setupTestRouter(t)
+	defer cleanup()
+
+	resp, err := http.Get(baseURL + "/")
+	if err != nil {
+		t.Fatalf("GET /: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body := make([]byte, 16384)
+	n, _ := resp.Body.Read(body)
+	html := string(body[:n])
+
+	if !strings.Contains(html, `href="/sessions"`) {
+		t.Error("nav missing /sessions link")
+	}
+}
+
+func TestEmbeddedTemplates_Sessions(t *testing.T) {
+	data, err := templatesFS.ReadFile("templates/sessions.html")
+	if err != nil {
+		t.Fatalf("sessions.html not embedded: %v", err)
+	}
+	if !strings.Contains(string(data), "Dispatch Sessions") {
+		t.Error("sessions.html does not contain 'Dispatch Sessions'")
+	}
+
+	data, err = templatesFS.ReadFile("templates/session_detail.html")
+	if err != nil {
+		t.Fatalf("session_detail.html not embedded: %v", err)
+	}
+	if !strings.Contains(string(data), "Conversation") {
+		t.Error("session_detail.html does not contain 'Conversation'")
+	}
+}
+
 func TestYardmasterStatus_NilDB(t *testing.T) {
 	result := YardmasterStatus(nil)
 	if result != nil {

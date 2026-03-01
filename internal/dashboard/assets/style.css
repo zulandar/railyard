@@ -161,6 +161,50 @@ dl.meta code { background: var(--bg); padding: 0.1rem 0.4rem; border-radius: 3px
 }
 .escalation-banner h3 { color: var(--red); margin-bottom: 0.5rem; }
 
+/* Source badges */
+.badge-source-telegraph { background: rgba(88, 166, 255, 0.15); color: var(--accent); }
+.badge-source-local { background: rgba(188, 140, 255, 0.15); color: var(--purple); }
+
+/* Session status badges */
+.badge-active { background: rgba(63, 185, 80, 0.15); color: var(--green); }
+.badge-completed { background: rgba(139, 148, 158, 0.15); color: var(--text-muted); }
+.badge-expired { background: rgba(248, 81, 73, 0.15); color: var(--red); }
+
+/* Conversation thread */
+.conversation { display: flex; flex-direction: column; gap: 0.75rem; }
+.conversation .msg {
+    padding: 0.75rem 1rem;
+    border-radius: 6px;
+    max-width: 85%;
+}
+.conversation .msg-user {
+    background: rgba(88, 166, 255, 0.1);
+    border: 1px solid rgba(88, 166, 255, 0.2);
+    align-self: flex-end;
+}
+.conversation .msg-assistant {
+    background: rgba(63, 185, 80, 0.1);
+    border: 1px solid rgba(63, 185, 80, 0.2);
+    align-self: flex-start;
+}
+.conversation .msg-system {
+    background: rgba(139, 148, 158, 0.1);
+    border: 1px solid rgba(139, 148, 158, 0.2);
+    align-self: center;
+    font-style: italic;
+}
+.conversation .msg-meta {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-bottom: 0.25rem;
+}
+.conversation .msg-content {
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: 0.9rem;
+    line-height: 1.5;
+}
+
 /* HTMX loading indicator */
 .htmx-indicator { opacity: 0; transition: opacity 200ms; }
 .htmx-request .htmx-indicator { opacity: 1; }

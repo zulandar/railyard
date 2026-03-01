@@ -23,6 +23,8 @@ func registerRoutes(router *gin.Engine, db *gorm.DB) {
 	router.GET("/engines/:id", handleEngineDetail(db))
 	router.GET("/messages", handleMessages(db))
 	router.GET("/logs", handleLogs(db))
+	router.GET("/sessions", handleSessionList(db))
+	router.GET("/sessions/:id", handleSessionDetail(db))
 
 	// HTMX partial endpoints for live refresh.
 	router.GET("/partials/engines", handlePartialsEngines(db))
@@ -200,6 +202,48 @@ func handleMessages(db *gorm.DB) gin.HandlerFunc {
 			"ActiveAgent":    agent,
 			"ActivePriority": priority,
 			"ActiveUnacked":  unacked,
+		})
+	}
+}
+
+func handleSessionList(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		source := c.Query("source")
+		status := c.Query("status")
+		user := c.Query("user")
+
+		filters := SessionFilters{
+			Source:   source,
+			Status:   status,
+			UserName: user,
+		}
+		result := SessionList(db, filters)
+
+		c.HTML(http.StatusOK, "sessions.html", gin.H{
+			"Sessions":     result.Sessions,
+			"Sources":      result.Sources,
+			"Statuses":     result.Statuses,
+			"Users":        result.Users,
+			"ActiveSource": source,
+			"ActiveStatus": status,
+			"ActiveUser":   user,
+		})
+	}
+}
+
+func handleSessionDetail(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id := c.Param("id")
+		detail, err := GetSessionDetail(db, id)
+		if err != nil {
+			c.HTML(http.StatusNotFound, "layout.html", gin.H{
+				"Error": fmt.Sprintf("Session not found: %s", id),
+			})
+			return
+		}
+
+		c.HTML(http.StatusOK, "session_detail.html", gin.H{
+			"Session": detail,
 		})
 	}
 }
