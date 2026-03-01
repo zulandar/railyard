@@ -913,3 +913,10 @@ func TestEmbeddedTemplates_Logs(t *testing.T) {
 		t.Error("logs.html does not contain 'Token Usage'")
 	}
 }
+
+func TestYardmasterStatus_NilDB(t *testing.T) {
+	result := YardmasterStatus(nil)
+	if result != nil {
+		t.Errorf("expected nil, got %+v", result)
+	}
+}

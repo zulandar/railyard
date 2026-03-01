@@ -793,3 +793,37 @@ func TokenUsageSummary(db *gorm.DB) TokenUsageResult {
 
 	return result
 }
+
+// YardmasterInfo holds yardmaster engine data for the status card.
+type YardmasterInfo struct {
+	ID           string
+	Status       string
+	LastActivity time.Time
+	StartedAt    time.Time
+	Uptime       string
+	CurrentCar   string
+}
+
+// YardmasterStatus returns the yardmaster engine status, or nil if not registered.
+func YardmasterStatus(db *gorm.DB) *YardmasterInfo {
+	if db == nil {
+		return nil
+	}
+
+	var eng models.Engine
+	if err := db.Where("role = ?", "yardmaster").First(&eng).Error; err != nil {
+		return nil
+	}
+
+	info := &YardmasterInfo{
+		ID:           eng.ID,
+		Status:       eng.Status,
+		LastActivity: eng.LastActivity,
+		StartedAt:    eng.StartedAt,
+		CurrentCar:   eng.CurrentCar,
+	}
+	if !eng.StartedAt.IsZero() {
+		info.Uptime = formatDuration(time.Since(eng.StartedAt))
+	}
+	return info
+}
