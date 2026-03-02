@@ -519,6 +519,32 @@ func TestInitCmd_NonInteractive_SkipDB(t *testing.T) {
 	}
 }
 
+func TestInitCmd_NonInteractive_CustomHost(t *testing.T) {
+	dir := initGitRepo(t)
+	configPath := filepath.Join(dir, "railyard.yaml")
+
+	cmd := newRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"init", "--yes", "--skip-db", "--host", "10.0.0.5", "--config", configPath})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("init --yes --skip-db --host 10.0.0.5: %v", err)
+	}
+	// Verify config file has the custom host.
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	cfg, err := config.Parse(data)
+	if err != nil {
+		t.Fatalf("parse generated config: %v\n---\n%s", err, string(data))
+	}
+	if cfg.Dolt.Host != "10.0.0.5" {
+		t.Errorf("Dolt.Host = %q, want %q", cfg.Dolt.Host, "10.0.0.5")
+	}
+}
+
 func TestDetectLanguages_SkipsDirs(t *testing.T) {
 	dir := t.TempDir()
 	// Files in skipped directories should not count.
@@ -757,6 +783,23 @@ func TestRenderConfig_WithoutTelegraph(t *testing.T) {
 	}
 	if strings.Contains(yamlStr, "telegraph:") {
 		t.Error("rendered YAML should not contain telegraph section when nil")
+	}
+}
+
+func TestRenderConfig_CustomHost(t *testing.T) {
+	tracks := []config.TrackConfig{
+		{Name: "backend", Language: "go", FilePatterns: []string{"**/*.go"}, EngineSlots: 2, TestCommand: "go test ./..."},
+	}
+	yamlStr, err := renderConfig("alice", "git@github.com:org/repo.git", "10.0.0.5", 3306, tracks, nil)
+	if err != nil {
+		t.Fatalf("renderConfig: %v", err)
+	}
+	cfg, err := config.Parse([]byte(yamlStr))
+	if err != nil {
+		t.Fatalf("config.Parse: %v\n---\n%s", err, yamlStr)
+	}
+	if cfg.Dolt.Host != "10.0.0.5" {
+		t.Errorf("Dolt.Host = %q, want %q", cfg.Dolt.Host, "10.0.0.5")
 	}
 }
 
