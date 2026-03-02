@@ -121,35 +121,44 @@ func (sd *StallDetector) Stop() {
 // HandleStall processes a detected stall: updates engine status to stalled,
 // car status to blocked, and sends a message to the yardmaster.
 func HandleStall(db *gorm.DB, engineID, carID string, reason StallReason) error {
-	// Update engine status to stalled.
-	if err := db.Model(&models.Engine{}).Where("id = ?", engineID).
-		Update("status", StatusStalled).Error; err != nil {
-		return fmt.Errorf("engine: mark stalled %s: %w", engineID, err)
-	}
+	return db.Transaction(func(tx *gorm.DB) error {
+		// Update engine status to stalled.
+		result := tx.Model(&models.Engine{}).Where("id = ?", engineID).
+			Update("status", StatusStalled)
+		if result.Error != nil {
+			return fmt.Errorf("engine: mark stalled %s: %w", engineID, result.Error)
+		}
+		if result.RowsAffected == 0 {
+			return fmt.Errorf("engine: engine %s not found", engineID)
+		}
 
-	// Update car status to blocked.
-	if err := db.Model(&models.Car{}).Where("id = ?", carID).
-		Update("status", "blocked").Error; err != nil {
-		return fmt.Errorf("engine: mark car blocked %s: %w", carID, err)
-	}
+		// Update car status to blocked.
+		result = tx.Model(&models.Car{}).Where("id = ?", carID).
+			Update("status", "blocked")
+		if result.Error != nil {
+			return fmt.Errorf("engine: mark car blocked %s: %w", carID, result.Error)
+		}
+		if result.RowsAffected == 0 {
+			return fmt.Errorf("engine: car %s not found", carID)
+		}
 
-	// Build message body with context.
-	body := fmt.Sprintf("Engine: %s\nCar: %s\nStall type: %s\nReason: %s",
-		engineID, carID, reason.Type, reason.Detail)
-	if reason.Snippet != "" {
-		body += fmt.Sprintf("\nLast output:\n%s", reason.Snippet)
-	}
+		// Build message body with context.
+		body := fmt.Sprintf("Engine: %s\nCar: %s\nStall type: %s\nReason: %s",
+			engineID, carID, reason.Type, reason.Detail)
+		if reason.Snippet != "" {
+			body += fmt.Sprintf("\nLast output:\n%s", reason.Snippet)
+		}
 
-	// Send message to yardmaster.
-	_, err := messaging.Send(db, engineID, "yardmaster", "engine-stalled", body, messaging.SendOpts{
-		CarID:    carID,
-		Priority: "urgent",
+		// Send message to yardmaster.
+		if _, err := messaging.Send(tx, engineID, "yardmaster", "engine-stalled", body, messaging.SendOpts{
+			CarID:    carID,
+			Priority: "urgent",
+		}); err != nil {
+			return fmt.Errorf("engine: send stall message: %w", err)
+		}
+
+		return nil
 	})
-	if err != nil {
-		return fmt.Errorf("engine: send stall message: %w", err)
-	}
-
-	return nil
 }
 
 // observeOutput is called on each stdout Write. It records the timestamp
