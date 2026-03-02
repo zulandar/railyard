@@ -64,7 +64,9 @@ func handleRetryMerge(db *gorm.DB, msg models.Message, out io.Writer) {
 	if car.Type == "epic" {
 		fmt.Fprintf(out, "Action retry-merge: car %s is an epic, attempting auto-close — %s\n", msg.CarID, msg.Body)
 		TryCloseEpic(db, msg.CarID)
-		writeProgressNote(db, msg.CarID, "dispatch", fmt.Sprintf("Retry merge (epic auto-close attempted): %s", msg.Body))
+		if err := writeProgressNote(db, msg.CarID, "dispatch", fmt.Sprintf("Retry merge (epic auto-close attempted): %s", msg.Body)); err != nil {
+			fmt.Fprintf(out, "Action retry-merge: progress note failed: %v\n", err)
+		}
 		return
 	}
 
@@ -76,9 +78,14 @@ func handleRetryMerge(db *gorm.DB, msg models.Message, out io.Writer) {
 
 	fmt.Fprintf(out, "Action retry-merge: setting car %s back to done — %s\n", msg.CarID, msg.Body)
 
-	db.Model(&models.Car{}).Where("id = ?", msg.CarID).Update("status", "done")
+	if err := db.Model(&models.Car{}).Where("id = ?", msg.CarID).Update("status", "done").Error; err != nil {
+		fmt.Fprintf(out, "Action retry-merge: update car %s failed: %v\n", msg.CarID, err)
+		return
+	}
 
-	writeProgressNote(db, msg.CarID, "dispatch", fmt.Sprintf("Retry merge requested: %s", msg.Body))
+	if err := writeProgressNote(db, msg.CarID, "dispatch", fmt.Sprintf("Retry merge requested: %s", msg.Body)); err != nil {
+		fmt.Fprintf(out, "Action retry-merge: progress note failed: %v\n", err)
+	}
 }
 
 // handleRequeueCar sets a car's status to "open" and clears the assignee,
@@ -91,12 +98,17 @@ func handleRequeueCar(db *gorm.DB, msg models.Message, out io.Writer) {
 
 	fmt.Fprintf(out, "Action requeue-car: requeuing car %s — %s\n", msg.CarID, msg.Body)
 
-	db.Model(&models.Car{}).Where("id = ?", msg.CarID).Updates(map[string]interface{}{
+	if err := db.Model(&models.Car{}).Where("id = ?", msg.CarID).Updates(map[string]interface{}{
 		"status":   "open",
 		"assignee": "",
-	})
+	}).Error; err != nil {
+		fmt.Fprintf(out, "Action requeue-car: update car %s failed: %v\n", msg.CarID, err)
+		return
+	}
 
-	writeProgressNote(db, msg.CarID, "dispatch", fmt.Sprintf("Requeued: %s", msg.Body))
+	if err := writeProgressNote(db, msg.CarID, "dispatch", fmt.Sprintf("Requeued: %s", msg.Body)); err != nil {
+		fmt.Fprintf(out, "Action requeue-car: progress note failed: %v\n", err)
+	}
 }
 
 // handleNudgeEngine forwards guidance from dispatch to the engine currently
@@ -116,8 +128,10 @@ func handleNudgeEngine(db *gorm.DB, msg models.Message, out io.Writer) {
 
 	fmt.Fprintf(out, "Action nudge-engine: sending guidance to %s (car %s)\n", eng.ID, msg.CarID)
 
-	messaging.Send(db, YardmasterID, eng.ID, "guidance", msg.Body,
-		messaging.SendOpts{CarID: msg.CarID})
+	if _, err := messaging.Send(db, YardmasterID, eng.ID, "guidance", msg.Body,
+		messaging.SendOpts{CarID: msg.CarID}); err != nil {
+		fmt.Fprintf(out, "Action nudge-engine: send guidance to %s failed: %v\n", eng.ID, err)
+	}
 }
 
 // handleUnblockCar transitions a blocked car back to "open" status.
@@ -139,9 +153,14 @@ func handleUnblockCar(db *gorm.DB, msg models.Message, out io.Writer) {
 
 	fmt.Fprintf(out, "Action unblock-car: unblocking car %s — %s\n", msg.CarID, msg.Body)
 
-	db.Model(&models.Car{}).Where("id = ?", msg.CarID).Update("status", "open")
+	if err := db.Model(&models.Car{}).Where("id = ?", msg.CarID).Update("status", "open").Error; err != nil {
+		fmt.Fprintf(out, "Action unblock-car: update car %s failed: %v\n", msg.CarID, err)
+		return
+	}
 
-	writeProgressNote(db, msg.CarID, "dispatch", fmt.Sprintf("Manually unblocked: %s", msg.Body))
+	if err := writeProgressNote(db, msg.CarID, "dispatch", fmt.Sprintf("Manually unblocked: %s", msg.Body)); err != nil {
+		fmt.Fprintf(out, "Action unblock-car: progress note failed: %v\n", err)
+	}
 }
 
 // handleCloseEpic attempts to auto-close an epic whose children are all complete.
@@ -163,16 +182,21 @@ func handleCloseEpic(db *gorm.DB, msg models.Message, out io.Writer) {
 
 	fmt.Fprintf(out, "Action close-epic: attempting auto-close for epic %s — %s\n", msg.CarID, msg.Body)
 	TryCloseEpic(db, msg.CarID)
-	writeProgressNote(db, msg.CarID, "dispatch", fmt.Sprintf("Close epic requested: %s", msg.Body))
+	if err := writeProgressNote(db, msg.CarID, "dispatch", fmt.Sprintf("Close epic requested: %s", msg.Body)); err != nil {
+		fmt.Fprintf(out, "Action close-epic: progress note failed: %v\n", err)
+	}
 }
 
 // writeProgressNote creates a CarProgress record documenting an action.
-func writeProgressNote(db *gorm.DB, carID, engineID, note string) {
-	db.Create(&models.CarProgress{
+func writeProgressNote(db *gorm.DB, carID, engineID, note string) error {
+	if err := db.Create(&models.CarProgress{
 		CarID:        carID,
 		EngineID:     engineID,
 		Note:         note,
 		FilesChanged: "[]",
 		CreatedAt:    time.Now(),
-	})
+	}).Error; err != nil {
+		return fmt.Errorf("yardmaster: progress note for car %s: %w", carID, err)
+	}
+	return nil
 }
