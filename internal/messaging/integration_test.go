@@ -199,9 +199,12 @@ func TestIntegration_Inbox_PriorityOrdering(t *testing.T) {
 	if len(msgs) != 2 {
 		t.Fatalf("len(msgs) = %d, want 2", len(msgs))
 	}
-	// "normal" < "urgent" alphabetically, so normal comes first in ASC order.
-	if msgs[0].Subject != "normal-task" {
-		t.Errorf("expected normal first (ASC sort), got %q", msgs[0].Subject)
+	// Urgent messages should be delivered before normal messages.
+	if msgs[0].Subject != "urgent-task" {
+		t.Errorf("expected urgent first, got %q", msgs[0].Subject)
+	}
+	if msgs[1].Subject != "normal-task" {
+		t.Errorf("expected normal second, got %q", msgs[1].Subject)
 	}
 }
 

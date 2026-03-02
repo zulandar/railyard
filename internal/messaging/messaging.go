@@ -68,7 +68,7 @@ func Inbox(db *gorm.DB, agentID string) ([]models.Message, error) {
 	if err := db.Where(
 		"(to_agent = ? AND acknowledged = ?) OR (to_agent = 'broadcast' AND id NOT IN (SELECT message_id FROM broadcast_acks WHERE agent_id = ?))",
 		agentID, false, agentID,
-	).Order("priority ASC, created_at ASC").Find(&msgs).Error; err != nil {
+	).Order("priority DESC, created_at ASC").Find(&msgs).Error; err != nil {
 		return nil, fmt.Errorf("messaging: inbox %s: %w", agentID, err)
 	}
 	return msgs, nil
