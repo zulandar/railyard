@@ -644,3 +644,82 @@ func TestHandleEscalateResult_NilResult(t *testing.T) {
 		t.Errorf("expected no output for nil result, got: %s", buf.String())
 	}
 }
+
+// ---------------------------------------------------------------------------
+// handleCompletedCars — epic skip tests
+// ---------------------------------------------------------------------------
+
+func TestHandleCompletedCars_SkipsEpicAndMarkesMerged(t *testing.T) {
+	db := testDB(t)
+
+	// Create an epic with status "done" (set by TryCloseEpic after children merged).
+	epicID := "epic-done1"
+	db.Create(&models.Car{
+		ID:     epicID,
+		Type:   "epic",
+		Status: "done",
+		Track:  "backend",
+		Branch: "ry/alice/backend/epic-done1",
+		Title:  "Test Epic",
+	})
+	// All children already merged.
+	db.Create(&models.Car{ID: "child-ed1", Type: "task", Status: "merged", Track: "backend", ParentID: &epicID})
+	db.Create(&models.Car{ID: "child-ed2", Type: "task", Status: "merged", Track: "backend", ParentID: &epicID})
+
+	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
+
+	var buf bytes.Buffer
+	// repoDir and ymDir don't matter — the epic should never reach Switch().
+	err := handleCompletedCars(context.Background(), db, cfg, "/nonexistent", "/nonexistent", &buf)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Epic should be marked as "merged", not stuck in "done".
+	var epic models.Car
+	db.First(&epic, "id = ?", epicID)
+	if epic.Status != "merged" {
+		t.Errorf("epic status = %q, want %q", epic.Status, "merged")
+	}
+	if epic.CompletedAt == nil {
+		t.Error("epic CompletedAt should be set")
+	}
+
+	// Output should mention skipping the merge for the epic.
+	output := buf.String()
+	if !strings.Contains(output, "epic") {
+		t.Errorf("output should mention epic, got: %s", output)
+	}
+}
+
+func TestHandleCompletedCars_EpicWithPendingChildren_StaysDone(t *testing.T) {
+	db := testDB(t)
+
+	// Epic is "done" but one child is still in_progress (edge case: race/bad state).
+	epicID := "epic-done2"
+	db.Create(&models.Car{
+		ID:     epicID,
+		Type:   "epic",
+		Status: "done",
+		Track:  "backend",
+		Branch: "ry/alice/backend/epic-done2",
+		Title:  "Partial Epic",
+	})
+	db.Create(&models.Car{ID: "child-ed3", Type: "task", Status: "merged", Track: "backend", ParentID: &epicID})
+	db.Create(&models.Car{ID: "child-ed4", Type: "task", Status: "in_progress", Track: "backend", ParentID: &epicID})
+
+	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
+
+	var buf bytes.Buffer
+	err := handleCompletedCars(context.Background(), db, cfg, "/nonexistent", "/nonexistent", &buf)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Epic should stay "done" — not yet all children resolved.
+	var epic models.Car
+	db.First(&epic, "id = ?", epicID)
+	if epic.Status != "done" {
+		t.Errorf("epic status = %q, want %q (children not all complete)", epic.Status, "done")
+	}
+}

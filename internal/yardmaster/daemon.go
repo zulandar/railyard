@@ -320,6 +320,38 @@ func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, r
 	}
 
 	for _, c := range cars {
+		// Epics are container cars — no engine ever commits to their branch.
+		// Skip the merge and transition directly to merged when all children
+		// are in a terminal state.
+		if c.Type == "epic" {
+			var remaining int64
+			db.Model(&models.Car{}).
+				Where("parent_id = ? AND status NOT IN ?", c.ID, []string{"done", "merged", "cancelled"}).
+				Count(&remaining)
+			if remaining > 0 {
+				fmt.Fprintf(out, "Completed epic %s (%s) — %d children still pending, skipping\n", c.ID, c.Title, remaining)
+				continue
+			}
+			now := time.Now()
+			db.Model(&models.Car{}).Where("id = ?", c.ID).Updates(map[string]interface{}{
+				"status":       "merged",
+				"completed_at": now,
+			})
+			fmt.Fprintf(out, "Completed epic %s (%s) — all children done, marked merged\n", c.ID, c.Title)
+
+			// Unblock cross-track dependencies and auto-close parent epics.
+			unblocked, _ := UnblockDeps(db, c.ID)
+			for _, u := range unblocked {
+				if u.Type == "epic" {
+					TryCloseEpic(db, u.ID)
+				}
+			}
+			if c.ParentID != nil && *c.ParentID != "" {
+				TryCloseEpic(db, *c.ParentID)
+			}
+			continue
+		}
+
 		fmt.Fprintf(out, "Completed car %s (%s) — switching\n", c.ID, c.Title)
 
 		// Reset the yardmaster worktree to the car's base branch before each
