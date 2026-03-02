@@ -50,39 +50,47 @@ func ReassignCar(db *gorm.DB, carID, fromEngineID, reason string) error {
 		return fmt.Errorf("yardmaster: fromEngineID is required")
 	}
 
-	// Release the car: set status=open, clear assignee.
-	result := db.Model(&models.Car{}).Where("id = ?", carID).Updates(map[string]interface{}{
-		"status":   "open",
-		"assignee": "",
+	return db.Transaction(func(tx *gorm.DB) error {
+		// Release the car: set status=open, clear assignee.
+		result := tx.Model(&models.Car{}).Where("id = ?", carID).Updates(map[string]interface{}{
+			"status":   "open",
+			"assignee": "",
+		})
+		if result.Error != nil {
+			return fmt.Errorf("yardmaster: release car %s: %w", carID, result.Error)
+		}
+		if result.RowsAffected == 0 {
+			return fmt.Errorf("yardmaster: car %s not found", carID)
+		}
+
+		// Mark the engine as dead and clear its current car.
+		if err := tx.Model(&models.Engine{}).Where("id = ?", fromEngineID).Updates(map[string]interface{}{
+			"status":      "dead",
+			"current_car": "",
+		}).Error; err != nil {
+			return fmt.Errorf("yardmaster: mark engine %s dead: %w", fromEngineID, err)
+		}
+
+		// Write progress note.
+		note := fmt.Sprintf("Reassigned from engine %s: %s", fromEngineID, reason)
+		if err := tx.Create(&models.CarProgress{
+			CarID:        carID,
+			EngineID:     fromEngineID,
+			Note:         note,
+			FilesChanged: "[]",
+			CreatedAt:    time.Now(),
+		}).Error; err != nil {
+			return fmt.Errorf("yardmaster: progress note for car %s: %w", carID, err)
+		}
+
+		// Send broadcast notification.
+		if _, err := messaging.Send(tx, "yardmaster", "broadcast", "reassignment",
+			fmt.Sprintf("Car %s reassigned from stalled engine %s", carID, fromEngineID),
+			messaging.SendOpts{CarID: carID, Priority: "urgent"},
+		); err != nil {
+			return fmt.Errorf("yardmaster: broadcast reassignment for car %s: %w", carID, err)
+		}
+
+		return nil
 	})
-	if result.Error != nil {
-		return fmt.Errorf("yardmaster: release car %s: %w", carID, result.Error)
-	}
-	if result.RowsAffected == 0 {
-		return fmt.Errorf("yardmaster: car %s not found", carID)
-	}
-
-	// Mark the engine as dead and clear its current car.
-	db.Model(&models.Engine{}).Where("id = ?", fromEngineID).Updates(map[string]interface{}{
-		"status":      "dead",
-		"current_car": "",
-	})
-
-	// Write progress note.
-	note := fmt.Sprintf("Reassigned from engine %s: %s", fromEngineID, reason)
-	db.Create(&models.CarProgress{
-		CarID:        carID,
-		EngineID:     fromEngineID,
-		Note:         note,
-		FilesChanged: "[]",
-		CreatedAt:    time.Now(),
-	})
-
-	// Send broadcast notification.
-	messaging.Send(db, "yardmaster", "broadcast", "reassignment",
-		fmt.Sprintf("Car %s reassigned from stalled engine %s", carID, fromEngineID),
-		messaging.SendOpts{CarID: carID, Priority: "urgent"},
-	)
-
-	return nil
 }
