@@ -331,7 +331,7 @@ owner: {{ .Owner }}
 repo: {{ .Repo }}
 
 dolt:
-  host: 127.0.0.1
+  host: {{ .DoltHost }}
   port: {{ .DoltPort }}
 
 tracks:
@@ -384,17 +384,19 @@ type telegraphTemplateData struct {
 type configTemplateData struct {
 	Owner     string
 	Repo      string
+	DoltHost  string
 	DoltPort  int
 	Tracks    []config.TrackConfig
 	Telegraph *telegraphTemplateData
 }
 
 // renderConfig generates a railyard.yaml string from the given parameters.
-func renderConfig(owner, repo string, doltPort int, tracks []config.TrackConfig, tg *telegraphTemplateData) (string, error) {
+func renderConfig(owner, repo, doltHost string, doltPort int, tracks []config.TrackConfig, tg *telegraphTemplateData) (string, error) {
 	var buf bytes.Buffer
 	data := configTemplateData{
 		Owner:     owner,
 		Repo:      repo,
+		DoltHost:  doltHost,
 		DoltPort:  doltPort,
 		Tracks:    tracks,
 		Telegraph: tg,
@@ -413,6 +415,7 @@ func newInitCmd() *cobra.Command {
 		skipDB        bool
 		skipCoco      bool
 		skipTelegraph bool
+		doltHost      string
 		doltPort      int
 	)
 
@@ -427,7 +430,7 @@ and Telegraph chat bridge (Slack/Discord).
 
 Run this once in any git repository to get started with Railyard.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runInit(cmd, configPath, yes, skipDB, skipCoco, skipTelegraph, doltPort)
+			return runInit(cmd, configPath, yes, skipDB, skipCoco, skipTelegraph, doltHost, doltPort)
 		},
 	}
 
@@ -437,11 +440,12 @@ Run this once in any git repository to get started with Railyard.`,
 	cmd.Flags().BoolVar(&skipCoco, "skip-cocoindex", false, "skip CocoIndex setup prompt")
 	cmd.Flags().BoolVar(&skipTelegraph, "skip-telegraph", false, "skip Telegraph chat bridge setup")
 	cmd.Flags().IntVarP(&doltPort, "port", "p", 3306, "Dolt SQL server port")
+	cmd.Flags().StringVarP(&doltHost, "host", "H", "127.0.0.1", "Dolt SQL server host address")
 	return cmd
 }
 
 // runInit is the main orchestrator for the "ry init" command.
-func runInit(cmd *cobra.Command, configPath string, yes, skipDB, skipCoco, skipTelegraph bool, doltPort int) error {
+func runInit(cmd *cobra.Command, configPath string, yes, skipDB, skipCoco, skipTelegraph bool, doltHost string, doltPort int) error {
 	out := cmd.OutOrStdout()
 	in := io.Reader(byteReader{cmd.InOrStdin()})
 
@@ -493,6 +497,7 @@ func runInit(cmd *cobra.Command, configPath string, yes, skipDB, skipCoco, skipT
 		fmt.Fprintln(out, "\nConfigure Railyard:")
 		owner = promptValue(in, out, "Owner", owner)
 		remote = promptValue(in, out, "Git remote URL", remote)
+		doltHost = promptValue(in, out, "Dolt host", doltHost)
 		portStr := promptValue(in, out, "Dolt port", fmt.Sprintf("%d", doltPort))
 		if v, err := fmt.Sscanf(portStr, "%d", &doltPort); v != 1 || err != nil {
 			return fmt.Errorf("invalid port: %s", portStr)
@@ -564,7 +569,7 @@ func runInit(cmd *cobra.Command, configPath string, yes, skipDB, skipCoco, skipT
 	}
 
 	// Step 5: Render and write config.
-	yamlContent, err := renderConfig(owner, remote, doltPort, tracks, tg)
+	yamlContent, err := renderConfig(owner, remote, doltHost, doltPort, tracks, tg)
 	if err != nil {
 		return err
 	}
@@ -596,7 +601,7 @@ func runInit(cmd *cobra.Command, configPath string, yes, skipDB, skipCoco, skipT
 
 	// Step 6: Ensure Dolt is running.
 	fmt.Fprintln(out, "")
-	if err := ensureDoltRunning(out, "127.0.0.1", doltPort); err != nil {
+	if err := ensureDoltRunning(out, doltHost, doltPort); err != nil {
 		return fmt.Errorf("ensure dolt: %w", err)
 	}
 

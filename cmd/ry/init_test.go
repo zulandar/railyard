@@ -388,7 +388,7 @@ func TestRenderConfig(t *testing.T) {
 			TestCommand:  "go test ./...",
 		},
 	}
-	yamlStr, err := renderConfig("alice", "git@github.com:org/repo.git", 3306, tracks, nil)
+	yamlStr, err := renderConfig("alice", "git@github.com:org/repo.git", "127.0.0.1", 3306, tracks, nil)
 	if err != nil {
 		t.Fatalf("renderConfig: %v", err)
 	}
@@ -414,7 +414,7 @@ func TestRenderConfig_MultipleTracks(t *testing.T) {
 		{Name: "backend", Language: "go", FilePatterns: []string{"**/*.go"}, EngineSlots: 2, TestCommand: "go test ./..."},
 		{Name: "frontend", Language: "typescript", FilePatterns: []string{"**/*.ts", "**/*.tsx"}, EngineSlots: 2, TestCommand: "npm test"},
 	}
-	yamlStr, err := renderConfig("bob", "git@github.com:org/app.git", 3306, tracks, nil)
+	yamlStr, err := renderConfig("bob", "git@github.com:org/app.git", "127.0.0.1", 3306, tracks, nil)
 	if err != nil {
 		t.Fatalf("renderConfig: %v", err)
 	}
@@ -450,6 +450,9 @@ func TestInitCmd_Help(t *testing.T) {
 	}
 	if !strings.Contains(output, "--port") {
 		t.Errorf("help should show --port flag: %s", output)
+	}
+	if !strings.Contains(output, "--host") {
+		t.Errorf("help should show --host flag: %s", output)
 	}
 	if !strings.Contains(output, "--skip-telegraph") {
 		t.Errorf("help should show --skip-telegraph flag: %s", output)
@@ -544,8 +547,8 @@ func TestInitCmd_InteractiveOverwrite(t *testing.T) {
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
 	// Answer "yes" to overwrite, then accept defaults for owner, remote,
-	// and port, then accept tracks, then decline telegraph.
-	cmd.SetIn(strings.NewReader("yes\n\n\n\ny\nn\n"))
+	// host, and port, then accept tracks, then decline telegraph.
+	cmd.SetIn(strings.NewReader("yes\n\n\n\n\ny\nn\n"))
 	cmd.SetArgs([]string{"init", "--skip-db", "--config", configPath})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("init with overwrite: %v", err)
@@ -606,7 +609,7 @@ func TestRenderConfig_EmptyRepo(t *testing.T) {
 	tracks := []config.TrackConfig{
 		{Name: "test", Language: "go", EngineSlots: 2},
 	}
-	yamlStr, err := renderConfig("alice", "", 3306, tracks, nil)
+	yamlStr, err := renderConfig("alice", "", "127.0.0.1", 3306, tracks, nil)
 	if err != nil {
 		t.Fatalf("renderConfig: %v", err)
 	}
@@ -669,7 +672,7 @@ func TestRenderConfig_WithTelegraphSlack(t *testing.T) {
 		SlackBotVar: "SLACK_BOT_TOKEN",
 		SlackAppVar: "SLACK_APP_TOKEN",
 	}
-	yamlStr, err := renderConfig("alice", "git@github.com:org/repo.git", 3306, tracks, tg)
+	yamlStr, err := renderConfig("alice", "git@github.com:org/repo.git", "127.0.0.1", 3306, tracks, tg)
 	if err != nil {
 		t.Fatalf("renderConfig: %v", err)
 	}
@@ -716,7 +719,7 @@ func TestRenderConfig_WithTelegraphDiscord(t *testing.T) {
 		GuildID:       "guild-123",
 		DiscordChanID: "chan-456",
 	}
-	yamlStr, err := renderConfig("alice", "git@github.com:org/repo.git", 3306, tracks, tg)
+	yamlStr, err := renderConfig("alice", "git@github.com:org/repo.git", "127.0.0.1", 3306, tracks, tg)
 	if err != nil {
 		t.Fatalf("renderConfig: %v", err)
 	}
@@ -748,7 +751,7 @@ func TestRenderConfig_WithoutTelegraph(t *testing.T) {
 	tracks := []config.TrackConfig{
 		{Name: "backend", Language: "go", FilePatterns: []string{"**/*.go"}, EngineSlots: 2, TestCommand: "go test ./..."},
 	}
-	yamlStr, err := renderConfig("alice", "git@github.com:org/repo.git", 3306, tracks, nil)
+	yamlStr, err := renderConfig("alice", "git@github.com:org/repo.git", "127.0.0.1", 3306, tracks, nil)
 	if err != nil {
 		t.Fatalf("renderConfig: %v", err)
 	}
@@ -765,9 +768,9 @@ func TestInitCmd_InteractiveWithTelegraphSlack(t *testing.T) {
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
-	// Prompts: owner, remote, port, tracks, telegraph yes, platform, channel,
+	// Prompts: owner, remote, host, port, tracks, telegraph yes, platform, channel,
 	// bot token var, app token var.
-	cmd.SetIn(strings.NewReader("\n\n\ny\ny\nslack\nC999\n\n\n"))
+	cmd.SetIn(strings.NewReader("\n\n\n\ny\ny\nslack\nC999\n\n\n"))
 	cmd.SetArgs([]string{"init", "--skip-db", "--config", configPath})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("init with telegraph slack: %v", err)
