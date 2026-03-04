@@ -364,7 +364,7 @@ func TestEnsureDoltRunning_AlreadyRunning(t *testing.T) {
 	// so we test the error path: connection to a dead port should return
 	// an error that mentions dolt.
 	var out bytes.Buffer
-	err := ensureDoltRunning(&out, "127.0.0.1", 19999)
+	err := ensureDoltRunning(&out, "127.0.0.1", 19999, "root", "")
 	// Should fail because nothing is on port 19999 and dolt data dir
 	// may not exist. The exact error doesn't matter — just verify it
 	// doesn't panic and returns an error.
@@ -388,7 +388,7 @@ func TestRenderConfig(t *testing.T) {
 			TestCommand:  "go test ./...",
 		},
 	}
-	yamlStr, err := renderConfig("alice", "git@github.com:org/repo.git", "127.0.0.1", 3306, tracks, nil)
+	yamlStr, err := renderConfig("alice", "git@github.com:org/repo.git", "127.0.0.1", 3306, "root", tracks, nil)
 	if err != nil {
 		t.Fatalf("renderConfig: %v", err)
 	}
@@ -414,7 +414,7 @@ func TestRenderConfig_MultipleTracks(t *testing.T) {
 		{Name: "backend", Language: "go", FilePatterns: []string{"**/*.go"}, EngineSlots: 2, TestCommand: "go test ./..."},
 		{Name: "frontend", Language: "typescript", FilePatterns: []string{"**/*.ts", "**/*.tsx"}, EngineSlots: 2, TestCommand: "npm test"},
 	}
-	yamlStr, err := renderConfig("bob", "git@github.com:org/app.git", "127.0.0.1", 3306, tracks, nil)
+	yamlStr, err := renderConfig("bob", "git@github.com:org/app.git", "127.0.0.1", 3306, "root", tracks, nil)
 	if err != nil {
 		t.Fatalf("renderConfig: %v", err)
 	}
@@ -635,7 +635,7 @@ func TestRenderConfig_EmptyRepo(t *testing.T) {
 	tracks := []config.TrackConfig{
 		{Name: "test", Language: "go", EngineSlots: 2},
 	}
-	yamlStr, err := renderConfig("alice", "", "127.0.0.1", 3306, tracks, nil)
+	yamlStr, err := renderConfig("alice", "", "127.0.0.1", 3306, "root", tracks, nil)
 	if err != nil {
 		t.Fatalf("renderConfig: %v", err)
 	}
@@ -698,7 +698,7 @@ func TestRenderConfig_WithTelegraphSlack(t *testing.T) {
 		SlackBotVar: "SLACK_BOT_TOKEN",
 		SlackAppVar: "SLACK_APP_TOKEN",
 	}
-	yamlStr, err := renderConfig("alice", "git@github.com:org/repo.git", "127.0.0.1", 3306, tracks, tg)
+	yamlStr, err := renderConfig("alice", "git@github.com:org/repo.git", "127.0.0.1", 3306, "root", tracks, tg)
 	if err != nil {
 		t.Fatalf("renderConfig: %v", err)
 	}
@@ -745,7 +745,7 @@ func TestRenderConfig_WithTelegraphDiscord(t *testing.T) {
 		GuildID:       "guild-123",
 		DiscordChanID: "chan-456",
 	}
-	yamlStr, err := renderConfig("alice", "git@github.com:org/repo.git", "127.0.0.1", 3306, tracks, tg)
+	yamlStr, err := renderConfig("alice", "git@github.com:org/repo.git", "127.0.0.1", 3306, "root", tracks, tg)
 	if err != nil {
 		t.Fatalf("renderConfig: %v", err)
 	}
@@ -777,7 +777,7 @@ func TestRenderConfig_WithoutTelegraph(t *testing.T) {
 	tracks := []config.TrackConfig{
 		{Name: "backend", Language: "go", FilePatterns: []string{"**/*.go"}, EngineSlots: 2, TestCommand: "go test ./..."},
 	}
-	yamlStr, err := renderConfig("alice", "git@github.com:org/repo.git", "127.0.0.1", 3306, tracks, nil)
+	yamlStr, err := renderConfig("alice", "git@github.com:org/repo.git", "127.0.0.1", 3306, "root", tracks, nil)
 	if err != nil {
 		t.Fatalf("renderConfig: %v", err)
 	}
@@ -790,7 +790,7 @@ func TestRenderConfig_CustomHost(t *testing.T) {
 	tracks := []config.TrackConfig{
 		{Name: "backend", Language: "go", FilePatterns: []string{"**/*.go"}, EngineSlots: 2, TestCommand: "go test ./..."},
 	}
-	yamlStr, err := renderConfig("alice", "git@github.com:org/repo.git", "10.0.0.5", 3306, tracks, nil)
+	yamlStr, err := renderConfig("alice", "git@github.com:org/repo.git", "10.0.0.5", 3306, "root", tracks, nil)
 	if err != nil {
 		t.Fatalf("renderConfig: %v", err)
 	}

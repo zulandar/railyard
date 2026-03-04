@@ -183,9 +183,9 @@ func ensureDoltDataDir(dataDir string) error {
 
 // ensureDoltRunning checks if Dolt is reachable on host:port. If not, it
 // starts dolt sql-server in the background using ~/.railyard/dolt-data.
-func ensureDoltRunning(out io.Writer, host string, port int) error {
+func ensureDoltRunning(out io.Writer, host string, port int, username, password string) error {
 	// Check if already running.
-	if _, err := db.ConnectAdmin(host, port, "root", ""); err == nil {
+	if _, err := db.ConnectAdmin(host, port, username, password); err == nil {
 		fmt.Fprintf(out, "Dolt is already running on %s:%d\n", host, port)
 		return nil
 	}
@@ -226,7 +226,7 @@ func ensureDoltRunning(out io.Writer, host string, port int) error {
 	// Wait for readiness.
 	for i := range 20 {
 		time.Sleep(500 * time.Millisecond)
-		if _, err := db.ConnectAdmin(host, port, "root", ""); err == nil {
+		if _, err := db.ConnectAdmin(host, port, username, password); err == nil {
 			fmt.Fprintf(out, "Dolt is ready (took %dms)\n", (i+1)*500)
 			return nil
 		}
@@ -333,6 +333,7 @@ repo: {{ .Repo }}
 dolt:
   host: {{ .DoltHost }}
   port: {{ .DoltPort }}
+  username: {{ .DoltUser }}
 
 tracks:
 {{- range .Tracks }}
@@ -386,18 +387,20 @@ type configTemplateData struct {
 	Repo      string
 	DoltHost  string
 	DoltPort  int
+	DoltUser  string
 	Tracks    []config.TrackConfig
 	Telegraph *telegraphTemplateData
 }
 
 // renderConfig generates a railyard.yaml string from the given parameters.
-func renderConfig(owner, repo, doltHost string, doltPort int, tracks []config.TrackConfig, tg *telegraphTemplateData) (string, error) {
+func renderConfig(owner, repo, doltHost string, doltPort int, doltUser string, tracks []config.TrackConfig, tg *telegraphTemplateData) (string, error) {
 	var buf bytes.Buffer
 	data := configTemplateData{
 		Owner:     owner,
 		Repo:      repo,
 		DoltHost:  doltHost,
 		DoltPort:  doltPort,
+		DoltUser:  doltUser,
 		Tracks:    tracks,
 		Telegraph: tg,
 	}
@@ -417,6 +420,7 @@ func newInitCmd() *cobra.Command {
 		skipTelegraph bool
 		doltHost      string
 		doltPort      int
+		doltUser      string
 	)
 
 	cmd := &cobra.Command{
@@ -430,7 +434,7 @@ and Telegraph chat bridge (Slack/Discord).
 
 Run this once in any git repository to get started with Railyard.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runInit(cmd, configPath, yes, skipDB, skipCoco, skipTelegraph, doltHost, doltPort)
+			return runInit(cmd, configPath, yes, skipDB, skipCoco, skipTelegraph, doltHost, doltPort, doltUser)
 		},
 	}
 
@@ -441,11 +445,12 @@ Run this once in any git repository to get started with Railyard.`,
 	cmd.Flags().BoolVar(&skipTelegraph, "skip-telegraph", false, "skip Telegraph chat bridge setup")
 	cmd.Flags().IntVarP(&doltPort, "port", "p", 3306, "Dolt SQL server port")
 	cmd.Flags().StringVarP(&doltHost, "host", "H", "127.0.0.1", "Dolt SQL server host address")
+	cmd.Flags().StringVarP(&doltUser, "user", "u", "root", "Dolt SQL server username")
 	return cmd
 }
 
 // runInit is the main orchestrator for the "ry init" command.
-func runInit(cmd *cobra.Command, configPath string, yes, skipDB, skipCoco, skipTelegraph bool, doltHost string, doltPort int) error {
+func runInit(cmd *cobra.Command, configPath string, yes, skipDB, skipCoco, skipTelegraph bool, doltHost string, doltPort int, doltUser string) error {
 	out := cmd.OutOrStdout()
 	in := io.Reader(byteReader{cmd.InOrStdin()})
 
@@ -498,6 +503,7 @@ func runInit(cmd *cobra.Command, configPath string, yes, skipDB, skipCoco, skipT
 		owner = promptValue(in, out, "Owner", owner)
 		remote = promptValue(in, out, "Git remote URL", remote)
 		doltHost = promptValue(in, out, "Dolt host", doltHost)
+		doltUser = promptValue(in, out, "Dolt user", doltUser)
 		portStr := promptValue(in, out, "Dolt port", fmt.Sprintf("%d", doltPort))
 		if v, err := fmt.Sscanf(portStr, "%d", &doltPort); v != 1 || err != nil {
 			return fmt.Errorf("invalid port: %s", portStr)
@@ -569,7 +575,7 @@ func runInit(cmd *cobra.Command, configPath string, yes, skipDB, skipCoco, skipT
 	}
 
 	// Step 5: Render and write config.
-	yamlContent, err := renderConfig(owner, remote, doltHost, doltPort, tracks, tg)
+	yamlContent, err := renderConfig(owner, remote, doltHost, doltPort, doltUser, tracks, tg)
 	if err != nil {
 		return err
 	}
@@ -601,7 +607,7 @@ func runInit(cmd *cobra.Command, configPath string, yes, skipDB, skipCoco, skipT
 
 	// Step 6: Ensure Dolt is running.
 	fmt.Fprintln(out, "")
-	if err := ensureDoltRunning(out, doltHost, doltPort); err != nil {
+	if err := ensureDoltRunning(out, doltHost, doltPort, doltUser, ""); err != nil {
 		return fmt.Errorf("ensure dolt: %w", err)
 	}
 
