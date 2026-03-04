@@ -195,6 +195,7 @@ func (c *Config) applyDefaults() {
 			c.Tracks[i].EngineSlots = 3
 		}
 	}
+	c.CocoIndex.DatabaseURL = resolveEnvVars(c.CocoIndex.DatabaseURL)
 	if c.CocoIndex.VenvPath == "" {
 		c.CocoIndex.VenvPath = "cocoindex/.venv"
 	}

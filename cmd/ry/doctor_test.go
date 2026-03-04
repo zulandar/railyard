@@ -82,6 +82,30 @@ func TestCheckGitRepo(t *testing.T) {
 	}
 }
 
+func TestCheckCredentials_DefaultPassword(t *testing.T) {
+	result := checkCredentials("root", "")
+	if result.status != "WARN" {
+		t.Errorf("expected WARN for default root/empty-password, got %s: %s", result.status, result.detail)
+	}
+	if !strings.Contains(result.detail, "default") {
+		t.Errorf("expected detail to mention 'default', got: %s", result.detail)
+	}
+}
+
+func TestCheckCredentials_ConfiguredPassword(t *testing.T) {
+	result := checkCredentials("admin", "s3cret")
+	if result.status != "PASS" {
+		t.Errorf("expected PASS for configured credentials, got %s: %s", result.status, result.detail)
+	}
+}
+
+func TestCheckCredentials_RootWithPassword(t *testing.T) {
+	result := checkCredentials("root", "s3cret")
+	if result.status != "PASS" {
+		t.Errorf("expected PASS for root with password, got %s: %s", result.status, result.detail)
+	}
+}
+
 func TestRootCmd_HasDoctorSubcommand(t *testing.T) {
 	cmd := newRootCmd()
 	buf := new(bytes.Buffer)

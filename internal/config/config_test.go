@@ -627,6 +627,26 @@ tracks:
 	}
 }
 
+func TestParse_CocoIndexDatabaseURL_EnvVar(t *testing.T) {
+	t.Setenv("TEST_COCOINDEX_URL", "postgresql://user:pass@localhost:5432/cocoindex")
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+cocoindex:
+  database_url: "${TEST_COCOINDEX_URL}"
+tracks:
+  - name: backend
+    language: go
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.CocoIndex.DatabaseURL != "postgresql://user:pass@localhost:5432/cocoindex" {
+		t.Errorf("CocoIndex.DatabaseURL = %q, want resolved env var value", cfg.CocoIndex.DatabaseURL)
+	}
+}
+
 func TestParse_CocoIndexCustomValues(t *testing.T) {
 	yaml := `
 owner: alice

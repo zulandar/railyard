@@ -587,7 +587,7 @@ func runInit(cmd *cobra.Command, configPath string, yes, skipDB, skipCoco, skipT
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(configPath, []byte(yamlContent), 0644); err != nil {
+	if err := os.WriteFile(configPath, []byte(yamlContent), 0600); err != nil {
 		return fmt.Errorf("write config: %w", err)
 	}
 	fmt.Fprintf(out, "\nWrote %s\n", configPath)

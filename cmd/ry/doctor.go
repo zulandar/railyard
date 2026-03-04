@@ -50,7 +50,12 @@ func runDoctor(cmd *cobra.Command, configPath string) error {
 		results = append(results, checkBinary(bin))
 	}
 
-	// 3. Dolt server
+	// 3. Credentials
+	if cfg != nil {
+		results = append(results, checkCredentials(cfg.Dolt.Username, cfg.Dolt.Password))
+	}
+
+	// 4. Dolt server
 	if cfg != nil {
 		results = append(results, checkDoltServer(cfg.Dolt.Host, cfg.Dolt.Port, cfg.Dolt.Username, cfg.Dolt.Password))
 	} else {
@@ -253,6 +258,13 @@ func checkTmuxSession(cfg *config.Config) []checkResult {
 		results = append(results, checkResult{"tmux sessions", "FAIL", fmt.Sprintf("no %s_* sessions running", prefix)})
 	}
 	return results
+}
+
+func checkCredentials(username, password string) checkResult {
+	if username == "root" && password == "" {
+		return checkResult{"Credentials", "WARN", "using default root with empty password — set dolt.password in config"}
+	}
+	return checkResult{"Credentials", "PASS", "non-default credentials configured"}
 }
 
 func checkGitRepo() checkResult {
