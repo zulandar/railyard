@@ -189,6 +189,64 @@ func TestConnectAdmin_Error(t *testing.T) {
 	}
 }
 
+func TestConnect_ErrorDoesNotLeakPassword(t *testing.T) {
+	password := "s3cret-P@ssw0rd!"
+	_, err := Connect("127.0.0.1", 1, "testdb", "admin", password)
+	if err == nil {
+		t.Fatal("expected error connecting to invalid port")
+	}
+	if strings.Contains(err.Error(), password) {
+		t.Errorf("Connect error leaks password: %s", err.Error())
+	}
+}
+
+func TestConnectAdmin_ErrorDoesNotLeakPassword(t *testing.T) {
+	password := "s3cret-P@ssw0rd!"
+	_, err := ConnectAdmin("127.0.0.1", 1, "admin", password)
+	if err == nil {
+		t.Fatal("expected error connecting to invalid port")
+	}
+	if strings.Contains(err.Error(), password) {
+		t.Errorf("ConnectAdmin error leaks password: %s", err.Error())
+	}
+}
+
+func TestSanitizeDBError(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		password string
+		wantSafe bool // true if password should NOT appear in output
+	}{
+		{
+			name:     "DSN in error",
+			input:    "dial tcp: admin:s3cret@tcp(127.0.0.1:3306)/mydb connection refused",
+			password: "s3cret",
+			wantSafe: true,
+		},
+		{
+			name:     "no password",
+			input:    "dial tcp: connection refused",
+			password: "",
+			wantSafe: true,
+		},
+		{
+			name:     "password in wrapped error",
+			input:    "db: connect: Error 1045: Access denied for user 'admin'@'localhost' (using password: YES) admin:hunter2@tcp(host:3306)/db",
+			password: "hunter2",
+			wantSafe: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := sanitizeDBError(tt.input, tt.password)
+			if tt.wantSafe && tt.password != "" && strings.Contains(got, tt.password) {
+				t.Errorf("sanitizeDBError() still contains password %q: %s", tt.password, got)
+			}
+		})
+	}
+}
+
 func TestMarshalJSON_Error(t *testing.T) {
 	// Channels cannot be marshaled to JSON.
 	_, err := marshalJSON(make(chan int))

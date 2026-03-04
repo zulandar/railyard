@@ -2,6 +2,7 @@ package db
 
 import (
 	"fmt"
+	"strings"
 
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
@@ -24,7 +25,7 @@ func Connect(host string, port int, database, username, password string) (*gorm.
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	if err != nil {
-		return nil, fmt.Errorf("db: connect to %s:%d/%s: %w", host, port, database, err)
+		return nil, fmt.Errorf("db: connect to %s:%d/%s: %s", host, port, database, sanitizeDBError(err.Error(), password))
 	}
 	return db, nil
 }
@@ -41,9 +42,18 @@ func ConnectAdmin(host string, port int, username, password string) (*gorm.DB, e
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	if err != nil {
-		return nil, fmt.Errorf("db: admin connect to %s:%d: %w", host, port, err)
+		return nil, fmt.Errorf("db: admin connect to %s:%d: %s", host, port, sanitizeDBError(err.Error(), password))
 	}
 	return db, nil
+}
+
+// sanitizeDBError removes credentials from database error messages to prevent
+// password leakage in logs and CLI output.
+func sanitizeDBError(errMsg, password string) string {
+	if password != "" {
+		errMsg = strings.ReplaceAll(errMsg, password, "***")
+	}
+	return errMsg
 }
 
 // DropDatabase drops the named database if it exists.
