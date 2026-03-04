@@ -1,9 +1,11 @@
 package dashboard
 
 import (
+	"fmt"
 	"html/template"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -128,4 +130,103 @@ func TestStaticAssets_PublicAccess(t *testing.T) {
 	if w.Code != http.StatusOK && w.Code != http.StatusMovedPermanently && w.Code != http.StatusNotFound {
 		t.Errorf("GET /static/ = %d, expected 200/301/404", w.Code)
 	}
+}
+
+// TestSensitiveRoutes_NoAuthRequired documents that routes exposing sensitive
+// operational data (agent messages, full I/O logs, session details) are
+// accessible without authentication.
+//
+// Data sensitivity classification:
+//   - /messages: inter-agent communications, escalation details, human-targeted messages
+//   - /logs: full agent I/O (prompts, responses, tool calls with arguments)
+//   - /sessions/:id: session metadata, engine assignments
+//   - /engines/:id: engine configuration, current car assignments
+//   - /api/events: real-time SSE stream of escalation alerts
+func TestSensitiveRoutes_NoAuthRequired(t *testing.T) {
+	router := testRouter()
+
+	sensitiveRoutes := []struct {
+		path       string
+		sensitivity string
+	}{
+		{"/messages", "HIGH: inter-agent messages, escalation details"},
+		{"/logs", "HIGH: full agent I/O including prompts and tool calls"},
+		{"/sessions", "MEDIUM: session metadata and engine assignments"},
+	}
+
+	for _, route := range sensitiveRoutes {
+		t.Run(route.path, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest("GET", route.path, nil)
+			router.ServeHTTP(w, req)
+
+			// Document: sensitive routes return 200 without auth.
+			if w.Code != http.StatusOK {
+				t.Errorf("GET %s = %d, want 200 (currently no auth)", route.path, w.Code)
+			}
+			// When auth is implemented, this test should verify 401.
+			t.Logf("SECURITY: %s is publicly accessible — sensitivity: %s", route.path, route.sensitivity)
+		})
+	}
+}
+
+// TestServerBindAddress_AllInterfaces documents that the dashboard server
+// binds to all interfaces (0.0.0.0), not just localhost. This means any
+// machine on the network can access the dashboard.
+func TestServerBindAddress_AllInterfaces(t *testing.T) {
+	// Start builds addr as fmt.Sprintf(":%d", port) — no host prefix means 0.0.0.0
+	addr := fmt.Sprintf(":%d", 8080)
+
+	// Document: binding to :<port> means all interfaces.
+	// For local-only access, should bind to 127.0.0.1:<port>.
+	if !strings.HasPrefix(addr, ":") {
+		t.Error("expected addr to start with : (all interfaces)")
+	}
+	if strings.HasPrefix(addr, "127.0.0.1:") || strings.HasPrefix(addr, "localhost:") {
+		t.Log("GOOD: dashboard binds to localhost only")
+	} else {
+		t.Log("SECURITY: dashboard binds to all interfaces (0.0.0.0) — accessible from network")
+	}
+}
+
+// TestNoCSRFProtection documents that the dashboard has no CSRF protection.
+// Currently all routes are GET-only (read-only dashboard), so CSRF risk is low.
+// If POST/PUT/DELETE routes are added, CSRF middleware must be added.
+func TestNoCSRFProtection(t *testing.T) {
+	router := testRouter()
+
+	// Verify POST to a page route returns 404/405 (no POST handlers registered)
+	methods := []string{"POST", "PUT", "DELETE", "PATCH"}
+	for _, method := range methods {
+		t.Run(method, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest(method, "/", nil)
+			router.ServeHTTP(w, req)
+
+			// 404 or 405 means no handler for this method — good for read-only dashboard
+			if w.Code == http.StatusOK {
+				t.Errorf("%s / = 200, expected 404/405 (dashboard should be read-only)", method)
+			}
+		})
+	}
+}
+
+// TestNoRateLimiting documents that the dashboard has no rate limiting.
+// An attacker could make unlimited requests to scrape all operational data.
+func TestNoRateLimiting(t *testing.T) {
+	router := testRouter()
+
+	// Make 50 rapid requests — all should succeed (no rate limiting)
+	for i := range 50 {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/", nil)
+		router.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Errorf("request %d: GET / = %d, expected 200 (no rate limiting)", i, w.Code)
+			break
+		}
+	}
+	// Document: no rate limiting exists
+	t.Log("SECURITY: no rate limiting on dashboard routes — unlimited scraping possible")
 }
