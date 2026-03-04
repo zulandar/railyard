@@ -20,6 +20,7 @@ DEFAULT_MAIN_TABLE_TEMPLATE = "main_{track}_embeddings"
 DEFAULT_OVERLAY_TABLE_PREFIX = "ovl_"
 DEFAULT_EXCLUDED_PATTERNS = [
     ".*", "vendor", "node_modules", "dist", "__pycache__", ".git",
+    ".railyard", ".claude",
 ]
 
 CONFIG_FILENAME = "cocoindex.yaml"

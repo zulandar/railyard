@@ -12,6 +12,8 @@ excluded_patterns:
   - dist
   - __pycache__
   - .git
+  - .railyard
+  - .claude
 
 # Per-track overrides (track names must match railyard.yaml).
 # Uncomment and customize as needed:

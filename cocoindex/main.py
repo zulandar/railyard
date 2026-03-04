@@ -57,7 +57,8 @@ LANGUAGE_MAP = {
 }
 
 # Patterns always excluded from indexing
-EXCLUDED_PATTERNS = [".*", "vendor", "node_modules", "dist", "__pycache__", ".git"]
+EXCLUDED_PATTERNS = [".*", "vendor", "node_modules", "dist", "__pycache__", ".git",
+                     ".railyard", ".claude"]
 
 
 # ---------------------------------------------------------------------------
