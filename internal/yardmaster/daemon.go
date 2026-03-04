@@ -642,19 +642,6 @@ func handleEscalateResult(db *gorm.DB, engineID, carID string, result *EscalateR
 	}
 }
 
-// countRecentFailures counts test-failure progress notes for a car.
-// Deprecated: use countRecentSwitchFailures for the generalized counter.
-func countRecentFailures(db *gorm.DB, carID string) int {
-	var count int64
-	if err := db.Model(&models.CarProgress{}).
-		Where("car_id = ? AND note LIKE ?", carID, "%test%fail%").
-		Count(&count).Error; err != nil {
-		log.Printf("countRecentFailures for %s: %v", carID, err)
-		return 0
-	}
-	return int(count)
-}
-
 // countRecentSwitchFailures counts all switch-categorized failure progress
 // notes for a car. Each note has the form "switch:<category>: <details>".
 func countRecentSwitchFailures(db *gorm.DB, carID string) int {

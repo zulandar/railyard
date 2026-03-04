@@ -185,8 +185,7 @@ func runTelegraphStart(cmd *cobra.Command, configPath string) error {
 		return fmt.Errorf("telegraph: getwd: %w", err)
 	}
 
-	var spawner telegraph.ProcessSpawner
-	spawner = &telegraph.LazySpawner{
+	var spawner telegraph.ProcessSpawner = &telegraph.LazySpawner{
 		RenderPrompt: func() (string, error) {
 			return dispatch.RenderPrompt(cfg)
 		},

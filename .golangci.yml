@@ -1,0 +1,24 @@
+linters:
+  disable:
+    - errcheck
+  enable:
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gofmt
+    - gosimple
+
+issues:
+  exclude-rules:
+    # Test files: relax staticcheck and gosimple.
+    - path: _test\.go
+      linters:
+        - staticcheck
+        - gosimple
+    # SA9003: empty branch — used for filtering logic.
+    - linters:
+        - staticcheck
+      text: "SA9003"
+  max-issues-per-linter: 50
+  max-same-issues: 5

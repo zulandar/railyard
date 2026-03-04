@@ -11,12 +11,6 @@ import (
 	"gorm.io/gorm"
 )
 
-// sseEvent represents an SSE event to send to the client.
-type sseEvent struct {
-	Event string `json:"event"`
-	Data  any    `json:"data"`
-}
-
 // escalationEvent holds data for an escalation SSE event.
 type escalationEvent struct {
 	ID       uint   `json:"id"`
