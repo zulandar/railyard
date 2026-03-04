@@ -3,6 +3,7 @@ package yardmaster
 import (
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -127,7 +128,9 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 
 			if result.FailureCategory == SwitchFailInfra {
 				// Infrastructure failure — set merge-failed, escalate to human.
-				db.Model(&models.Car{}).Where("id = ?", carID).Update("status", "merge-failed")
+				if dbErr := db.Model(&models.Car{}).Where("id = ?", carID).Update("status", "merge-failed").Error; dbErr != nil {
+					log.Printf("update car %s to merge-failed: %v", carID, dbErr)
+				}
 				messaging.Send(db, "yardmaster", "human", "infra-test-failure",
 					fmt.Sprintf("Infrastructure test failure for car %s (%s) on branch %s:\n%s",
 						carID, car.Track, car.Branch, truncateOutput(testOutput, 500)),
@@ -135,7 +138,9 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 				)
 			} else {
 				// Code test failure — set blocked, notify engine.
-				db.Model(&models.Car{}).Where("id = ?", carID).Update("status", "blocked")
+				if dbErr := db.Model(&models.Car{}).Where("id = ?", carID).Update("status", "blocked").Error; dbErr != nil {
+					log.Printf("update car %s to blocked: %v", carID, dbErr)
+				}
 				if car.Assignee != "" {
 					messaging.Send(db, "yardmaster", car.Assignee, "test-failure",
 						fmt.Sprintf("Tests failed for car %s on branch %s:\n%s", carID, car.Branch, testOutput),
@@ -162,13 +167,18 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 		result.AlreadyMerged = true
 
 		now := time.Now()
-		db.Model(&models.Car{}).Where("id = ?", carID).Updates(map[string]interface{}{
+		if dbErr := db.Model(&models.Car{}).Where("id = ?", carID).Updates(map[string]interface{}{
 			"status":       "merged",
 			"completed_at": now,
-		})
+		}).Error; dbErr != nil {
+			log.Printf("update car %s to merged (already-ancestor): %v", carID, dbErr)
+		}
 
 		// Run the same post-merge logic as a normal merge.
-		unblocked, _ := UnblockDeps(db, carID)
+		unblocked, ubErr := UnblockDeps(db, carID)
+		if ubErr != nil {
+			log.Printf("unblock deps for %s (already-ancestor): %v", carID, ubErr)
+		}
 		if len(unblocked) > 0 {
 			titles := make([]string, len(unblocked))
 			for i, b := range unblocked {
@@ -215,10 +225,12 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 
 		// Mark car as pr_open — not merged yet, waiting for human review.
 		now := time.Now()
-		db.Model(&models.Car{}).Where("id = ?", carID).Updates(map[string]interface{}{
+		if dbErr := db.Model(&models.Car{}).Where("id = ?", carID).Updates(map[string]interface{}{
 			"status":       "pr_open",
 			"completed_at": now,
-		})
+		}).Error; dbErr != nil {
+			log.Printf("update car %s to pr_open: %v", carID, dbErr)
+		}
 
 		return result, nil
 	}
@@ -260,13 +272,18 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 
 	// Mark car as merged — push succeeded, safe to update status.
 	now := time.Now()
-	db.Model(&models.Car{}).Where("id = ?", carID).Updates(map[string]interface{}{
+	if dbErr := db.Model(&models.Car{}).Where("id = ?", carID).Updates(map[string]interface{}{
 		"status":       "merged",
 		"completed_at": now,
-	})
+	}).Error; dbErr != nil {
+		log.Printf("update car %s to merged: %v", carID, dbErr)
+	}
 
 	// Unblock cross-track dependencies.
-	unblocked, _ := UnblockDeps(db, carID)
+	unblocked, ubErr := UnblockDeps(db, carID)
+	if ubErr != nil {
+		log.Printf("unblock deps for %s: %v", carID, ubErr)
+	}
 	if len(unblocked) > 0 {
 		titles := make([]string, len(unblocked))
 		for i, b := range unblocked {
@@ -312,11 +329,13 @@ func UnblockDeps(db *gorm.DB, carID string) ([]models.Car, error) {
 	for _, dep := range deps {
 		// Check if this dependent has any OTHER unresolved blockers.
 		var otherBlockers int64
-		db.Model(&models.CarDep{}).
+		if err := db.Model(&models.CarDep{}).
 			Where("car_id = ? AND blocked_by != ?", dep.CarID, carID).
 			Joins("JOIN cars ON cars.id = car_deps.blocked_by").
 			Where("cars.status NOT IN ?", models.ResolvedBlockerStatuses).
-			Count(&otherBlockers)
+			Count(&otherBlockers).Error; err != nil {
+			return nil, fmt.Errorf("yardmaster: count other blockers for %s: %w", dep.CarID, err)
+		}
 
 		if otherBlockers == 0 {
 			// No other blockers — unblock this car (only if it's actually blocked).
@@ -724,9 +743,12 @@ func TryCloseEpic(db *gorm.DB, epicID string) {
 
 	// Count children that are NOT done, merged, or cancelled.
 	var remaining int64
-	db.Model(&models.Car{}).
+	if err := db.Model(&models.Car{}).
 		Where("parent_id = ? AND status NOT IN ?", epicID, []string{"done", "merged", "cancelled"}).
-		Count(&remaining)
+		Count(&remaining).Error; err != nil {
+		log.Printf("TryCloseEpic: count remaining children for %s: %v", epicID, err)
+		return
+	}
 
 	if remaining > 0 {
 		return
@@ -734,10 +756,13 @@ func TryCloseEpic(db *gorm.DB, epicID string) {
 
 	// All children are done/cancelled — close the epic.
 	now := time.Now()
-	db.Model(&models.Car{}).Where("id = ?", epicID).Updates(map[string]interface{}{
+	if err := db.Model(&models.Car{}).Where("id = ?", epicID).Updates(map[string]interface{}{
 		"status":       "done",
 		"completed_at": now,
-	})
+	}).Error; err != nil {
+		log.Printf("TryCloseEpic: update epic %s to done: %v", epicID, err)
+		return
+	}
 
 	messaging.Send(db, "yardmaster", "broadcast", "epic-closed",
 		fmt.Sprintf("Epic %s (%s) auto-closed — all children complete", epicID, epic.Title),

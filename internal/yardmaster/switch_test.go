@@ -1456,3 +1456,50 @@ func TestResolveGoModConflict(t *testing.T) {
 		t.Error("expected rebase to be complete after go.mod resolution")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// UnblockDeps error handling tests
+// ---------------------------------------------------------------------------
+
+func TestUnblockDeps_ReturnsErrorOnCountFailure(t *testing.T) {
+	// Create a DB with cars and deps, then drop the cars table to make
+	// the JOIN in the Count() query fail. UnblockDeps should return an error
+	// instead of silently defaulting otherBlockers to 0 and unblocking.
+	db := testDB(t)
+
+	// Car A depends on both Car B and Car C.
+	db.Create(&models.Car{ID: "car-a", Status: "blocked", Track: "backend"})
+	db.Create(&models.Car{ID: "car-b", Status: "merged", Track: "backend"})
+	db.Create(&models.Car{ID: "car-c", Status: "open", Track: "backend"}) // NOT resolved
+	db.Create(&models.CarDep{CarID: "car-a", BlockedBy: "car-b"})
+	db.Create(&models.CarDep{CarID: "car-a", BlockedBy: "car-c"})
+
+	// Drop the cars table to make the JOIN query fail.
+	db.Exec("DROP TABLE cars")
+
+	_, err := UnblockDeps(db, "car-b")
+	if err == nil {
+		t.Fatal("expected error when Count query fails due to missing table")
+	}
+}
+
+func TestUnblockDeps_DoesNotUnblockWhenOtherBlockersQueryFails(t *testing.T) {
+	// Even if the deps query succeeds, a Count failure for other blockers
+	// should NOT cause the car to be unblocked (fail-safe).
+	db := testDB(t)
+
+	db.Create(&models.Car{ID: "car-x", Status: "blocked", Track: "backend"})
+	db.Create(&models.Car{ID: "car-y", Status: "merged", Track: "backend"})
+	db.Create(&models.Car{ID: "car-z", Status: "open", Track: "backend"})
+	db.Create(&models.CarDep{CarID: "car-x", BlockedBy: "car-y"})
+	db.Create(&models.CarDep{CarID: "car-x", BlockedBy: "car-z"})
+
+	// Unblocking car-y should NOT unblock car-x because car-z is still open.
+	// To verify error handling: drop the cars table after creating deps.
+	db.Exec("DROP TABLE cars")
+
+	unblocked, _ := UnblockDeps(db, "car-y")
+	if len(unblocked) > 0 {
+		t.Errorf("should not have unblocked any cars when query fails, got %d", len(unblocked))
+	}
+}

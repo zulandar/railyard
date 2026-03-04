@@ -296,7 +296,9 @@ func handleStaleEngines(db *gorm.DB, cfg *config.Config, configPath string, out 
 			}
 		} else {
 			fmt.Fprintf(out, "Stale engine %s (idle) — restarting\n", eng.ID)
-			db.Model(&models.Engine{}).Where("id = ?", eng.ID).Update("status", engine.StatusDead)
+			if err := db.Model(&models.Engine{}).Where("id = ?", eng.ID).Update("status", engine.StatusDead).Error; err != nil {
+				log.Printf("update stale engine %s to dead: %v", eng.ID, err)
+			}
 		}
 
 		// Restart the engine to spawn a replacement on the same track.
@@ -325,22 +327,31 @@ func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, r
 		// are in a terminal state.
 		if c.Type == "epic" {
 			var remaining int64
-			db.Model(&models.Car{}).
+			if err := db.Model(&models.Car{}).
 				Where("parent_id = ? AND status NOT IN ?", c.ID, []string{"done", "merged", "cancelled"}).
-				Count(&remaining)
+				Count(&remaining).Error; err != nil {
+				log.Printf("count remaining children for epic %s: %v", c.ID, err)
+				continue
+			}
 			if remaining > 0 {
 				fmt.Fprintf(out, "Completed epic %s (%s) — %d children still pending, skipping\n", c.ID, c.Title, remaining)
 				continue
 			}
 			now := time.Now()
-			db.Model(&models.Car{}).Where("id = ?", c.ID).Updates(map[string]interface{}{
+			if err := db.Model(&models.Car{}).Where("id = ?", c.ID).Updates(map[string]interface{}{
 				"status":       "merged",
 				"completed_at": now,
-			})
+			}).Error; err != nil {
+				log.Printf("update epic %s to merged: %v", c.ID, err)
+				continue
+			}
 			fmt.Fprintf(out, "Completed epic %s (%s) — all children done, marked merged\n", c.ID, c.Title)
 
 			// Unblock cross-track dependencies and auto-close parent epics.
-			unblocked, _ := UnblockDeps(db, c.ID)
+			unblocked, ubErr := UnblockDeps(db, c.ID)
+			if ubErr != nil {
+				log.Printf("unblock deps for epic %s: %v", c.ID, ubErr)
+			}
 			for _, u := range unblocked {
 				if u.Type == "epic" {
 					TryCloseEpic(db, u.ID)
@@ -487,14 +498,20 @@ func sweepOpenEpics(db *gorm.DB, out io.Writer) error {
 
 	for _, e := range openEpics {
 		var remaining int64
-		db.Model(&models.Car{}).
+		if err := db.Model(&models.Car{}).
 			Where("parent_id = ? AND status NOT IN ?", e.ID, []string{"done", "merged", "cancelled"}).
-			Count(&remaining)
+			Count(&remaining).Error; err != nil {
+			log.Printf("sweepOpenEpics: count remaining for %s: %v", e.ID, err)
+			continue
+		}
 
 		if remaining == 0 {
 			// Double-check the epic has at least one child (don't close empty epics).
 			var total int64
-			db.Model(&models.Car{}).Where("parent_id = ?", e.ID).Count(&total)
+			if err := db.Model(&models.Car{}).Where("parent_id = ?", e.ID).Count(&total).Error; err != nil {
+				log.Printf("sweepOpenEpics: count total children for %s: %v", e.ID, err)
+				continue
+			}
 			if total > 0 {
 				fmt.Fprintf(out, "Sweep: auto-closing epic %s (%s) — all children complete\n", e.ID, e.Title)
 				TryCloseEpic(db, e.ID)
@@ -550,10 +567,12 @@ func reconcileStaleCars(db *gorm.DB, repoDir string, out io.Writer) error {
 		for _, c := range cars {
 			if mergedBranches[c.Branch] {
 				fmt.Fprintf(out, "Reconciled car %s (%s) — branch %s already merged into %s\n", c.ID, c.Title, c.Branch, base)
-				db.Model(&models.Car{}).Where("id = ?", c.ID).Updates(map[string]interface{}{
+				if err := db.Model(&models.Car{}).Where("id = ?", c.ID).Updates(map[string]interface{}{
 					"status":       "merged",
 					"completed_at": now,
-				})
+				}).Error; err != nil {
+					log.Printf("reconcile car %s to merged: %v", c.ID, err)
+				}
 			}
 		}
 	}
@@ -620,9 +639,12 @@ func handleEscalateResult(db *gorm.DB, engineID, carID string, result *EscalateR
 // Deprecated: use countRecentSwitchFailures for the generalized counter.
 func countRecentFailures(db *gorm.DB, carID string) int {
 	var count int64
-	db.Model(&models.CarProgress{}).
+	if err := db.Model(&models.CarProgress{}).
 		Where("car_id = ? AND note LIKE ?", carID, "%test%fail%").
-		Count(&count)
+		Count(&count).Error; err != nil {
+		log.Printf("countRecentFailures for %s: %v", carID, err)
+		return 0
+	}
 	return int(count)
 }
 
@@ -630,9 +652,12 @@ func countRecentFailures(db *gorm.DB, carID string) int {
 // notes for a car. Each note has the form "switch:<category>: <details>".
 func countRecentSwitchFailures(db *gorm.DB, carID string) int {
 	var count int64
-	db.Model(&models.CarProgress{}).
+	if err := db.Model(&models.CarProgress{}).
 		Where("car_id = ? AND note LIKE ?", carID, "switch:%").
-		Count(&count)
+		Count(&count).Error; err != nil {
+		log.Printf("countRecentSwitchFailures for %s: %v", carID, err)
+		return 0
+	}
 	return int(count)
 }
 
@@ -671,7 +696,9 @@ func maybeSwitchEscalate(ctx context.Context, db *gorm.DB, cfg *config.Config, c
 
 		// Move car out of "done" to stop the retry loop. Can be retried
 		// via the "retry-merge" action after the underlying issue is resolved.
-		db.Model(&models.Car{}).Where("id = ?", carID).Update("status", "merge-failed")
+		if err := db.Model(&models.Car{}).Where("id = ?", carID).Update("status", "merge-failed").Error; err != nil {
+			log.Printf("update car %s to merge-failed (infra): %v", carID, err)
+		}
 		fmt.Fprintf(out, "Car %s status → merge-failed\n", carID)
 
 		go func(carID, reason string) {
@@ -705,7 +732,9 @@ func maybeSwitchEscalate(ctx context.Context, db *gorm.DB, cfg *config.Config, c
 
 	// Move car out of "done" to stop the retry loop. Can be retried
 	// via the "retry-merge" action after the underlying issue is resolved.
-	db.Model(&models.Car{}).Where("id = ?", carID).Update("status", "merge-failed")
+	if err := db.Model(&models.Car{}).Where("id = ?", carID).Update("status", "merge-failed").Error; err != nil {
+		log.Printf("update car %s to merge-failed: %v", carID, err)
+	}
 	fmt.Fprintf(out, "Car %s status → merge-failed\n", carID)
 
 	go func(carID string, failCount int, reason string) {
