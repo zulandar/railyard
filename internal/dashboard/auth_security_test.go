@@ -146,7 +146,7 @@ func TestSensitiveRoutes_NoAuthRequired(t *testing.T) {
 	router := testRouter()
 
 	sensitiveRoutes := []struct {
-		path       string
+		path        string
 		sensitivity string
 	}{
 		{"/messages", "HIGH: inter-agent messages, escalation details"},
