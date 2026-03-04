@@ -400,6 +400,26 @@ class TestGetDeletedFiles:
         result = get_deleted_files("postgresql://x", "eng-abc123")
         assert result == []
 
+    def test_includes_track_in_query(self):
+        """get_deleted_files should filter by track when provided."""
+        cursor = mock.MagicMock()
+        cursor.__enter__ = mock.MagicMock(return_value=cursor)
+        cursor.__exit__ = mock.MagicMock(return_value=False)
+        cursor.fetchone.return_value = ('["a.go"]',)
+        conn = mock.MagicMock()
+        conn.cursor.return_value = cursor
+        _psycopg2.connect = mock.MagicMock(return_value=conn)
+
+        result = get_deleted_files("postgresql://x", "eng-abc123", track="backend")
+        assert result == ["a.go"]
+
+        # Verify the query includes track in WHERE clause
+        call_args = cursor.execute.call_args
+        query = str(call_args[0][0])
+        params = call_args[0][1]
+        assert "track" in query.lower(), f"Query should filter by track: {query}"
+        assert "backend" in params, f"Params should include track value: {params}"
+
 
 # ===================================================================
 # search
@@ -547,6 +567,32 @@ class TestGetOverlayStatus:
         cfg = ServerConfig(database_url="postgresql://x", engine_id=None)
         result = get_overlay_status(cfg)
         assert result["status"] == "no_engine_id"
+
+    def test_includes_track_in_query(self):
+        """get_overlay_status should filter by track when config.track is set."""
+        cursor = mock.MagicMock()
+        cursor.__enter__ = mock.MagicMock(return_value=cursor)
+        cursor.__exit__ = mock.MagicMock(return_value=False)
+        cursor.fetchone.return_value = (
+            "eng-1", "backend", "ry/test", "abc123",
+            5, 42, '["old.go"]', "2026-02-19 12:00", "2026-02-19 12:05",
+        )
+        conn = mock.MagicMock()
+        conn.cursor.return_value = cursor
+        _psycopg2.connect = mock.MagicMock(return_value=conn)
+
+        cfg = ServerConfig(
+            database_url="postgresql://x", engine_id="eng-1", track="backend"
+        )
+        result = get_overlay_status(cfg)
+        assert result["status"] == "ok"
+
+        # Verify the query includes track in WHERE clause
+        call_args = cursor.execute.call_args
+        query = str(call_args[0][0])
+        params = call_args[0][1]
+        assert "track" in query.lower(), f"Query should filter by track: {query}"
+        assert "backend" in params, f"Params should include track value: {params}"
 
 
 # ===================================================================

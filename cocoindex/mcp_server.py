@@ -158,15 +158,21 @@ def query_table(
     return results
 
 
-def get_deleted_files(database_url: str, engine_id: str) -> list[str]:
+def get_deleted_files(database_url: str, engine_id: str, track: str | None = None) -> list[str]:
     """Load deleted_files list from overlay_meta for an engine."""
     conn = psycopg2.connect(database_url)
     try:
         with conn.cursor() as cur:
-            cur.execute(
-                "SELECT deleted_files FROM overlay_meta WHERE engine_id = %s",
-                (engine_id,),
-            )
+            if track:
+                cur.execute(
+                    "SELECT deleted_files FROM overlay_meta WHERE engine_id = %s AND track = %s",
+                    (engine_id, track),
+                )
+            else:
+                cur.execute(
+                    "SELECT deleted_files FROM overlay_meta WHERE engine_id = %s",
+                    (engine_id,),
+                )
             row = cur.fetchone()
     finally:
         conn.close()
@@ -295,7 +301,7 @@ def search(
     # Get deleted files for dedup
     deleted = []
     if config.engine_id:
-        deleted = get_deleted_files(config.database_url, config.engine_id)
+        deleted = get_deleted_files(config.database_url, config.engine_id, track=config.track)
 
     return merge_results(main_results, overlay_results, deleted, top_k, min_score)
 
@@ -313,13 +319,22 @@ def get_overlay_status(config: ServerConfig) -> dict:
     conn = psycopg2.connect(config.database_url)
     try:
         with conn.cursor() as cur:
-            cur.execute(
-                "SELECT engine_id, track, branch, last_commit, "
-                "files_indexed, chunks_indexed, deleted_files, "
-                "created_at, updated_at "
-                "FROM overlay_meta WHERE engine_id = %s",
-                (config.engine_id,),
-            )
+            if config.track:
+                cur.execute(
+                    "SELECT engine_id, track, branch, last_commit, "
+                    "files_indexed, chunks_indexed, deleted_files, "
+                    "created_at, updated_at "
+                    "FROM overlay_meta WHERE engine_id = %s AND track = %s",
+                    (config.engine_id, config.track),
+                )
+            else:
+                cur.execute(
+                    "SELECT engine_id, track, branch, last_commit, "
+                    "files_indexed, chunks_indexed, deleted_files, "
+                    "created_at, updated_at "
+                    "FROM overlay_meta WHERE engine_id = %s",
+                    (config.engine_id,),
+                )
             row = cur.fetchone()
     finally:
         conn.close()
