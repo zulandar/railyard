@@ -55,7 +55,9 @@ repo: git@github.com:org/myproject.git
 # dolt:
 #   host: 127.0.0.1
 #   port: 3306
-#   database: railyard_yourname    # default: railyard_{owner}
+#   username: root                   # default: root
+#   password:                        # default: empty; supports ${ENV_VAR} syntax
+#   database: railyard_yourname      # default: railyard_{owner}
 
 # ---------------------------------------------------------------------------
 # Stall detection (optional — defaults shown)
