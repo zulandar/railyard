@@ -454,6 +454,9 @@ func TestInitCmd_Help(t *testing.T) {
 	if !strings.Contains(output, "--host") {
 		t.Errorf("help should show --host flag: %s", output)
 	}
+	if !strings.Contains(output, "--user") {
+		t.Errorf("help should show --user flag: %s", output)
+	}
 	if !strings.Contains(output, "--skip-telegraph") {
 		t.Errorf("help should show --skip-telegraph flag: %s", output)
 	}
@@ -545,6 +548,31 @@ func TestInitCmd_NonInteractive_CustomHost(t *testing.T) {
 	}
 }
 
+func TestInitCmd_NonInteractive_CustomUser(t *testing.T) {
+	dir := initGitRepo(t)
+	configPath := filepath.Join(dir, "railyard.yaml")
+
+	cmd := newRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"init", "--yes", "--skip-db", "--user", "admin", "--config", configPath})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("init --yes --skip-db --user admin: %v", err)
+	}
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	cfg, err := config.Parse(data)
+	if err != nil {
+		t.Fatalf("parse generated config: %v\n---\n%s", err, string(data))
+	}
+	if cfg.Dolt.Username != "admin" {
+		t.Errorf("Dolt.Username = %q, want %q", cfg.Dolt.Username, "admin")
+	}
+}
+
 func TestDetectLanguages_SkipsDirs(t *testing.T) {
 	dir := t.TempDir()
 	// Files in skipped directories should not count.
@@ -573,8 +601,8 @@ func TestInitCmd_InteractiveOverwrite(t *testing.T) {
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
 	// Answer "yes" to overwrite, then accept defaults for owner, remote,
-	// host, and port, then accept tracks, then decline telegraph.
-	cmd.SetIn(strings.NewReader("yes\n\n\n\n\ny\nn\n"))
+	// host, user, and port, then accept tracks, then decline telegraph.
+	cmd.SetIn(strings.NewReader("yes\n\n\n\n\n\ny\nn\n"))
 	cmd.SetArgs([]string{"init", "--skip-db", "--config", configPath})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("init with overwrite: %v", err)
@@ -803,6 +831,23 @@ func TestRenderConfig_CustomHost(t *testing.T) {
 	}
 }
 
+func TestRenderConfig_CustomUser(t *testing.T) {
+	tracks := []config.TrackConfig{
+		{Name: "backend", Language: "go", FilePatterns: []string{"**/*.go"}, EngineSlots: 2, TestCommand: "go test ./..."},
+	}
+	yamlStr, err := renderConfig("alice", "git@github.com:org/repo.git", "127.0.0.1", 3306, "deploy", tracks, nil)
+	if err != nil {
+		t.Fatalf("renderConfig: %v", err)
+	}
+	cfg, err := config.Parse([]byte(yamlStr))
+	if err != nil {
+		t.Fatalf("config.Parse: %v\n---\n%s", err, yamlStr)
+	}
+	if cfg.Dolt.Username != "deploy" {
+		t.Errorf("Dolt.Username = %q, want %q", cfg.Dolt.Username, "deploy")
+	}
+}
+
 func TestInitCmd_InteractiveWithTelegraphSlack(t *testing.T) {
 	dir := initGitRepo(t)
 	configPath := filepath.Join(dir, "railyard.yaml")
@@ -811,9 +856,9 @@ func TestInitCmd_InteractiveWithTelegraphSlack(t *testing.T) {
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
-	// Prompts: owner, remote, host, port, tracks, telegraph yes, platform, channel,
+	// Prompts: owner, remote, host, user, port, tracks, telegraph yes, platform, channel,
 	// bot token var, app token var.
-	cmd.SetIn(strings.NewReader("\n\n\n\ny\ny\nslack\nC999\n\n\n"))
+	cmd.SetIn(strings.NewReader("\n\n\n\n\ny\ny\nslack\nC999\n\n\n"))
 	cmd.SetArgs([]string{"init", "--skip-db", "--config", configPath})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("init with telegraph slack: %v", err)
