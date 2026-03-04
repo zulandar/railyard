@@ -29,24 +29,26 @@ func handleSSE(db *gorm.DB) gin.HandlerFunc {
 		c.Header("Connection", "keep-alive")
 		c.Header("X-Accel-Buffering", "no")
 
-		// Send connected event.
-		writeSSE(c.Writer, "connected", map[string]string{"type": "connected"})
-		c.Writer.Flush()
-
 		// If no DB, just send connected and return — tests use nil DB.
 		if db == nil {
+			writeSSE(c.Writer, "connected", map[string]string{"type": "connected"})
+			c.Writer.Flush()
 			return
 		}
 
 		// Track what we've already seen.
+		// Compute lastSeenID BEFORE sending "connected" so that clients
+		// inserting messages right after "connected" won't race with this query.
 		var lastSeenID uint
-
-		// Get the current max ID so we only alert on NEW escalations.
 		var maxMsg models.Message
 		if err := db.Where("to_agent = ? AND acknowledged = ?", "human", false).
 			Order("id DESC").Limit(1).First(&maxMsg).Error; err == nil {
 			lastSeenID = maxMsg.ID
 		}
+
+		// Send connected event after initialization is complete.
+		writeSSE(c.Writer, "connected", map[string]string{"type": "connected"})
+		c.Writer.Flush()
 
 		ctx := c.Request.Context()
 		ticker := time.NewTicker(3 * time.Second)

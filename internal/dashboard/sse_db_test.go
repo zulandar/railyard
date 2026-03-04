@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"testing"
@@ -22,26 +23,24 @@ func startSSEServer(t *testing.T, db *gorm.DB) (string, func()) {
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
+	router.GET("/health", func(c *gin.Context) { c.Status(200) })
 	router.GET("/api/events", handleSSE(db))
 
-	port := findFreePort()
-	addr := fmt.Sprintf(":%d", port)
-	srv := &http.Server{Addr: addr, Handler: router}
+	// Bind to port 0 to get an OS-assigned free port.
+	listener, err := net.Listen("tcp", ":0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
 
-	ctx, cancel := context.WithCancel(context.Background())
-	errCh := make(chan error, 1)
-	go func() {
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			errCh <- err
-		}
-		close(errCh)
-	}()
+	srv := &http.Server{Handler: router}
+	go srv.Serve(listener)
 
-	// Wait for server to be ready.
+	// Wait for server to be ready using a health endpoint (not SSE).
 	baseURL := fmt.Sprintf("http://localhost:%d", port)
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		resp, err := http.Get(baseURL + "/api/events")
+		resp, err := http.Get(baseURL + "/health")
 		if err == nil {
 			resp.Body.Close()
 			break
@@ -50,12 +49,9 @@ func startSSEServer(t *testing.T, db *gorm.DB) (string, func()) {
 	}
 
 	return baseURL, func() {
-		cancel()
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer shutdownCancel()
 		srv.Shutdown(shutdownCtx)
-		// Drain the context cancel to avoid lint warnings.
-		_ = ctx
 	}
 }
 
@@ -85,16 +81,18 @@ func TestSSE_EscalationDetection(t *testing.T) {
 	baseURL, cleanup := startSSEServer(t, db)
 	defer cleanup()
 
-	// Connect to SSE endpoint.
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// Connect to SSE endpoint with a dedicated client (no connection pooling).
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
+
+	client := &http.Client{Transport: &http.Transport{DisableKeepAlives: true}}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/api/events", nil)
 	if err != nil {
 		t.Fatalf("create request: %v", err)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("GET /api/events: %v", err)
 	}
@@ -144,8 +142,8 @@ func TestSSE_EscalationDetection(t *testing.T) {
 		Acknowledged: false,
 	})
 
-	// Wait for the escalation event (poll interval is 3s, allow up to 10s).
-	deadline := time.After(10 * time.Second)
+	// Wait for the escalation event (poll interval is 3s, allow up to 13s for ~4 polls).
+	deadline := time.After(13 * time.Second)
 	for {
 		select {
 		case evt, ok := <-events:
@@ -177,7 +175,7 @@ func TestSSE_EscalationDetection(t *testing.T) {
 			}
 			// Skip heartbeat or other events.
 		case <-deadline:
-			t.Fatal("timeout waiting for escalation event (10s)")
+			t.Fatal("timeout waiting for escalation event (13s)")
 		}
 	}
 }
