@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -98,7 +99,9 @@ railyard.yaml
 .beads/
 .railyard/
 `
-	os.WriteFile(filepath.Join(wtDir, ".claudeignore"), []byte(ignoreContent), 0644)
+	if err := os.WriteFile(filepath.Join(wtDir, ".claudeignore"), []byte(ignoreContent), 0644); err != nil {
+		log.Printf("write .claudeignore in %s: %v", wtDir, err)
+	}
 }
 
 // RemoveWorktree removes an engine's git worktree.

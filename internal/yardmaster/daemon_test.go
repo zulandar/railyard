@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -175,7 +176,7 @@ func TestProcessInbox_StaleDrainIgnored(t *testing.T) {
 
 	startedAt := time.Now()
 	var buf bytes.Buffer
-	draining, err := processInbox(context.Background(), db, nil, "", "", startedAt, &buf)
+	draining, err := processInbox(context.Background(), db, nil, "", "", startedAt, &sync.WaitGroup{}, &buf)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -203,7 +204,7 @@ func TestProcessInbox_FreshDrainHonored(t *testing.T) {
 	db.Create(&freshDrain)
 
 	var buf bytes.Buffer
-	draining, err := processInbox(context.Background(), db, nil, "", "", startedAt, &buf)
+	draining, err := processInbox(context.Background(), db, nil, "", "", startedAt, &sync.WaitGroup{}, &buf)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -217,7 +218,7 @@ func TestProcessInbox_EmptyInbox(t *testing.T) {
 
 	startedAt := time.Now()
 	var buf bytes.Buffer
-	draining, err := processInbox(context.Background(), db, nil, "", "", startedAt, &buf)
+	draining, err := processInbox(context.Background(), db, nil, "", "", startedAt, &sync.WaitGroup{}, &buf)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -437,7 +438,7 @@ func TestMaybeSwitchEscalate_BelowThreshold(t *testing.T) {
 
 	var buf bytes.Buffer
 	// This should NOT escalate (below threshold), so no "escalating" in output.
-	maybeSwitchEscalate(context.Background(), db, cfg, "car-esc1", SwitchFailMerge, nil, "", &buf)
+	maybeSwitchEscalate(context.Background(), db, cfg, "car-esc1", SwitchFailMerge, nil, "", &sync.WaitGroup{}, &buf)
 
 	if strings.Contains(buf.String(), "escalating") {
 		t.Errorf("should not escalate below threshold, got: %s", buf.String())
@@ -459,7 +460,7 @@ func TestMaybeSwitchEscalate_AtThreshold(t *testing.T) {
 	var buf bytes.Buffer
 	// Escalation will fire (at threshold). The actual Claude call will fail
 	// since there's no `claude` binary in CI, but we can verify the log output.
-	maybeSwitchEscalate(context.Background(), db, cfg, "car-esc2", SwitchFailFetch, nil, "", &buf)
+	maybeSwitchEscalate(context.Background(), db, cfg, "car-esc2", SwitchFailFetch, nil, "", &sync.WaitGroup{}, &buf)
 
 	if !strings.Contains(buf.String(), "escalating") {
 		t.Errorf("should escalate at threshold, got: %s", buf.String())
@@ -478,7 +479,7 @@ func TestMaybeSwitchEscalate_InfraEscalatesImmediately(t *testing.T) {
 	cfg.Stall.MaxSwitchFailures = 3
 
 	var buf bytes.Buffer
-	maybeSwitchEscalate(context.Background(), db, cfg, "car-infra1", SwitchFailInfra, nil, "", &buf)
+	maybeSwitchEscalate(context.Background(), db, cfg, "car-infra1", SwitchFailInfra, nil, "", &sync.WaitGroup{}, &buf)
 
 	if !strings.Contains(buf.String(), "infra failure") {
 		t.Errorf("should escalate immediately for infra, got: %s", buf.String())
@@ -501,7 +502,7 @@ func TestMaybeSwitchEscalate_SetsCarToMergeFailed(t *testing.T) {
 	cfg.Stall.MaxSwitchFailures = 3
 
 	var buf bytes.Buffer
-	maybeSwitchEscalate(context.Background(), db, cfg, "car-esc3", SwitchFailMerge, nil, "", &buf)
+	maybeSwitchEscalate(context.Background(), db, cfg, "car-esc3", SwitchFailMerge, nil, "", &sync.WaitGroup{}, &buf)
 
 	// Car status should change to "merge-failed" to break the retry loop.
 	var car models.Car
@@ -521,7 +522,7 @@ func TestMaybeSwitchEscalate_InfraSetsCarToMergeFailed(t *testing.T) {
 	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
 
 	var buf bytes.Buffer
-	maybeSwitchEscalate(context.Background(), db, cfg, "car-infra2", SwitchFailInfra, nil, "", &buf)
+	maybeSwitchEscalate(context.Background(), db, cfg, "car-infra2", SwitchFailInfra, nil, "", &sync.WaitGroup{}, &buf)
 
 	// Infra failures should also set merge-failed.
 	var car models.Car
@@ -670,7 +671,7 @@ func TestHandleCompletedCars_SkipsEpicAndMarkesMerged(t *testing.T) {
 
 	var buf bytes.Buffer
 	// repoDir and ymDir don't matter — the epic should never reach Switch().
-	err := handleCompletedCars(context.Background(), db, cfg, "/nonexistent", "/nonexistent", &buf)
+	err := handleCompletedCars(context.Background(), db, cfg, "/nonexistent", "/nonexistent", &sync.WaitGroup{}, &buf)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -715,7 +716,7 @@ func TestHandleCompletedCars_EpicCountError_LogsAndContinues(t *testing.T) {
 	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
 
 	var buf bytes.Buffer
-	err := handleCompletedCars(context.Background(), db, cfg, "/nonexistent", "/nonexistent", &buf)
+	err := handleCompletedCars(context.Background(), db, cfg, "/nonexistent", "/nonexistent", &sync.WaitGroup{}, &buf)
 	// The function should return the error from car.List (which also queries cars table).
 	if err == nil {
 		// If it doesn't error on car.List, it should at least not panic.
@@ -762,7 +763,7 @@ func TestHandleCompletedCars_EpicWithPendingChildren_StaysDone(t *testing.T) {
 	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
 
 	var buf bytes.Buffer
-	err := handleCompletedCars(context.Background(), db, cfg, "/nonexistent", "/nonexistent", &buf)
+	err := handleCompletedCars(context.Background(), db, cfg, "/nonexistent", "/nonexistent", &sync.WaitGroup{}, &buf)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

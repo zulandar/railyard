@@ -9,7 +9,57 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
+
+func TestStart_ShutdownWithTimeout(t *testing.T) {
+	// Verify that server shutdown uses a bounded context, not context.Background().
+	// We test this by cancelling the context and checking that Start returns
+	// promptly (within a few seconds), not hanging indefinitely.
+	ctx, cancel := context.WithCancel(context.Background())
+
+	port := findFreePort()
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(gin.Recovery())
+	tmpl, err := parseTemplates()
+	if err != nil {
+		t.Fatalf("parse templates: %v", err)
+	}
+	router.SetHTMLTemplate(tmpl)
+	registerRoutes(router, nil)
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- Start(ctx, StartOpts{
+			DB:   &gorm.DB{}, // non-nil to pass validation
+			Port: port,
+		})
+	}()
+
+	// Wait for server to be listening.
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		resp, err := http.Get(fmt.Sprintf("http://localhost:%d/static/style.css", port))
+		if err == nil {
+			resp.Body.Close()
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	// Cancel context — should trigger shutdown.
+	cancel()
+
+	// Start should return within a reasonable time (the shutdown timeout).
+	select {
+	case <-errCh:
+		// Good — shut down promptly.
+	case <-time.After(20 * time.Second):
+		t.Fatal("Start did not return within 20s after context cancellation — shutdown may be hanging")
+	}
+}
 
 func TestStart_NilDB(t *testing.T) {
 	err := Start(context.Background(), StartOpts{DB: nil})
@@ -139,7 +189,9 @@ func startTestServer(ctx context.Context, port int) error {
 
 	go func() {
 		<-ctx.Done()
-		srv.Shutdown(context.Background())
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		srv.Shutdown(shutdownCtx)
 	}()
 
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {

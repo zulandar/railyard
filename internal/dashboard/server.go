@@ -50,10 +50,13 @@ func Start(ctx context.Context, opts StartOpts) error {
 		Handler: router,
 	}
 
-	// Graceful shutdown on context cancellation.
+	// Graceful shutdown on context cancellation with a bounded timeout
+	// so the server doesn't hang indefinitely on stuck connections.
 	go func() {
 		<-ctx.Done()
-		srv.Shutdown(context.Background())
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		srv.Shutdown(shutdownCtx)
 	}()
 
 	if opts.Out != nil {
