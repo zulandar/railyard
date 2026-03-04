@@ -161,6 +161,17 @@ tmux attach -t railyard
 
 ## Usage
 
+### Setup
+
+```bash
+ry init                                 # Interactive setup: detect languages, generate config, start Dolt
+ry init -c railyard.yaml --yes          # Non-interactive with all defaults
+ry init --skip-db --skip-cocoindex      # Skip Dolt and CocoIndex setup
+ry init -u myuser -p 3307              # Custom Dolt host/port/user
+ry init --password secret               # Set Dolt password
+ry migrate -c railyard.yaml             # Migrate existing repo to .railyard/ directory structure
+```
+
 ### Orchestration
 
 ```bash

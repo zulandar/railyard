@@ -45,7 +45,53 @@ sys.modules["cocoindex.functions"] = _funcs
 
 _psycopg2 = types.ModuleType("psycopg2")
 _psycopg2.connect = mock.MagicMock()
+
+# Stub psycopg2.sql with minimal SQL/Identifier/Composed classes
+_psycopg2_sql = types.ModuleType("psycopg2.sql")
+
+
+class _FakeComposed:
+    """Mimics psycopg2.sql.Composed for testing."""
+    def __init__(self, text):
+        self._text = text
+
+    def __str__(self):
+        return self._text
+
+    def __repr__(self):
+        return self._text
+
+    def __contains__(self, item):
+        return item in self._text
+
+
+class _FakeSQL:
+    """Mimics psycopg2.sql.SQL for testing."""
+    def __init__(self, template):
+        self._template = template
+
+    def format(self, *args, **kwargs):
+        result = self._template
+        for arg in args:
+            result = result.replace("{}", str(arg), 1)
+        return _FakeComposed(result)
+
+
+class _FakeIdentifier:
+    """Mimics psycopg2.sql.Identifier for testing."""
+    def __init__(self, *strings):
+        self._strings = strings
+
+    def __str__(self):
+        return ".".join(f'"{s}"' for s in self._strings)
+
+
+_psycopg2_sql.SQL = _FakeSQL
+_psycopg2_sql.Identifier = _FakeIdentifier
+_psycopg2_sql.Composed = _FakeComposed
+_psycopg2.sql = _psycopg2_sql
 sys.modules["psycopg2"] = _psycopg2
+sys.modules["psycopg2.sql"] = _psycopg2_sql
 
 _st = types.ModuleType("sentence_transformers")
 _st.SentenceTransformer = mock.MagicMock()
@@ -415,11 +461,11 @@ class TestBuild:
         assert result["files_indexed"] == 1
         assert result["chunks_indexed"] >= 1
         assert result["table"] == "ovl_eng_abc123"
-        # Verify table creation SQL
-        sql_calls = [str(c) for c in ctx.cursor_mock.execute.call_args_list]
-        sql_joined = " ".join(sql_calls)
-        assert "CREATE TABLE IF NOT EXISTS ovl_eng_abc123" in sql_joined
-        assert "TRUNCATE TABLE ovl_eng_abc123" in sql_joined
+        # Verify table creation SQL (table name is now quoted via psycopg2.sql.Identifier)
+        sql_stmts = [str(c[0][0]) for c in ctx.cursor_mock.execute.call_args_list]
+        sql_joined = " ".join(sql_stmts)
+        assert 'CREATE TABLE IF NOT EXISTS "ovl_eng_abc123"' in sql_joined
+        assert 'TRUNCATE TABLE "ovl_eng_abc123"' in sql_joined
 
     def test_uses_correct_embedding_model(self):
         with self._patch_all() as ctx:
@@ -477,8 +523,8 @@ class TestBuild:
         """IVFFlat index should not be created with < 10 rows."""
         with self._patch_all(changed=["tiny.go"], file_contents={"tiny.go": "x"}) as ctx:
             build(_make_build_args())
-        sql_calls = [str(c) for c in ctx.cursor_mock.execute.call_args_list]
-        sql_joined = " ".join(sql_calls)
+        sql_stmts = [str(c[0][0]) for c in ctx.cursor_mock.execute.call_args_list]
+        sql_joined = " ".join(sql_stmts)
         assert "ivfflat" not in sql_joined.lower()
 
 
@@ -548,9 +594,9 @@ class TestCleanup:
     def test_drops_table(self):
         with self._patch_db() as ctx:
             cleanup(_make_cleanup_args())
-        sql_calls = [str(c) for c in ctx.cursor_mock.execute.call_args_list]
-        sql_joined = " ".join(sql_calls)
-        assert "DROP TABLE IF EXISTS ovl_eng_abc123" in sql_joined
+        sql_stmts = [str(c[0][0]) for c in ctx.cursor_mock.execute.call_args_list]
+        sql_joined = " ".join(sql_stmts)
+        assert 'DROP TABLE IF EXISTS "ovl_eng_abc123"' in sql_joined
 
     def test_deletes_overlay_meta_row(self):
         with self._patch_db() as ctx:

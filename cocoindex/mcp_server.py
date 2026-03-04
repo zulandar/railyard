@@ -27,6 +27,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 import psycopg2
+from psycopg2 import sql
 from sentence_transformers import SentenceTransformer
 
 from main import EMBEDDING_MODEL
@@ -127,11 +128,13 @@ def query_table(
     try:
         with conn.cursor() as cur:
             cur.execute(
-                f"SELECT filename, code, location, "
-                f"1 - (embedding <=> %s::vector) AS score "
-                f"FROM {table} "
-                f"ORDER BY embedding <=> %s::vector "
-                f"LIMIT %s",
+                sql.SQL(
+                    "SELECT filename, code, location, "
+                    "1 - (embedding <=> %s::vector) AS score "
+                    "FROM {} "
+                    "ORDER BY embedding <=> %s::vector "
+                    "LIMIT %s"
+                ).format(sql.Identifier(table)),
                 (embedding_str, embedding_str, top_k * 2),
             )
             rows = cur.fetchall()

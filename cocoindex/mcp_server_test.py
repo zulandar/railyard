@@ -42,7 +42,53 @@ sys.modules["cocoindex.functions"] = _funcs
 # Stub psycopg2 + sentence_transformers
 _psycopg2 = types.ModuleType("psycopg2")
 _psycopg2.connect = mock.MagicMock()
+
+# Stub psycopg2.sql with minimal SQL/Identifier/Composed classes
+_psycopg2_sql = types.ModuleType("psycopg2.sql")
+
+
+class _FakeComposed:
+    """Mimics psycopg2.sql.Composed for testing."""
+    def __init__(self, text):
+        self._text = text
+
+    def __str__(self):
+        return self._text
+
+    def __repr__(self):
+        return self._text
+
+    def __contains__(self, item):
+        return item in self._text
+
+
+class _FakeSQL:
+    """Mimics psycopg2.sql.SQL for testing."""
+    def __init__(self, template):
+        self._template = template
+
+    def format(self, *args, **kwargs):
+        result = self._template
+        for arg in args:
+            result = result.replace("{}", str(arg), 1)
+        return _FakeComposed(result)
+
+
+class _FakeIdentifier:
+    """Mimics psycopg2.sql.Identifier for testing."""
+    def __init__(self, *strings):
+        self._strings = strings
+
+    def __str__(self):
+        return ".".join(f'"{s}"' for s in self._strings)
+
+
+_psycopg2_sql.SQL = _FakeSQL
+_psycopg2_sql.Identifier = _FakeIdentifier
+_psycopg2_sql.Composed = _FakeComposed
+_psycopg2.sql = _psycopg2_sql
 sys.modules["psycopg2"] = _psycopg2
+sys.modules["psycopg2.sql"] = _psycopg2_sql
 
 _st = types.ModuleType("sentence_transformers")
 _st.SentenceTransformer = mock.MagicMock()
@@ -279,9 +325,9 @@ class TestQueryTable:
         assert len(results) == 1
         assert results[0]["filename"] == "a.go"
         assert results[0]["score"] == 0.92
-        # Verify correct table in SQL
-        sql = cursor.execute.call_args[0][0]
-        assert "my_table" in sql
+        # Verify correct table in SQL (now uses psycopg2.sql.Identifier)
+        query = cursor.execute.call_args[0][0]
+        assert "my_table" in query
 
     def test_filters_by_min_score(self):
         cursor = mock.MagicMock()

@@ -160,6 +160,7 @@ def build(args: argparse.Namespace) -> dict:
     """Build overlay index for files changed on the engine's branch."""
     # Lazy import — only needed at runtime, not when testing pure functions
     import psycopg2
+    from psycopg2 import sql
     from sentence_transformers import SentenceTransformer
 
     # Load config for overlay table prefix
@@ -203,32 +204,38 @@ def build(args: argparse.Namespace) -> dict:
     conn = psycopg2.connect(args.database_url)
     try:
         with conn.cursor() as cur:
-            cur.execute(f"""
-                CREATE TABLE IF NOT EXISTS {table} (
+            cur.execute(sql.SQL("""
+                CREATE TABLE IF NOT EXISTS {} (
                     filename    TEXT NOT NULL,
                     location    TEXT,
                     code        TEXT NOT NULL,
                     embedding   vector(384),
                     PRIMARY KEY (filename, location)
                 )
-            """)
-            cur.execute(f"TRUNCATE TABLE {table}")
+            """).format(sql.Identifier(table)))
+            cur.execute(sql.SQL("TRUNCATE TABLE {}").format(
+                sql.Identifier(table)))
 
             for filename, location, code, embedding in rows:
                 embedding_str = "[" + ",".join(str(x) for x in embedding) + "]"
                 cur.execute(
-                    f"INSERT INTO {table} (filename, location, code, embedding) "
-                    "VALUES (%s, %s, %s, %s::vector)",
+                    sql.SQL("INSERT INTO {} (filename, location, code, embedding) "
+                            "VALUES (%s, %s, %s, %s::vector)").format(
+                        sql.Identifier(table)),
                     (filename, location, code, embedding_str),
                 )
 
             # Create IVFFlat index if enough rows (lists=10 needs >= 10 rows)
             if len(rows) >= 10:
-                cur.execute(f"""
-                    CREATE INDEX IF NOT EXISTS idx_{table}_embedding
-                    ON {table}
+                index_name = f"idx_{table}_embedding"
+                cur.execute(sql.SQL("""
+                    CREATE INDEX IF NOT EXISTS {}
+                    ON {}
                     USING ivfflat (embedding vector_cosine_ops) WITH (lists = 10)
-                """)
+                """).format(
+                    sql.Identifier(index_name),
+                    sql.Identifier(table),
+                ))
 
             # 7. Upsert overlay_meta row
             head = get_head_commit(args.worktree)
@@ -275,6 +282,7 @@ def cleanup(args: argparse.Namespace) -> dict:
     Both operations are idempotent and non-fatal on missing data.
     """
     import psycopg2
+    from psycopg2 import sql
 
     cfg = load_config(getattr(args, "config", None))
     table = overlay_table_name(args.engine_id, prefix=cfg.overlay_table_prefix)
@@ -282,7 +290,8 @@ def cleanup(args: argparse.Namespace) -> dict:
     conn = psycopg2.connect(args.database_url)
     try:
         with conn.cursor() as cur:
-            cur.execute(f"DROP TABLE IF EXISTS {table}")
+            cur.execute(sql.SQL("DROP TABLE IF EXISTS {}").format(
+                sql.Identifier(table)))
             cur.execute(
                 "DELETE FROM overlay_meta WHERE engine_id = %s",
                 (args.engine_id,),
