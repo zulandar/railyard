@@ -49,7 +49,7 @@ func RunDaemon(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath,
 	out = logutil.NewTimestampWriter(out)
 
 	startedAt := time.Now()
-	if err := registerYardmaster(db); err != nil {
+	if err := registerYardmaster(db, cfg.AgentProvider); err != nil {
 		return fmt.Errorf("yardmaster: register: %w", err)
 	}
 	fmt.Fprintf(out, "Yardmaster registered (id=%s)\n", YardmasterID)
@@ -136,13 +136,17 @@ func RunDaemon(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath,
 }
 
 // registerYardmaster creates or updates the yardmaster engine record.
-func registerYardmaster(db *gorm.DB) error {
+func registerYardmaster(db *gorm.DB, providerName string) error {
 	now := time.Now()
+	if providerName == "" {
+		providerName = "claude"
+	}
 	eng := models.Engine{
 		ID:           YardmasterID,
 		Track:        "*",
 		Role:         "yardmaster",
 		Status:       engine.StatusIdle,
+		Provider:     providerName,
 		StartedAt:    now,
 		LastActivity: now,
 	}
@@ -156,6 +160,7 @@ func registerYardmaster(db *gorm.DB) error {
 	return db.Model(&models.Engine{}).Where("id = ?", YardmasterID).Updates(map[string]interface{}{
 		"status":        engine.StatusIdle,
 		"role":          "yardmaster",
+		"provider":      providerName,
 		"track":         "*",
 		"started_at":    now,
 		"last_activity": now,
