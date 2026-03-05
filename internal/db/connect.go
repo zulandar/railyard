@@ -1,9 +1,14 @@
 package db
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
+	"os"
 	"strings"
 
+	gomysql "github.com/go-sql-driver/mysql"
+	"github.com/zulandar/railyard/internal/config"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -54,6 +59,62 @@ func sanitizeDBError(errMsg, password string) string {
 		errMsg = strings.ReplaceAll(errMsg, password, "***")
 	}
 	return errMsg
+}
+
+// RegisterTLS registers a custom TLS configuration with the MySQL driver.
+// If cfg.Enabled is false, this is a no-op.
+func RegisterTLS(cfg config.TLSConfig) error {
+	if !cfg.Enabled {
+		return nil
+	}
+
+	tlsCfg := &tls.Config{
+		InsecureSkipVerify: cfg.SkipVerify,
+	}
+
+	if cfg.CACert != "" {
+		caPEM, err := os.ReadFile(cfg.CACert)
+		if err != nil {
+			return fmt.Errorf("db: read ca_cert %s: %w", cfg.CACert, err)
+		}
+		caPool := x509.NewCertPool()
+		if !caPool.AppendCertsFromPEM(caPEM) {
+			return fmt.Errorf("db: ca_cert %s: no valid certificates found", cfg.CACert)
+		}
+		tlsCfg.RootCAs = caPool
+	}
+
+	if cfg.ClientCert != "" && cfg.ClientKey != "" {
+		cert, err := tls.LoadX509KeyPair(cfg.ClientCert, cfg.ClientKey)
+		if err != nil {
+			return fmt.Errorf("db: load client cert/key: %w", err)
+		}
+		tlsCfg.Certificates = []tls.Certificate{cert}
+	}
+
+	return gomysql.RegisterTLSConfig("custom", tlsCfg)
+}
+
+// DSNFromConfig builds a MySQL-compatible DSN from a DoltConfig.
+// When TLS is enabled, it appends tls=custom.
+func DSNFromConfig(cfg config.DoltConfig) string {
+	dsn := DSN(cfg.Host, cfg.Port, cfg.Database, cfg.Username, cfg.Password)
+	if cfg.TLS.Enabled {
+		dsn += "&tls=custom"
+	}
+	return dsn
+}
+
+// ConnectWithConfig opens a GORM connection using a DoltConfig.
+func ConnectWithConfig(cfg config.DoltConfig) (*gorm.DB, error) {
+	dsn := DSNFromConfig(cfg)
+	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("db: connect to %s:%d/%s: %s", cfg.Host, cfg.Port, cfg.Database, sanitizeDBError(err.Error(), cfg.Password))
+	}
+	return db, nil
 }
 
 // DropDatabase drops the named database if it exists.

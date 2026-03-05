@@ -247,6 +247,142 @@ func TestSanitizeDBError(t *testing.T) {
 	}
 }
 
+func TestDSNFromConfig_NoTLS(t *testing.T) {
+	cfg := config.DoltConfig{
+		Host:     "127.0.0.1",
+		Port:     3306,
+		Database: "railyard_alice",
+		Username: "root",
+	}
+	got := DSNFromConfig(cfg)
+	want := "root@tcp(127.0.0.1:3306)/railyard_alice?parseTime=true"
+	if got != want {
+		t.Errorf("DSNFromConfig() = %q, want %q", got, want)
+	}
+}
+
+func TestDSNFromConfig_WithPassword(t *testing.T) {
+	cfg := config.DoltConfig{
+		Host:     "127.0.0.1",
+		Port:     3306,
+		Database: "mydb",
+		Username: "admin",
+		Password: "secret",
+	}
+	got := DSNFromConfig(cfg)
+	want := "admin:secret@tcp(127.0.0.1:3306)/mydb?parseTime=true"
+	if got != want {
+		t.Errorf("DSNFromConfig() = %q, want %q", got, want)
+	}
+}
+
+func TestDSNFromConfig_WithTLS(t *testing.T) {
+	cfg := config.DoltConfig{
+		Host:     "dolt.k8s.internal",
+		Port:     3306,
+		Database: "railyard_prod",
+		Username: "root",
+		TLS: config.TLSConfig{
+			Enabled: true,
+		},
+	}
+	got := DSNFromConfig(cfg)
+	if !strings.Contains(got, "tls=custom") {
+		t.Errorf("DSNFromConfig() = %q, want tls=custom parameter", got)
+	}
+	if !strings.Contains(got, "parseTime=true") {
+		t.Errorf("DSNFromConfig() = %q, want parseTime=true", got)
+	}
+}
+
+func TestDSNFromConfig_TLSDisabled_NoTLSParam(t *testing.T) {
+	cfg := config.DoltConfig{
+		Host:     "127.0.0.1",
+		Port:     3306,
+		Database: "mydb",
+		Username: "root",
+		TLS: config.TLSConfig{
+			Enabled: false,
+		},
+	}
+	got := DSNFromConfig(cfg)
+	if strings.Contains(got, "tls=") {
+		t.Errorf("DSNFromConfig() = %q, should not contain tls= when disabled", got)
+	}
+}
+
+func TestRegisterTLS_SkipVerify(t *testing.T) {
+	tlsCfg := config.TLSConfig{
+		Enabled:    true,
+		SkipVerify: true,
+	}
+	err := RegisterTLS(tlsCfg)
+	if err != nil {
+		t.Fatalf("RegisterTLS() error = %v", err)
+	}
+}
+
+func TestRegisterTLS_NotEnabled(t *testing.T) {
+	tlsCfg := config.TLSConfig{Enabled: false}
+	err := RegisterTLS(tlsCfg)
+	if err != nil {
+		t.Fatalf("RegisterTLS() error = %v, want nil for disabled TLS", err)
+	}
+}
+
+func TestRegisterTLS_BadCACert(t *testing.T) {
+	tlsCfg := config.TLSConfig{
+		Enabled: true,
+		CACert:  "/nonexistent/ca.pem",
+	}
+	err := RegisterTLS(tlsCfg)
+	if err == nil {
+		t.Fatal("RegisterTLS() expected error for nonexistent CA cert")
+	}
+	if !strings.Contains(err.Error(), "ca_cert") {
+		t.Errorf("error = %q, want to mention ca_cert", err.Error())
+	}
+}
+
+func TestRegisterTLS_BadClientCert(t *testing.T) {
+	tlsCfg := config.TLSConfig{
+		Enabled:    true,
+		SkipVerify: true,
+		ClientCert: "/nonexistent/cert.pem",
+		ClientKey:  "/nonexistent/key.pem",
+	}
+	err := RegisterTLS(tlsCfg)
+	if err == nil {
+		t.Fatal("RegisterTLS() expected error for nonexistent client cert")
+	}
+	if !strings.Contains(err.Error(), "client cert") {
+		t.Errorf("error = %q, want to mention client cert", err.Error())
+	}
+}
+
+func TestConnectWithConfig_RequiresDolt(t *testing.T) {
+	var fn func(config.DoltConfig) (*gorm.DB, error) = ConnectWithConfig
+	if fn == nil {
+		t.Fatal("ConnectWithConfig function is nil")
+	}
+}
+
+func TestConnectWithConfig_Error(t *testing.T) {
+	cfg := config.DoltConfig{
+		Host:     "127.0.0.1",
+		Port:     1,
+		Database: "nonexistent",
+		Username: "root",
+	}
+	_, err := ConnectWithConfig(cfg)
+	if err == nil {
+		t.Fatal("expected error connecting to invalid port")
+	}
+	if !strings.Contains(err.Error(), "db: connect to") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "db: connect to")
+	}
+}
+
 func TestMarshalJSON_Error(t *testing.T) {
 	// Channels cannot be marshaled to JSON.
 	_, err := marshalJSON(make(chan int))

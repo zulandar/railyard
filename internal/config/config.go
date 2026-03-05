@@ -66,13 +66,23 @@ type StallConfig struct {
 	MaxSwitchFailures int `yaml:"max_switch_failures"` // repeated switch failures before escalation (default 3)
 }
 
+// TLSConfig holds TLS settings for encrypted database connections.
+type TLSConfig struct {
+	Enabled    bool   `yaml:"enabled"`
+	CACert     string `yaml:"ca_cert"`
+	ClientCert string `yaml:"client_cert"`
+	ClientKey  string `yaml:"client_key"`
+	SkipVerify bool   `yaml:"skip_verify"`
+}
+
 // DoltConfig holds connection settings for the Dolt SQL server.
 type DoltConfig struct {
-	Host     string `yaml:"host"`
-	Port     int    `yaml:"port"`
-	Database string `yaml:"database"`
-	Username string `yaml:"username"`
-	Password string `yaml:"password"`
+	Host     string    `yaml:"host"`
+	Port     int       `yaml:"port"`
+	Database string    `yaml:"database"`
+	Username string    `yaml:"username"`
+	Password string    `yaml:"password"`
+	TLS      TLSConfig `yaml:"tls"`
 }
 
 // TrackConfig defines an area of concern within the repo.
@@ -188,6 +198,9 @@ func (c *Config) applyDefaults() {
 	}
 	c.Dolt.Username = resolveEnvVars(c.Dolt.Username)
 	c.Dolt.Password = resolveEnvVars(c.Dolt.Password)
+	c.Dolt.TLS.CACert = resolveEnvVars(c.Dolt.TLS.CACert)
+	c.Dolt.TLS.ClientCert = resolveEnvVars(c.Dolt.TLS.ClientCert)
+	c.Dolt.TLS.ClientKey = resolveEnvVars(c.Dolt.TLS.ClientKey)
 	if c.Stall.StdoutTimeoutSec == 0 {
 		c.Stall.StdoutTimeoutSec = 120
 	}

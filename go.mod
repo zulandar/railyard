@@ -5,6 +5,7 @@ go 1.25.7
 require (
 	github.com/bwmarrin/discordgo v0.29.0
 	github.com/gin-gonic/gin v1.11.0
+	github.com/go-sql-driver/mysql v1.8.1
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/slack-go/slack v0.18.0
 	github.com/spf13/cobra v1.10.2
@@ -24,7 +25,6 @@ require (
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect
 	github.com/go-playground/validator/v10 v10.27.0 // indirect
-	github.com/go-sql-driver/mysql v1.8.1 // indirect
 	github.com/goccy/go-json v0.10.2 // indirect
 	github.com/goccy/go-yaml v1.18.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect

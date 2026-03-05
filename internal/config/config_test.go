@@ -1122,6 +1122,114 @@ tracks:
 	}
 }
 
+// ---------------------------------------------------------------------------
+// TLS config tests
+// ---------------------------------------------------------------------------
+
+func TestParse_TLSConfig_Full(t *testing.T) {
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+dolt:
+  host: dolt.k8s.internal
+  port: 3306
+  tls:
+    enabled: true
+    ca_cert: /certs/ca.pem
+    client_cert: /certs/client-cert.pem
+    client_key: /certs/client-key.pem
+    skip_verify: false
+tracks:
+  - name: backend
+    language: go
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !cfg.Dolt.TLS.Enabled {
+		t.Error("Dolt.TLS.Enabled = false, want true")
+	}
+	if cfg.Dolt.TLS.CACert != "/certs/ca.pem" {
+		t.Errorf("Dolt.TLS.CACert = %q, want /certs/ca.pem", cfg.Dolt.TLS.CACert)
+	}
+	if cfg.Dolt.TLS.ClientCert != "/certs/client-cert.pem" {
+		t.Errorf("Dolt.TLS.ClientCert = %q", cfg.Dolt.TLS.ClientCert)
+	}
+	if cfg.Dolt.TLS.ClientKey != "/certs/client-key.pem" {
+		t.Errorf("Dolt.TLS.ClientKey = %q", cfg.Dolt.TLS.ClientKey)
+	}
+	if cfg.Dolt.TLS.SkipVerify {
+		t.Error("Dolt.TLS.SkipVerify = true, want false")
+	}
+}
+
+func TestParse_TLSConfig_Disabled_ByDefault(t *testing.T) {
+	cfg, err := Parse([]byte(minimalYAML))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Dolt.TLS.Enabled {
+		t.Error("Dolt.TLS.Enabled should be false by default")
+	}
+}
+
+func TestParse_TLSConfig_SkipVerify(t *testing.T) {
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+dolt:
+  tls:
+    enabled: true
+    skip_verify: true
+tracks:
+  - name: backend
+    language: go
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !cfg.Dolt.TLS.Enabled {
+		t.Error("Dolt.TLS.Enabled = false, want true")
+	}
+	if !cfg.Dolt.TLS.SkipVerify {
+		t.Error("Dolt.TLS.SkipVerify = false, want true")
+	}
+}
+
+func TestParse_TLSConfig_EnvVarResolution(t *testing.T) {
+	t.Setenv("TEST_CA_PATH", "/resolved/ca.pem")
+	t.Setenv("TEST_CERT_PATH", "/resolved/cert.pem")
+	t.Setenv("TEST_KEY_PATH", "/resolved/key.pem")
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+dolt:
+  tls:
+    enabled: true
+    ca_cert: "${TEST_CA_PATH}"
+    client_cert: "${TEST_CERT_PATH}"
+    client_key: "${TEST_KEY_PATH}"
+tracks:
+  - name: backend
+    language: go
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Dolt.TLS.CACert != "/resolved/ca.pem" {
+		t.Errorf("Dolt.TLS.CACert = %q, want /resolved/ca.pem", cfg.Dolt.TLS.CACert)
+	}
+	if cfg.Dolt.TLS.ClientCert != "/resolved/cert.pem" {
+		t.Errorf("Dolt.TLS.ClientCert = %q, want /resolved/cert.pem", cfg.Dolt.TLS.ClientCert)
+	}
+	if cfg.Dolt.TLS.ClientKey != "/resolved/key.pem" {
+		t.Errorf("Dolt.TLS.ClientKey = %q, want /resolved/key.pem", cfg.Dolt.TLS.ClientKey)
+	}
+}
+
 func TestParse_AgentProviderUnknownAllowed(t *testing.T) {
 	yaml := `
 owner: alice
