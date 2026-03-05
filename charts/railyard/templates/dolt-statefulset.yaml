@@ -1,0 +1,72 @@
+{{- if .Values.dolt.internal }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "railyard.fullname" . }}-dolt
+  labels:
+    {{- include "railyard.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dolt
+spec:
+  serviceName: {{ include "railyard.fullname" . }}-dolt
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "railyard.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: dolt
+  template:
+    metadata:
+      labels:
+        {{- include "railyard.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: dolt
+    spec:
+      {{- if .Values.imagePullSecret }}
+      imagePullSecrets:
+        - name: {{ .Values.imagePullSecret }}
+      {{- end }}
+      containers:
+        - name: dolt
+          image: dolthub/dolt-sql-server:latest
+          args:
+            - --host=0.0.0.0
+            - --port={{ .Values.dolt.port }}
+          ports:
+            - name: mysql
+              containerPort: {{ .Values.dolt.port }}
+              protocol: TCP
+          env:
+            - name: DOLT_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "railyard.fullname" . }}-db
+                  key: dolt-password
+          readinessProbe:
+            tcpSocket:
+              port: mysql
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: mysql
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+          volumeMounts:
+            - name: dolt-data
+              mountPath: /var/lib/dolt
+          {{- with .Values.dolt.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+  volumeClaimTemplates:
+    - metadata:
+        name: dolt-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.dolt.storage.storageClass }}
+        storageClassName: {{ .Values.dolt.storage.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.dolt.storage.size }}
+{{- end }}

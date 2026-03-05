@@ -1,0 +1,94 @@
+{{- if .Values.pgvector.internal }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "railyard.fullname" . }}-pgvector
+  labels:
+    {{- include "railyard.labels" . | nindent 4 }}
+    app.kubernetes.io/component: pgvector
+spec:
+  serviceName: {{ include "railyard.fullname" . }}-pgvector
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "railyard.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: pgvector
+  template:
+    metadata:
+      labels:
+        {{- include "railyard.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: pgvector
+    spec:
+      {{- if .Values.imagePullSecret }}
+      imagePullSecrets:
+        - name: {{ .Values.imagePullSecret }}
+      {{- end }}
+      containers:
+        - name: pgvector
+          image: pgvector/pgvector:pg16
+          ports:
+            - name: postgres
+              containerPort: 5432
+              protocol: TCP
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "railyard.fullname" . }}-db
+                  key: pgvector-username
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "railyard.fullname" . }}-db
+                  key: pgvector-password
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "railyard.fullname" . }}-db
+                  key: pgvector-database
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+          volumeMounts:
+            - name: pgvector-data
+              mountPath: /var/lib/postgresql/data
+            - name: init-scripts
+              mountPath: /docker-entrypoint-initdb.d
+              readOnly: true
+          {{- with .Values.pgvector.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: init-scripts
+          configMap:
+            name: {{ include "railyard.fullname" . }}-pgvector-init
+  volumeClaimTemplates:
+    - metadata:
+        name: pgvector-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.pgvector.storage.storageClass }}
+        storageClassName: {{ .Values.pgvector.storage.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.pgvector.storage.size }}
+{{- end }}
