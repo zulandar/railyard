@@ -16,6 +16,7 @@ var envVarRe = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
 type Config struct {
 	Owner             string              `yaml:"owner"`
 	Repo              string              `yaml:"repo"`
+	Project           string              `yaml:"project"`
 	BranchPrefix      string              `yaml:"branch_prefix"`
 	DefaultBranch     string              `yaml:"default_branch"`
 	DefaultAcceptance string              `yaml:"default_acceptance"`
@@ -26,7 +27,13 @@ type Config struct {
 	Notifications     NotificationsConfig `yaml:"notifications"`
 	CocoIndex         CocoIndexConfig     `yaml:"cocoindex"`
 	Telegraph         TelegraphConfig     `yaml:"telegraph"`
+	Kubernetes        KubernetesConfig    `yaml:"kubernetes"`
 	AgentProvider     string              `yaml:"agent_provider"`
+}
+
+// IsKubernetesMode returns true when the config targets a Kubernetes deployment.
+func (c *Config) IsKubernetesMode() bool {
+	return c.Kubernetes.Namespace != ""
 }
 
 // KnownProviders is the set of recognized agent provider names.
@@ -83,6 +90,23 @@ type DoltConfig struct {
 	Username string    `yaml:"username"`
 	Password string    `yaml:"password"`
 	TLS      TLSConfig `yaml:"tls"`
+}
+
+// KubernetesConfig holds settings for Kubernetes deployment mode.
+type KubernetesConfig struct {
+	Namespace       string        `yaml:"namespace"`
+	Image           string        `yaml:"image"`
+	ImagePullSecret string        `yaml:"image_pull_secret"`
+	ServiceAccount  string        `yaml:"service_account"`
+	Scaling         ScalingConfig `yaml:"scaling"`
+}
+
+// ScalingConfig controls engine auto-scaling in Kubernetes mode.
+type ScalingConfig struct {
+	MinEngines           int `yaml:"min_engines"`
+	MaxEngines           int `yaml:"max_engines"`
+	ScaleUpThreshold     int `yaml:"scale_up_threshold"`
+	ScaleDownIdleMinutes int `yaml:"scale_down_idle_minutes"`
 }
 
 // TrackConfig defines an area of concern within the repo.
@@ -224,6 +248,24 @@ func (c *Config) applyDefaults() {
 			c.Tracks[i].AgentProvider = c.AgentProvider
 		}
 	}
+	// Kubernetes defaults — only apply when kubernetes section is present.
+	if c.Kubernetes.Namespace != "" || c.Kubernetes.Image != "" {
+		if c.Kubernetes.Namespace == "" && c.Project != "" {
+			c.Kubernetes.Namespace = "railyard-" + c.Project
+		}
+		if c.Kubernetes.Scaling.MinEngines == 0 {
+			c.Kubernetes.Scaling.MinEngines = 1
+		}
+		if c.Kubernetes.Scaling.MaxEngines == 0 {
+			c.Kubernetes.Scaling.MaxEngines = 10
+		}
+		if c.Kubernetes.Scaling.ScaleUpThreshold == 0 {
+			c.Kubernetes.Scaling.ScaleUpThreshold = 3
+		}
+		if c.Kubernetes.Scaling.ScaleDownIdleMinutes == 0 {
+			c.Kubernetes.Scaling.ScaleDownIdleMinutes = 10
+		}
+	}
 	c.CocoIndex.DatabaseURL = resolveEnvVars(c.CocoIndex.DatabaseURL)
 	if c.CocoIndex.VenvPath == "" {
 		c.CocoIndex.VenvPath = "cocoindex/.venv"
@@ -298,6 +340,12 @@ func (c *Config) validate() error {
 		}
 		if t.Language == "" {
 			errs = append(errs, fmt.Sprintf("tracks[%d].language is required", i))
+		}
+	}
+	// Kubernetes validation (only when namespace or image is set).
+	if c.Kubernetes.Namespace != "" || c.Kubernetes.Image != "" {
+		if c.Kubernetes.Image == "" {
+			errs = append(errs, "kubernetes.image is required when kubernetes is configured")
 		}
 	}
 	// Telegraph validation (only when platform is configured).
