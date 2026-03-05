@@ -1,0 +1,107 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "railyard.fullname" . }}-dashboard
+  labels:
+    {{- include "railyard.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dashboard
+spec:
+  replicas: {{ .Values.dashboard.replicas }}
+  selector:
+    matchLabels:
+      {{- include "railyard.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: dashboard
+  template:
+    metadata:
+      labels:
+        {{- include "railyard.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: dashboard
+    spec:
+      serviceAccountName: {{ include "railyard.serviceAccountName" . }}
+      {{- if .Values.imagePullSecret }}
+      imagePullSecrets:
+        - name: {{ .Values.imagePullSecret }}
+      {{- end }}
+      containers:
+        - name: dashboard
+          image: {{ include "railyard.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["ry"]
+          args: ["dashboard", "-c", "/etc/railyard/railyard.yaml", "-p", "8080"]
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: DOLT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "railyard.fullname" . }}-db
+                  key: dolt-password
+          readinessProbe:
+            httpGet:
+              port: http
+              path: /
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              port: http
+              path: /
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 3
+          volumeMounts:
+            - name: config
+              mountPath: /etc/railyard
+              readOnly: true
+          {{- with .Values.dashboard.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+        {{- if .Values.dashboard.oauth2proxy.enabled }}
+        - name: oauth2-proxy
+          image: "{{ .Values.dashboard.oauth2proxy.image.repository }}:{{ .Values.dashboard.oauth2proxy.image.tag }}"
+          args:
+            - --upstream=http://localhost:8080
+            - --http-address=0.0.0.0:4180
+            - --provider={{ .Values.dashboard.oauth2proxy.provider }}
+            - --client-id=$(OAUTH2_PROXY_CLIENT_ID)
+            - --client-secret=$(OAUTH2_PROXY_CLIENT_SECRET)
+            - --cookie-secret=$(OAUTH2_PROXY_COOKIE_SECRET)
+            - --email-domain=*
+            {{- range .Values.dashboard.oauth2proxy.extraArgs }}
+            - {{ . | quote }}
+            {{- end }}
+          ports:
+            - name: oauth-proxy
+              containerPort: 4180
+              protocol: TCP
+          env:
+            - name: OAUTH2_PROXY_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "railyard.fullname" . }}-oauth2proxy
+                  key: client-id
+            - name: OAUTH2_PROXY_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "railyard.fullname" . }}-oauth2proxy
+                  key: client-secret
+            - name: OAUTH2_PROXY_COOKIE_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "railyard.fullname" . }}-oauth2proxy
+                  key: cookie-secret
+          readinessProbe:
+            httpGet:
+              port: oauth-proxy
+              path: /ping
+            initialDelaySeconds: 5
+            periodSeconds: 10
+        {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "railyard.fullname" . }}-config

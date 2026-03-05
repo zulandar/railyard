@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "railyard.fullname" . }}-dispatch
+  labels:
+    {{- include "railyard.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dispatch
+spec:
+  replicas: {{ .Values.dispatch.replicas }}
+  selector:
+    matchLabels:
+      {{- include "railyard.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: dispatch
+  template:
+    metadata:
+      labels:
+        {{- include "railyard.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: dispatch
+    spec:
+      serviceAccountName: {{ include "railyard.serviceAccountName" . }}
+      {{- if .Values.imagePullSecret }}
+      imagePullSecrets:
+        - name: {{ .Values.imagePullSecret }}
+      {{- end }}
+      containers:
+        - name: dispatch
+          image: {{ include "railyard.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["ry"]
+          args: ["dispatch", "-c", "/etc/railyard/railyard.yaml"]
+          env:
+            - name: DOLT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "railyard.fullname" . }}-db
+                  key: dolt-password
+            {{- include "railyard.authExtraEnv" . | nindent 12 }}
+          envFrom:
+            {{- include "railyard.authEnvFrom" . | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/railyard
+              readOnly: true
+            {{- include "railyard.authVolumeMounts" . | nindent 12 }}
+          {{- with .Values.dispatch.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "railyard.fullname" . }}-config
+        {{- include "railyard.authVolumes" . | nindent 8 }}
