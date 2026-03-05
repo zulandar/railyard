@@ -431,11 +431,22 @@ func truncateOutput(output string, maxLen int) string {
 // runTests checks out the branch and runs the test suite.
 // baseBranch is the branch to return to after tests (e.g. "main").
 func runTests(repoDir, branch, baseBranch, preTestCommand, testCommand string) (string, error) {
-	// Checkout the branch.
+	// Checkout the branch (worktree-safe: fall back to detached HEAD).
 	checkout := exec.Command("git", "checkout", branch)
 	checkout.Dir = repoDir
 	if out, err := checkout.CombinedOutput(); err != nil {
-		return string(out), fmt.Errorf("git checkout %s: %w", branch, err)
+		// Fallback: detach at origin/<branch> (handles worktree collision).
+		detach := exec.Command("git", "checkout", "--detach", "origin/"+branch)
+		detach.Dir = repoDir
+		if dOut, dErr := detach.CombinedOutput(); dErr != nil {
+			// Last resort: detach at local branch ref.
+			last := exec.Command("git", "checkout", "--detach", branch)
+			last.Dir = repoDir
+			if lOut, lErr := last.CombinedOutput(); lErr != nil {
+				return string(out) + "\n" + string(dOut) + "\n" + string(lOut),
+					fmt.Errorf("git checkout %s: %w", branch, err)
+			}
+		}
 	}
 
 	// Run pre-test command if configured (e.g. "go mod vendor", "npm install").

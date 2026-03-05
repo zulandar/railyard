@@ -1103,6 +1103,30 @@ func TestRunTests_RealTestFailure(t *testing.T) {
 	}
 }
 
+func TestRunTests_BranchCheckedOutInOtherWorktree(t *testing.T) {
+	// When the branch is checked out in another worktree, runTests should
+	// still work by using a detached HEAD checkout fallback.
+	repoDir, run := initTestRepo(t)
+
+	// Create a feature branch.
+	run("git", "checkout", "-b", "feature-wt")
+	run("git", "commit", "--allow-empty", "-m", "feature work")
+	run("git", "checkout", "main")
+
+	// Create a second worktree that has the branch checked out.
+	wtDir := filepath.Join(t.TempDir(), "other-wt")
+	run("git", "worktree", "add", wtDir, "feature-wt")
+
+	// runTests should handle this gracefully — the branch is locked by another worktree.
+	output, err := runTests(repoDir, "feature-wt", "main", "", "true")
+	if err != nil {
+		t.Fatalf("runTests should handle worktree collision, got: %v\noutput: %s", err, output)
+	}
+
+	// Clean up worktree.
+	exec.Command("git", "-C", repoDir, "worktree", "remove", "--force", wtDir).Run()
+}
+
 // writeFile is a test helper that writes content to a file in the repo.
 func writeFile(t *testing.T, repoDir, name, content string) {
 	t.Helper()
