@@ -101,3 +101,69 @@ pgvector host — auto-derived when internal, otherwise from values.
 {{- .Values.pgvector.host }}
 {{- end }}
 {{- end }}
+
+{{/*
+Auth secret name — uses existingSecret if set, otherwise generated name.
+*/}}
+{{- define "railyard.authSecretName" -}}
+{{- if .Values.auth.existingSecret }}
+{{- .Values.auth.existingSecret }}
+{{- else }}
+{{- printf "%s-auth" (include "railyard.fullname" .) }}
+{{- end }}
+{{- end }}
+
+{{/*
+Auth environment variables — renders envFrom for the auth secret.
+Include this in any pod spec that needs agent credentials.
+*/}}
+{{- define "railyard.authEnvFrom" -}}
+- secretRef:
+    name: {{ include "railyard.authSecretName" . }}
+{{- end }}
+
+{{/*
+Auth volume — mounts claude.json ConfigMap when using oauth_token method.
+Include in pod spec volumes.
+*/}}
+{{- define "railyard.authVolumes" -}}
+{{- if eq .Values.auth.method "oauth_token" }}
+- name: claude-config
+  configMap:
+    name: {{ include "railyard.fullname" . }}-claude-config
+{{- end }}
+{{- if and (eq .Values.auth.method "vertex") .Values.auth.vertex.credentialsSecret }}
+- name: gcp-credentials
+  secret:
+    secretName: {{ .Values.auth.vertex.credentialsSecret }}
+{{- end }}
+{{- end }}
+
+{{/*
+Auth volume mounts — mounts claude.json and GCP credentials into containers.
+Include in container volumeMounts.
+*/}}
+{{- define "railyard.authVolumeMounts" -}}
+{{- if eq .Values.auth.method "oauth_token" }}
+- name: claude-config
+  mountPath: /home/railyard/.claude.json
+  subPath: claude.json
+  readOnly: true
+{{- end }}
+{{- if and (eq .Values.auth.method "vertex") .Values.auth.vertex.credentialsSecret }}
+- name: gcp-credentials
+  mountPath: /var/secrets/google
+  readOnly: true
+{{- end }}
+{{- end }}
+
+{{/*
+Auth extra env vars — adds provider-specific env vars beyond the secret.
+Include in container env.
+*/}}
+{{- define "railyard.authExtraEnv" -}}
+{{- if and (eq .Values.auth.method "vertex") .Values.auth.vertex.credentialsSecret }}
+- name: GOOGLE_APPLICATION_CREDENTIALS
+  value: /var/secrets/google/credentials.json
+{{- end }}
+{{- end }}

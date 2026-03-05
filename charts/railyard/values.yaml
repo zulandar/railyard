@@ -73,6 +73,53 @@ pgvector:
   resources: {}
 
 # ---------------------------------------------------------------------------
+# Agent authentication
+# ---------------------------------------------------------------------------
+# Configures credentials for the AI agent provider used by engines.
+#
+# Methods:
+#   api_key      - ANTHROPIC_API_KEY (claude), OPENAI_API_KEY (codex),
+#                  GEMINI_API_KEY (gemini). Simplest for headless/CI.
+#   oauth_token  - CLAUDE_CODE_OAUTH_TOKEN from 'claude setup-token'.
+#                  Uses Max plan subscription budget (no pay-per-token).
+#                  Mounts ~/.claude.json with hasCompletedOnboarding:true.
+#   bedrock      - AWS Bedrock: uses AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY,
+#                  AWS_REGION. No browser login needed.
+#   vertex       - Google Vertex AI: uses GOOGLE_APPLICATION_CREDENTIALS
+#                  (service account JSON) and CLOUD_ML_REGION.
+#   foundry      - Azure AI Foundry: uses AZURE_API_KEY and AZURE_ENDPOINT.
+auth:
+  # -- Authentication method: api_key, oauth_token, bedrock, vertex, foundry.
+  method: api_key
+  # -- Use an existing Secret instead of creating one. The Secret must contain
+  # the appropriate keys for the chosen method (see auth-secret.yaml template).
+  existingSecret: ""
+  # -- API key (used when method=api_key).
+  # Set the key for your provider: ANTHROPIC_API_KEY, OPENAI_API_KEY, etc.
+  apiKey: ""
+  # -- OAuth token from 'claude setup-token' (used when method=oauth_token).
+  oauthToken: ""
+  # -- AWS Bedrock configuration (used when method=bedrock).
+  bedrock:
+    accessKeyID: ""
+    secretAccessKey: ""
+    region: us-east-1
+  # -- Google Vertex AI configuration (used when method=vertex).
+  vertex:
+    projectID: ""
+    region: us-central1
+    # -- Name of an existing Secret containing the service account JSON
+    # key in a 'credentials.json' key.
+    credentialsSecret: ""
+  # -- Azure AI Foundry configuration (used when method=foundry).
+  foundry:
+    apiKey: ""
+    endpoint: ""
+  # -- Advanced: apiKeyHelper command for dynamic key rotation (e.g. Vault).
+  # When set, ANTHROPIC_API_KEY_HELPER is set to this value.
+  apiKeyHelper: ""
+
+# ---------------------------------------------------------------------------
 # Tracks
 # ---------------------------------------------------------------------------
 # Each track defines an area of concern with its own engine pool.
