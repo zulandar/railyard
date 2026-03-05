@@ -37,7 +37,7 @@ func withMockDB(t *testing.T, gormDB *gorm.DB) func() {
 	orig := connectFromConfig
 	connectFromConfig = func(configPath string) (*config.Config, *gorm.DB, error) {
 		cfg := &config.Config{
-			Owner: "test-user",
+			Owner:  "test-user",
 			Tracks: []config.TrackConfig{{Name: "backend", Language: "go", EngineSlots: 3}},
 		}
 		return cfg, gormDB, nil

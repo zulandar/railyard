@@ -1094,8 +1094,9 @@ func TestCompletedToday_WithData(t *testing.T) {
 	db := testDB(t)
 
 	now := time.Now()
-	today := now.Add(-1 * time.Hour)
-	yesterday := now.Add(-25 * time.Hour)
+	midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	today := midnight.Add(1 * time.Hour)      // 1am today — always after midnight
+	yesterday := midnight.Add(-1 * time.Hour) // 11pm yesterday — always before midnight
 
 	db.Create(&models.Car{ID: "car-1", Title: "T1", Track: "backend", Status: "done", Type: "task", CompletedAt: &today})
 	db.Create(&models.Car{ID: "car-2", Title: "T2", Track: "backend", Status: "done", Type: "task", CompletedAt: &today})
@@ -1140,7 +1141,8 @@ func TestComputeStats_Integration(t *testing.T) {
 	db := testDB(t)
 
 	now := time.Now()
-	today := now.Add(-1 * time.Hour)
+	midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	today := midnight.Add(1 * time.Hour) // 1am today — always after midnight
 
 	// Set up engines.
 	engines := []EngineRow{
@@ -1290,12 +1292,28 @@ func TestTrackSummary_AllStatuses(t *testing.T) {
 		t.Fatalf("got %d tracks, want 1", len(tracks))
 	}
 	tc := tracks[0]
-	if tc.Draft != 1 { t.Errorf("Draft = %d, want 1", tc.Draft) }
-	if tc.Open != 2 { t.Errorf("Open = %d, want 2 (open + ready)", tc.Open) }
-	if tc.Claimed != 1 { t.Errorf("Claimed = %d, want 1", tc.Claimed) }
-	if tc.InProgress != 1 { t.Errorf("InProgress = %d, want 1", tc.InProgress) }
-	if tc.Done != 1 { t.Errorf("Done = %d, want 1", tc.Done) }
-	if tc.Merged != 1 { t.Errorf("Merged = %d, want 1", tc.Merged) }
-	if tc.Blocked != 1 { t.Errorf("Blocked = %d, want 1", tc.Blocked) }
-	if tc.Total != 8 { t.Errorf("Total = %d, want 8", tc.Total) }
+	if tc.Draft != 1 {
+		t.Errorf("Draft = %d, want 1", tc.Draft)
+	}
+	if tc.Open != 2 {
+		t.Errorf("Open = %d, want 2 (open + ready)", tc.Open)
+	}
+	if tc.Claimed != 1 {
+		t.Errorf("Claimed = %d, want 1", tc.Claimed)
+	}
+	if tc.InProgress != 1 {
+		t.Errorf("InProgress = %d, want 1", tc.InProgress)
+	}
+	if tc.Done != 1 {
+		t.Errorf("Done = %d, want 1", tc.Done)
+	}
+	if tc.Merged != 1 {
+		t.Errorf("Merged = %d, want 1", tc.Merged)
+	}
+	if tc.Blocked != 1 {
+		t.Errorf("Blocked = %d, want 1", tc.Blocked)
+	}
+	if tc.Total != 8 {
+		t.Errorf("Total = %d, want 8", tc.Total)
+	}
 }

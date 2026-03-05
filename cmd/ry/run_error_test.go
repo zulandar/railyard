@@ -189,4 +189,3 @@ func TestLogsCmd_Help(t *testing.T) {
 		}
 	}
 }
-
