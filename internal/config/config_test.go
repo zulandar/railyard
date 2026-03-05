@@ -1409,6 +1409,53 @@ tracks:
 	}
 }
 
+func TestParse_BranchPrefix_DefaultsToRy_WhenProjectSet(t *testing.T) {
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+project: myapp
+tracks:
+  - name: backend
+    language: go
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.BranchPrefix != "ry" {
+		t.Errorf("BranchPrefix = %q, want %q when project is set", cfg.BranchPrefix, "ry")
+	}
+}
+
+func TestParse_BranchPrefix_DefaultsToRyOwner_WhenNoProject(t *testing.T) {
+	cfg, err := Parse([]byte(minimalYAML))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.BranchPrefix != "ry/bob" {
+		t.Errorf("BranchPrefix = %q, want %q when only owner is set", cfg.BranchPrefix, "ry/bob")
+	}
+}
+
+func TestParse_BranchPrefix_ExplicitNotOverridden_WithProject(t *testing.T) {
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+project: myapp
+branch_prefix: custom/prefix
+tracks:
+  - name: backend
+    language: go
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.BranchPrefix != "custom/prefix" {
+		t.Errorf("BranchPrefix = %q, want %q (explicit should not be overridden)", cfg.BranchPrefix, "custom/prefix")
+	}
+}
+
 func TestParse_ProjectField(t *testing.T) {
 	yaml := `
 owner: alice

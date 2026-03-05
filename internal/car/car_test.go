@@ -58,6 +58,7 @@ func TestComputeBranch(t *testing.T) {
 		{"ry/alice", "backend", "car-abc12", "ry/alice/backend/car-abc12"},
 		{"ry/bob", "frontend", "car-00000", "ry/bob/frontend/car-00000"},
 		{"ry/carol", "infra", "car-fffff", "ry/carol/infra/car-fffff"},
+		{"ry", "backend", "car-abc12", "ry/backend/car-abc12"},
 	}
 	for _, tt := range tests {
 		got := ComputeBranch(tt.prefix, tt.track, tt.id)

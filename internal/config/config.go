@@ -205,8 +205,12 @@ func Parse(data []byte) (*Config, error) {
 
 // applyDefaults fills in derived and default values.
 func (c *Config) applyDefaults() {
-	if c.BranchPrefix == "" && c.Owner != "" {
-		c.BranchPrefix = "ry/" + c.Owner
+	if c.BranchPrefix == "" {
+		if c.Project != "" {
+			c.BranchPrefix = "ry"
+		} else if c.Owner != "" {
+			c.BranchPrefix = "ry/" + c.Owner
+		}
 	}
 	if c.Dolt.Host == "" {
 		c.Dolt.Host = "127.0.0.1"
