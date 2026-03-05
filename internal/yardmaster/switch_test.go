@@ -1546,3 +1546,57 @@ func TestUnblockDeps_DoesNotUnblockWhenOtherBlockersQueryFails(t *testing.T) {
 		t.Errorf("should not have unblocked any cars when query fails, got %d", len(unblocked))
 	}
 }
+
+func TestSwitch_UpdatesLocalRefAfterPush(t *testing.T) {
+	// After Switch pushes a merge to the remote, the local tracking ref
+	// (origin/<baseBranch>) must be updated so the next sibling merge
+	// starts from the correct commit.
+	repoDir, bareDir, run := initTestRepoWithRemote(t)
+
+	// Create a feature branch with a commit that adds a file.
+	run(repoDir, "git", "checkout", "-b", "ry/alice/backend/car-sib1")
+	if err := os.WriteFile(filepath.Join(repoDir, "shared.txt"), []byte("from sib1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run(repoDir, "git", "add", "shared.txt")
+	run(repoDir, "git", "commit", "-m", "sib1: add shared.txt")
+	run(repoDir, "git", "checkout", "main")
+
+	// Set up DB.
+	db := testDB(t)
+	db.Create(&models.Car{
+		ID:     "car-sib1",
+		Title:  "Sibling 1",
+		Track:  "backend",
+		Branch: "ry/alice/backend/car-sib1",
+		Status: "done",
+	})
+
+	// Merge sibling 1.
+	result, err := Switch(db, "car-sib1", SwitchOpts{
+		RepoDir:     repoDir,
+		TestCommand: "true",
+	})
+	if err != nil {
+		t.Fatalf("Switch sib1 failed: %v", err)
+	}
+	if !result.Merged {
+		t.Fatal("sib1 should be merged")
+	}
+
+	// Verify origin/main is updated locally (not stale).
+	cmd := exec.Command("git", "rev-parse", "origin/main")
+	cmd.Dir = repoDir
+	localOrigin, _ := cmd.Output()
+
+	cmd = exec.Command("git", "rev-parse", "main")
+	cmd.Dir = bareDir
+	remoteMain, _ := cmd.Output()
+
+	localRef := strings.TrimSpace(string(localOrigin))
+	remoteRef := strings.TrimSpace(string(remoteMain))
+
+	if localRef != remoteRef {
+		t.Errorf("origin/main not updated after push\nlocal origin/main:  %s\nremote main:        %s", localRef, remoteRef)
+	}
+}

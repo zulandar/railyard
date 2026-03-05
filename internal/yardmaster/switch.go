@@ -268,6 +268,11 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 		return result, result.Error
 	}
 
+	// Update local tracking ref so the next sibling merge starts from the
+	// correct commit. Without this, origin/<baseBranch> remains stale and
+	// sibling merges see add/add conflicts.
+	gitFetchBranch(opts.RepoDir, baseBranch)
+
 	result.Merged = true
 
 	// Mark car as merged — push succeeded, safe to update status.
@@ -723,6 +728,15 @@ func gitPush(repoDir, baseBranch string) error {
 		return fmt.Errorf("git push: %s: %w", string(out), err)
 	}
 	return nil
+}
+
+// gitFetchBranch fetches a single branch from origin to update the local
+// tracking ref. This is called after push to ensure origin/<branch> reflects
+// the just-pushed commit.
+func gitFetchBranch(repoDir, branch string) {
+	cmd := exec.Command("git", "fetch", "origin", branch)
+	cmd.Dir = repoDir
+	cmd.CombinedOutput() // best-effort — push already succeeded
 }
 
 // detachEngineWorktree detaches HEAD in the engine's worktree so the branch
