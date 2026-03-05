@@ -49,6 +49,31 @@ func (p *CodexProvider) BuildCommand(ctx context.Context, opts engine.SpawnOpts)
 	return cmd, cancel
 }
 
+func (p *CodexProvider) BuildInteractiveCommand(systemPrompt, workDir string) *exec.Cmd {
+	binary := p.Binary
+	if binary == "" {
+		binary = "codex"
+	}
+	cmd := exec.Command(binary,
+		"--full-auto",
+		"--instructions", systemPrompt,
+	)
+	if workDir != "" {
+		cmd.Dir = workDir
+	}
+	return cmd
+}
+
+func (p *CodexProvider) BuildPromptCommand(ctx context.Context, prompt string) (*exec.Cmd, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(ctx)
+	binary := p.Binary
+	if binary == "" {
+		binary = "codex"
+	}
+	cmd := exec.CommandContext(ctx, binary, "--quiet", "--full-auto", prompt)
+	return cmd, cancel
+}
+
 // ParseOutput returns empty stats — Codex CLI outputs plain text without
 // structured token usage information.
 func (p *CodexProvider) ParseOutput(content string) engine.UsageStats {

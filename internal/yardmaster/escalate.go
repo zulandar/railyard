@@ -3,9 +3,9 @@ package yardmaster
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"strings"
 
+	"github.com/zulandar/railyard/internal/engine"
 	"github.com/zulandar/railyard/internal/models"
 	"gorm.io/gorm"
 )
@@ -21,33 +21,51 @@ const (
 	EscalateSkip     EscalateAction = "SKIP"
 )
 
-// EscalateOpts holds parameters for a Claude escalation call.
+// EscalateOpts holds parameters for an agent escalation call.
 type EscalateOpts struct {
-	CarID    string
-	EngineID string
-	Reason   string
-	Details  string
-	DB       *gorm.DB
+	CarID        string
+	EngineID     string
+	Reason       string
+	Details      string
+	DB           *gorm.DB
+	ProviderName string // agent provider name; defaults to "claude"
 }
 
-// EscalateResult contains Claude's decision after escalation.
+// EscalateResult contains the agent's decision after escalation.
 type EscalateResult struct {
 	Action  EscalateAction
 	Message string
 }
 
-// EscalateToClaude spawns a short-lived Claude session with a focused prompt
-// and parses the structured decision response.
-func EscalateToClaude(ctx context.Context, opts EscalateOpts) (*EscalateResult, error) {
-	prompt := buildEscalationPrompt(opts)
+// EscalateToAgent spawns a short-lived agent session with a focused prompt
+// and parses the structured decision response. Uses the provider configured
+// in opts.ProviderName (defaults to "claude").
+func EscalateToAgent(ctx context.Context, opts EscalateOpts) (*EscalateResult, error) {
+	providerName := opts.ProviderName
+	if providerName == "" {
+		providerName = "claude"
+	}
+	provider, err := engine.GetProvider(providerName)
+	if err != nil {
+		return nil, fmt.Errorf("yardmaster: escalate: resolve provider: %w", err)
+	}
 
-	cmd := exec.CommandContext(ctx, "claude", "-p", prompt)
+	prompt := buildEscalationPrompt(opts)
+	cmd, cancel := provider.BuildPromptCommand(ctx, prompt)
+	defer cancel()
+
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("yardmaster: escalate: %w", err)
 	}
 
 	return parseEscalateResponse(string(output)), nil
+}
+
+// EscalateToClaude is a backward-compatible alias for EscalateToAgent.
+// Deprecated: use EscalateToAgent with opts.ProviderName instead.
+func EscalateToClaude(ctx context.Context, opts EscalateOpts) (*EscalateResult, error) {
+	return EscalateToAgent(ctx, opts)
 }
 
 // buildEscalationPrompt constructs a focused prompt with car details, progress,

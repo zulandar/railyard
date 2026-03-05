@@ -11,8 +11,14 @@ import (
 type AgentProvider interface {
 	// Name returns the provider identifier (e.g., "claude", "opencode").
 	Name() string
-	// BuildCommand constructs the exec.Cmd for the provider's CLI tool.
+	// BuildCommand constructs the exec.Cmd for the provider's CLI tool (engine mode).
 	BuildCommand(ctx context.Context, opts SpawnOpts) (*exec.Cmd, context.CancelFunc)
+	// BuildInteractiveCommand constructs an interactive CLI session (dispatch mode).
+	// The system prompt is appended to the agent's default behavior.
+	BuildInteractiveCommand(systemPrompt, workDir string) *exec.Cmd
+	// BuildPromptCommand constructs a one-shot CLI invocation (escalation mode).
+	// The prompt is sent as a single message and the agent exits after responding.
+	BuildPromptCommand(ctx context.Context, prompt string) (*exec.Cmd, context.CancelFunc)
 	// ParseOutput extracts token usage statistics from the provider's output.
 	ParseOutput(content string) UsageStats
 	// ValidateBinary checks that the provider's CLI binary is available.
@@ -37,6 +43,23 @@ func (defaultClaudeProvider) Name() string { return "claude" }
 
 func (defaultClaudeProvider) BuildCommand(ctx context.Context, opts SpawnOpts) (*exec.Cmd, context.CancelFunc) {
 	return buildCommand(ctx, opts)
+}
+
+func (defaultClaudeProvider) BuildInteractiveCommand(systemPrompt, workDir string) *exec.Cmd {
+	cmd := exec.Command("claude",
+		"--dangerously-skip-permissions",
+		"--append-system-prompt", systemPrompt,
+	)
+	if workDir != "" {
+		cmd.Dir = workDir
+	}
+	return cmd
+}
+
+func (defaultClaudeProvider) BuildPromptCommand(ctx context.Context, prompt string) (*exec.Cmd, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(ctx)
+	cmd := exec.CommandContext(ctx, "claude", "-p", prompt)
+	return cmd, cancel
 }
 
 func (defaultClaudeProvider) ParseOutput(content string) UsageStats {

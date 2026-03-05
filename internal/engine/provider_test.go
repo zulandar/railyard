@@ -18,6 +18,13 @@ func (m *mockProvider) BuildCommand(ctx context.Context, opts SpawnOpts) (*exec.
 	cmd := exec.CommandContext(ctx, "echo", "mock")
 	return cmd, cancel
 }
+func (m *mockProvider) BuildInteractiveCommand(systemPrompt, workDir string) *exec.Cmd {
+	return exec.Command("echo", "mock-interactive")
+}
+func (m *mockProvider) BuildPromptCommand(ctx context.Context, prompt string) (*exec.Cmd, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(ctx)
+	return exec.CommandContext(ctx, "echo", "mock-prompt"), cancel
+}
 func (m *mockProvider) ParseOutput(content string) UsageStats {
 	return UsageStats{}
 }

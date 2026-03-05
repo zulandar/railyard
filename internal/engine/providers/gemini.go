@@ -50,6 +50,32 @@ func (p *GeminiProvider) BuildCommand(ctx context.Context, opts engine.SpawnOpts
 	return cmd, cancel
 }
 
+func (p *GeminiProvider) BuildInteractiveCommand(systemPrompt, workDir string) *exec.Cmd {
+	binary := p.Binary
+	if binary == "" {
+		binary = "gemini"
+	}
+	cmd := exec.Command(binary,
+		"--yes",
+		"--sandbox",
+		"--system-instruction", systemPrompt,
+	)
+	if workDir != "" {
+		cmd.Dir = workDir
+	}
+	return cmd
+}
+
+func (p *GeminiProvider) BuildPromptCommand(ctx context.Context, prompt string) (*exec.Cmd, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(ctx)
+	binary := p.Binary
+	if binary == "" {
+		binary = "gemini"
+	}
+	cmd := exec.CommandContext(ctx, binary, "--yes", "--sandbox", "-p", prompt)
+	return cmd, cancel
+}
+
 // ParseOutput returns empty stats — Gemini CLI outputs plain text without
 // structured token usage information.
 func (p *GeminiProvider) ParseOutput(content string) engine.UsageStats {

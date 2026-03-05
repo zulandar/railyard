@@ -9,10 +9,11 @@ import (
 
 func testConfig(tracks ...config.TrackConfig) *config.Config {
 	return &config.Config{
-		Owner:        "alice",
-		Repo:         "git@github.com:org/myapp.git",
-		BranchPrefix: "ry/alice",
-		Tracks:       tracks,
+		Owner:         "alice",
+		Repo:          "git@github.com:org/myapp.git",
+		BranchPrefix:  "ry/alice",
+		AgentProvider: "claude",
+		Tracks:        tracks,
 	}
 }
 
@@ -241,12 +242,12 @@ func TestStart_ValidConfig_FailsOnClaude(t *testing.T) {
 		Language: "go",
 	})
 	err := Start(StartOpts{Config: cfg})
-	// Start renders the prompt successfully but fails when trying to run claude.
+	// Start renders the prompt successfully but fails when trying to run the agent.
 	if err == nil {
-		t.Fatal("expected error (claude binary not available in test)")
+		t.Fatal("expected error (agent binary not available in test)")
 	}
-	if !strings.Contains(err.Error(), "claude session") {
-		t.Errorf("error = %q, want to contain %q", err.Error(), "claude session")
+	if !strings.Contains(err.Error(), "agent session") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "agent session")
 	}
 }
 

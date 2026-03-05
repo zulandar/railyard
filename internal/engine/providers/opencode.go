@@ -49,6 +49,30 @@ func (p *OpenCodeProvider) BuildCommand(ctx context.Context, opts engine.SpawnOp
 	return cmd, cancel
 }
 
+func (p *OpenCodeProvider) BuildInteractiveCommand(systemPrompt, workDir string) *exec.Cmd {
+	binary := p.Binary
+	if binary == "" {
+		binary = "opencode"
+	}
+	cmd := exec.Command(binary,
+		"--system-prompt", systemPrompt,
+	)
+	if workDir != "" {
+		cmd.Dir = workDir
+	}
+	return cmd
+}
+
+func (p *OpenCodeProvider) BuildPromptCommand(ctx context.Context, prompt string) (*exec.Cmd, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(ctx)
+	binary := p.Binary
+	if binary == "" {
+		binary = "opencode"
+	}
+	cmd := exec.CommandContext(ctx, binary, "--non-interactive", "--prompt", prompt)
+	return cmd, cancel
+}
+
 // ParseOutput returns empty stats — OpenCode CLI outputs plain text without
 // structured token usage information.
 func (p *OpenCodeProvider) ParseOutput(content string) engine.UsageStats {

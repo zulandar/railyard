@@ -47,6 +47,31 @@ func (p *ClaudeProvider) BuildCommand(ctx context.Context, opts engine.SpawnOpts
 	return cmd, cancel
 }
 
+func (p *ClaudeProvider) BuildInteractiveCommand(systemPrompt, workDir string) *exec.Cmd {
+	binary := p.Binary
+	if binary == "" {
+		binary = "claude"
+	}
+	cmd := exec.Command(binary,
+		"--dangerously-skip-permissions",
+		"--append-system-prompt", systemPrompt,
+	)
+	if workDir != "" {
+		cmd.Dir = workDir
+	}
+	return cmd
+}
+
+func (p *ClaudeProvider) BuildPromptCommand(ctx context.Context, prompt string) (*exec.Cmd, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(ctx)
+	binary := p.Binary
+	if binary == "" {
+		binary = "claude"
+	}
+	cmd := exec.CommandContext(ctx, binary, "-p", prompt)
+	return cmd, cancel
+}
+
 func (p *ClaudeProvider) ParseOutput(content string) engine.UsageStats {
 	return engine.ParseUsageFromContent(content)
 }
