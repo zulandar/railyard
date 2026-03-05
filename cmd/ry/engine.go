@@ -16,6 +16,7 @@ import (
 	"github.com/zulandar/railyard/internal/config"
 	"github.com/zulandar/railyard/internal/db"
 	"github.com/zulandar/railyard/internal/engine"
+	_ "github.com/zulandar/railyard/internal/engine/providers" // register agent providers
 	"github.com/zulandar/railyard/internal/logutil"
 	"github.com/zulandar/railyard/internal/messaging"
 	"github.com/zulandar/railyard/internal/models"
@@ -103,12 +104,21 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 		return fmt.Errorf("load track %q from database: %w", track, err)
 	}
 
+	// Resolve agent provider from track config.
+	providerName := trackCfg.AgentProvider
+	if providerName == "" {
+		providerName = cfg.AgentProvider
+	}
+	if providerName == "" {
+		providerName = "claude"
+	}
+
 	// Register the engine.
-	eng, err := engine.Register(gormDB, engine.RegisterOpts{Track: track})
+	eng, err := engine.Register(gormDB, engine.RegisterOpts{Track: track, Provider: providerName})
 	if err != nil {
 		return fmt.Errorf("register engine: %w", err)
 	}
-	fmt.Fprintf(out, "Engine %s registered on track %q\n", eng.ID, track)
+	fmt.Fprintf(out, "Engine %s registered on track %q (provider: %s)\n", eng.ID, track, providerName)
 
 	// Set up context with signal handling for clean shutdown.
 	ctx, cancel := context.WithCancel(context.Background())
@@ -267,12 +277,13 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 			}
 		}
 
-		// Spawn Claude Code.
+		// Spawn agent subprocess.
 		sess, err := engine.SpawnAgent(ctx, gormDB, engine.SpawnOpts{
 			EngineID:       eng.ID,
 			CarID:          claimed.ID,
 			ContextPayload: contextPayload,
 			WorkDir:        workDir,
+			ProviderName:   providerName,
 		})
 		if err != nil {
 			log.Printf("spawn error: %v", err)

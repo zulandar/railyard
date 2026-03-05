@@ -290,6 +290,7 @@ func TestLogWriter_FlushPopulatesTokenUsage(t *testing.T) {
 		sessionID: "sess-tok",
 		carID:     "car-tok",
 		direction: "out",
+		parseFn:   ParseUsageFromContent,
 		writeFn: func(log models.AgentLog) error {
 			captured = log
 			return nil
@@ -438,6 +439,7 @@ func spawnWithMockDB(t *testing.T, ctx context.Context, opts SpawnOpts) *Session
 		sessionID: sessionID,
 		carID:     opts.CarID,
 		direction: "out",
+		parseFn:   ParseUsageFromContent,
 		writeFn: func(log models.AgentLog) error {
 			mu.Lock()
 			stdoutLogs = append(stdoutLogs, log)

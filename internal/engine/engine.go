@@ -26,6 +26,7 @@ type RegisterOpts struct {
 	Role      string
 	VMID      string
 	SessionID string
+	Provider  string // agent provider name (e.g., "claude", "codex")
 }
 
 // GenerateID creates a unique engine ID in eng-xxxxxxxx format (8-char hex).
@@ -78,6 +79,7 @@ func Register(db *gorm.DB, opts RegisterOpts) (*models.Engine, error) {
 		Role:         opts.Role,
 		Status:       StatusIdle,
 		SessionID:    opts.SessionID,
+		Provider:     opts.Provider,
 		StartedAt:    now,
 		LastActivity: now,
 	}
