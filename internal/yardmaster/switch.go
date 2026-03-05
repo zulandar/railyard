@@ -253,6 +253,12 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 		// Rebase succeeded — retry the merge (should be clean now).
 		if retryErr := gitMerge(opts.RepoDir, car.Branch, baseBranch); retryErr != nil {
 			result.FailureCategory = SwitchFailMerge
+			// Capture conflict details from the failed retry merge.
+			conflictFiles := getConflictFiles(opts.RepoDir)
+			if len(conflictFiles) > 0 {
+				result.ConflictDetails = getConflictContext(opts.RepoDir, conflictFiles)
+			}
+			gitMergeAbort(opts.RepoDir)
 			result.Error = fmt.Errorf("merge after rebase: %w", retryErr)
 			return result, result.Error
 		}
@@ -560,20 +566,32 @@ func gitRebaseAbort(repoDir string) {
 }
 
 // getConflictFiles returns the list of files with unresolved conflicts.
-// Works during both merge and rebase conflicts.
+// Uses git ls-files --unmerged which works during both merge and rebase conflicts.
 func getConflictFiles(repoDir string) []string {
-	cmd := exec.Command("git", "diff", "--name-only", "--diff-filter=U")
+	cmd := exec.Command("git", "ls-files", "--unmerged")
 	cmd.Dir = repoDir
 	out, err := cmd.Output()
 	if err != nil {
 		return nil
 	}
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	// ls-files --unmerged outputs lines like: "<mode> <hash> <stage>\t<path>"
+	// Multiple lines per file (one per stage). Deduplicate by path.
+	seen := make(map[string]bool)
 	var files []string
-	for _, l := range lines {
-		l = strings.TrimSpace(l)
-		if l != "" {
-			files = append(files, l)
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// Split on tab — path is after the tab.
+		parts := strings.SplitN(line, "\t", 2)
+		if len(parts) < 2 {
+			continue
+		}
+		path := strings.TrimSpace(parts[1])
+		if path != "" && !seen[path] {
+			seen[path] = true
+			files = append(files, path)
 		}
 	}
 	return files

@@ -1600,3 +1600,48 @@ func TestSwitch_UpdatesLocalRefAfterPush(t *testing.T) {
 		t.Errorf("origin/main not updated after push\nlocal origin/main:  %s\nremote main:        %s", localRef, remoteRef)
 	}
 }
+
+func TestGetConflictFiles_DuringRebaseConflict(t *testing.T) {
+	// getConflictFiles must detect conflicts during a rebase, not just merges.
+	repoDir, run := initTestRepo(t)
+
+	// Create conflicting branches.
+	run("git", "checkout", "-b", "base-branch")
+	if err := os.WriteFile(filepath.Join(repoDir, "conflict.txt"), []byte("base content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run("git", "add", "conflict.txt")
+	run("git", "commit", "-m", "base: add conflict.txt")
+
+	run("git", "checkout", "main")
+	run("git", "checkout", "-b", "feature-branch")
+	if err := os.WriteFile(filepath.Join(repoDir, "conflict.txt"), []byte("feature content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run("git", "add", "conflict.txt")
+	run("git", "commit", "-m", "feature: add conflict.txt")
+
+	// Attempt rebase — will conflict.
+	rebase := exec.Command("git", "rebase", "base-branch")
+	rebase.Dir = repoDir
+	rebase.CombinedOutput() // expected to fail
+
+	// getConflictFiles should find conflict.txt.
+	files := getConflictFiles(repoDir)
+	if len(files) == 0 {
+		t.Fatal("getConflictFiles returned 0 files during rebase conflict")
+	}
+	found := false
+	for _, f := range files {
+		if f == "conflict.txt" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("conflict.txt not in conflict files: %v", files)
+	}
+
+	// Clean up.
+	gitRebaseAbort(repoDir)
+}
