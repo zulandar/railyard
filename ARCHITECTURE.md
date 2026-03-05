@@ -11,7 +11,7 @@ Railyard is a multi-agent AI orchestration system that coordinates coding agents
 | **Railyard** | An employee's orchestration instance (each person runs their own) |
 | **Track** | An area of concern within the repo (backend, frontend, infra) |
 | **Car** | A unit of work (from the [Beads](https://github.com/steveyegge/beads) model) |
-| **Engine** | A worker agent (Claude Code, Codex, etc.) |
+| **Engine** | A worker agent backed by a configurable **provider** (Claude Code by default; also supports Codex, Gemini CLI, OpenCode) |
 | **Yardmaster** | The supervisor agent — merges, monitors, coordinates |
 | **Dispatch** | The planner agent — your interface, breaks down work |
 | **Telegraph** | Chat bridge — connects Railyard to Slack/Discord for commands, events, and dispatch |
@@ -571,7 +571,7 @@ Shared infrastructure hosts multiple railyard instances. Each employee gets thei
 
 The engine container image is the single deployable unit. It contains everything an engine pod needs:
 
-- Claude Code CLI (or whatever agent runtime)
+- AI coding CLI determined by the configured provider (Claude Code by default; see provider system below)
 - Git, configured with deploy keys (or credential helpers)
 - Dolt client (MySQL compatible)
 - Railyard CLI (`ry`)
@@ -581,7 +581,10 @@ The engine container image is the single deployable unit. It contains everything
 # Dockerfile.engine
 FROM ubuntu:24.04
 RUN apt-get update && apt-get install -y git tmux python3.13 python3.13-venv
+# Install agent runtimes — include whichever providers you need
 RUN npm install -g @anthropic-ai/claude-code
+# RUN npm install -g @openai/codex          # optional: Codex provider
+# RUN pip install gemini-cli                 # optional: Gemini CLI provider
 COPY ry /usr/local/bin/ry
 COPY cocoindex/ /opt/railyard/cocoindex/
 ```
@@ -594,6 +597,7 @@ owner: alice                    # unique owner ID, used for DB name + branch pre
 
 repo: git@github.com:org/myapp.git   # shared repo (same for all employees)
 branch_prefix: ry/alice              # all branches: ry/alice/{track}/{car_id}
+agent_provider: claude               # default provider for all tracks (claude|codex|gemini|opencode)
 
 dolt:
   host: dolt.railyard-infra.svc    # k8s Service DNS
@@ -635,6 +639,7 @@ tracks:
     language: mixed
     file_patterns: ["terraform/**", "docker/**", ".github/**", "Makefile"]
     engine_slots: 2
+    agent_provider: codex             # per-track override (optional)
 ```
 
 ### Pod Lifecycle
@@ -888,7 +893,7 @@ This runs on every engine instance (tmux pane locally, pod in k8s). It's not an 
 │  │    - Progress log (if resuming)            │ │
 │  │    - Recent commits on branch              │ │
 │  │    - Yardmaster messages                   │ │
-│  │ 5. Start Claude Code with context          │ │
+│  │ 5. Start agent via configured provider     │ │
 │  │ 6. Monitor: capture I/O, detect stall      │ │
 │  │ 7. On exit:                                │ │
 │  │    a. Check if car marked done in DB      │ │
@@ -908,6 +913,16 @@ This runs on every engine instance (tmux pane locally, pod in k8s). It's not an 
 │                                                  │
 └──────────────────────────────────────────────────┘
 ```
+
+### Provider System
+
+Step 5 ("Start agent via configured provider") delegates to the **provider** subsystem (`internal/engine/providers/`). The engine resolves the configured provider (from global `agent_provider` or per-track `agent_provider` override) and delegates command building and output parsing to the provider implementation.
+
+Each provider implements a common interface that knows how to:
+- Build the CLI command and arguments for its agent runtime
+- Parse agent output to detect completion, errors, and `/clear` events
+
+Built-in providers: **Claude Code** (default), **Codex**, **Gemini CLI**, **OpenCode**. New providers can be added by implementing the provider interface.
 
 ---
 
@@ -1312,7 +1327,7 @@ BuildOverlayIndex(workDir, engineID)    -- NEW: git diff main...HEAD -> parse ->
 WriteMCPConfig(workDir, engineID)       -- NEW: .mcp.json with engine-specific env vars
     |
     v
-SpawnAgent(ctx, db, opts)               -- existing; Claude Code finds .mcp.json in worktree
+SpawnAgent(ctx, db, opts)               -- existing; resolves provider, agent finds .mcp.json in worktree
     |
     v
 Agent calls search_code("auth handler")
