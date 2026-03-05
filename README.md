@@ -413,8 +413,8 @@ Railyard includes GitHub Actions workflows:
 To create a release:
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag vX.Y.Z
+git push origin vX.Y.Z
 ```
 
 ## Project Structure
@@ -450,4 +450,4 @@ docker/              Docker Compose files (pgvector)
 
 ## License
 
-All rights reserved.
+[MIT License](LICENSE)
