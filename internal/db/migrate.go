@@ -22,7 +22,6 @@ func AllModels() []interface{} {
 		&models.BroadcastAck{},
 		&models.AgentLog{},
 		&models.RailyardConfig{},
-		&models.ReindexJob{},
 		&models.DispatchSession{},
 		&models.TelegraphConversation{},
 	}

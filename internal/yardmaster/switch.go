@@ -920,23 +920,3 @@ func createDraftPR(repoDir, title, body, branch string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// CreateReindexJob inserts a reindex_jobs row after a successful merge.
-func CreateReindexJob(db *gorm.DB, track, commitHash string) error {
-	if db == nil {
-		return fmt.Errorf("yardmaster: db is required")
-	}
-	if track == "" {
-		return fmt.Errorf("yardmaster: track is required")
-	}
-
-	job := models.ReindexJob{
-		Track:         track,
-		TriggerCommit: commitHash,
-		Status:        "pending",
-		CreatedAt:     time.Now(),
-	}
-	if err := db.Create(&job).Error; err != nil {
-		return fmt.Errorf("yardmaster: create reindex job: %w", err)
-	}
-	return nil
-}

@@ -455,51 +455,6 @@ func TestIntegration_UnblockDeps_DBError(t *testing.T) {
 	}
 }
 
-// --- CreateReindexJob integration tests ---
-
-func TestIntegration_CreateReindexJob(t *testing.T) {
-	gormDB := setupTestDB(t, "railyard_ym_reindex1")
-
-	err := CreateReindexJob(gormDB, "backend", "abc123def")
-	if err != nil {
-		t.Fatalf("CreateReindexJob: %v", err)
-	}
-
-	var job models.ReindexJob
-	if err := gormDB.First(&job).Error; err != nil {
-		t.Fatalf("query reindex job: %v", err)
-	}
-	if job.Track != "backend" {
-		t.Errorf("Track = %q, want %q", job.Track, "backend")
-	}
-	if job.TriggerCommit != "abc123def" {
-		t.Errorf("TriggerCommit = %q, want %q", job.TriggerCommit, "abc123def")
-	}
-	if job.Status != "pending" {
-		t.Errorf("Status = %q, want %q", job.Status, "pending")
-	}
-}
-
-func TestIntegration_CreateReindexJob_DBError(t *testing.T) {
-	gormDB := setupTestDB(t, "railyard_ym_reindexerr")
-	sqlDB, _ := gormDB.DB()
-	sqlDB.Close()
-
-	err := CreateReindexJob(gormDB, "backend", "abc123")
-	if err == nil {
-		t.Fatal("expected error for closed DB")
-	}
-}
-
-func TestIntegration_CreateReindexJob_EmptyTrackWithDB(t *testing.T) {
-	gormDB := setupTestDB(t, "railyard_ym_reindextrack")
-
-	err := CreateReindexJob(gormDB, "", "abc123")
-	if err == nil {
-		t.Fatal("expected error for empty track")
-	}
-}
-
 // --- Switch with real git repo ---
 
 func setupGitRepo(t *testing.T) string {

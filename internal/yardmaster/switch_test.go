@@ -162,25 +162,6 @@ func TestUnblockDeps_EmptyCarID(t *testing.T) {
 	}
 }
 
-// --- CreateReindexJob validation tests ---
-
-func TestCreateReindexJob_NilDB(t *testing.T) {
-	err := CreateReindexJob(nil, "backend", "abc123")
-	if err == nil {
-		t.Fatal("expected error for nil db")
-	}
-	if !strings.Contains(err.Error(), "db is required") {
-		t.Errorf("error = %q", err)
-	}
-}
-
-func TestCreateReindexJob_EmptyTrack(t *testing.T) {
-	err := CreateReindexJob(nil, "", "abc123")
-	if err == nil {
-		t.Fatal("expected error")
-	}
-}
-
 // --- gitPush tests ---
 
 func TestGitPush_NoRemote(t *testing.T) {

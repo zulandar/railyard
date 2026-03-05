@@ -60,7 +60,6 @@ func TestAutoMigrate_CreatesAllTables(t *testing.T) {
 		"broadcast_acks",
 		"agent_logs",
 		"railyard_configs",
-		"reindex_jobs",
 		"dispatch_sessions",
 		"telegraph_conversations",
 	}

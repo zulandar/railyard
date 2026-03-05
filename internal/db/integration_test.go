@@ -188,7 +188,6 @@ func TestIntegration_AutoMigrate(t *testing.T) {
 		"messages",
 		"agent_logs",
 		"railyard_configs",
-		"reindex_jobs",
 	}
 
 	var tables []string

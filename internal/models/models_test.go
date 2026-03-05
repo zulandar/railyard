@@ -235,26 +235,6 @@ func TestRailyardConfig_Fields(t *testing.T) {
 	assertFieldType(t, typ, "Owner", "string")
 }
 
-func TestReindexJob_Fields(t *testing.T) {
-	typ := reflect.TypeOf(ReindexJob{})
-
-	assertGormTag(t, typ, "ID", "primaryKey")
-	assertGormTag(t, typ, "ID", "autoIncrement")
-	assertGormTag(t, typ, "Track", "size:64")
-	assertGormTag(t, typ, "Track", "not null")
-	assertGormTag(t, typ, "TriggerCommit", "size:40")
-	assertGormTag(t, typ, "Status", "size:16")
-	assertGormTag(t, typ, "Status", "default:pending")
-	assertGormTag(t, typ, "GPUBoxID", "size:64")
-	assertGormTag(t, typ, "ErrorMessage", "type:text")
-
-	assertFieldType(t, typ, "ID", "uint")
-	assertFieldType(t, typ, "FilesChanged", "int")
-	assertFieldType(t, typ, "ChunksUpdated", "int")
-	assertFieldType(t, typ, "StartedAt", "*time.Time")
-	assertFieldType(t, typ, "CompletedAt", "*time.Time")
-	assertFieldType(t, typ, "CreatedAt", "time.Time")
-}
 
 func TestCar_Instantiation(t *testing.T) {
 	parentID := "parent-001"
@@ -519,27 +499,6 @@ func TestTelegraphConversation_Instantiation(t *testing.T) {
 	}
 }
 
-func TestReindexJob_Instantiation(t *testing.T) {
-	now := time.Now()
-	rj := ReindexJob{
-		ID:            1,
-		Track:         "backend",
-		TriggerCommit: "abc123",
-		Status:        "pending",
-		FilesChanged:  10,
-		ChunksUpdated: 5,
-		GPUBoxID:      "gpu-1",
-		StartedAt:     &now,
-		CompletedAt:   nil,
-		ErrorMessage:  "",
-	}
-	if rj.FilesChanged != 10 {
-		t.Errorf("FilesChanged = %d, want 10", rj.FilesChanged)
-	}
-	if rj.CompletedAt != nil {
-		t.Error("CompletedAt should be nil for pending job")
-	}
-}
 
 // ---------------------------------------------------------------------------
 // CRUD tests — verify AutoMigrate creates tables and basic operations work

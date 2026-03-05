@@ -125,7 +125,6 @@ func TestRenderPrompt_ContainsResponsibilities(t *testing.T) {
 		"Switch completed branches",
 		"Handle stalls",
 		"Manage dependencies",
-		"Trigger reindexing",
 		"Escalate to human",
 	} {
 		if !strings.Contains(prompt, keyword) {
