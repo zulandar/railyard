@@ -58,27 +58,38 @@ func Start(opts StartOpts) error {
 		}
 	}
 
-	// Launch claude interactively — user attaches to tmux pane and converses.
-	cmd := exec.Command("claude",
-		"--dangerously-skip-permissions",
-		"--append-system-prompt", prompt,
-	)
-	cmd.Dir = workDir
+	// Resolve the agent provider from config (defaults to "claude").
+	providerName := opts.Config.AgentProvider
+	if providerName == "" {
+		providerName = "claude"
+	}
+	provider, err := engine.GetProvider(providerName)
+	if err != nil {
+		return fmt.Errorf("dispatch: resolve provider: %w", err)
+	}
+
+	// Launch agent interactively — user attaches to tmux pane and converses.
+	cmd := provider.BuildInteractiveCommand(prompt, workDir)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("dispatch: claude session: %w", err)
+		return fmt.Errorf("dispatch: agent session: %w", err)
 	}
 	return nil
 }
 
-// BuildCommand constructs the exec.Cmd for the dispatch Claude session.
-// Exported for testing.
+// BuildCommand constructs the exec.Cmd for the dispatch agent session.
+// Exported for testing. Uses the default claude provider.
 func BuildCommand(prompt string) *exec.Cmd {
-	return exec.Command("claude",
-		"--dangerously-skip-permissions",
-		"--append-system-prompt", prompt,
-	)
+	provider, err := engine.GetProvider("claude")
+	if err != nil {
+		// Fallback to direct command if provider not registered.
+		return exec.Command("claude",
+			"--dangerously-skip-permissions",
+			"--append-system-prompt", prompt,
+		)
+	}
+	return provider.BuildInteractiveCommand(prompt, "")
 }

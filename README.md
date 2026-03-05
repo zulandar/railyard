@@ -8,7 +8,7 @@
   <a href="http://discord.gg/qNtYxa7mYf"><strong>Discord</strong></a>
 </p>
 
-Multi-agent AI orchestration for coding. Railyard coordinates multiple Claude Code agents across tracks (backend, frontend, infra) with per-branch isolation, a version-controlled SQL database, semantic code search, and automated supervision.
+Multi-agent AI orchestration for coding. Railyard coordinates multiple AI coding agents (Claude Code, Codex, Gemini, OpenCode) across tracks (backend, frontend, infra) with per-branch isolation, a version-controlled SQL database, semantic code search, and automated supervision.
 
 Each developer runs their own Railyard instance against the same repo. Agents work on isolated branches (`ry/{owner}/{track}/{car-id}`), and a supervisor (Yardmaster) handles merges, stall detection, and dependency management.
 
@@ -18,7 +18,7 @@ Each developer runs their own Railyard instance against the same repo. Agents wo
 |---|---|
 | **Track** | An area of concern within the repo (backend, frontend, infra) |
 | **Car** | A unit of work (task, bug, feature, epic) |
-| **Engine** | A worker agent (Claude Code session that claims and executes cars) |
+| **Engine** | A worker agent (AI coding CLI session that claims and executes cars) |
 | **Yardmaster** | Supervisor agent — merges branches, monitors engines, handles stalls |
 | **Dispatch** | Planner agent — your interface, decomposes requests into cars |
 | **Switch** | Merging a completed car's branch back to main |
@@ -43,7 +43,7 @@ Each developer runs their own Railyard instance against the same repo. Agents wo
   │     └─────┬─────┘     │
   │           │           │
 ┌─▼───────┐ ┌─▼───────┐ ┌─▼───────┐
-│Engine 1 │ │Engine 2 │ │Engine N │  ← Claude Code agents
+│Engine 1 │ │Engine 2 │ │Engine N │  ← AI coding agents (Claude, Codex, Gemini, OpenCode)
 └─────┬───┘ └─────┬───┘ └────┬────┘
       │           │          │
       │     ┌─────▼─────┐   │
@@ -57,7 +57,7 @@ Each developer runs their own Railyard instance against the same repo. Agents wo
 - **Dolt** (version-controlled MySQL) stores all state: cars, engine status, messages, logs
 - **pgvector** (PostgreSQL + vector extension) stores semantic code embeddings for search
 - **tmux** manages agent sessions — each engine, Dispatch, and Yardmaster runs in its own pane
-- **Engines** poll for ready cars, spawn Claude Code sessions with MCP-powered code search, and handle completion/stall outcomes
+- **Engines** poll for ready cars, spawn AI coding CLI sessions with MCP-powered code search, and handle completion/stall outcomes
 - **Yardmaster** runs tests and merges completed branches back to main
 
 ## Prerequisites
@@ -65,7 +65,11 @@ Each developer runs their own Railyard instance against the same repo. Agents wo
 - **Go 1.25+**
 - **Dolt** — version-controlled SQL database ([install](https://docs.dolthub.com/introduction/installation))
 - **tmux** — terminal multiplexer
-- **Claude Code CLI** — `npm install -g @anthropic-ai/claude-code`
+- **AI coding CLI** (at least one):
+  - Claude Code (default) — `npm install -g @anthropic-ai/claude-code`
+  - Codex — `npm install -g @openai/codex`
+  - Gemini — `npm install -g @google/gemini-cli`
+  - OpenCode — `go install github.com/opencode-ai/opencode@latest`
 - **Docker** (optional) — for pgvector/CocoIndex semantic search
 - **Python 3.13+** (optional) — for CocoIndex semantic search
 
@@ -350,6 +354,7 @@ See [`railyard.example.yaml`](railyard.example.yaml) for a copy-paste ready temp
 ```yaml
 owner: alice                            # Your identity (branch prefix: ry/alice/...)
 repo: git@github.com:org/repo.git       # Target repository
+agent_provider: claude                  # AI CLI provider (claude, codex, gemini, opencode)
 # branch_prefix: ry/alice               # Override default ry/{owner}
 # default_acceptance: "Tests pass, code reviewed"  # Default acceptance criteria for Dispatch
 # require_pr: true                      # Create draft PRs instead of direct merge to main
@@ -387,6 +392,7 @@ tracks:
     language: typescript
     file_patterns: ["src/**", "*.ts", "*.tsx", "*.css"]
     engine_slots: 2
+    agent_provider: codex               # Per-track override (inherits global if omitted)
     test_command: "npm test"            # Any shell command works
     conventions:
       framework: "Next.js 15"
@@ -396,7 +402,7 @@ tracks:
 ## How It Works
 
 1. **Dispatch** decomposes your request into structured cars with dependencies — either via the CLI (`ry dispatch`) or chat (@mention the bot in Slack/Discord via Telegraph)
-2. **Engines** poll the database for ready cars (no unresolved blockers), claim one atomically, and spawn a Claude Code session with full context (car description, track conventions, prior progress, recent commits)
+2. **Engines** poll the database for ready cars (no unresolved blockers), claim one atomically, and spawn an AI coding CLI session (using the configured provider) with full context (car description, track conventions, prior progress, recent commits)
 3. Each engine works on an isolated git branch (`ry/{owner}/{track}/{car-id}`)
 4. If CocoIndex is configured, each engine gets an MCP server for semantic code search — the overlay index tracks files changed on the engine's branch so search results are always current
 5. When an agent finishes, it calls `ry complete` — the engine daemon picks up the next car
@@ -427,6 +433,7 @@ internal/
   db/                Dolt/GORM connection and migrations
   dispatch/          Dispatch planner agent (decomposition)
   engine/            Engine daemon: claim, spawn, stall detection, outcomes, overlay
+    providers/       AI CLI provider implementations (Claude, Codex, Gemini, OpenCode)
   messaging/         Agent-to-agent message passing via DB
   models/            GORM models (Car, Engine, Message, Track, etc.)
   orchestration/     tmux session management, start/stop/scale/status

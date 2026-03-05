@@ -9,6 +9,8 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/zulandar/railyard/internal/config"
 	"github.com/zulandar/railyard/internal/db"
+	"github.com/zulandar/railyard/internal/engine"
+	_ "github.com/zulandar/railyard/internal/engine/providers"
 	"github.com/zulandar/railyard/internal/orchestration"
 )
 
@@ -50,7 +52,12 @@ func runDoctor(cmd *cobra.Command, configPath string) error {
 		results = append(results, checkBinary(bin))
 	}
 
-	// 3. Credentials
+	// 3. Provider binaries (only if config is loaded).
+	if cfg != nil {
+		results = append(results, checkProviderBinaries(cfg)...)
+	}
+
+	// 4. Credentials
 	if cfg != nil {
 		results = append(results, checkCredentials(cfg.Dolt.Username, cfg.Dolt.Password))
 	}
@@ -273,4 +280,62 @@ func checkGitRepo() checkResult {
 		return checkResult{"Git repo", "FAIL", "not inside a git repository"}
 	}
 	return checkResult{"Git repo", "PASS", "valid"}
+}
+
+// checkProviderBinaries validates that each configured agent provider's binary is available.
+func checkProviderBinaries(cfg *config.Config) []checkResult {
+	// Collect unique provider names from config.
+	providers := make(map[string]bool)
+	if cfg.AgentProvider != "" {
+		providers[cfg.AgentProvider] = true
+	}
+	for _, t := range cfg.Tracks {
+		if t.AgentProvider != "" {
+			providers[t.AgentProvider] = true
+		}
+	}
+
+	var results []checkResult
+	for name := range providers {
+		p, err := engine.GetProvider(name)
+		if err != nil {
+			results = append(results, checkResult{
+				name:   fmt.Sprintf("Provider: %s", name),
+				status: "WARN",
+				detail: fmt.Sprintf("provider %q not registered", name),
+			})
+			continue
+		}
+		if err := p.ValidateBinary(); err != nil {
+			results = append(results, checkResult{
+				name:   fmt.Sprintf("Provider: %s", name),
+				status: "WARN",
+				detail: fmt.Sprintf("binary not found — %s", providerInstallHint(name)),
+			})
+		} else {
+			results = append(results, checkResult{
+				name:   fmt.Sprintf("Provider: %s", name),
+				status: "PASS",
+				detail: fmt.Sprintf("%s binary available", name),
+			})
+		}
+	}
+
+	return results
+}
+
+// providerInstallHint returns installation instructions for a provider.
+func providerInstallHint(name string) string {
+	switch name {
+	case "claude":
+		return "install: npm install -g @anthropic-ai/claude-code"
+	case "codex":
+		return "install: npm install -g @openai/codex"
+	case "gemini":
+		return "install: npm install -g @google/gemini-cli"
+	case "opencode":
+		return "install: go install github.com/opencode-ai/opencode@latest"
+	default:
+		return fmt.Sprintf("ensure %q is in PATH", name)
+	}
 }

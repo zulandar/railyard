@@ -254,6 +254,7 @@ type EngineInfo struct {
 	ID           string
 	Track        string
 	Status       string
+	Provider     string
 	CurrentCar   string
 	LastActivity time.Time
 	Uptime       time.Duration
@@ -305,6 +306,7 @@ func Status(db *gorm.DB, tmux Tmux, cfg *config.Config) (*StatusInfo, error) {
 			ID:           e.ID,
 			Track:        e.Track,
 			Status:       e.Status,
+			Provider:     e.Provider,
 			CurrentCar:   e.CurrentCar,
 			LastActivity: e.LastActivity,
 			Uptime:       now.Sub(e.StartedAt),
@@ -397,15 +399,19 @@ func FormatStatus(info *StatusInfo) string {
 
 	// Engine table.
 	b.WriteString("ENGINES\n")
-	b.WriteString(fmt.Sprintf("%-14s %-12s %-10s %-14s %-20s %s\n",
-		"ID", "TRACK", "STATUS", "CURRENT CAR", "LAST ACTIVITY", "UPTIME"))
+	b.WriteString(fmt.Sprintf("%-14s %-12s %-10s %-10s %-14s %-20s %s\n",
+		"ID", "TRACK", "STATUS", "PROVIDER", "CURRENT CAR", "LAST ACTIVITY", "UPTIME"))
 	for _, e := range info.Engines {
 		car := e.CurrentCar
 		if car == "" {
 			car = "-"
 		}
-		b.WriteString(fmt.Sprintf("%-14s %-12s %-10s %-14s %-20s %s\n",
-			e.ID, e.Track, e.Status, car,
+		provider := e.Provider
+		if provider == "" {
+			provider = "claude"
+		}
+		b.WriteString(fmt.Sprintf("%-14s %-12s %-10s %-10s %-14s %-20s %s\n",
+			e.ID, e.Track, e.Status, provider, car,
 			e.LastActivity.Format("15:04:05"),
 			formatDuration(e.Uptime)))
 	}

@@ -118,6 +118,15 @@ func (m *MockAdapter) StartThread(ctx context.Context, channelID, messageID, rep
 	return threadID, nil
 }
 
+// CloseInbound closes the inbound channel without disconnecting the adapter.
+// This simulates a socket drop where the REST API is still usable.
+func (m *MockAdapter) CloseInbound() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.closed = true // prevent double-close in Close()
+	close(m.inbound)
+}
+
 // --- Test helpers ---
 
 // SimulateInbound sends a message into the inbound channel as if it came

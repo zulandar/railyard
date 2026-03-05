@@ -15,13 +15,14 @@ import (
 	"gorm.io/gorm"
 )
 
-// SpawnOpts holds parameters for spawning a claude subprocess.
+// SpawnOpts holds parameters for spawning an agent subprocess.
 type SpawnOpts struct {
 	EngineID       string
 	CarID          string
 	ContextPayload string
-	WorkDir        string // working directory for claude
-	ClaudeBinary   string // path to claude binary, default "claude"
+	WorkDir        string // working directory for the agent
+	ClaudeBinary   string // path to claude binary, default "claude" (legacy; prefer ProviderName)
+	ProviderName   string // agent provider name (e.g., "claude", "codex"); defaults to "claude"
 }
 
 // Session represents a running claude subprocess.
@@ -49,7 +50,8 @@ type logWriter struct {
 	mu      sync.Mutex
 	buf     bytes.Buffer
 	writeFn func(models.AgentLog) error
-	onWrite func([]byte) // optional callback invoked on each Write
+	parseFn func(string) UsageStats // provider-specific output parser (nil for stderr)
+	onWrite func([]byte)            // optional callback invoked on each Write
 }
 
 // DefaultFlushInterval is the interval between periodic log flushes.
@@ -64,7 +66,9 @@ func GenerateSessionID() (string, error) {
 	return "sess-" + hex.EncodeToString(b), nil
 }
 
-// SpawnAgent spawns a claude CLI subprocess with the given context payload.
+// SpawnAgent spawns an agent CLI subprocess with the given context payload.
+// It resolves the provider from opts.ProviderName (defaulting to "claude")
+// and delegates command building and output parsing to the provider.
 func SpawnAgent(ctx context.Context, db *gorm.DB, opts SpawnOpts) (*Session, error) {
 	if opts.EngineID == "" {
 		return nil, fmt.Errorf("engine: engineID is required")
@@ -76,15 +80,26 @@ func SpawnAgent(ctx context.Context, db *gorm.DB, opts SpawnOpts) (*Session, err
 		return nil, fmt.Errorf("engine: contextPayload is required")
 	}
 
+	// Resolve provider (default to claude for backward compatibility).
+	providerName := opts.ProviderName
+	if providerName == "" {
+		providerName = "claude"
+	}
+	provider, err := GetProvider(providerName)
+	if err != nil {
+		return nil, fmt.Errorf("engine: resolve provider: %w", err)
+	}
+
 	sessionID, err := GenerateSessionID()
 	if err != nil {
 		return nil, err
 	}
 
-	cmd, cancel := buildCommand(ctx, opts)
+	cmd, cancel := provider.BuildCommand(ctx, opts)
 
-	stdoutWriter := newLogWriter(db, opts.EngineID, sessionID, opts.CarID, "out")
-	stderrWriter := newLogWriter(db, opts.EngineID, sessionID, opts.CarID, "err")
+	parseFn := provider.ParseOutput
+	stdoutWriter := newLogWriter(db, opts.EngineID, sessionID, opts.CarID, "out", parseFn)
+	stderrWriter := newLogWriter(db, opts.EngineID, sessionID, opts.CarID, "err", nil)
 
 	cmd.Stdout = stdoutWriter
 	cmd.Stderr = stderrWriter
@@ -171,12 +186,14 @@ func buildCommand(ctx context.Context, opts SpawnOpts) (*exec.Cmd, context.Cance
 }
 
 // newLogWriter creates a logWriter that flushes to the DB via db.Create.
-func newLogWriter(db *gorm.DB, engineID, sessionID, carID, direction string) *logWriter {
+// parseFn is the provider-specific output parser (pass nil for stderr).
+func newLogWriter(db *gorm.DB, engineID, sessionID, carID, direction string, parseFn func(string) UsageStats) *logWriter {
 	return &logWriter{
 		engineID:  engineID,
 		sessionID: sessionID,
 		carID:     carID,
 		direction: direction,
+		parseFn:   parseFn,
 		writeFn: func(log models.AgentLog) error {
 			return db.Create(&log).Error
 		},
@@ -215,8 +232,8 @@ func (w *logWriter) Flush() error {
 		CreatedAt: time.Now(),
 	}
 
-	if w.direction == "out" {
-		usage := ParseUsageFromContent(content)
+	if w.parseFn != nil {
+		usage := w.parseFn(content)
 		log.InputTokens = usage.InputTokens
 		log.OutputTokens = usage.OutputTokens
 		log.TokenCount = usage.InputTokens + usage.OutputTokens

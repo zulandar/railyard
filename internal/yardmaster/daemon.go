@@ -49,7 +49,7 @@ func RunDaemon(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath,
 	out = logutil.NewTimestampWriter(out)
 
 	startedAt := time.Now()
-	if err := registerYardmaster(db); err != nil {
+	if err := registerYardmaster(db, cfg.AgentProvider); err != nil {
 		return fmt.Errorf("yardmaster: register: %w", err)
 	}
 	fmt.Fprintf(out, "Yardmaster registered (id=%s)\n", YardmasterID)
@@ -136,13 +136,17 @@ func RunDaemon(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath,
 }
 
 // registerYardmaster creates or updates the yardmaster engine record.
-func registerYardmaster(db *gorm.DB) error {
+func registerYardmaster(db *gorm.DB, providerName string) error {
 	now := time.Now()
+	if providerName == "" {
+		providerName = "claude"
+	}
 	eng := models.Engine{
 		ID:           YardmasterID,
 		Track:        "*",
 		Role:         "yardmaster",
 		Status:       engine.StatusIdle,
+		Provider:     providerName,
 		StartedAt:    now,
 		LastActivity: now,
 	}
@@ -156,6 +160,7 @@ func registerYardmaster(db *gorm.DB) error {
 	return db.Model(&models.Engine{}).Where("id = ?", YardmasterID).Updates(map[string]interface{}{
 		"status":        engine.StatusIdle,
 		"role":          "yardmaster",
+		"provider":      providerName,
 		"track":         "*",
 		"started_at":    now,
 		"last_activity": now,
@@ -202,16 +207,17 @@ func processInbox(ctx context.Context, db *gorm.DB, cfg *config.Config, configPa
 			ackMsg(db, msg)
 
 		case subject == "help" || subject == "stuck":
-			fmt.Fprintf(out, "Inbox: %s from %s (car %s) — escalating to Claude\n", subject, msg.FromAgent, msg.CarID)
+			fmt.Fprintf(out, "Inbox: %s from %s (car %s) — escalating to agent\n", subject, msg.FromAgent, msg.CarID)
 			escWg.Add(1)
 			go func(m models.Message) {
 				defer escWg.Done()
-				result, escErr := EscalateToClaude(ctx, EscalateOpts{
-					CarID:    m.CarID,
-					EngineID: m.FromAgent,
-					Reason:   m.Subject,
-					Details:  m.Body,
-					DB:       db,
+				result, escErr := EscalateToAgent(ctx, EscalateOpts{
+					CarID:        m.CarID,
+					EngineID:     m.FromAgent,
+					Reason:       m.Subject,
+					Details:      m.Body,
+					DB:           db,
+					ProviderName: cfg.AgentProvider,
 				})
 				if escErr != nil {
 					log.Printf("escalation error: %v", escErr)
@@ -698,11 +704,12 @@ func maybeSwitchEscalate(ctx context.Context, db *gorm.DB, cfg *config.Config, c
 		escWg.Add(1)
 		go func(carID, reason string) {
 			defer escWg.Done()
-			res, escErr := EscalateToClaude(ctx, EscalateOpts{
-				CarID:   carID,
-				Reason:  reason,
-				Details: fmt.Sprintf("Infrastructure test failure for car %s. The test command failed due to environment issues (missing dependencies, broken Docker, misconfigured commands), not code problems. Latest: %v", carID, switchErr),
-				DB:      db,
+			res, escErr := EscalateToAgent(ctx, EscalateOpts{
+				CarID:        carID,
+				Reason:       reason,
+				Details:      fmt.Sprintf("Infrastructure test failure for car %s. The test command failed due to environment issues (missing dependencies, broken Docker, misconfigured commands), not code problems. Latest: %v", carID, switchErr),
+				DB:           db,
+				ProviderName: cfg.AgentProvider,
 			})
 			if escErr != nil {
 				log.Printf("escalation error for %s: %v", carID, escErr)
@@ -736,11 +743,12 @@ func maybeSwitchEscalate(ctx context.Context, db *gorm.DB, cfg *config.Config, c
 	escWg.Add(1)
 	go func(carID string, failCount int, reason string) {
 		defer escWg.Done()
-		res, escErr := EscalateToClaude(ctx, EscalateOpts{
-			CarID:   carID,
-			Reason:  reason,
-			Details: fmt.Sprintf("Car %s has failed %d times. Latest: %v\n%s", carID, failCount, switchErr, conflictDetails),
-			DB:      db,
+		res, escErr := EscalateToAgent(ctx, EscalateOpts{
+			CarID:        carID,
+			Reason:       reason,
+			Details:      fmt.Sprintf("Car %s has failed %d times. Latest: %v\n%s", carID, failCount, switchErr, conflictDetails),
+			DB:           db,
+			ProviderName: cfg.AgentProvider,
 		})
 		if escErr != nil {
 			log.Printf("escalation error for %s: %v", carID, escErr)

@@ -49,6 +49,15 @@ repo: git@github.com:org/myproject.git
 # Your git identity (from ~/.gitconfig or PAT) remains the commit author.
 
 # ---------------------------------------------------------------------------
+# Agent provider (optional — default: claude)
+# ---------------------------------------------------------------------------
+
+# Which AI coding CLI to use as the engine runtime.
+# Supported providers: claude, codex, gemini, opencode
+# This sets the global default — individual tracks can override it.
+# agent_provider: claude
+
+# ---------------------------------------------------------------------------
 # Dolt database connection (optional — defaults shown)
 # ---------------------------------------------------------------------------
 
@@ -101,6 +110,7 @@ tracks:
     file_patterns: ["cmd/**", "internal/**", "pkg/**", "*.go"]
     engine_slots: 3
     test_command: "go test ./..."
+    # agent_provider: claude    # override global provider for this track
     conventions:
       style: "stdlib-first, no frameworks"
       test_framework: "stdlib table-driven"
@@ -111,6 +121,7 @@ tracks:
   #   engine_slots: 2
   #   pre_test_command: "npm install"
   #   test_command: "npm test"
+  #   agent_provider: codex    # override global provider for this track
   #   conventions:
   #     framework: "Next.js 15"
   #     styling: "Tailwind CSS"
