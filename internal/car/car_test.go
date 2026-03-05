@@ -143,6 +143,17 @@ func TestCreateOpts_Defaults(t *testing.T) {
 	}
 }
 
+func TestCreateOpts_RequestedBy(t *testing.T) {
+	opts := CreateOpts{
+		Title:       "test",
+		Track:       "backend",
+		RequestedBy: "alice",
+	}
+	if opts.RequestedBy != "alice" {
+		t.Errorf("RequestedBy = %q, want alice", opts.RequestedBy)
+	}
+}
+
 func TestListFilters_ZeroValue(t *testing.T) {
 	f := ListFilters{}
 	if f.Track != "" || f.Status != "" || f.Type != "" || f.Assignee != "" || f.ParentID != "" {

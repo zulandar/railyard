@@ -85,6 +85,9 @@ func runCarCreate(cmd *cobra.Command, configPath string, opts car.CreateOpts) er
 		return err
 	}
 	opts.BranchPrefix = cfg.BranchPrefix
+	if opts.RequestedBy == "" {
+		opts.RequestedBy = cfg.Owner
+	}
 
 	// Snapshot the current base branch at car creation time.
 	repoDir, _ := os.Getwd()

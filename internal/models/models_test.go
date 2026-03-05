@@ -76,8 +76,10 @@ func TestCar_Fields(t *testing.T) {
 	assertGormTag(t, typ, "DesignNotes", "type:text")
 	assertGormTag(t, typ, "Acceptance", "type:text")
 	assertGormTag(t, typ, "SkipTests", "default:false")
+	assertGormTag(t, typ, "RequestedBy", "size:64")
 
 	assertFieldType(t, typ, "ID", "string")
+	assertFieldType(t, typ, "RequestedBy", "string")
 	assertFieldType(t, typ, "SkipTests", "bool")
 	assertFieldType(t, typ, "ParentID", "*string")
 	assertFieldType(t, typ, "CreatedAt", "time.Time")
