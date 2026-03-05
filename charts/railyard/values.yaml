@@ -1,0 +1,160 @@
+# Railyard Helm chart values
+#
+# This chart deploys a complete Railyard instance: Dolt, pgvector,
+# dispatch, yardmaster, dashboard, engine pods, and optionally Telegraph.
+
+# -- Project name used for namespace derivation and resource naming.
+project: ""
+
+# -- Git repository settings.
+git:
+  owner: ""
+  repo: ""
+  defaultBranch: main
+
+# ---------------------------------------------------------------------------
+# Container image
+# ---------------------------------------------------------------------------
+image:
+  repository: ghcr.io/zulandar/railyard
+  tag: ""  # defaults to .Chart.AppVersion
+  pullPolicy: IfNotPresent
+
+# -- Name of an existing image pull secret.
+imagePullSecret: ""
+
+# -- Service account name. Created if serviceAccount.create is true.
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# ---------------------------------------------------------------------------
+# Dolt database
+# ---------------------------------------------------------------------------
+dolt:
+  # -- Deploy Dolt as a StatefulSet inside the cluster.
+  internal: true
+  # -- Connection settings (used whether internal or external).
+  host: ""       # auto-derived when internal=true
+  port: 3306
+  database: ""   # default: railyard_{project}
+  username: root
+  password: ""
+  tls:
+    enabled: false
+    caSecret: ""       # secret name containing ca.crt
+    clientSecret: ""   # secret name containing tls.crt + tls.key
+    skipVerify: false
+  # -- Storage settings for the internal StatefulSet.
+  storage:
+    size: 10Gi
+    storageClass: ""
+  # -- Resource requests/limits for the internal Dolt pod.
+  resources: {}
+
+# ---------------------------------------------------------------------------
+# pgvector (PostgreSQL + pgvector for CocoIndex)
+# ---------------------------------------------------------------------------
+pgvector:
+  # -- Deploy pgvector as a StatefulSet inside the cluster.
+  internal: true
+  # -- Connection settings (used whether internal or external).
+  host: ""       # auto-derived when internal=true
+  port: 5432
+  database: cocoindex
+  username: cocoindex
+  password: cocoindex
+  # -- Storage settings for the internal StatefulSet.
+  storage:
+    size: 10Gi
+    storageClass: ""
+  # -- Resource requests/limits for the internal pgvector pod.
+  resources: {}
+
+# ---------------------------------------------------------------------------
+# Tracks
+# ---------------------------------------------------------------------------
+# Each track defines an area of concern with its own engine pool.
+tracks:
+  - name: backend
+    engineSlots: 3
+    minReplicas: 1
+    maxReplicas: 3
+    language: go
+    testCommand: "go test ./..."
+
+# ---------------------------------------------------------------------------
+# Engine pods
+# ---------------------------------------------------------------------------
+engine:
+  # -- Agent provider: claude, codex, gemini, opencode.
+  agentProvider: claude
+  # -- Resource requests/limits per engine pod.
+  resources: {}
+  # -- Node selector for engine pods.
+  nodeSelector: {}
+  # -- Tolerations for engine pods.
+  tolerations: []
+  # -- Affinity rules for engine pods.
+  affinity: {}
+  # -- Extra environment variables for engine pods.
+  extraEnv: []
+
+# ---------------------------------------------------------------------------
+# Dispatch
+# ---------------------------------------------------------------------------
+dispatch:
+  replicas: 1
+  resources: {}
+
+# ---------------------------------------------------------------------------
+# Yardmaster
+# ---------------------------------------------------------------------------
+yardmaster:
+  replicas: 1
+  resources: {}
+
+# ---------------------------------------------------------------------------
+# Dashboard
+# ---------------------------------------------------------------------------
+dashboard:
+  replicas: 1
+  resources: {}
+  service:
+    type: ClusterIP
+    port: 8080
+  ingress:
+    enabled: false
+    className: ""
+    host: ""
+    annotations: {}
+    tls: []
+  # -- OAuth2 Proxy sidecar for dashboard authentication.
+  oauth2proxy:
+    enabled: false
+    image:
+      repository: quay.io/oauth2-proxy/oauth2-proxy
+      tag: "v7.6.0"
+    provider: github
+    clientID: ""
+    clientSecret: ""
+    cookieSecret: ""
+    extraArgs: []
+
+# ---------------------------------------------------------------------------
+# Telegraph (chat bridge — Slack or Discord)
+# ---------------------------------------------------------------------------
+telegraph:
+  enabled: false
+  replicas: 1
+  resources: {}
+  platform: slack   # slack or discord
+  channel: ""
+  slack:
+    botToken: ""    # or reference a secret
+    appToken: ""
+  discord:
+    botToken: ""
+    guildID: ""
+    channelID: ""
