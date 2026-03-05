@@ -272,7 +272,7 @@ func TestProviderInstallHint(t *testing.T) {
 	}{
 		{"claude", "install: npm install -g @anthropic-ai/claude-code"},
 		{"codex", "install: npm install -g @openai/codex"},
-		{"gemini", "install: npm install -g @anthropic-ai/gemini-cli"},
+		{"gemini", "install: npm install -g @google/gemini-cli"},
 		{"opencode", "install: go install github.com/opencode-ai/opencode@latest"},
 		{"unknown", `ensure "unknown" is in PATH`},
 	}

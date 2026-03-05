@@ -59,7 +59,11 @@ func Start(opts StartOpts) error {
 	}
 
 	// Resolve the agent provider from config (defaults to "claude").
-	provider, err := engine.GetProvider(opts.Config.AgentProvider)
+	providerName := opts.Config.AgentProvider
+	if providerName == "" {
+		providerName = "claude"
+	}
+	provider, err := engine.GetProvider(providerName)
 	if err != nil {
 		return fmt.Errorf("dispatch: resolve provider: %w", err)
 	}

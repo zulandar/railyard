@@ -584,7 +584,7 @@ RUN apt-get update && apt-get install -y git tmux python3.13 python3.13-venv
 # Install agent runtimes — include whichever providers you need
 RUN npm install -g @anthropic-ai/claude-code
 # RUN npm install -g @openai/codex          # optional: Codex provider
-# RUN pip install gemini-cli                 # optional: Gemini CLI provider
+# RUN npm install -g @google/gemini-cli       # optional: Gemini CLI provider
 COPY ry /usr/local/bin/ry
 COPY cocoindex/ /opt/railyard/cocoindex/
 ```

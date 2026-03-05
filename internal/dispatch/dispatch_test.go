@@ -251,6 +251,22 @@ func TestStart_ValidConfig_FailsOnClaude(t *testing.T) {
 	}
 }
 
+func TestStart_EmptyAgentProvider_DefaultsToClaude(t *testing.T) {
+	cfg := testConfig(config.TrackConfig{
+		Name:     "backend",
+		Language: "go",
+	})
+	cfg.AgentProvider = "" // explicitly empty — should default to "claude"
+	err := Start(StartOpts{Config: cfg})
+	// Should fail on binary execution, NOT on "unknown provider"
+	if err == nil {
+		t.Fatal("expected error (agent binary not available in test)")
+	}
+	if strings.Contains(err.Error(), "unknown provider") {
+		t.Errorf("empty AgentProvider should default to claude, got: %v", err)
+	}
+}
+
 func TestBuildCommand_Args(t *testing.T) {
 	cmd := BuildCommand("test prompt")
 	if cmd.Path == "" {

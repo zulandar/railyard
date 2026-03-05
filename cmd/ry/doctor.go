@@ -332,7 +332,7 @@ func providerInstallHint(name string) string {
 	case "codex":
 		return "install: npm install -g @openai/codex"
 	case "gemini":
-		return "install: npm install -g @anthropic-ai/gemini-cli"
+		return "install: npm install -g @google/gemini-cli"
 	case "opencode":
 		return "install: go install github.com/opencode-ai/opencode@latest"
 	default:

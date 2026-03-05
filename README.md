@@ -68,7 +68,7 @@ Each developer runs their own Railyard instance against the same repo. Agents wo
 - **AI coding CLI** (at least one):
   - Claude Code (default) — `npm install -g @anthropic-ai/claude-code`
   - Codex — `npm install -g @openai/codex`
-  - Gemini — `npm install -g @anthropic-ai/gemini-cli`
+  - Gemini — `npm install -g @google/gemini-cli`
   - OpenCode — `go install github.com/opencode-ai/opencode@latest`
 - **Docker** (optional) — for pgvector/CocoIndex semantic search
 - **Python 3.13+** (optional) — for CocoIndex semantic search
