@@ -158,7 +158,7 @@ func TestEngine_Fields(t *testing.T) {
 
 	assertGormTag(t, typ, "ID", "primaryKey")
 	assertGormTag(t, typ, "ID", "size:64")
-	assertGormTag(t, typ, "VMID", "size:64")
+	assertGormTag(t, typ, "PodName", "size:128")
 	assertGormTag(t, typ, "Track", "size:64")
 	assertGormTag(t, typ, "Track", "index")
 	assertGormTag(t, typ, "Role", "size:16")
@@ -337,7 +337,7 @@ func TestEngine_Instantiation(t *testing.T) {
 	now := time.Now()
 	e := Engine{
 		ID:           "eng-001",
-		VMID:         "vm-abc",
+		PodName:      "railyard-eng-abc-0",
 		Track:        "backend",
 		Role:         "engine",
 		Status:       "idle",

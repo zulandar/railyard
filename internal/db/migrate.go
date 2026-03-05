@@ -33,6 +33,21 @@ func AutoMigrate(db *gorm.DB) error {
 	if err := db.AutoMigrate(AllModels()...); err != nil {
 		return fmt.Errorf("db: auto-migrate: %w", err)
 	}
+	if err := migrateRenameVMIDToPodName(db); err != nil {
+		return err
+	}
+	return nil
+}
+
+// migrateRenameVMIDToPodName renames the engines.vmid column to pod_name
+// for existing databases. Safe to run repeatedly — checks if the old column exists.
+func migrateRenameVMIDToPodName(db *gorm.DB) error {
+	if !db.Migrator().HasColumn(&models.Engine{}, "vmid") {
+		return nil
+	}
+	if err := db.Migrator().RenameColumn(&models.Engine{}, "vmid", "pod_name"); err != nil {
+		return fmt.Errorf("db: rename vmid to pod_name: %w", err)
+	}
 	return nil
 }
 

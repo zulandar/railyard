@@ -5,7 +5,7 @@ import "time"
 // Engine represents a worker agent instance.
 type Engine struct {
 	ID           string `gorm:"primaryKey;size:64"`
-	VMID         string `gorm:"size:64"`
+	PodName      string `gorm:"size:128"` // k8s pod name (empty in local mode)
 	Track        string `gorm:"size:64;index"`
 	Role         string `gorm:"size:16"`
 	Status       string `gorm:"size:16;index"`

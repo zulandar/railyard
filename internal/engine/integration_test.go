@@ -146,7 +146,7 @@ func TestIntegration_Register(t *testing.T) {
 	eng, err := Register(gormDB, RegisterOpts{
 		Track:     "backend",
 		Role:      "builder",
-		VMID:      "vm-123",
+		PodName:   "pod-123",
 		SessionID: "sess-abc",
 	})
 	if err != nil {
@@ -165,8 +165,8 @@ func TestIntegration_Register(t *testing.T) {
 	if eng.Status != StatusIdle {
 		t.Errorf("Status = %q, want %q", eng.Status, StatusIdle)
 	}
-	if eng.VMID != "vm-123" {
-		t.Errorf("VMID = %q, want %q", eng.VMID, "vm-123")
+	if eng.PodName != "pod-123" {
+		t.Errorf("PodName = %q, want %q", eng.PodName, "pod-123")
 	}
 	if eng.SessionID != "sess-abc" {
 		t.Errorf("SessionID = %q, want %q", eng.SessionID, "sess-abc")
