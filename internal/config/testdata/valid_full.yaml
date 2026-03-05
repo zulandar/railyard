@@ -1,6 +1,7 @@
 owner: alice
 repo: git@github.com:org/myapp.git
 branch_prefix: ry/alice
+agent_provider: claude
 
 dolt:
   host: 10.0.0.5
@@ -12,6 +13,7 @@ tracks:
     language: go
     file_patterns: ["cmd/**", "internal/**", "pkg/**", "*.go"]
     engine_slots: 5
+    agent_provider: opencode
     conventions:
       go_version: "1.22"
       style: "stdlib-first, no frameworks"

@@ -26,6 +26,15 @@ type Config struct {
 	Notifications     NotificationsConfig `yaml:"notifications"`
 	CocoIndex         CocoIndexConfig     `yaml:"cocoindex"`
 	Telegraph         TelegraphConfig     `yaml:"telegraph"`
+	AgentProvider     string              `yaml:"agent_provider"`
+}
+
+// KnownProviders is the set of recognized agent provider names.
+var KnownProviders = map[string]bool{
+	"claude":   true,
+	"opencode": true,
+	"gemini":   true,
+	"codex":    true,
 }
 
 // CocoIndexConfig holds settings for the CocoIndex semantic search integration.
@@ -75,6 +84,7 @@ type TrackConfig struct {
 	PreTestCommand string                 `yaml:"pre_test_command"`
 	TestCommand    string                 `yaml:"test_command"`
 	Conventions    map[string]interface{} `yaml:"conventions"`
+	AgentProvider  string                 `yaml:"agent_provider"`
 }
 
 // TelegraphConfig holds settings for the Telegraph chat bridge.
@@ -190,9 +200,15 @@ func (c *Config) applyDefaults() {
 	if c.Stall.MaxSwitchFailures == 0 {
 		c.Stall.MaxSwitchFailures = 3
 	}
+	if c.AgentProvider == "" {
+		c.AgentProvider = "claude"
+	}
 	for i := range c.Tracks {
 		if c.Tracks[i].EngineSlots == 0 {
 			c.Tracks[i].EngineSlots = 3
+		}
+		if c.Tracks[i].AgentProvider == "" {
+			c.Tracks[i].AgentProvider = c.AgentProvider
 		}
 	}
 	c.CocoIndex.DatabaseURL = resolveEnvVars(c.CocoIndex.DatabaseURL)

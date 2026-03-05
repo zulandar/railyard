@@ -11,6 +11,7 @@ const fullYAML = `
 owner: alice
 repo: git@github.com:org/myapp.git
 branch_prefix: ry/alice
+agent_provider: claude
 
 dolt:
   host: 10.0.0.5
@@ -96,6 +97,9 @@ func TestParse_FullConfig(t *testing.T) {
 	}
 	if fe.Conventions["framework"] != "Next.js 15" {
 		t.Errorf("Tracks[1].Conventions[framework] = %v, want Next.js 15", fe.Conventions["framework"])
+	}
+	if cfg.AgentProvider != "claude" {
+		t.Errorf("AgentProvider = %q, want %q", cfg.AgentProvider, "claude")
 	}
 }
 
@@ -362,6 +366,9 @@ func TestLoad_FullFixture(t *testing.T) {
 	}
 	if len(cfg.Tracks) != 2 {
 		t.Fatalf("len(Tracks) = %d, want 2", len(cfg.Tracks))
+	}
+	if cfg.AgentProvider != "claude" {
+		t.Errorf("AgentProvider = %q, want %q", cfg.AgentProvider, "claude")
 	}
 }
 
@@ -1052,6 +1059,84 @@ func TestResolveEnvVars(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("resolveEnvVars(%q) = %q, want %q", tt.input, got, tt.want)
 		}
+	}
+}
+
+func TestParse_AgentProviderDefault(t *testing.T) {
+	// minimalYAML has no agent_provider set
+	cfg, err := Parse([]byte(minimalYAML))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.AgentProvider != "claude" {
+		t.Errorf("AgentProvider = %q, want %q (default)", cfg.AgentProvider, "claude")
+	}
+	// Track should inherit global default
+	if cfg.Tracks[0].AgentProvider != "claude" {
+		t.Errorf("Tracks[0].AgentProvider = %q, want %q (inherited)", cfg.Tracks[0].AgentProvider, "claude")
+	}
+}
+
+func TestParse_AgentProviderGlobalOverride(t *testing.T) {
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+agent_provider: opencode
+tracks:
+  - name: backend
+    language: go
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.AgentProvider != "opencode" {
+		t.Errorf("AgentProvider = %q, want %q", cfg.AgentProvider, "opencode")
+	}
+	if cfg.Tracks[0].AgentProvider != "opencode" {
+		t.Errorf("Tracks[0].AgentProvider = %q, want %q (inherited from global)", cfg.Tracks[0].AgentProvider, "opencode")
+	}
+}
+
+func TestParse_AgentProviderPerTrackOverride(t *testing.T) {
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+agent_provider: claude
+tracks:
+  - name: backend
+    language: go
+    agent_provider: opencode
+  - name: frontend
+    language: typescript
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Tracks[0].AgentProvider != "opencode" {
+		t.Errorf("Tracks[0].AgentProvider = %q, want %q (per-track override)", cfg.Tracks[0].AgentProvider, "opencode")
+	}
+	if cfg.Tracks[1].AgentProvider != "claude" {
+		t.Errorf("Tracks[1].AgentProvider = %q, want %q (inherited from global)", cfg.Tracks[1].AgentProvider, "claude")
+	}
+}
+
+func TestParse_AgentProviderUnknownAllowed(t *testing.T) {
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+agent_provider: some-future-provider
+tracks:
+  - name: backend
+    language: go
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error (unknown providers should be allowed): %v", err)
+	}
+	if cfg.AgentProvider != "some-future-provider" {
+		t.Errorf("AgentProvider = %q, want %q", cfg.AgentProvider, "some-future-provider")
 	}
 }
 
