@@ -403,7 +403,10 @@ func runCarUpdate(cmd *cobra.Command, configPath, id string, updates map[string]
 }
 
 // connectFromConfig loads config and returns a GORM DB connection.
-func connectFromConfig(configPath string) (*config.Config, *gorm.DB, error) {
+// It is a var so tests can override it with a SQLite-backed implementation.
+var connectFromConfig = defaultConnectFromConfig
+
+func defaultConnectFromConfig(configPath string) (*config.Config, *gorm.DB, error) {
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		return nil, nil, fmt.Errorf("load config: %w", err)
