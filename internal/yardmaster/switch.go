@@ -392,17 +392,19 @@ var infraPatterns = []string{
 	"not installed",
 	"module not found",
 	"no such module",
+	"already checked out",
 }
 
 // classifyTestFailure distinguishes infrastructure failures from code test
 // failures by inspecting the error and output. Exit codes 126 (permission
-// denied) and 127 (command not found) are always infrastructure. Otherwise
-// the output is pattern-matched against known infrastructure signatures.
+// denied), 127 (command not found), and 128 (git fatal error) are always
+// infrastructure. Otherwise the output is pattern-matched against known
+// infrastructure signatures.
 func classifyTestFailure(err error, output string) SwitchFailureCategory {
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
 		code := exitErr.ExitCode()
-		if code == 127 || code == 126 {
+		if code == 127 || code == 126 || code == 128 {
 			return SwitchFailInfra
 		}
 	}

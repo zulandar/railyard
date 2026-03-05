@@ -104,6 +104,25 @@ func TestClassifyTestFailure_CodeTestFailure(t *testing.T) {
 	}
 }
 
+func TestClassifyTestFailure_ExitCode128(t *testing.T) {
+	// Exit code 128 is a git fatal error (e.g. branch already checked out).
+	cmd := exec.Command("sh", "-c", "exit 128")
+	err := cmd.Run()
+	cat := classifyTestFailure(err, "")
+	if cat != SwitchFailInfra {
+		t.Errorf("exit 128: got %q, want %q", cat, SwitchFailInfra)
+	}
+}
+
+func TestClassifyTestFailure_AlreadyCheckedOut(t *testing.T) {
+	err := fmt.Errorf("tests failed: exit status 1")
+	output := "fatal: 'ry/alice/backend/car-001' is already checked out at '/repo/.railyard/engines/eng-001'"
+	cat := classifyTestFailure(err, output)
+	if cat != SwitchFailInfra {
+		t.Errorf("already checked out: got %q, want %q", cat, SwitchFailInfra)
+	}
+}
+
 func TestTruncateOutput_Short(t *testing.T) {
 	out := truncateOutput("hello", 100)
 	if out != "hello" {
