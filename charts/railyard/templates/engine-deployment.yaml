@@ -1,0 +1,99 @@
+{{- $fullname := include "railyard.fullname" . -}}
+{{- range .Values.tracks }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fullname }}-engine-{{ .name }}
+  labels:
+    {{- include "railyard.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: engine
+    railyard.dev/track: {{ .name }}
+spec:
+  replicas: {{ .minReplicas | default 1 }}
+  selector:
+    matchLabels:
+      {{- include "railyard.selectorLabels" $ | nindent 6 }}
+      app.kubernetes.io/component: engine
+      railyard.dev/track: {{ .name }}
+  template:
+    metadata:
+      labels:
+        {{- include "railyard.selectorLabels" $ | nindent 8 }}
+        app.kubernetes.io/component: engine
+        railyard.dev/track: {{ .name }}
+    spec:
+      serviceAccountName: {{ include "railyard.serviceAccountName" $ }}
+      {{- if $.Values.imagePullSecret }}
+      imagePullSecrets:
+        - name: {{ $.Values.imagePullSecret }}
+      {{- end }}
+      terminationGracePeriodSeconds: 300
+      initContainers:
+        - name: git-clone
+          image: {{ include "railyard.image" $ }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          command: ["sh", "-c"]
+          args:
+            - |
+              git clone {{ $.Values.git.repo }} /repo &&
+              cd /repo &&
+              git config user.name "railyard" &&
+              git config user.email "railyard@railyard.dev"
+          volumeMounts:
+            - name: repo
+              mountPath: /repo
+      containers:
+        - name: engine
+          image: {{ include "railyard.image" $ }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          command: ["ry"]
+          args: ["engine", "start", "--track", {{ .name | quote }}, "-c", "/etc/railyard/railyard.yaml"]
+          workingDir: /repo
+          env:
+            - name: DOLT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $fullname }}-db
+                  key: dolt-password
+            {{- include "railyard.authExtraEnv" $ | nindent 12 }}
+            {{- with $.Values.engine.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          envFrom:
+            {{- include "railyard.authEnvFrom" $ | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/railyard
+              readOnly: true
+            - name: repo
+              mountPath: /repo
+            {{- include "railyard.authVolumeMounts" $ | nindent 12 }}
+          {{- with $.Values.engine.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          lifecycle:
+            preStop:
+              exec:
+                command: ["ry", "engine", "drain"]
+      volumes:
+        - name: config
+          configMap:
+            name: {{ $fullname }}-config
+        - name: repo
+          emptyDir: {}
+        {{- include "railyard.authVolumes" $ | nindent 8 }}
+      {{- with $.Values.engine.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $.Values.engine.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $.Values.engine.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}
