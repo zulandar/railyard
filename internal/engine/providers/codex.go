@@ -12,8 +12,8 @@ import (
 // CodexProvider implements AgentProvider for OpenAI's Codex CLI.
 //
 // Codex CLI (github.com/openai/codex) is a terminal-based coding agent.
-// Non-interactive operation requires --quiet and --full-auto flags.
-// System prompts are passed via --instructions, initial prompts as positional args.
+// Non-interactive execution uses "codex exec --full-auto <prompt>".
+// Interactive sessions use "codex --full-auto <prompt>".
 // Output is plain text (no structured JSON), so token parsing returns empty stats.
 // Authentication: OPENAI_API_KEY environment variable.
 type CodexProvider struct {
@@ -30,11 +30,11 @@ func (p *CodexProvider) BuildCommand(ctx context.Context, opts engine.SpawnOpts)
 		binary = "codex"
 	}
 
+	prompt := opts.ContextPayload + "\n\nBegin working on your assigned car. Follow the instructions provided."
 	cmd := exec.CommandContext(ctx, binary,
-		"--quiet",
+		"exec",
 		"--full-auto",
-		"--instructions", opts.ContextPayload,
-		"Begin working on your assigned car. Follow the instructions provided.",
+		prompt,
 	)
 
 	if opts.WorkDir != "" {
@@ -56,7 +56,7 @@ func (p *CodexProvider) BuildInteractiveCommand(systemPrompt, workDir string) *e
 	}
 	cmd := exec.Command(binary,
 		"--full-auto",
-		"--instructions", systemPrompt,
+		systemPrompt,
 	)
 	if workDir != "" {
 		cmd.Dir = workDir
@@ -70,7 +70,7 @@ func (p *CodexProvider) BuildPromptCommand(ctx context.Context, prompt string) (
 	if binary == "" {
 		binary = "codex"
 	}
-	cmd := exec.CommandContext(ctx, binary, "--quiet", "--full-auto", prompt)
+	cmd := exec.CommandContext(ctx, binary, "exec", "--full-auto", prompt)
 	return cmd, cancel
 }
 

@@ -49,13 +49,21 @@ func TestCodexProvider_BuildCommand_RequiredFlags(t *testing.T) {
 
 	args := strings.Join(cmd.Args, " ")
 	for _, flag := range []string{
-		"--quiet",
+		"exec",
 		"--full-auto",
-		"--instructions my context",
 	} {
 		if !strings.Contains(args, flag) {
 			t.Errorf("missing flag %q in args: %s", flag, args)
 		}
+	}
+	// Context payload should be included in the prompt (last positional arg)
+	lastArg := cmd.Args[len(cmd.Args)-1]
+	if !strings.Contains(lastArg, "my context") {
+		t.Errorf("last arg should contain context payload, got: %s", lastArg)
+	}
+	// Should NOT contain --instructions (removed; not a valid codex flag)
+	if strings.Contains(args, "--instructions") {
+		t.Errorf("should not contain --instructions flag, got: %s", args)
 	}
 
 	if cmd.Dir != "/tmp/work" {
