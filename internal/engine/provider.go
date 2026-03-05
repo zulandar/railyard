@@ -25,6 +25,33 @@ var (
 	registry   = make(map[string]AgentProvider)
 )
 
+// defaultClaudeProvider is a built-in provider that uses the legacy buildCommand
+// and ParseUsageFromContent functions already in the engine package. It is
+// registered at init time so that SpawnAgent's default "claude" provider works
+// without requiring callers to add a side-effect import of the providers
+// sub-package. The providers/claude.go init() overwrites this with an identical
+// (but explicitly constructed) implementation when imported.
+type defaultClaudeProvider struct{}
+
+func (defaultClaudeProvider) Name() string { return "claude" }
+
+func (defaultClaudeProvider) BuildCommand(ctx context.Context, opts SpawnOpts) (*exec.Cmd, context.CancelFunc) {
+	return buildCommand(ctx, opts)
+}
+
+func (defaultClaudeProvider) ParseOutput(content string) UsageStats {
+	return ParseUsageFromContent(content)
+}
+
+func (defaultClaudeProvider) ValidateBinary() error {
+	_, err := exec.LookPath("claude")
+	return err
+}
+
+func init() {
+	RegisterProvider(defaultClaudeProvider{})
+}
+
 // RegisterProvider adds a provider to the global registry.
 func RegisterProvider(p AgentProvider) {
 	registryMu.Lock()
