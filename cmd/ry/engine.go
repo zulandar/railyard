@@ -521,14 +521,18 @@ func runEngineList(cmd *cobra.Command, configPath, track, statusFilter string) e
 	}
 
 	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "ID\tTRACK\tSTATUS\tCURRENT CAR\tLAST ACTIVITY\tUPTIME")
+	fmt.Fprintln(w, "ID\tTRACK\tSTATUS\tPROVIDER\tCURRENT CAR\tLAST ACTIVITY\tUPTIME")
 	for _, e := range engines {
 		car := e.CurrentCar
 		if car == "" {
 			car = "-"
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
-			e.ID, e.Track, e.Status, car,
+		provider := e.Provider
+		if provider == "" {
+			provider = "claude"
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			e.ID, e.Track, e.Status, provider, car,
 			e.LastActivity.Format("15:04:05"),
 			formatUptime(e.Uptime))
 	}

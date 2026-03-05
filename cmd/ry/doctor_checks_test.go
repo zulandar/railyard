@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/zulandar/railyard/internal/config"
+	_ "github.com/zulandar/railyard/internal/engine/providers"
 	"github.com/zulandar/railyard/internal/orchestration"
 )
 
@@ -189,5 +190,96 @@ func TestConnectFromConfig_InvalidDolt(t *testing.T) {
 	_, _, err := connectFromConfig(path)
 	if err == nil {
 		t.Fatal("expected error when Dolt is not running")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// checkProviderBinaries
+// ---------------------------------------------------------------------------
+
+func TestCheckProviderBinaries_DefaultClaude(t *testing.T) {
+	cfg := &config.Config{
+		AgentProvider: "claude",
+		Tracks: []config.TrackConfig{
+			{Name: "backend", Language: "go", AgentProvider: "claude"},
+		},
+	}
+	results := checkProviderBinaries(cfg)
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	// Claude may or may not be installed; just verify we get a result.
+	if results[0].name != "Provider: claude" {
+		t.Errorf("name = %q, want %q", results[0].name, "Provider: claude")
+	}
+}
+
+func TestCheckProviderBinaries_MultipleProviders(t *testing.T) {
+	cfg := &config.Config{
+		AgentProvider: "claude",
+		Tracks: []config.TrackConfig{
+			{Name: "backend", Language: "go", AgentProvider: "claude"},
+			{Name: "frontend", Language: "typescript", AgentProvider: "codex"},
+		},
+	}
+	results := checkProviderBinaries(cfg)
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	// Should have one for claude and one for codex.
+	names := map[string]bool{}
+	for _, r := range results {
+		names[r.name] = true
+	}
+	if !names["Provider: claude"] {
+		t.Error("missing Provider: claude result")
+	}
+	if !names["Provider: codex"] {
+		t.Error("missing Provider: codex result")
+	}
+}
+
+func TestCheckProviderBinaries_UnknownProvider(t *testing.T) {
+	cfg := &config.Config{
+		AgentProvider: "nonexistent-provider-xyz",
+		Tracks: []config.TrackConfig{
+			{Name: "backend", Language: "go", AgentProvider: "nonexistent-provider-xyz"},
+		},
+	}
+	results := checkProviderBinaries(cfg)
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].status != "WARN" {
+		t.Errorf("status = %q, want WARN for unknown provider", results[0].status)
+	}
+}
+
+func TestCheckProviderBinaries_EmptyConfig(t *testing.T) {
+	cfg := &config.Config{
+		Tracks: []config.TrackConfig{},
+	}
+	results := checkProviderBinaries(cfg)
+	if len(results) != 0 {
+		t.Fatalf("expected 0 results for empty config, got %d", len(results))
+	}
+}
+
+func TestProviderInstallHint(t *testing.T) {
+	tests := []struct {
+		name string
+		want string
+	}{
+		{"claude", "install: npm install -g @anthropic-ai/claude-code"},
+		{"codex", "install: npm install -g @openai/codex"},
+		{"gemini", "install: npm install -g @anthropic-ai/gemini-cli"},
+		{"opencode", "install: go install github.com/opencode-ai/opencode@latest"},
+		{"unknown", `ensure "unknown" is in PATH`},
+	}
+	for _, tt := range tests {
+		got := providerInstallHint(tt.name)
+		if got != tt.want {
+			t.Errorf("providerInstallHint(%q) = %q, want %q", tt.name, got, tt.want)
+		}
 	}
 }

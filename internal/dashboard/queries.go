@@ -15,6 +15,7 @@ type EngineRow struct {
 	Track        string
 	Status       string
 	CurrentCar   string
+	Provider     string
 	LastActivity time.Time
 	StartedAt    time.Time
 }
@@ -35,6 +36,7 @@ func EngineSummary(db *gorm.DB) ([]EngineRow, error) {
 			Track:        e.Track,
 			Status:       e.Status,
 			CurrentCar:   e.CurrentCar,
+			Provider:     e.Provider,
 			LastActivity: e.LastActivity,
 			StartedAt:    e.StartedAt,
 		}
@@ -513,6 +515,7 @@ type EngineDetail struct {
 	Status        string
 	Role          string
 	SessionID     string
+	Provider      string
 	CurrentCar    string
 	CurrentTitle  string
 	CurrentStatus string
@@ -549,6 +552,7 @@ func GetEngineDetail(db *gorm.DB, id string) (*EngineDetail, error) {
 		Status:       e.Status,
 		Role:         e.Role,
 		SessionID:    e.SessionID,
+		Provider:     e.Provider,
 		CurrentCar:   e.CurrentCar,
 		LastActivity: e.LastActivity,
 		StartedAt:    e.StartedAt,
