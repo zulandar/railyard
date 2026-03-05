@@ -244,8 +244,76 @@ func TestRun_HandlesClosed(t *testing.T) {
 		t.Fatal("timed out waiting for Run to return")
 	}
 
-	if !strings.Contains(buf.String(), "inbound channel closed") {
-		t.Errorf("missing channel closed message in output: %s", buf.String())
+	output := buf.String()
+	if !strings.Contains(output, "inbound channel closed") {
+		t.Errorf("missing channel closed message in output: %s", output)
+	}
+	if !strings.Contains(output, "Telegraph shutting down") {
+		t.Errorf("missing shutdown message in output: %s", output)
+	}
+	if !strings.Contains(output, "Telegraph stopped") {
+		t.Errorf("missing stopped message in output: %s", output)
+	}
+}
+
+func TestRun_InboundClosedSendsShutdown(t *testing.T) {
+	mock := NewMockAdapter()
+	buf := &syncBuffer{}
+
+	d, err := NewDaemon(DaemonOpts{
+		DB:             openTestDB(t),
+		Config:         testCfg(),
+		Adapter:        mock,
+		StatusProvider: &nullStatusProvider{},
+		Out:            buf,
+	})
+	if err != nil {
+		t.Fatalf("NewDaemon: %v", err)
+	}
+
+	ctx := context.Background()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- d.Run(ctx)
+	}()
+
+	// Wait for online.
+	waitFor(t, func() bool {
+		return strings.Contains(buf.String(), "Telegraph online")
+	}, 2*time.Second)
+
+	// Close inbound channel without disconnecting (simulates socket drop
+	// where REST API is still usable).
+	mock.CloseInbound()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Run returned error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for Run to return")
+	}
+
+	// Verify shutdown message was sent via adapter.
+	last, ok := mock.LastSent()
+	if !ok {
+		t.Fatal("expected shutdown message")
+	}
+	if last.Text != "Telegraph shutting down" {
+		t.Errorf("last message = %q, want %q", last.Text, "Telegraph shutting down")
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "inbound channel closed") {
+		t.Errorf("missing channel closed message in output: %s", output)
+	}
+	if !strings.Contains(output, "Telegraph shutting down") {
+		t.Errorf("missing shutdown message in output: %s", output)
+	}
+	if !strings.Contains(output, "Telegraph stopped") {
+		t.Errorf("missing stopped message in output: %s", output)
 	}
 }
 

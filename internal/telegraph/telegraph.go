@@ -183,8 +183,14 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 		case msg, ok := <-inbound:
 			if !ok {
-				// Adapter closed the channel.
+				// Adapter closed the channel (disconnect or external close).
 				fmt.Fprintf(d.out, "Telegraph inbound channel closed\n")
+				fmt.Fprintf(d.out, "Telegraph shutting down...\n")
+				d.sendShutdown() // best-effort; may fail if adapter already disconnected
+				if err := d.adapter.Close(); err != nil {
+					log.Printf("telegraph: close adapter: %v", err)
+				}
+				fmt.Fprintf(d.out, "Telegraph stopped\n")
 				return nil
 			}
 			router.Handle(ctx, msg)
