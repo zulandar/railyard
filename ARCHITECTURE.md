@@ -2,7 +2,7 @@
 
 ## Overview
 
-Railyard is a multi-agent AI orchestration system that coordinates coding agents across local machines and cloud VMs. Multiple employees can each run their own Railyard instance against the **same repo**, working on separate branches. Uses Dolt (version-controlled SQL) for task state, GORM for all database access, and per-track isolation to prevent context contamination between domains.
+Railyard is a multi-agent AI orchestration system that coordinates coding agents across local machines and Kubernetes clusters. Multiple employees can each run their own Railyard instance against the **same repo**, working on separate branches. Uses Dolt (version-controlled SQL) for task state, GORM for all database access, and per-track isolation to prevent context contamination between domains.
 
 **Naming convention:**
 
@@ -158,7 +158,7 @@ type Track struct {
 // Engine represents a worker agent.
 type Engine struct {
     ID           string    `gorm:"primaryKey;size:64"`
-    VMID         string    `gorm:"size:64"`
+    PodName      string    `gorm:"size:128"`              // k8s pod name (empty in local mode)
     Track        string    `gorm:"size:64;index"`
     Role         string    `gorm:"size:16"`              // engine, yardmaster, dispatch
     Status       string    `gorm:"size:16;index"`        // idle, working, clearing, stalled, dead
@@ -504,62 +504,89 @@ done
 tmux attach -t railyard
 ```
 
-### Production Mode (Multi-VM)
+### Production Mode (Kubernetes)
 
-Shared infrastructure hosts multiple railyard instances. Each employee's Dispatch runs locally (or on a management VM). Engines run on cloud VMs inside a VPC.
+Shared infrastructure hosts multiple railyard instances. Each employee gets their own namespace. Engines run as pods that connect back to shared Dolt and pgvector services.
 
 ```
 ┌─ Alice's Machine ──────────┐  ┌─ Bob's Machine ──────────────┐
-│  ry start --mode production │  │  ry start --mode production  │
-│  SSH tunnel to VPC bastion  │  │  SSH tunnel to VPC bastion   │
+│  ry start --mode k8s        │  │  ry start --mode k8s         │
+│  kubeconfig → cluster       │  │  kubeconfig → cluster        │
 └──────────────┬──────────────┘  └──────────────┬───────────────┘
-               │ SSH / WireGuard / Tailscale     │
+               │ kubectl / k8s API               │
 ┌──────────────▼─────────────────────────────────▼──────────────┐
-│  VPC (private subnet, no public IPs)                          │
+│  Kubernetes Cluster                                            │
 │                                                                │
-│  ┌──────────────────────┐  ┌────────────────────────────┐     │
-│  │ Dolt Server          │  │ Git Server (shared repo)   │     │
-│  │ (dedicated VM)       │  │ (Gitea / GitHub / bare)    │     │
-│  │ :3306 internal       │  │ :22 internal               │     │
-│  │                      │  │                            │     │
-│  │ DBs:                 │  │ Branches:                  │     │
-│  │  railyard_alice      │  │  ry/alice/backend/car-001   │     │
-│  │  railyard_bob        │  │  ry/bob/backend/car-050     │     │
-│  │  railyard_carol      │  │  ry/carol/frontend/car-030  │     │
-│  │  railyard_shared     │  │                            │     │
-│  └──────────────────────┘  └────────────────────────────┘     │
+│  Namespace: railyard-infra ──────────────────────────────┐     │
+│  │                                                       │     │
+│  │  ┌──────────────────────┐  ┌────────────────────┐     │     │
+│  │  │ StatefulSet: dolt    │  │ StatefulSet:       │     │     │
+│  │  │ :3306 (Service)      │  │ pgvector           │     │     │
+│  │  │                      │  │ :5432 (Service)    │     │     │
+│  │  │ DBs:                 │  │ (per-track indexes)│     │     │
+│  │  │  railyard_alice      │  │                    │     │     │
+│  │  │  railyard_bob        │  └────────────────────┘     │     │
+│  │  │  railyard_shared     │                             │     │
+│  │  └──────────────────────┘                             │     │
+│  └───────────────────────────────────────────────────────┘     │
 │                                                                │
-│  ┌──────────────────────┐  ┌────────────────────────────┐     │
-│  │ Postgres + pgvector  │  │ Roundhouse (GPU box)       │     │
-│  │ :5432 internal       │  │ CocoIndex indexer          │     │
-│  │ (per-track indexes)  │  │ Embedding service :9090    │     │
-│  └──────────────────────┘  └────────────────────────────┘     │
+│  Namespace: railyard-alice ──────────────────────────────┐     │
+│  │                                                       │     │
+│  │  ┌────────────┐  ┌────────────┐  ┌────────────────┐  │     │
+│  │  │ Deployment │  │ Deployment │  │ Deployment     │  │     │
+│  │  │ dispatch   │  │ yardmaster │  │ dashboard      │  │     │
+│  │  │ (1 replica)│  │ (1 replica)│  │ (1r, Ingress)  │  │     │
+│  │  └────────────┘  └────────────┘  └────────────────┘  │     │
+│  │                                                       │     │
+│  │  ┌───────────────────────────────────────────────┐    │     │
+│  │  │ Deployment: engines-backend (N replicas)      │    │     │
+│  │  │ ┌─────────┐ ┌─────────┐ ┌─────────┐          │    │     │
+│  │  │ │ Pod     │ │ Pod     │ │ Pod     │          │    │     │
+│  │  │ │ Engine  │ │ Engine  │ │ Engine  │  ← HPA   │    │     │
+│  │  │ └─────────┘ └─────────┘ └─────────┘          │    │     │
+│  │  └───────────────────────────────────────────────┘    │     │
+│  │                                                       │     │
+│  │  ┌───────────────────────────────────────────────┐    │     │
+│  │  │ Deployment: engines-frontend (N replicas)     │    │     │
+│  │  │ ┌─────────┐ ┌─────────┐                       │    │     │
+│  │  │ │ Pod     │ │ Pod     │               ← HPA   │    │     │
+│  │  │ └─────────┘ └─────────┘                       │    │     │
+│  │  └───────────────────────────────────────────────┘    │     │
+│  │                                                       │     │
+│  │  CronJob: overlay-gc (periodic cleanup)               │     │
+│  └───────────────────────────────────────────────────────┘     │
 │                                                                │
-│  ┌──────────────────────┐  ┌────────────────────────────┐     │
-│  │ Bastion / Jump       │  │ cocoindex-mcp :8080        │     │
-│  │ (SSH gateway)        │  │ (Roundhouse query server)  │     │
-│  │ :22 external         │  │                            │     │
-│  └──────────────────────┘  └────────────────────────────┘     │
-│                                                                │
-│  Alice's engines:           Bob's engines:                     │
-│  ┌─────────┐ ┌─────────┐  ┌─────────┐ ┌─────────┐           │
-│  │ VM-01   │ │ VM-02   │  │ VM-03   │ │ VM-04   │           │
-│  │ Engine  │ │ Engine  │  │ Engine  │ │ Engine  │           │
-│  │ alice:car│ │ alice:fe│  │ bob:car  │ │ bob:inf │           │
-│  └─────────┘ └─────────┘  └─────────┘ └─────────┘           │
+│  Namespace: railyard-bob (same structure as alice)              │
 │                                                                │
 └────────────────────────────────────────────────────────────────┘
 ```
 
-**Key difference from local:** All employees share infrastructure (Dolt, Postgres, GPU box) but each has their own database, branches, and engine fleet. Engines are tagged with `{owner}:{track}` and can only access their owner's Dolt database.
+**Key difference from local:** All employees share cluster infrastructure (Dolt, pgvector) but each gets their own namespace with isolated Deployments, Services, and RBAC. Engines are ephemeral pods — they claim a car, do work, finish, and claim another. Scaling is handled by HPA or KEDA based on ready car counts.
 
 ---
 
-## VM Provisioning & Lifecycle
+## Kubernetes Deployment & Lifecycle
 
-### Provisioner (Part of Dispatch)
+### Container Image
 
-Dispatch manages VM lifecycle. Could target any cloud provider (Terraform, Pulumi, or direct API).
+The engine container image is the single deployable unit. It contains everything an engine pod needs:
+
+- Claude Code CLI (or whatever agent runtime)
+- Git, configured with deploy keys (or credential helpers)
+- Dolt client (MySQL compatible)
+- Railyard CLI (`ry`)
+- Python 3.13+ and CocoIndex dependencies (for overlay builds)
+
+```dockerfile
+# Dockerfile.engine
+FROM ubuntu:24.04
+RUN apt-get update && apt-get install -y git tmux python3.13 python3.13-venv
+RUN npm install -g @anthropic-ai/claude-code
+COPY ry /usr/local/bin/ry
+COPY cocoindex/ /opt/railyard/cocoindex/
+```
+
+### Configuration
 
 ```yaml
 # config.yaml — per-employee railyard configuration
@@ -569,24 +596,18 @@ repo: git@github.com:org/myapp.git   # shared repo (same for all employees)
 branch_prefix: ry/alice              # all branches: ry/alice/{track}/{car_id}
 
 dolt:
-  host: 127.0.0.1              # local dev; production: dolt-server.vpc.internal
+  host: dolt.railyard-infra.svc    # k8s Service DNS
   port: 3306
-  database: railyard_alice     # auto-derived from owner
+  database: railyard_alice          # auto-derived from owner
 
-provisioner:
-  provider: aws            # aws, gcp, hetzner, etc.
-  region: us-east-1
-  instance_type: c6i.xlarge
-  ami: ami-xxxxx           # pre-baked with Claude Code, git, dolt client
-  vpc_id: vpc-xxxxx
-  subnet_id: subnet-xxxxx
-  security_group: sg-xxxxx # allows only VPC-internal + SSH from bastion
-  ssh_key: railyard-key
-  
+kubernetes:
+  namespace: railyard-alice         # auto-derived from owner
+  image: ghcr.io/org/railyard-engine:latest
+  image_pull_secret: ghcr-creds     # optional
   scaling:
-    min_engines: 2
+    min_engines: 1
     max_engines: 20
-    scale_up_threshold: 5    # ready cars per engine
+    scale_up_threshold: 5           # ready cars per engine triggers scale-up
     scale_down_idle_minutes: 15
 
 tracks:
@@ -595,11 +616,11 @@ tracks:
     file_patterns: ["cmd/**", "internal/**", "pkg/**", "*.go"]
     engine_slots: 5
     conventions:
-      go_version: "1.22"
+      go_version: "1.25"
       style: "stdlib-first, no frameworks"
       test_framework: "stdlib table-driven"
       forbidden: ["python", "node", "CGO unless approved"]
-      
+
   - name: frontend
     language: typescript
     file_patterns: ["src/**", "*.ts", "*.tsx", "*.css"]
@@ -616,106 +637,127 @@ tracks:
     engine_slots: 2
 ```
 
-### VM Lifecycle States
+### Pod Lifecycle
+
+Engines are stateless pods. Each pod runs the engine daemon, which polls Dolt for work:
 
 ```
-provisioning → ready → claimed → working → draining → terminated
-                 ↑                    │
-                 └────── idle ────────┘  (reassignable)
+pod scheduled → init (clone repo) → running (claim → work → complete loop) → terminated
 ```
 
-**Pre-baked AMI / image contains:**
-- Claude Code CLI (or whatever agent runtime)
-- Git, configured with deploy keys
-- Dolt client (MySQL compatible, just needs mysql CLI)
-- Engine daemon script
-- SSH server (key-only auth, VPC-internal)
-- Logging agent (ships to Dolt or Kafka)
-- Railyard CLI (`ry`)
-
-**Spin-up flow:**
+**Init container** handles repo setup:
 ```
-1. Dispatch detects: ready_cars / active_engines > threshold
-2. Provisions new VM via cloud API
-3. Waits for SSH availability
-4. Assigns track based on which track has most queued ready cars
-5. Seeds VM with config: 
-   - Clones repo, checks out branch prefix (ry/{owner}/)
-   - Writes track-specific AGENTS.md
-   - Configures Dolt connection (owner's database only)
-   - Starts engine daemon
-6. Updates engines table
+1. Clone repo (or pull from shared PVC cache)
+2. Configure git identity and credentials
+3. Write track-specific AGENTS.md
+4. Configure Dolt connection via environment variables
 ```
 
-**Spin-down flow:**
+**Engine container** runs the standard daemon loop:
 ```
-1. Dispatch detects: engine idle > 15 minutes, no ready cars for its track
-2. Sets VM status = 'draining'
-3. Waits for current car to complete (or timeout)
-4. Engine daemon exits cleanly
-5. Terminates VM via cloud API
-6. Updates railyard.vms table
+1. Register in engines table
+2. Start heartbeat goroutine
+3. Poll for ready cars → claim → spawn agent → handle outcome → repeat
+4. On SIGTERM: finish current car, deregister, exit
 ```
+
+**Scaling** is driven by ready car counts per track:
+
+```yaml
+# HPA or KEDA ScaledObject
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: engines-backend
+  namespace: railyard-alice
+spec:
+  scaleTargetRef:
+    name: engines-backend
+  minReplicaCount: 1
+  maxReplicaCount: 10
+  triggers:
+    - type: mysql
+      metadata:
+        host: dolt.railyard-infra.svc
+        port: "3306"
+        dbName: railyard_alice
+        query: >
+          SELECT COUNT(*) FROM cars
+          WHERE status = 'open' AND track = 'backend'
+          AND id NOT IN (
+            SELECT car_id FROM car_deps
+            WHERE blocked_by_id NOT IN (
+              SELECT id FROM cars WHERE status IN ('done','cancelled')
+            )
+          )
+        targetQueryValue: "3"
+```
+
+### Spin-down
+
+Kubernetes handles graceful shutdown via `preStop` hooks and `terminationGracePeriodSeconds`:
+
+```yaml
+spec:
+  terminationGracePeriodSeconds: 300  # 5 min to finish current car
+  containers:
+    - name: engine
+      lifecycle:
+        preStop:
+          exec:
+            command: ["ry", "engine", "drain"]
+```
+
+The engine daemon catches SIGTERM, finishes the current car (or writes a progress note if it can't finish in time), deregisters from the engines table, and exits cleanly.
 
 ---
 
-## SSH Tunnels for Human Intervention
+## Human Intervention (Kubernetes)
 
 When an engine is stuck (stalled status, repeated /clear cycles, Yardmaster can't resolve), a human needs to jump in.
 
-### Tunnel Setup
-
-```bash
-# From your machine, tunnel through bastion to a specific engine VM
-# Dispatch provides this command when you ask to attach to a stuck engine
-
-ssh -J bastion.vpc.internal engine-vm-07.vpc.internal \
-    -L 3307:dolt-server.vpc.internal:3306 \
-    -L 2222:localhost:22
-
-# Now you have:
-#   localhost:3307 → Dolt server (query railyard state)
-#   localhost:2222 → Engine VM SSH (attach to tmux)
-```
-
-### Railyard CLI Commands
+### Attaching to a Stalled Engine
 
 ```bash
 # List stuck engines
 ry engine list --status stalled
 
-# Get tunnel command for a specific engine
-ry engine attach vm-07
-# Outputs: ssh -J bastion... (copy/paste)
-# Also prints: tmux attach -t engine (run after SSH)
+# Exec into a running engine pod
+kubectl exec -it -n railyard-alice engine-backend-7f8d9-xk2p4 -- tmux attach -t engine
+
+# Or use the ry shorthand (wraps kubectl exec)
+ry engine attach eng-a1b2c
+
+# Port-forward to Dolt for direct queries
+kubectl port-forward -n railyard-infra svc/dolt 3306:3306
 
 # Force-reassign a car from a stuck engine
-ry car reassign car-a1b2c --from vm-07 --reason "stuck on test failure"
+ry car reassign car-a1b2c --from eng-a1b2c --reason "stuck on test failure"
 
-# Drain a VM (finish current work, then idle)
-ry vm drain vm-07
+# Kill an engine pod (k8s restarts it automatically)
+kubectl delete pod -n railyard-alice engine-backend-7f8d9-xk2p4
 
-# Kill an engine session and restart fresh
-ry engine restart vm-07
+# Scale down a track temporarily
+ry engine scale --track backend --count 0
 ```
 
 ### What the Human Sees When Attached
 
 ```
-┌─ tmux: engine @ vm-07 ──────────────────────────┐
+┌─ tmux: engine @ engine-backend-7f8d9-xk2p4 ─────┐
 │                                                   │
 │  Claude Code session                              │
-│  Car: car-a1b2c "Add /users endpoint"      │
-│  Track: backend-api                                 │
-│  Cycle: 3 (2 previous /clear cycles)             │
+│  Car: car-a1b2c "Add /users endpoint"             │
+│  Track: backend                                   │
+│  Cycle: 3 (2 previous /clear cycles)              │
 │                                                   │
 │  [agent output / conversation visible]            │
 │                                                   │
 │  You can:                                         │
 │  - Type directly to the agent                     │
 │  - /clear and provide new instructions            │
-│  - Ctrl-C to kill, daemon will restart            │
-│  - Exit SSH when done, daemon continues           │
+│  - Ctrl-C to kill, k8s will restart the pod       │
+│  - Exit the exec session, engine continues        │
 │                                                   │
 └───────────────────────────────────────────────────┘
 ```
@@ -732,7 +774,7 @@ Every token in, every token out. Essential for debugging, cost tracking, and imp
 Agent Session
     │
     ├─ stdout/stderr captured by engine daemon
-    │   └─ Piped to logging agent on VM
+    │   └─ Piped to logging agent (local or pod sidecar)
     │       └─ Writes to local buffer (SQLite or file)
     │           └─ Async ships to Dolt: agent_logs table
     │               └─ Or Kafka topic: orchestrator.system.logs
@@ -824,7 +866,7 @@ ORDER BY created_at;
 
 ## Engine Daemon — The Core Loop
 
-This runs on every engine VM. It's not an AI agent — it's a bash/Go/Python script that manages the agent lifecycle.
+This runs on every engine instance (tmux pane locally, pod in k8s). It's not an AI agent — it's a Go daemon that manages the agent lifecycle.
 
 ```
 ┌─────────────────────────────────────────────────┐
@@ -1051,21 +1093,21 @@ Everything on one box. CPU-only embedding is fine for small repos (<50k LOC). Th
 Split indexing and query. The GPU box handles the heavy embedding work. Query can run on a lighter machine since it's just one embedding + a pgvector query.
 
 ```
-┌─ VPC ────────────────────────────────────────────────────────┐
+┌─ Kubernetes Cluster ─────────────────────────────────────────┐
 │                                                               │
 │  ┌─────────────────────┐   ┌──────────────────────────────┐  │
-│  │ GPU Box             │   │ Services VM                  │  │
-│  │ (e.g., g5.xlarge)   │   │                              │  │
-│  │                     │   │  Postgres + pgvector (:5432)  │  │
-│  │  CocoIndex Indexer  │──▶│  Dolt server        (:3306)  │  │
-│  │  (writes embeddings │   │  cocoindex-mcp      (:8080)  │  │
-│  │   to Postgres)      │   │  Git server         (:22)    │  │
+│  │ GPU Pod / Job       │   │ Namespace: railyard-infra     │  │
+│  │ (e.g., GPU node)    │   │                              │  │
+│  │                     │   │  StatefulSet: pgvector(:5432) │  │
+│  │  CocoIndex Indexer  │──▶│  StatefulSet: dolt   (:3306) │  │
+│  │  (writes embeddings │   │  Deployment: cocoindex-mcp   │  │
+│  │   to pgvector)      │   │             (:8080)          │  │
 │  │                     │   │                              │  │
 │  │  Models cached:     │   └──────────────┬───────────────┘  │
 │  │  - all-MiniLM-L6-v2 │                  │                  │
 │  │  - graphcodebert     │                  │                  │
 │  │  - unixcoder-base    │    ┌─────────────▼──────────────┐  │
-│  │                     │    │ Engine VMs query             │  │
+│  │                     │    │ Engine pods query            │  │
 │  └─────────────────────┘    │ cocoindex-mcp for code search│  │
 │                              └─────────────────────────────┘  │
 │                                                               │
@@ -1085,11 +1127,11 @@ If you want maximum query quality with larger embedding models, the GPU box can 
 Engine → cocoindex-mcp → (embed query on GPU box) → pgvector search → results
 ```
 
-This adds ~50ms of network latency but lets you use heavier models like `microsoft/graphcodebert-base` (125M params) for query embedding without bogging down the services VM.
+This adds ~50ms of network latency but lets you use heavier models like `microsoft/graphcodebert-base` (125M params) for query embedding without bogging down the infra pods.
 
 #### Option C: Hybrid (Best of Both)
 
-GPU box runs as an **embedding service** via a simple HTTP API. Both the indexer and the MCP query server call it for embeddings. Postgres+pgvector lives on the services VM.
+GPU pod runs as an **embedding service** via a simple HTTP API. Both the indexer and the MCP query server call it for embeddings. Postgres+pgvector runs as a StatefulSet in the infra namespace.
 
 ```
 ┌─ GPU Box ──────────────────┐
@@ -1143,7 +1185,7 @@ INSERT INTO reindex_jobs (track, trigger_commit, status, created_at)
 VALUES ('backend', 'abc1234', 'pending', NOW());
 ```
 
-The Roundhouse daemon (on the GPU box or services VM) polls for pending jobs:
+The Roundhouse daemon (GPU pod or CronJob in the infra namespace) polls for pending jobs:
 ```sql
 SELECT * FROM reindex_jobs 
 WHERE status = 'pending' 
@@ -1531,7 +1573,7 @@ ry overlay gc                      # Clean up orphaned overlays (cross-ref with 
 
 ## Yardmaster (Agent2)
 
-The Yardmaster is also an AI agent, but with broader permissions and a different prompt. It runs alongside Dispatch (locally or on a management VM). Each railyard has its own Yardmaster — it only manages that owner's work.
+The Yardmaster is also an AI agent, but with broader permissions and a different prompt. It runs alongside Dispatch (locally in tmux, or as a dedicated pod in k8s). Each railyard has its own Yardmaster — it only manages that owner's work.
 
 **Responsibilities:**
 1. Monitor engine health (heartbeats, stall detection)
@@ -1587,31 +1629,29 @@ Dispatch creates (in railyard_alice):
 
 The same config.yaml, GORM models, and `ry` CLI work in both modes. The only differences:
 
-| Aspect | Local | Production |
+| Aspect | Local | Kubernetes |
 |--------|-------|-----------|
-| Dolt server | localhost:3306 | dolt.vpc.internal:3306 |
-| Dolt database | `railyard_alice` (single) | `railyard_alice`, `railyard_bob`, ... (shared server) |
-| Postgres+pgvector | localhost:5432 | postgres.vpc.internal:5432 |
-| Roundhouse indexer | CPU, in-process | GPU box (spot instance) |
-| cocoindex-mcp | localhost:8080 | cocoindex-mcp.vpc.internal:8080 |
-| Roundhouse embeddings | CPU local (MiniLM) | GPU box :9090 (GraphCodeBERT+) |
-| Git repo | Local clone | Internal Gitea/GitHub |
-| Engines | tmux panes | Separate VMs |
-| Provisioner | No-op (manual tmux) | Cloud API |
-| SSH tunnels | N/A (everything local) | Via bastion |
-| Logging | Also to terminal | Dolt/Kafka only |
-| Engine count | 1-3 | 2-20+ per railyard |
+| Dolt server | localhost:3306 | dolt.railyard-infra.svc:3306 |
+| Dolt database | `railyard_alice` (single) | `railyard_alice`, `railyard_bob`, ... (shared StatefulSet) |
+| Postgres+pgvector | localhost:5432 | pgvector.railyard-infra.svc:5432 |
+| CocoIndex MCP | localhost:8080 | Sidecar or per-pod process |
+| Git repo | Local clone | Clone per pod (or shared PVC cache) |
+| Engines | tmux panes | Pods in per-owner namespace |
+| Scaling | Manual (`ry engine scale`) | HPA/KEDA on ready car count |
+| Human intervention | tmux attach | kubectl exec / ry engine attach |
+| Logging | Also to terminal | stdout → cluster logging (Loki, CloudWatch, etc.) |
+| Engine count | 1-3 | 1-20+ per railyard (auto-scaled) |
 
-Environment variable `RAILYARD_MODE=local|production` switches behavior.
+Environment variable `RAILYARD_MODE=local|k8s` switches behavior.
 
 ```bash
 # Local
 export RAILYARD_MODE=local
 ry start  # starts dolt + postgres + tmux panes
 
-# Production
-export RAILYARD_MODE=production
-ry start  # connects to shared Dolt, provisions engine VMs
+# Kubernetes
+export RAILYARD_MODE=k8s
+ry start  # connects to shared Dolt, creates/scales Deployments via k8s API
 ```
 
 ---
@@ -1684,20 +1724,27 @@ The Yardmaster polls the shared database to check if cross-railyard blockers are
 ### Production Topology (Phase 2)
 
 ```
-┌─ Shared Dolt Server ──────────────────┐
-│                                        │
-│  railyard_alice    (alice's cars)     │
-│  railyard_bob      (bob's cars)      │
-│  railyard_carol    (carol's cars)    │
-│  railyard_shared   (merge queue,      │
-│                     conflict tracking) │
-│                                        │
-└────────────────────────────────────────┘
-        ▲          ▲           ▲
-        │          │           │
-  alice's ry   bob's ry   carol's ry
-  (local or    (local or   (local or
-   VM fleet)    VM fleet)   VM fleet)
+┌─ Kubernetes Cluster ─────────────────────────────────────────┐
+│                                                               │
+│  Namespace: railyard-infra ─────────────────────────────┐     │
+│  │  StatefulSet: dolt                                   │     │
+│  │    railyard_alice    (alice's cars)                  │     │
+│  │    railyard_bob      (bob's cars)                   │     │
+│  │    railyard_carol    (carol's cars)                 │     │
+│  │    railyard_shared   (merge queue, conflict tracking)│     │
+│  │  StatefulSet: pgvector                               │     │
+│  └──────────────────────────────────────────────────────┘     │
+│           ▲              ▲              ▲                      │
+│           │              │              │                      │
+│  ┌────────┴───────┐ ┌───┴──────────┐ ┌┴───────────────┐      │
+│  │ ns: ry-alice   │ │ ns: ry-bob   │ │ ns: ry-carol   │      │
+│  │ dispatch (1)   │ │ dispatch (1) │ │ dispatch (1)   │      │
+│  │ yardmaster (1) │ │ yardmaster(1)│ │ yardmaster (1) │      │
+│  │ engines (N)    │ │ engines (N)  │ │ engines (N)    │      │
+│  │ dashboard (1)  │ │ dashboard(1) │ │ dashboard (1)  │      │
+│  └────────────────┘ └──────────────┘ └────────────────┘      │
+│                                                               │
+└───────────────────────────────────────────────────────────────┘
 ```
 
 Each Yardmaster periodically checks `railyard_shared` for:
