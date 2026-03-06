@@ -26,7 +26,7 @@ data:
         skip_verify: {{ .Values.dolt.tls.skipVerify }}
       {{- end }}
 
-    {{- if .Values.pgvector.internal }}
+    {{- if or .Values.pgvector.internal .Values.pgvector.host }}
     cocoindex:
       database_url: "postgresql://{{ .Values.pgvector.username }}:${PGVECTOR_PASSWORD}@{{ include "railyard.pgvectorHost" . }}:{{ .Values.pgvector.port }}/{{ .Values.pgvector.database }}"
     {{- end }}
