@@ -22,12 +22,14 @@ Railyard is a multi-agent AI orchestration system that coordinates coding agents
 **Multi-railyard model:**
 ```
 repo: github.com/org/myapp
-├── alice's railyard  → branches: ry/alice/backend/car-001, ry/alice/frontend/car-010
-├── bob's railyard    → branches: ry/bob/backend/car-050, ry/bob/infra/car-080
-└── carol's railyard  → branches: ry/carol/frontend/car-030
+├── project: webapp   → branches: ry/backend/car-001, ry/frontend/car-010
+├── project: platform → branches: ry/backend/car-050, ry/infra/car-080
+└── alice (no project) → branches: ry/alice/backend/car-030
 ```
 
-Each railyard is fully independent (Phase 1). Phase 2 adds a shared merge queue and file-level conflict awareness across railyards.
+When `project` is set, branches use the shorter `ry/{track}/{car-id}` format (owner is omitted since the project namespace provides isolation). Without a project, the legacy `ry/{owner}/{track}/{car-id}` format is used.
+
+Each railyard is fully independent (Phase 1). Phase 2 adds a shared merge queue and file-level conflict awareness across projects.
 
 ---
 
@@ -48,13 +50,12 @@ Dolt replaces Beads' git-backed JSONL with a proper SQL database that retains ve
 Each employee's Railyard gets its own Dolt database. In local dev, each person runs their own Dolt server. In production, a shared Dolt server hosts multiple databases.
 
 ```
-# Local (alice's machine)
+# Local (alice's machine, no project set)
 railyard_alice/          — alice's cars, messages, logs, config
 
-# Production (shared Dolt server)
-railyard_alice/          — alice's railyard
-railyard_bob/            — bob's railyard
-railyard_carol/          — carol's railyard
+# Kubernetes (per-project namespace, each has its own Dolt)
+railyard_webapp/         — webapp project's railyard
+railyard_platform/       — platform project's railyard
 railyard_shared/         — shared config, merge queue (Phase 2)
 ```
 
@@ -66,14 +67,18 @@ SELECT * FROM cars WHERE status = 'done' AND track = 'backend';
 SELECT * FROM cars WHERE status = 'blocked';  -- all tracks
 ```
 
-**Branch namespacing:** Each railyard owns a branch prefix in the shared repo:
+**Branch namespacing:** Each railyard owns a branch prefix in the shared repo. When `project` is set, the owner is omitted from the prefix since the per-project namespace provides isolation:
 ```
+# With project set (default for Kubernetes):
+ry/{track}/{car_id}
+ry/backend/car-001
+ry/frontend/car-010
+
+# Without project (legacy per-owner mode):
 ry/{owner}/{track}/{car_id}
-ry/alice/backend/car-001
-ry/alice/frontend/car-010
-ry/bob/backend/car-050
+ry/alice/backend/car-050
 ```
-This prevents branch collisions between employees and makes ownership instantly clear.
+This prevents branch collisions between projects and makes ownership instantly clear.
 
 ### 1.5. GORM — Database Access Layer
 
@@ -98,7 +103,7 @@ type Car struct {
     Track       string     `gorm:"size:64;index"`          // backend, frontend, infra
     Assignee    string     `gorm:"size:64"`                // engine ID
     ParentID    *string    `gorm:"size:32"`                // epic parent
-    Branch      string     `gorm:"size:128"`               // git branch: ry/alice/backend/car-001
+    Branch      string     `gorm:"size:128"`               // git branch: ry/backend/car-001 (or ry/alice/backend/car-001 without project)
     DesignNotes string     `gorm:"type:text"`
     Acceptance  string     `gorm:"type:text"`
     CreatedAt   time.Time
@@ -123,7 +128,7 @@ type CarDep struct {
     Blocker Car `gorm:"foreignKey:BlockedBy"`
 }
 
-// CarDepExternal tracks cross-railyard dependencies (Phase 2).
+// CarDepExternal tracks cross-project dependencies (Phase 2).
 type CarDepExternal struct {
     CarID          string `gorm:"primaryKey;size:32"`
     BlockedByOwner  string `gorm:"primaryKey;size:64"`  // foreign railyard owner
@@ -205,21 +210,6 @@ type RailyardConfig struct {
     Settings string `gorm:"type:json"`                  // arbitrary config
 }
 
-// ReindexJob tracks Roundhouse re-indexing work.
-type ReindexJob struct {
-    ID            uint      `gorm:"primaryKey;autoIncrement"`
-    Track         string    `gorm:"size:64;not null"`
-    TriggerCommit string    `gorm:"size:40"`
-    Status        string    `gorm:"size:16;default:pending"` // pending, running, done, failed
-    FilesChanged  int
-    ChunksUpdated int
-    GPUBoxID      string    `gorm:"size:64"`
-    StartedAt     *time.Time
-    CompletedAt   *time.Time
-    CreatedAt     time.Time
-    ErrorMessage  string    `gorm:"type:text"`
-}
-
 // DispatchSession tracks an active or completed dispatch session initiated
 // from Telegraph (chat) or local CLI. Used for dispatch lock (prevent
 // concurrent sessions on the same thread/channel).
@@ -293,7 +283,6 @@ func AutoMigrate(db *gorm.DB) error {
         &models.Message{},
         &models.AgentLog{},
         &models.RailyardConfig{},
-        &models.ReindexJob{},
     )
 }
 ```
@@ -306,14 +295,13 @@ Schema is defined by GORM models above (Section 1.5). GORM AutoMigrate creates a
 |---|---|
 | `cars` | Work items — the core unit. Has `track` column for filtering. |
 | `car_deps` | Blocking relationships between cars (same railyard) |
-| `car_deps_external` | Cross-railyard dependencies (Phase 2) |
+| `car_deps_external` | Cross-project dependencies (Phase 2) |
 | `car_progress` | Work log across /clear cycles |
 | `tracks` | Track definitions (backend, frontend, infra) |
 | `engines` | Worker agent state and health |
 | `messages` | Agent-to-agent communication |
 | `agent_logs` | Complete I/O capture for debugging |
 | `railyard_config` | Instance-level settings |
-| `reindex_jobs` | Roundhouse re-indexing queue |
 
 **Key GORM operations:**
 
@@ -399,12 +387,12 @@ Add Kafka when direct DB polling becomes a bottleneck. The Dolt messages table b
 
 ```
 Topic structure:
-  railyard.{owner}.track.{track_name}.assignments  — new car assignments
-  railyard.{owner}.track.{track_name}.completions   — car done notifications
-  railyard.{owner}.track.{track_name}.messages      — general agent-to-agent
-  railyard.{owner}.yardmaster.commands              — Yardmaster directives
-  railyard.{owner}.system.heartbeats                — engine health
-  railyard.{owner}.system.logs                      — centralized logging
+  railyard.{project}.track.{track_name}.assignments  — new car assignments
+  railyard.{project}.track.{track_name}.completions   — car done notifications
+  railyard.{project}.track.{track_name}.messages      — general agent-to-agent
+  railyard.{project}.yardmaster.commands              — Yardmaster directives
+  railyard.{project}.system.heartbeats                — engine health
+  railyard.{project}.system.logs                      — centralized logging
 ```
 
 **Pattern:** Write to Kafka for real-time delivery, consumer writes to Dolt for persistence/audit. Engines consume from their owner+track topic only.
@@ -431,7 +419,7 @@ Everything runs on your laptop. Your own Dolt instance, GORM handles schema, age
 │  │ :3306    │          │           │        │       │
 │  └──────────┴──────────┴───────────┴────────┘       │
 │                                                      │
-│  Dolt database: railyard_alice                       │
+│  Dolt database: railyard_{owner}                     │
 │  ┌──────────────────────────────────────────┐       │
 │  │ cars (track=backend | frontend | infra) │       │
 │  │ engines, messages, car_progress, ...    │       │
@@ -449,7 +437,7 @@ Everything runs on your laptop. Your own Dolt instance, GORM handles schema, age
 │    config.yaml         — track definitions, owner    │
 │    ry                  — CLI binary (Go)             │
 │                                                      │
-│  Git branches: ry/alice/backend/car-001, ...          │
+│  Git branches: ry/backend/car-001, ... (or ry/alice/backend/car-001 without project) │
 │                                                      │
 └──────────────────────────────────────────────────────┘
 ```
@@ -506,62 +494,56 @@ tmux attach -t railyard
 
 ### Production Mode (Kubernetes)
 
-Shared infrastructure hosts multiple railyard instances. Each employee gets their own namespace. Engines run as pods that connect back to shared Dolt and pgvector services.
+Shared infrastructure hosts multiple projects. Each project gets its own self-contained namespace with all components (Dolt, pgvector, engines, dispatch, yardmaster). Engines run as pods within the project namespace.
 
 ```
-┌─ Alice's Machine ──────────┐  ┌─ Bob's Machine ──────────────┐
-│  ry start --mode k8s        │  │  ry start --mode k8s         │
-│  kubeconfig → cluster       │  │  kubeconfig → cluster        │
-└──────────────┬──────────────┘  └──────────────┬───────────────┘
-               │ kubectl / k8s API               │
-┌──────────────▼─────────────────────────────────▼──────────────┐
-│  Kubernetes Cluster                                            │
-│                                                                │
-│  Namespace: railyard-infra ──────────────────────────────┐     │
-│  │                                                       │     │
-│  │  ┌──────────────────────┐  ┌────────────────────┐     │     │
-│  │  │ StatefulSet: dolt    │  │ StatefulSet:       │     │     │
-│  │  │ :3306 (Service)      │  │ pgvector           │     │     │
-│  │  │                      │  │ :5432 (Service)    │     │     │
-│  │  │ DBs:                 │  │ (per-track indexes)│     │     │
-│  │  │  railyard_alice      │  │                    │     │     │
-│  │  │  railyard_bob        │  └────────────────────┘     │     │
-│  │  │  railyard_shared     │                             │     │
-│  │  └──────────────────────┘                             │     │
-│  └───────────────────────────────────────────────────────┘     │
-│                                                                │
-│  Namespace: railyard-alice ──────────────────────────────┐     │
-│  │                                                       │     │
-│  │  ┌────────────┐  ┌────────────┐  ┌────────────────┐  │     │
-│  │  │ Deployment │  │ Deployment │  │ Deployment     │  │     │
-│  │  │ dispatch   │  │ yardmaster │  │ dashboard      │  │     │
-│  │  │ (1 replica)│  │ (1 replica)│  │ (1r, Ingress)  │  │     │
-│  │  └────────────┘  └────────────┘  └────────────────┘  │     │
-│  │                                                       │     │
-│  │  ┌───────────────────────────────────────────────┐    │     │
-│  │  │ Deployment: engines-backend (N replicas)      │    │     │
-│  │  │ ┌─────────┐ ┌─────────┐ ┌─────────┐          │    │     │
-│  │  │ │ Pod     │ │ Pod     │ │ Pod     │          │    │     │
-│  │  │ │ Engine  │ │ Engine  │ │ Engine  │  ← HPA   │    │     │
-│  │  │ └─────────┘ └─────────┘ └─────────┘          │    │     │
-│  │  └───────────────────────────────────────────────┘    │     │
-│  │                                                       │     │
-│  │  ┌───────────────────────────────────────────────┐    │     │
-│  │  │ Deployment: engines-frontend (N replicas)     │    │     │
-│  │  │ ┌─────────┐ ┌─────────┐                       │    │     │
-│  │  │ │ Pod     │ │ Pod     │               ← HPA   │    │     │
-│  │  │ └─────────┘ └─────────┘                       │    │     │
-│  │  └───────────────────────────────────────────────┘    │     │
-│  │                                                       │     │
-│  │  CronJob: overlay-gc (periodic cleanup)               │     │
-│  └───────────────────────────────────────────────────────┘     │
-│                                                                │
-│  Namespace: railyard-bob (same structure as alice)              │
-│                                                                │
-└────────────────────────────────────────────────────────────────┘
+┌─ Developer's Machine ──────────┐
+│  ry start --mode k8s            │
+│  kubeconfig → cluster           │
+└──────────────┬──────────────────┘
+               │ kubectl / k8s API
+┌──────────────▼──────────────────────────────────────────────┐
+│  Kubernetes Cluster                                          │
+│                                                              │
+│  Namespace: railyard-webapp ─────────────────────────────┐   │
+│  │                                                       │   │
+│  │  ┌──────────────────────┐  ┌────────────────────┐     │   │
+│  │  │ StatefulSet: dolt    │  │ StatefulSet:       │     │   │
+│  │  │ :3306 (Service)      │  │ pgvector           │     │   │
+│  │  │                      │  │ :5432 (Service)    │     │   │
+│  │  │ DB: railyard_webapp  │  │ (per-track indexes)│     │   │
+│  │  └──────────────────────┘  └────────────────────┘     │   │
+│  │                                                       │   │
+│  │  ┌────────────┐  ┌────────────┐  ┌────────────────┐  │   │
+│  │  │ Deployment │  │ Deployment │  │ Deployment     │  │   │
+│  │  │ dispatch   │  │ yardmaster │  │ dashboard      │  │   │
+│  │  │ (1 replica)│  │ (1 replica)│  │ (1r, Ingress)  │  │   │
+│  │  └────────────┘  └────────────┘  └────────────────┘  │   │
+│  │                                                       │   │
+│  │  ┌───────────────────────────────────────────────┐    │   │
+│  │  │ Deployment: engines-backend (N replicas)      │    │   │
+│  │  │ ┌─────────┐ ┌─────────┐ ┌─────────┐          │    │   │
+│  │  │ │ Pod     │ │ Pod     │ │ Pod     │          │    │   │
+│  │  │ │ Engine  │ │ Engine  │ │ Engine  │  ← HPA   │    │   │
+│  │  │ └─────────┘ └─────────┘ └─────────┘          │    │   │
+│  │  └───────────────────────────────────────────────┘    │   │
+│  │                                                       │   │
+│  │  ┌───────────────────────────────────────────────┐    │   │
+│  │  │ Deployment: engines-frontend (N replicas)     │    │   │
+│  │  │ ┌─────────┐ ┌─────────┐                       │    │   │
+│  │  │ │ Pod     │ │ Pod     │               ← HPA   │    │   │
+│  │  │ └─────────┘ └─────────┘                       │    │   │
+│  │  └───────────────────────────────────────────────┘    │   │
+│  │                                                       │   │
+│  │  CronJob: overlay-gc (periodic cleanup)               │   │
+│  └───────────────────────────────────────────────────────┘   │
+│                                                              │
+│  Namespace: railyard-platform (same structure as webapp)      │
+│                                                              │
+└──────────────────────────────────────────────────────────────┘
 ```
 
-**Key difference from local:** All employees share cluster infrastructure (Dolt, pgvector) but each gets their own namespace with isolated Deployments, Services, and RBAC. Engines are ephemeral pods — they claim a car, do work, finish, and claim another. Scaling is handled by HPA or KEDA based on ready car counts.
+**Key difference from local:** Each project gets a self-contained Kubernetes namespace with its own Dolt, pgvector, and engine pods. Namespace is derived from the project name (`railyard-{project}`). Engines are ephemeral pods — they claim a car, do work, finish, and claim another. Scaling is handled by HPA or KEDA based on ready car counts.
 
 ---
 
@@ -592,26 +574,28 @@ COPY cocoindex/ /opt/railyard/cocoindex/
 ### Configuration
 
 ```yaml
-# config.yaml — per-employee railyard configuration
-owner: alice                    # unique owner ID, used for DB name + branch prefix
+# config.yaml — per-project railyard configuration
+owner: alice                         # unique owner ID
+project: webapp                      # project name — drives namespace + branch prefix
 
-repo: git@github.com:org/myapp.git   # shared repo (same for all employees)
-branch_prefix: ry/alice              # all branches: ry/alice/{track}/{car_id}
+repo: git@github.com:org/myapp.git   # shared repo
+branch_prefix: ry                    # auto-derived when project is set: branches are ry/{track}/{car_id}
 agent_provider: claude               # default provider for all tracks (claude|codex|gemini|opencode)
 
 dolt:
-  host: dolt.railyard-infra.svc    # k8s Service DNS
+  host: dolt.railyard-webapp.svc     # k8s Service DNS (per-project namespace)
   port: 3306
-  database: railyard_alice          # auto-derived from owner
+  database: railyard_webapp           # can be auto-derived from project
 
 kubernetes:
-  namespace: railyard-alice         # auto-derived from owner
+  namespace: railyard-webapp          # auto-derived from project (railyard-{project})
   image: ghcr.io/org/railyard-engine:latest
-  image_pull_secret: ghcr-creds     # optional
+  image_pull_secret: ghcr-creds       # optional
+  service_account: railyard-engine    # optional
   scaling:
     min_engines: 1
     max_engines: 20
-    scale_up_threshold: 5           # ready cars per engine triggers scale-up
+    scale_up_threshold: 5             # ready cars per engine triggers scale-up
     scale_down_idle_minutes: 15
 
 tracks:
@@ -674,7 +658,7 @@ apiVersion: keda.sh/v1alpha1
 kind: ScaledObject
 metadata:
   name: engines-backend
-  namespace: railyard-alice
+  namespace: railyard-webapp
 spec:
   scaleTargetRef:
     name: engines-backend
@@ -683,9 +667,9 @@ spec:
   triggers:
     - type: mysql
       metadata:
-        host: dolt.railyard-infra.svc
+        host: dolt.railyard-webapp.svc
         port: "3306"
-        dbName: railyard_alice
+        dbName: railyard_webapp
         query: >
           SELECT COUNT(*) FROM cars
           WHERE status = 'open' AND track = 'backend'
@@ -728,19 +712,19 @@ When an engine is stuck (stalled status, repeated /clear cycles, Yardmaster can'
 ry engine list --status stalled
 
 # Exec into a running engine pod
-kubectl exec -it -n railyard-alice engine-backend-7f8d9-xk2p4 -- tmux attach -t engine
+kubectl exec -it -n railyard-webapp engine-backend-7f8d9-xk2p4 -- tmux attach -t engine
 
 # Or use the ry shorthand (wraps kubectl exec)
 ry engine attach eng-a1b2c
 
 # Port-forward to Dolt for direct queries
-kubectl port-forward -n railyard-infra svc/dolt 3306:3306
+kubectl port-forward -n railyard-webapp svc/dolt 3306:3306
 
 # Force-reassign a car from a stuck engine
 ry car reassign car-a1b2c --from eng-a1b2c --reason "stuck on test failure"
 
 # Kill an engine pod (k8s restarts it automatically)
-kubectl delete pod -n railyard-alice engine-backend-7f8d9-xk2p4
+kubectl delete pod -n railyard-webapp engine-backend-7f8d9-xk2p4
 
 # Scale down a track temporarily
 ry engine scale --track backend --count 0
@@ -933,7 +917,8 @@ After every /clear (or fresh session start), this is what gets rendered and fed 
 ```markdown
 # You are an engine on track: {track.name}
 # Railyard owner: {config.owner}
-# Branch prefix: ry/{config.owner}/{track.name}/
+# Project: {config.project}
+# Branch prefix: {config.branch_prefix}/{track.name}/
 
 ## Project Conventions
 {track.system_prompt}
@@ -1111,7 +1096,7 @@ Split indexing and query. The GPU box handles the heavy embedding work. Query ca
 ┌─ Kubernetes Cluster ─────────────────────────────────────────┐
 │                                                               │
 │  ┌─────────────────────┐   ┌──────────────────────────────┐  │
-│  │ GPU Pod / Job       │   │ Namespace: railyard-infra     │  │
+│  │ GPU Pod / Job       │   │ Namespace: railyard-{project}  │  │
 │  │ (e.g., GPU node)    │   │                              │  │
 │  │                     │   │  StatefulSet: pgvector(:5432) │  │
 │  │  CocoIndex Indexer  │──▶│  StatefulSet: dolt   (:3306) │  │
@@ -1142,11 +1127,11 @@ If you want maximum query quality with larger embedding models, the GPU box can 
 Engine → cocoindex-mcp → (embed query on GPU box) → pgvector search → results
 ```
 
-This adds ~50ms of network latency but lets you use heavier models like `microsoft/graphcodebert-base` (125M params) for query embedding without bogging down the infra pods.
+This adds ~50ms of network latency but lets you use heavier models like `microsoft/graphcodebert-base` (125M params) for query embedding without bogging down the project pods.
 
 #### Option C: Hybrid (Best of Both)
 
-GPU pod runs as an **embedding service** via a simple HTTP API. Both the indexer and the MCP query server call it for embeddings. Postgres+pgvector runs as a StatefulSet in the infra namespace.
+GPU pod runs as an **embedding service** via a simple HTTP API. Both the indexer and the MCP query server call it for embeddings. Postgres+pgvector runs as a StatefulSet in the project namespace.
 
 ```
 ┌─ GPU Box ──────────────────┐
@@ -1193,22 +1178,7 @@ Yardmaster switch flow:
   5. Incremental — only changed files get re-embedded
 ```
 
-Implementation:
-```sql
--- Yardmaster inserts a re-index job after switch
-INSERT INTO reindex_jobs (track, trigger_commit, status, created_at)
-VALUES ('backend', 'abc1234', 'pending', NOW());
-```
-
-The Roundhouse daemon (GPU pod or CronJob in the infra namespace) polls for pending jobs:
-```sql
-SELECT * FROM reindex_jobs 
-WHERE status = 'pending' 
-ORDER BY created_at 
-LIMIT 1 FOR UPDATE SKIP LOCKED;
-```
-
-Claims it, runs the CocoIndex flow for that track, marks done. Engines see updated search results on their next query.
+The Yardmaster triggers re-indexing directly via the CocoIndex API after a successful switch. The Roundhouse daemon (GPU pod or CronJob in the project namespace) runs the CocoIndex flow for the affected track. Engines see updated search results on their next query.
 
 ### Roundhouse MCP Server Design
 
@@ -1342,7 +1312,7 @@ Merge results (overlay wins on filename+location conflict)
 Return top_k results to agent
 ```
 
-- **Main index**: Shared, authoritative index of the `main` branch. One pgvector table per track (e.g., `main_backend_embeddings`, `main_frontend_embeddings`). Rebuilt incrementally after each switch (merge) via `CreateReindexJob`. All engines on the same track share the same main index.
+- **Main index**: Shared, authoritative index of the `main` branch. One pgvector table per track (e.g., `main_backend_embeddings`, `main_frontend_embeddings`). Rebuilt incrementally after each switch (merge). All engines on the same track share the same main index.
 - **Overlay index**: Small, ephemeral, per-engine index of ONLY the files that differ between the engine's branch and `main`. Created at engine startup (after `CreateBranch`), naturally refreshed each `/clear` cycle (the engine daemon loop restarts), and deleted after switch (merge) or engine deregistration.
 
 #### Per-Track Main Indexes
@@ -1511,7 +1481,7 @@ if cfg.CocoIndex.Overlay.Enabled {
 
 On `/clear` cycle, the overlay is naturally refreshed when the engine daemon loop restarts and calls `BuildOverlay` again.
 
-**Yardmaster switch flow** (`internal/yardmaster/switch.go` / `daemon.go` — after `CreateReindexJob`):
+**Yardmaster switch flow** (`internal/yardmaster/switch.go` / `daemon.go` — after merge):
 ```go
 if car.Assignee != "" {
     overlay.Cleanup(car.Assignee)  // non-fatal; drop the completing engine's overlay
@@ -1594,7 +1564,7 @@ The Yardmaster is also an AI agent, but with broader permissions and a different
 1. Monitor engine health (heartbeats, stall detection)
 2. Switch completed branches into main (merge per track, creates PR)
 3. Run post-switch CI/tests
-4. Trigger Roundhouse re-indexing after switch (insert reindex_jobs row)
+4. Trigger Roundhouse re-indexing after switch
 5. Resolve cross-track dependency unblocking (within this railyard)
 6. Reassign cars from dead/stalled engines
 7. Escalate to human when stuck
@@ -1612,30 +1582,30 @@ Dispatch is your interface. You tell it what you want built, it breaks it down i
 You: "Add user authentication. Backend needs JWT endpoints, 
       frontend needs login page and auth context."
 
-Dispatch creates (in railyard_alice):
+Dispatch creates (in railyard_webapp):
   track: backend
     car-001 [epic] "User Authentication Backend"
       car-002 [task] "POST /auth/login endpoint with JWT"
-         branch: ry/alice/backend/car-002
+         branch: ry/backend/car-002
       car-003 [task] "POST /auth/register endpoint"
-         branch: ry/alice/backend/car-003
+         branch: ry/backend/car-003
       car-004 [task] "JWT middleware for protected routes"
-         branch: ry/alice/backend/car-004
+         branch: ry/backend/car-004
       car-005 [task] "User model and database migration"
-         branch: ry/alice/backend/car-005
+         branch: ry/backend/car-005
       car-002 blocked_by car-005
       car-004 blocked_by car-002
 
   track: frontend
     car-f01 [epic] "User Authentication Frontend"
       car-f02 [task] "Login page with form and validation"
-         branch: ry/alice/frontend/car-002
+         branch: ry/frontend/car-002
          blocked_by car-002 (cross-track, same railyard)
       car-f03 [task] "Auth context provider with JWT storage"
-         branch: ry/alice/frontend/car-003
+         branch: ry/frontend/car-003
          blocked_by car-002 (cross-track, same railyard)
       car-f04 [task] "Protected route wrapper component"
-         branch: ry/alice/frontend/car-004
+         branch: ry/frontend/car-004
 ```
 
 ---
@@ -1646,16 +1616,17 @@ The same config.yaml, GORM models, and `ry` CLI work in both modes. The only dif
 
 | Aspect | Local | Kubernetes |
 |--------|-------|-----------|
-| Dolt server | localhost:3306 | dolt.railyard-infra.svc:3306 |
-| Dolt database | `railyard_alice` (single) | `railyard_alice`, `railyard_bob`, ... (shared StatefulSet) |
-| Postgres+pgvector | localhost:5432 | pgvector.railyard-infra.svc:5432 |
+| Dolt server | localhost:3306 | dolt.railyard-{project}.svc:3306 |
+| Dolt database | `railyard_{owner}` (single) | `railyard_{project}` (per-project namespace) |
+| Postgres+pgvector | localhost:5432 | pgvector.railyard-{project}.svc:5432 |
 | CocoIndex MCP | localhost:8080 | Sidecar or per-pod process |
 | Git repo | Local clone | Clone per pod (or shared PVC cache) |
-| Engines | tmux panes | Pods in per-owner namespace |
+| Engines | tmux sessions | Pods in per-project namespace |
+| Namespacing | Single developer | Per-project namespaces (`railyard-{project}`) |
 | Scaling | Manual (`ry engine scale`) | HPA/KEDA on ready car count |
 | Human intervention | tmux attach | kubectl exec / ry engine attach |
 | Logging | Also to terminal | stdout → cluster logging (Loki, CloudWatch, etc.) |
-| Engine count | 1-3 | 1-20+ per railyard (auto-scaled) |
+| Engine count | 1-3 | 1-20+ per project (auto-scaled) |
 
 Environment variable `RAILYARD_MODE=local|k8s` switches behavior.
 
@@ -1671,9 +1642,9 @@ ry start  # connects to shared Dolt, creates/scales Deployments via k8s API
 
 ---
 
-## Phase 2: Cross-Railyard Coordination
+## Phase 2: Cross-Project Coordination
 
-Phase 1 (above) has each railyard fully independent. Multiple employees work on the same repo but don't see each other's work until PR merge. Phase 2 adds coordination.
+Phase 1 (above) has each project's railyard fully independent. Multiple projects work on the same repo but don't see each other's work until PR merge. Phase 2 adds coordination.
 
 ### Shared Merge Queue
 
@@ -1686,7 +1657,7 @@ type MergeRequest struct {
     Owner       string    `gorm:"size:64;not null"`       // alice, bob
     CarID      string    `gorm:"size:32;not null"`
     Track       string    `gorm:"size:64"`
-    Branch      string    `gorm:"size:128;not null"`      // ry/alice/backend/car-002
+    Branch      string    `gorm:"size:128;not null"`      // ry/backend/car-002
     Status      string    `gorm:"size:16;default:pending"` // pending, testing, merged, conflict, rejected
     Priority    int       `gorm:"default:2"`
     FilesTouched string   `gorm:"type:json"`               // ["internal/auth/handler.go", ...]
@@ -1716,43 +1687,41 @@ func DetectConflicts(sharedDB *gorm.DB, owner, track string, files []string) ([]
 ```
 
 When conflict detected, Yardmaster can:
-1. **Warn** — "Bob is also working on `internal/auth/handler.go`, coordinate?"
+1. **Warn** — "The platform project is also working on `internal/auth/handler.go`, coordinate?"
 2. **Block** — Automatically hold the car until the conflicting merge resolves
 3. **Sequence** — Add to merge queue with ordering to minimize conflicts
 
-### Cross-Railyard Dependencies
+### Cross-Project Dependencies
 
 The `CarDepExternal` model enables Phase 2 dependencies:
 
 ```go
-// Alice's car depends on Bob's car
+// Webapp project's car depends on platform project's car
 dep := models.CarDepExternal{
-    CarID:         "car-f02",           // alice's car
-    BlockedByOwner: "bob",              // bob's railyard
-    BlockedByID:    "car-050",           // bob's car
+    CarID:         "car-f02",           // webapp's car
+    BlockedByOwner: "platform",         // platform project's railyard
+    BlockedByID:    "car-050",           // platform's car
     DepType:        "blocks",
 }
 ```
 
-The Yardmaster polls the shared database to check if cross-railyard blockers are resolved. When Bob's `car-050` merges to main, Alice's `car-f02` becomes unblocked.
+The Yardmaster polls the shared database to check if cross-project blockers are resolved. When the platform project's `car-050` merges to main, the webapp project's `car-f02` becomes unblocked.
 
 ### Production Topology (Phase 2)
 
 ```
 ┌─ Kubernetes Cluster ─────────────────────────────────────────┐
 │                                                               │
-│  Namespace: railyard-infra ─────────────────────────────┐     │
+│  Namespace: railyard-shared ────────────────────────────┐     │
 │  │  StatefulSet: dolt                                   │     │
-│  │    railyard_alice    (alice's cars)                  │     │
-│  │    railyard_bob      (bob's cars)                   │     │
-│  │    railyard_carol    (carol's cars)                 │     │
 │  │    railyard_shared   (merge queue, conflict tracking)│     │
-│  │  StatefulSet: pgvector                               │     │
 │  └──────────────────────────────────────────────────────┘     │
 │           ▲              ▲              ▲                      │
 │           │              │              │                      │
 │  ┌────────┴───────┐ ┌───┴──────────┐ ┌┴───────────────┐      │
-│  │ ns: ry-alice   │ │ ns: ry-bob   │ │ ns: ry-carol   │      │
+│  │ ns: ry-webapp  │ │ ns: ry-plat  │ │ ns: ry-infra   │      │
+│  │ dolt (1)       │ │ dolt (1)     │ │ dolt (1)       │      │
+│  │ pgvector (1)   │ │ pgvector (1) │ │ pgvector (1)   │      │
 │  │ dispatch (1)   │ │ dispatch (1) │ │ dispatch (1)   │      │
 │  │ yardmaster (1) │ │ yardmaster(1)│ │ yardmaster (1) │      │
 │  │ engines (N)    │ │ engines (N)  │ │ engines (N)    │      │
@@ -1765,5 +1734,5 @@ The Yardmaster polls the shared database to check if cross-railyard blockers are
 Each Yardmaster periodically checks `railyard_shared` for:
 - Merge queue ordering (whose PR goes first)
 - File conflict warnings
-- Cross-railyard dependency resolution
+- Cross-project dependency resolution
 - Announcements (e.g., "main is broken, hold merges")
