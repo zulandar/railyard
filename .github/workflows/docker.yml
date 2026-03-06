@@ -15,8 +15,11 @@ permissions:
 
 jobs:
   build-and-push:
-    name: Build and Push
+    name: Build and Push (${{ matrix.provider }})
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        provider: [claude, codex, gemini, opencode]
     steps:
       - uses: actions/checkout@v4
 
@@ -46,10 +49,9 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}/engine
           tags: |
-            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=sha
+            type=semver,pattern={{version}},suffix=-${{ matrix.provider }}
+            type=semver,pattern={{major}}.{{minor}},suffix=-${{ matrix.provider }}
+            type=sha,suffix=-${{ matrix.provider }}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
@@ -58,7 +60,37 @@ jobs:
           context: .
           push: true
           platforms: linux/amd64
+          build-args: AGENT_PROVIDER=${{ matrix.provider }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.provider }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.provider }}
+
+  # Tag the claude variant as the default (latest + unqualified semver).
+  tag-default:
+    name: Tag Default (claude)
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install crane
+        run: |
+          curl -sSL https://github.com/google/go-containerregistry/releases/download/v0.20.3/go-containerregistry_Linux_x86_64.tar.gz \
+            | tar xz -C /usr/local/bin crane
+
+      - name: Create default tags from claude variant
+        run: |
+          IMAGE="ghcr.io/${{ github.repository }}/engine"
+          VERSION="${GITHUB_REF_NAME#v}"
+          MAJOR_MINOR="${VERSION%.*}"
+
+          # Copy claude-suffixed tags to unqualified defaults.
+          crane copy "${IMAGE}:${VERSION}-claude" "${IMAGE}:${VERSION}"
+          crane copy "${IMAGE}:${VERSION}-claude" "${IMAGE}:${MAJOR_MINOR}"
+          crane copy "${IMAGE}:${VERSION}-claude" "${IMAGE}:latest"

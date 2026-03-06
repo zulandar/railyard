@@ -17,7 +17,10 @@ git:
 # ---------------------------------------------------------------------------
 image:
   repository: ghcr.io/zulandar/railyard/engine
-  tag: ""  # defaults to .Chart.AppVersion
+  # Tag defaults to .Chart.AppVersion. Provider-specific images are published
+  # with a suffix: e.g. "0.6.0-codex", "0.6.0-gemini", "0.6.0-opencode".
+  # The unqualified tag (e.g. "0.6.0") is the claude variant.
+  tag: ""
   pullPolicy: IfNotPresent
 
 # -- Name of an existing image pull secret.

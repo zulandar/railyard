@@ -67,7 +67,7 @@ jobs:
 
       - name: Build and load Docker image into Kind
         run: |
-          docker build -t railyard-engine:ci -f Dockerfile.engine .
+          docker build --build-arg AGENT_PROVIDER=claude -t railyard-engine:ci -f Dockerfile.engine .
           kind load docker-image railyard-engine:ci --name railyard-release-ci
 
       - name: Install Helm chart
