@@ -60,3 +60,30 @@ jobs:
 
       - name: Run govulncheck
         run: govulncheck ./...
+
+  helm-lint:
+    name: Helm Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
+      - name: Helm lint (default values)
+        run: helm lint charts/railyard
+
+      - name: Helm lint (minimal)
+        run: helm lint charts/railyard -f charts/railyard/ci/test-values-minimal.yaml
+
+      - name: Helm lint (external DB)
+        run: helm lint charts/railyard -f charts/railyard/ci/test-values-external-db.yaml
+
+      - name: Helm lint (full)
+        run: helm lint charts/railyard -f charts/railyard/ci/test-values-full.yaml
+
+      - name: Helm template (default values)
+        run: helm template railyard charts/railyard > /dev/null
+
+      - name: Helm template (full)
+        run: helm template railyard charts/railyard -f charts/railyard/ci/test-values-full.yaml > /dev/null
