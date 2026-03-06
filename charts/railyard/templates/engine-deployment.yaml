@@ -36,7 +36,13 @@ spec:
           command: ["sh", "-c"]
           args:
             - |
-              git clone {{ $.Values.git.repo }} /repo &&
+              git config --global --add safe.directory /repo
+              if [ -d /repo/.git ]; then
+                cd /repo && git fetch --all
+              else
+                rm -rf /repo/* /repo/.[!.]* 2>/dev/null
+                git clone {{ $.Values.git.repo }} /repo
+              fi
               cd /repo &&
               git config user.name "railyard" &&
               git config user.email "railyard@railyard.dev"
@@ -51,11 +57,22 @@ spec:
           args: ["engine", "start", "--track", {{ .name | quote }}, "-c", "/etc/railyard/railyard.yaml"]
           workingDir: /repo
           env:
+            - name: GIT_CONFIG_COUNT
+              value: "1"
+            - name: GIT_CONFIG_KEY_0
+              value: safe.directory
+            - name: GIT_CONFIG_VALUE_0
+              value: /repo
             - name: DOLT_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ $fullname }}-db
                   key: dolt-password
+            - name: PGVECTOR_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $fullname }}-db
+                  key: pgvector-password
             {{- include "railyard.authExtraEnv" $ | nindent 12 }}
             {{- with $.Values.engine.extraEnv }}
             {{- toYaml . | nindent 12 }}

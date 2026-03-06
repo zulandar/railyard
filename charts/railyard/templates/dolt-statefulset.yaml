@@ -26,9 +26,6 @@ spec:
       containers:
         - name: dolt
           image: dolthub/dolt-sql-server:latest
-          args:
-            - --host=0.0.0.0
-            - --port={{ .Values.dolt.port }}
           ports:
             - name: mysql
               containerPort: {{ .Values.dolt.port }}
@@ -54,10 +51,17 @@ spec:
           volumeMounts:
             - name: dolt-data
               mountPath: /var/lib/dolt
+            - name: dolt-init
+              mountPath: /docker-entrypoint-initdb.d
+              readOnly: true
           {{- with .Values.dolt.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+      volumes:
+        - name: dolt-init
+          configMap:
+            name: {{ include "railyard.fullname" . }}-dolt-init
   volumeClaimTemplates:
     - metadata:
         name: dolt-data

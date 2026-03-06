@@ -22,13 +22,40 @@ spec:
       imagePullSecrets:
         - name: {{ .Values.imagePullSecret }}
       {{- end }}
+      initContainers:
+        - name: git-clone
+          image: {{ include "railyard.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["sh", "-c"]
+          args:
+            - |
+              git config --global --add safe.directory /repo
+              if [ -d /repo/.git ]; then
+                cd /repo && git fetch --all
+              else
+                rm -rf /repo/* /repo/.[!.]* 2>/dev/null
+                git clone {{ .Values.git.repo }} /repo
+              fi
+              cd /repo &&
+              git config user.name "railyard" &&
+              git config user.email "railyard@railyard.dev"
+          volumeMounts:
+            - name: repo
+              mountPath: /repo
       containers:
         - name: dispatch
           image: {{ include "railyard.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["ry"]
           args: ["dispatch", "-c", "/etc/railyard/railyard.yaml"]
+          workingDir: /repo
           env:
+            - name: GIT_CONFIG_COUNT
+              value: "1"
+            - name: GIT_CONFIG_KEY_0
+              value: safe.directory
+            - name: GIT_CONFIG_VALUE_0
+              value: /repo
             - name: DOLT_PASSWORD
               valueFrom:
                 secretKeyRef:
@@ -41,6 +68,8 @@ spec:
             - name: config
               mountPath: /etc/railyard
               readOnly: true
+            - name: repo
+              mountPath: /repo
             {{- include "railyard.authVolumeMounts" . | nindent 12 }}
           {{- with .Values.dispatch.resources }}
           resources:
@@ -50,4 +79,6 @@ spec:
         - name: config
           configMap:
             name: {{ include "railyard.fullname" . }}-config
+        - name: repo
+          emptyDir: {}
         {{- include "railyard.authVolumes" . | nindent 8 }}
