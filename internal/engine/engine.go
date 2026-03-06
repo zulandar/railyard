@@ -24,7 +24,7 @@ const (
 type RegisterOpts struct {
 	Track     string
 	Role      string
-	VMID      string
+	PodName   string
 	SessionID string
 	Provider  string // agent provider name (e.g., "claude", "codex")
 }
@@ -74,7 +74,7 @@ func Register(db *gorm.DB, opts RegisterOpts) (*models.Engine, error) {
 	now := time.Now()
 	engine := models.Engine{
 		ID:           id,
-		VMID:         opts.VMID,
+		PodName:      opts.PodName,
 		Track:        opts.Track,
 		Role:         opts.Role,
 		Status:       StatusIdle,

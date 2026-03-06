@@ -33,6 +33,7 @@ func newEngineCmd() *cobra.Command {
 	}
 
 	cmd.AddCommand(newEngineStartCmd())
+	cmd.AddCommand(newEngineDrainCmd())
 	cmd.AddCommand(newEngineScaleCmd())
 	cmd.AddCommand(newEngineListCmd())
 	cmd.AddCommand(newEngineRestartCmd())
@@ -351,6 +352,34 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 
 		sleepWithContext(ctx, pollInterval)
 	}
+}
+
+func newEngineDrainCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "drain",
+		Short: "Gracefully drain the engine process",
+		Long:  "Sends SIGTERM to the engine process running in this container, triggering graceful shutdown. Used as a Kubernetes preStop lifecycle hook.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runEngineDrain(cmd)
+		},
+	}
+	return cmd
+}
+
+func runEngineDrain(cmd *cobra.Command) error {
+	// Find the engine start process (our parent or sibling PID 1 process).
+	// In a Kubernetes pod, the engine start command runs as PID 1.
+	// The preStop hook runs in a separate exec, so we signal PID 1.
+	pid := 1
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return fmt.Errorf("find engine process (PID %d): %w", pid, err)
+	}
+	if err := proc.Signal(syscall.SIGTERM); err != nil {
+		return fmt.Errorf("send SIGTERM to PID %d: %w", pid, err)
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "Sent SIGTERM to PID %d for graceful drain\n", pid)
+	return nil
 }
 
 // outcomeKind describes how a subprocess session ended.

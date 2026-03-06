@@ -1,0 +1,75 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "railyard.fullname" . }}-config
+  labels:
+    {{- include "railyard.labels" . | nindent 4 }}
+data:
+  railyard.yaml: |
+    owner: {{ .Values.git.owner | quote }}
+    repo: {{ .Values.git.repo | quote }}
+    {{- if .Values.project }}
+    project: {{ .Values.project | quote }}
+    {{- end }}
+    default_branch: {{ .Values.git.defaultBranch | quote }}
+    agent_provider: {{ .Values.engine.agentProvider | quote }}
+
+    dolt:
+      host: {{ include "railyard.doltHost" . | quote }}
+      port: {{ .Values.dolt.port }}
+      database: {{ include "railyard.doltDatabase" . | quote }}
+      username: {{ .Values.dolt.username | quote }}
+      password: ${DOLT_PASSWORD}
+      {{- if .Values.dolt.tls.enabled }}
+      tls:
+        enabled: true
+        skip_verify: {{ .Values.dolt.tls.skipVerify }}
+      {{- end }}
+
+    {{- if or .Values.pgvector.internal .Values.pgvector.host }}
+    cocoindex:
+      database_url: "postgresql://{{ .Values.pgvector.username }}:${PGVECTOR_PASSWORD}@{{ include "railyard.pgvectorHost" . }}:{{ .Values.pgvector.port }}/{{ .Values.pgvector.database }}"
+    {{- end }}
+
+    tracks:
+    {{- range .Values.tracks }}
+      - name: {{ .name | quote }}
+        language: {{ .language | quote }}
+        engine_slots: {{ .engineSlots | default 3 }}
+        {{- if .testCommand }}
+        test_command: {{ .testCommand | quote }}
+        {{- end }}
+        {{- if .preTestCommand }}
+        pre_test_command: {{ .preTestCommand | quote }}
+        {{- end }}
+        {{- if .filePatterns }}
+        file_patterns:
+        {{- range .filePatterns }}
+          - {{ . | quote }}
+        {{- end }}
+        {{- end }}
+        {{- if .agentProvider }}
+        agent_provider: {{ .agentProvider | quote }}
+        {{- end }}
+    {{- end }}
+
+    {{- if .Values.telegraph.enabled }}
+    telegraph:
+      platform: {{ .Values.telegraph.platform | quote }}
+      channel: {{ .Values.telegraph.channel | quote }}
+      {{- if eq .Values.telegraph.platform "slack" }}
+      slack:
+        bot_token: ${SLACK_BOT_TOKEN}
+        app_token: ${SLACK_APP_TOKEN}
+      {{- end }}
+      {{- if eq .Values.telegraph.platform "discord" }}
+      discord:
+        bot_token: ${DISCORD_BOT_TOKEN}
+        {{- if .Values.telegraph.discord.guildID }}
+        guild_id: {{ .Values.telegraph.discord.guildID | quote }}
+        {{- end }}
+        {{- if .Values.telegraph.discord.channelID }}
+        channel_id: {{ .Values.telegraph.discord.channelID | quote }}
+        {{- end }}
+      {{- end }}
+    {{- end }}

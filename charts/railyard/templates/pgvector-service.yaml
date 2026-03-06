@@ -1,0 +1,20 @@
+{{- if .Values.pgvector.internal }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "railyard.fullname" . }}-pgvector
+  labels:
+    {{- include "railyard.labels" . | nindent 4 }}
+    app.kubernetes.io/component: pgvector
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+    - name: postgres
+      port: {{ .Values.pgvector.port }}
+      targetPort: postgres
+      protocol: TCP
+  selector:
+    {{- include "railyard.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: pgvector
+{{- end }}

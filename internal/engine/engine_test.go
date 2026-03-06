@@ -51,7 +51,7 @@ func TestGenerateID_HexChars(t *testing.T) {
 
 func TestRegisterOpts_ZeroValue(t *testing.T) {
 	opts := RegisterOpts{}
-	if opts.Track != "" || opts.Role != "" || opts.VMID != "" || opts.SessionID != "" {
+	if opts.Track != "" || opts.Role != "" || opts.PodName != "" || opts.SessionID != "" {
 		t.Error("zero-value RegisterOpts should have all empty fields")
 	}
 }

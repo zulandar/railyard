@@ -1122,6 +1122,114 @@ tracks:
 	}
 }
 
+// ---------------------------------------------------------------------------
+// TLS config tests
+// ---------------------------------------------------------------------------
+
+func TestParse_TLSConfig_Full(t *testing.T) {
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+dolt:
+  host: dolt.k8s.internal
+  port: 3306
+  tls:
+    enabled: true
+    ca_cert: /certs/ca.pem
+    client_cert: /certs/client-cert.pem
+    client_key: /certs/client-key.pem
+    skip_verify: false
+tracks:
+  - name: backend
+    language: go
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !cfg.Dolt.TLS.Enabled {
+		t.Error("Dolt.TLS.Enabled = false, want true")
+	}
+	if cfg.Dolt.TLS.CACert != "/certs/ca.pem" {
+		t.Errorf("Dolt.TLS.CACert = %q, want /certs/ca.pem", cfg.Dolt.TLS.CACert)
+	}
+	if cfg.Dolt.TLS.ClientCert != "/certs/client-cert.pem" {
+		t.Errorf("Dolt.TLS.ClientCert = %q", cfg.Dolt.TLS.ClientCert)
+	}
+	if cfg.Dolt.TLS.ClientKey != "/certs/client-key.pem" {
+		t.Errorf("Dolt.TLS.ClientKey = %q", cfg.Dolt.TLS.ClientKey)
+	}
+	if cfg.Dolt.TLS.SkipVerify {
+		t.Error("Dolt.TLS.SkipVerify = true, want false")
+	}
+}
+
+func TestParse_TLSConfig_Disabled_ByDefault(t *testing.T) {
+	cfg, err := Parse([]byte(minimalYAML))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Dolt.TLS.Enabled {
+		t.Error("Dolt.TLS.Enabled should be false by default")
+	}
+}
+
+func TestParse_TLSConfig_SkipVerify(t *testing.T) {
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+dolt:
+  tls:
+    enabled: true
+    skip_verify: true
+tracks:
+  - name: backend
+    language: go
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !cfg.Dolt.TLS.Enabled {
+		t.Error("Dolt.TLS.Enabled = false, want true")
+	}
+	if !cfg.Dolt.TLS.SkipVerify {
+		t.Error("Dolt.TLS.SkipVerify = false, want true")
+	}
+}
+
+func TestParse_TLSConfig_EnvVarResolution(t *testing.T) {
+	t.Setenv("TEST_CA_PATH", "/resolved/ca.pem")
+	t.Setenv("TEST_CERT_PATH", "/resolved/cert.pem")
+	t.Setenv("TEST_KEY_PATH", "/resolved/key.pem")
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+dolt:
+  tls:
+    enabled: true
+    ca_cert: "${TEST_CA_PATH}"
+    client_cert: "${TEST_CERT_PATH}"
+    client_key: "${TEST_KEY_PATH}"
+tracks:
+  - name: backend
+    language: go
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Dolt.TLS.CACert != "/resolved/ca.pem" {
+		t.Errorf("Dolt.TLS.CACert = %q, want /resolved/ca.pem", cfg.Dolt.TLS.CACert)
+	}
+	if cfg.Dolt.TLS.ClientCert != "/resolved/cert.pem" {
+		t.Errorf("Dolt.TLS.ClientCert = %q, want /resolved/cert.pem", cfg.Dolt.TLS.ClientCert)
+	}
+	if cfg.Dolt.TLS.ClientKey != "/resolved/key.pem" {
+		t.Errorf("Dolt.TLS.ClientKey = %q, want /resolved/key.pem", cfg.Dolt.TLS.ClientKey)
+	}
+}
+
 func TestParse_AgentProviderUnknownAllowed(t *testing.T) {
 	yaml := `
 owner: alice
@@ -1137,6 +1245,232 @@ tracks:
 	}
 	if cfg.AgentProvider != "some-future-provider" {
 		t.Errorf("AgentProvider = %q, want %q", cfg.AgentProvider, "some-future-provider")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Kubernetes config tests
+// ---------------------------------------------------------------------------
+
+func TestParse_KubernetesConfig_Full(t *testing.T) {
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+project: myapp
+kubernetes:
+  namespace: railyard-myapp
+  image: ghcr.io/org/railyard-engine:latest
+  image_pull_secret: ghcr-creds
+  service_account: railyard-sa
+  scaling:
+    min_engines: 1
+    max_engines: 10
+    scale_up_threshold: 5
+    scale_down_idle_minutes: 15
+tracks:
+  - name: backend
+    language: go
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Project != "myapp" {
+		t.Errorf("Project = %q, want myapp", cfg.Project)
+	}
+	k := cfg.Kubernetes
+	if k.Namespace != "railyard-myapp" {
+		t.Errorf("Kubernetes.Namespace = %q, want railyard-myapp", k.Namespace)
+	}
+	if k.Image != "ghcr.io/org/railyard-engine:latest" {
+		t.Errorf("Kubernetes.Image = %q", k.Image)
+	}
+	if k.ImagePullSecret != "ghcr-creds" {
+		t.Errorf("Kubernetes.ImagePullSecret = %q", k.ImagePullSecret)
+	}
+	if k.ServiceAccount != "railyard-sa" {
+		t.Errorf("Kubernetes.ServiceAccount = %q", k.ServiceAccount)
+	}
+	if k.Scaling.MinEngines != 1 {
+		t.Errorf("Scaling.MinEngines = %d, want 1", k.Scaling.MinEngines)
+	}
+	if k.Scaling.MaxEngines != 10 {
+		t.Errorf("Scaling.MaxEngines = %d, want 10", k.Scaling.MaxEngines)
+	}
+	if k.Scaling.ScaleUpThreshold != 5 {
+		t.Errorf("Scaling.ScaleUpThreshold = %d, want 5", k.Scaling.ScaleUpThreshold)
+	}
+	if k.Scaling.ScaleDownIdleMinutes != 15 {
+		t.Errorf("Scaling.ScaleDownIdleMinutes = %d, want 15", k.Scaling.ScaleDownIdleMinutes)
+	}
+}
+
+func TestParse_KubernetesConfig_Defaults(t *testing.T) {
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+project: myapp
+kubernetes:
+  namespace: railyard-myapp
+  image: ghcr.io/org/engine:latest
+tracks:
+  - name: backend
+    language: go
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	k := cfg.Kubernetes
+	if k.Scaling.MinEngines != 1 {
+		t.Errorf("Scaling.MinEngines = %d, want 1 (default)", k.Scaling.MinEngines)
+	}
+	if k.Scaling.MaxEngines != 10 {
+		t.Errorf("Scaling.MaxEngines = %d, want 10 (default)", k.Scaling.MaxEngines)
+	}
+	if k.Scaling.ScaleUpThreshold != 3 {
+		t.Errorf("Scaling.ScaleUpThreshold = %d, want 3 (default)", k.Scaling.ScaleUpThreshold)
+	}
+	if k.Scaling.ScaleDownIdleMinutes != 10 {
+		t.Errorf("Scaling.ScaleDownIdleMinutes = %d, want 10 (default)", k.Scaling.ScaleDownIdleMinutes)
+	}
+}
+
+func TestParse_KubernetesConfig_NamespaceFromProject(t *testing.T) {
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+project: coolproject
+kubernetes:
+  image: ghcr.io/org/engine:v1
+tracks:
+  - name: backend
+    language: go
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Kubernetes.Namespace != "railyard-coolproject" {
+		t.Errorf("Kubernetes.Namespace = %q, want railyard-coolproject (derived from project)", cfg.Kubernetes.Namespace)
+	}
+}
+
+func TestParse_KubernetesConfig_Absent_LocalMode(t *testing.T) {
+	cfg, err := Parse([]byte(minimalYAML))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.IsKubernetesMode() {
+		t.Error("IsKubernetesMode() = true, want false when kubernetes section absent")
+	}
+	if cfg.Kubernetes.Namespace != "" {
+		t.Errorf("Kubernetes.Namespace = %q, want empty", cfg.Kubernetes.Namespace)
+	}
+}
+
+func TestParse_KubernetesConfig_IsKubernetesMode(t *testing.T) {
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+project: myapp
+kubernetes:
+  namespace: railyard-myapp
+  image: ghcr.io/org/engine:latest
+tracks:
+  - name: backend
+    language: go
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !cfg.IsKubernetesMode() {
+		t.Error("IsKubernetesMode() = false, want true when namespace is set")
+	}
+}
+
+func TestParse_KubernetesConfig_ValidationRequiresImage(t *testing.T) {
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+kubernetes:
+  namespace: railyard-test
+tracks:
+  - name: backend
+    language: go
+`
+	_, err := Parse([]byte(yaml))
+	if err == nil {
+		t.Fatal("expected validation error for k8s without image")
+	}
+	if !strings.Contains(err.Error(), "kubernetes.image is required") {
+		t.Errorf("error = %q, want to mention kubernetes.image", err.Error())
+	}
+}
+
+func TestParse_BranchPrefix_DefaultsToRy_WhenProjectSet(t *testing.T) {
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+project: myapp
+tracks:
+  - name: backend
+    language: go
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.BranchPrefix != "ry" {
+		t.Errorf("BranchPrefix = %q, want %q when project is set", cfg.BranchPrefix, "ry")
+	}
+}
+
+func TestParse_BranchPrefix_DefaultsToRyOwner_WhenNoProject(t *testing.T) {
+	cfg, err := Parse([]byte(minimalYAML))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.BranchPrefix != "ry/bob" {
+		t.Errorf("BranchPrefix = %q, want %q when only owner is set", cfg.BranchPrefix, "ry/bob")
+	}
+}
+
+func TestParse_BranchPrefix_ExplicitNotOverridden_WithProject(t *testing.T) {
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+project: myapp
+branch_prefix: custom/prefix
+tracks:
+  - name: backend
+    language: go
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.BranchPrefix != "custom/prefix" {
+		t.Errorf("BranchPrefix = %q, want %q (explicit should not be overridden)", cfg.BranchPrefix, "custom/prefix")
+	}
+}
+
+func TestParse_ProjectField(t *testing.T) {
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+project: my-project
+tracks:
+  - name: backend
+    language: go
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Project != "my-project" {
+		t.Errorf("Project = %q, want my-project", cfg.Project)
 	}
 }
 

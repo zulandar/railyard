@@ -1,0 +1,12 @@
+{{- if .Values.pgvector.internal }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "railyard.fullname" . }}-pgvector-init
+  labels:
+    {{- include "railyard.labels" . | nindent 4 }}
+    app.kubernetes.io/component: pgvector
+data:
+  01-init-pgvector.sql: |
+    CREATE EXTENSION IF NOT EXISTS vector;
+{{- end }}

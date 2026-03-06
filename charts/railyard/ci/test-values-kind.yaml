@@ -1,0 +1,29 @@
+project: railyard
+
+git:
+  owner: zulandar
+  repo: https://github.com/zulandar/railyard.git
+  defaultBranch: main
+
+image:
+  repository: railyard-engine
+  tag: ci
+  pullPolicy: Never
+
+auth:
+  method: api_key
+  apiKey: "sk-ant-test-dummy-key-for-ci"
+
+engine:
+  agentProvider: claude
+
+dolt:
+  password: "ci-test-password"
+
+tracks:
+  - name: backend
+    engineSlots: 1
+    minReplicas: 1
+    maxReplicas: 1
+    language: go
+    testCommand: "go test ./..."

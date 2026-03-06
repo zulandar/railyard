@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "railyard.fullname" . }}-dashboard
+  labels:
+    {{- include "railyard.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dashboard
+spec:
+  type: {{ .Values.dashboard.service.type }}
+  ports:
+    {{- if .Values.dashboard.oauth2proxy.enabled }}
+    - name: http
+      port: {{ .Values.dashboard.service.port }}
+      targetPort: oauth-proxy
+      protocol: TCP
+    {{- else }}
+    - name: http
+      port: {{ .Values.dashboard.service.port }}
+      targetPort: http
+      protocol: TCP
+    {{- end }}
+  selector:
+    {{- include "railyard.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: dashboard

@@ -1,0 +1,54 @@
+# Dockerfile.engine — Railyard engine container image.
+# The ry binary is built in CI and placed in the build context.
+
+FROM ubuntu:24.04
+
+# Prevent interactive prompts during package installation.
+ENV DEBIAN_FRONTEND=noninteractive
+
+# ── System packages ──────────────────────────────────────────────────────────
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    tmux \
+    curl \
+    python3 \
+    python3-venv \
+    ca-certificates \
+    gnupg \
+  && rm -rf /var/lib/apt/lists/*
+
+# ── Node.js 22 LTS (NodeSource) ─────────────────────────────────────────────
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+  && apt-get install -y --no-install-recommends nodejs \
+  && rm -rf /var/lib/apt/lists/*
+
+# ── Claude Code CLI ─────────────────────────────────────────────────────────
+RUN npm install -g @anthropic-ai/claude-code
+
+# ── Railyard binary (pre-built in CI) ───────────────────────────────────────
+COPY ry /usr/local/bin/ry
+RUN chmod +x /usr/local/bin/ry
+
+# ── CocoIndex (Python semantic-search scripts) ──────────────────────────────
+COPY cocoindex/ /opt/railyard/cocoindex/
+
+# ── Non-root user ───────────────────────────────────────────────────────────
+RUN useradd -m -s /bin/bash railyard
+
+# Ensure .claude directory exists for OAuth token mounting.
+RUN mkdir -p /home/railyard/.claude \
+  && chown railyard:railyard /home/railyard/.claude
+
+# Create default .claude.json to bypass onboarding.
+RUN echo '{"hasCompletedOnboarding": true}' > /home/railyard/.claude.json \
+  && chown railyard:railyard /home/railyard/.claude.json
+
+# ── Workspace ────────────────────────────────────────────────────────────────
+RUN mkdir -p /home/railyard/workspace \
+  && chown railyard:railyard /home/railyard/workspace
+
+WORKDIR /home/railyard/workspace
+
+USER railyard
+
+ENTRYPOINT ["ry"]

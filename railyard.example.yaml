@@ -17,6 +17,10 @@ owner: yourname
 # Git remote URL for your project.
 repo: git@github.com:org/myproject.git
 
+# Project name for multi-project Kubernetes deployments (optional).
+# When set, branch_prefix defaults to "ry" and namespace to "railyard-{project}".
+# project: myproject
+
 # ---------------------------------------------------------------------------
 # Optional — general settings
 # ---------------------------------------------------------------------------
@@ -67,6 +71,12 @@ repo: git@github.com:org/myproject.git
 #   username: root                   # default: root
 #   password:                        # default: empty; supports ${ENV_VAR} syntax
 #   database: railyard_yourname      # default: railyard_{owner}
+#   tls:
+#     enabled: false
+#     ca_cert: /path/to/ca.pem         # or ${DOLT_TLS_CA_CERT}
+#     client_cert: /path/to/client.pem # or ${DOLT_TLS_CLIENT_CERT}
+#     client_key: /path/to/client-key.pem # or ${DOLT_TLS_CLIENT_KEY}
+#     skip_verify: false
 
 # ---------------------------------------------------------------------------
 # Stall detection (optional — defaults shown)
@@ -77,6 +87,22 @@ repo: git@github.com:org/myproject.git
 #   repeated_error_max: 3      # same error N times = engine stall
 #   max_clear_cycles: 5        # more than N /clear cycles = engine stall
 #   max_switch_failures: 3     # repeated switch (merge/test/push) failures before Claude escalation
+
+# ---------------------------------------------------------------------------
+# Kubernetes deployment mode (optional)
+# ---------------------------------------------------------------------------
+# When configured, engines run as Kubernetes pods instead of tmux sessions.
+#
+# kubernetes:
+#   namespace: railyard-myproject    # auto-derived from project if unset
+#   image: ghcr.io/org/railyard-engine:latest
+#   image_pull_secret: ghcr-creds   # optional
+#   service_account: ""             # optional, auto-created by Helm
+#   scaling:
+#     min_engines: 1
+#     max_engines: 10
+#     scale_up_threshold: 3         # ready cars per engine triggers scale-up
+#     scale_down_idle_minutes: 10   # idle time before scale-down
 
 # ---------------------------------------------------------------------------
 # Notifications (optional)

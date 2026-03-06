@@ -26,9 +26,105 @@ jobs:
       - name: Test
         run: go test ./... -count=1 -timeout 300s -race
 
+  helm-validate:
+    name: Helm Validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Build ry binary
+        run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o ry ./cmd/ry/
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
+      - name: Install kubeconform
+        run: |
+          curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz \
+            | tar xz -C /usr/local/bin kubeconform
+
+      - name: Helm lint
+        run: |
+          helm lint charts/railyard
+          helm lint charts/railyard -f charts/railyard/ci/test-values-full.yaml
+          helm lint charts/railyard -f charts/railyard/ci/test-values-kind.yaml
+
+      - name: Kubeconform validate
+        run: |
+          helm template railyard charts/railyard \
+            -f charts/railyard/ci/test-values-full.yaml \
+            | kubeconform -strict -kubernetes-version 1.26.0 -summary
+
+      - name: Create Kind cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: railyard-release-ci
+          node_image: kindest/node:v1.31.4
+
+      - name: Build and load Docker image into Kind
+        run: |
+          docker build -t railyard-engine:ci -f Dockerfile.engine .
+          kind load docker-image railyard-engine:ci --name railyard-release-ci
+
+      - name: Install Helm chart
+        run: |
+          helm install railyard charts/railyard \
+            --namespace railyard --create-namespace \
+            -f charts/railyard/ci/test-values-kind.yaml \
+            --wait-for-jobs \
+            --timeout 3m
+
+      - name: Verify infrastructure pods
+        run: |
+          kubectl rollout status statefulset/railyard-dolt -n railyard --timeout=120s
+          kubectl rollout status statefulset/railyard-pgvector -n railyard --timeout=120s
+
+      - name: Run database migration
+        run: |
+          kubectl wait --for=condition=available deployment/railyard-dashboard \
+            -n railyard --timeout=60s
+          kubectl exec deploy/railyard-dashboard -n railyard -- \
+            ry db init -c /etc/railyard/railyard.yaml
+
+      - name: Verify app pods
+        run: |
+          kubectl wait --for=condition=available deployment/railyard-dashboard \
+            -n railyard --timeout=120s
+          kubectl wait --for=condition=available deployment/railyard-dispatch \
+            -n railyard --timeout=120s
+          kubectl wait --for=condition=available deployment/railyard-yardmaster \
+            -n railyard --timeout=120s
+
+      - name: Show pod status
+        if: always()
+        run: kubectl get pods -n railyard -o wide
+
+      - name: Show pod logs on failure
+        if: failure()
+        run: |
+          for comp in dolt pgvector dashboard dispatch yardmaster engine; do
+            echo "=== $comp ==="
+            kubectl logs -l app.kubernetes.io/component=$comp -n railyard --tail=50 --all-containers 2>/dev/null || true
+          done
+          kubectl get events -n railyard --sort-by='.lastTimestamp' | tail -30 || true
+
   release:
     name: Release
-    needs: test
+    needs: [test, helm-validate]
     runs-on: ubuntu-latest
     strategy:
       matrix:

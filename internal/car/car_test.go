@@ -58,6 +58,7 @@ func TestComputeBranch(t *testing.T) {
 		{"ry/alice", "backend", "car-abc12", "ry/alice/backend/car-abc12"},
 		{"ry/bob", "frontend", "car-00000", "ry/bob/frontend/car-00000"},
 		{"ry/carol", "infra", "car-fffff", "ry/carol/infra/car-fffff"},
+		{"ry", "backend", "car-abc12", "ry/backend/car-abc12"},
 	}
 	for _, tt := range tests {
 		got := ComputeBranch(tt.prefix, tt.track, tt.id)
@@ -139,6 +140,17 @@ func TestCreateOpts_Defaults(t *testing.T) {
 	}
 	if opts.Priority != 0 {
 		t.Errorf("default Priority should be 0 (zero value), got %d", opts.Priority)
+	}
+}
+
+func TestCreateOpts_RequestedBy(t *testing.T) {
+	opts := CreateOpts{
+		Title:       "test",
+		Track:       "backend",
+		RequestedBy: "alice",
+	}
+	if opts.RequestedBy != "alice" {
+		t.Errorf("RequestedBy = %q, want alice", opts.RequestedBy)
 	}
 }
 

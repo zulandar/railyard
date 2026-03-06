@@ -60,3 +60,191 @@ jobs:
 
       - name: Run govulncheck
         run: govulncheck ./...
+
+  helm-lint:
+    name: Helm Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
+      - name: Helm lint (default values)
+        run: helm lint charts/railyard
+
+      - name: Helm lint (minimal)
+        run: helm lint charts/railyard -f charts/railyard/ci/test-values-minimal.yaml
+
+      - name: Helm lint (external DB)
+        run: helm lint charts/railyard -f charts/railyard/ci/test-values-external-db.yaml
+
+      - name: Helm lint (full)
+        run: helm lint charts/railyard -f charts/railyard/ci/test-values-full.yaml
+
+      - name: Helm template (default values)
+        run: helm template railyard charts/railyard > /dev/null
+
+      - name: Helm template (full)
+        run: helm template railyard charts/railyard -f charts/railyard/ci/test-values-full.yaml > /dev/null
+
+      - name: Helm template (Kind CI)
+        run: helm template railyard charts/railyard -f charts/railyard/ci/test-values-kind.yaml > /dev/null
+
+  helm-kubeconform:
+    name: Helm Kubeconform
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
+      - name: Install kubeconform
+        run: |
+          curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz \
+            | tar xz -C /usr/local/bin kubeconform
+
+      - name: Validate default values
+        run: |
+          helm template railyard charts/railyard \
+            | kubeconform -strict -kubernetes-version 1.26.0 -summary
+
+      - name: Validate minimal values
+        run: |
+          helm template railyard charts/railyard \
+            -f charts/railyard/ci/test-values-minimal.yaml \
+            | kubeconform -strict -kubernetes-version 1.26.0 -summary
+
+      - name: Validate external DB values
+        run: |
+          helm template railyard charts/railyard \
+            -f charts/railyard/ci/test-values-external-db.yaml \
+            | kubeconform -strict -kubernetes-version 1.26.0 -summary
+
+      - name: Validate full values
+        run: |
+          helm template railyard charts/railyard \
+            -f charts/railyard/ci/test-values-full.yaml \
+            | kubeconform -strict -kubernetes-version 1.26.0 -summary
+
+      - name: Validate Kind CI values
+        run: |
+          helm template railyard charts/railyard \
+            -f charts/railyard/ci/test-values-kind.yaml \
+            | kubeconform -strict -kubernetes-version 1.26.0 -summary
+
+  helm-install-test:
+    name: Helm Install Test (Kind)
+    needs: [helm-lint, helm-kubeconform]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Build ry binary
+        run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o ry ./cmd/ry/
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
+      - name: Create Kind cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: railyard-ci
+          node_image: kindest/node:v1.31.4
+
+      - name: Build and load Docker image into Kind
+        run: |
+          docker build -t railyard-engine:ci -f Dockerfile.engine .
+          kind load docker-image railyard-engine:ci --name railyard-ci
+
+      - name: Install Helm chart
+        run: |
+          helm install railyard charts/railyard \
+            --namespace railyard --create-namespace \
+            -f charts/railyard/ci/test-values-kind.yaml \
+            --wait-for-jobs \
+            --timeout 3m
+
+      - name: Wait for Dolt to be ready
+        run: |
+          kubectl rollout status statefulset/railyard-dolt -n railyard --timeout=120s
+
+      - name: Wait for pgvector to be ready
+        run: |
+          kubectl rollout status statefulset/railyard-pgvector -n railyard --timeout=120s
+
+      - name: Run database migration
+        run: |
+          kubectl exec railyard-dolt-0 -n railyard -- dolt sql \
+            -q "SELECT 1" > /dev/null
+          kubectl wait --for=condition=available deployment/railyard-dashboard \
+            -n railyard --timeout=60s
+          kubectl exec deploy/railyard-dashboard -n railyard -- \
+            ry db init -c /etc/railyard/railyard.yaml
+
+      - name: Wait for app pods to be ready
+        run: |
+          kubectl wait --for=condition=available deployment/railyard-dashboard \
+            -n railyard --timeout=120s
+          kubectl wait --for=condition=available deployment/railyard-dispatch \
+            -n railyard --timeout=120s
+          kubectl wait --for=condition=available deployment/railyard-yardmaster \
+            -n railyard --timeout=120s
+
+      - name: Verify engine init container succeeds
+        run: |
+          # Wait for the engine pod to exist and init container to complete
+          for i in $(seq 1 30); do
+            POD=$(kubectl get pods -n railyard -l app.kubernetes.io/component=engine \
+              -o jsonpath='{.items[0].metadata.name}' 2>/dev/null) || true
+            if [ -n "$POD" ]; then
+              INIT_STATUS=$(kubectl get pod "$POD" -n railyard \
+                -o jsonpath='{.status.initContainerStatuses[0].state.terminated.exitCode}' 2>/dev/null) || true
+              if [ "$INIT_STATUS" = "0" ]; then
+                echo "Engine init container (git-clone) succeeded"
+                exit 0
+              fi
+            fi
+            echo "Waiting for engine init container... ($i/30)"
+            sleep 5
+          done
+          echo "Engine init container did not succeed in time"
+          kubectl describe pods -l app.kubernetes.io/component=engine -n railyard
+          exit 1
+
+      - name: Show pod status
+        if: always()
+        run: kubectl get pods -n railyard -o wide
+
+      - name: Show pod logs on failure
+        if: failure()
+        run: |
+          echo "=== Dolt ==="
+          kubectl logs railyard-dolt-0 -n railyard --tail=50 || true
+          echo "=== pgvector ==="
+          kubectl logs railyard-pgvector-0 -n railyard --tail=50 || true
+          echo "=== Dashboard ==="
+          kubectl logs -l app.kubernetes.io/component=dashboard -n railyard --tail=50 || true
+          echo "=== Dispatch ==="
+          kubectl logs -l app.kubernetes.io/component=dispatch -n railyard --tail=50 --all-containers || true
+          echo "=== Yardmaster ==="
+          kubectl logs -l app.kubernetes.io/component=yardmaster -n railyard --tail=50 --all-containers || true
+          echo "=== Engine ==="
+          kubectl logs -l app.kubernetes.io/component=engine -n railyard --tail=50 --all-containers || true
+          echo "=== Events ==="
+          kubectl get events -n railyard --sort-by='.lastTimestamp' | tail -30 || true

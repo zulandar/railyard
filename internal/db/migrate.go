@@ -22,7 +22,6 @@ func AllModels() []interface{} {
 		&models.BroadcastAck{},
 		&models.AgentLog{},
 		&models.RailyardConfig{},
-		&models.ReindexJob{},
 		&models.DispatchSession{},
 		&models.TelegraphConversation{},
 	}
@@ -30,8 +29,25 @@ func AllModels() []interface{} {
 
 // AutoMigrate creates or updates all Phase 1 tables.
 func AutoMigrate(db *gorm.DB) error {
+	// Rename legacy vmid column BEFORE AutoMigrate adds pod_name,
+	// otherwise the rename fails with a duplicate-column error.
+	if err := migrateRenameVMIDToPodName(db); err != nil {
+		return err
+	}
 	if err := db.AutoMigrate(AllModels()...); err != nil {
 		return fmt.Errorf("db: auto-migrate: %w", err)
+	}
+	return nil
+}
+
+// migrateRenameVMIDToPodName renames the engines.vmid column to pod_name
+// for existing databases. Safe to run repeatedly — checks if the old column exists.
+func migrateRenameVMIDToPodName(db *gorm.DB) error {
+	if !db.Migrator().HasColumn(&models.Engine{}, "vmid") {
+		return nil
+	}
+	if err := db.Migrator().RenameColumn(&models.Engine{}, "vmid", "pod_name"); err != nil {
+		return fmt.Errorf("db: rename vmid to pod_name: %w", err)
 	}
 	return nil
 }

@@ -1,0 +1,25 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "railyard.fullname" . }}
+  labels:
+    {{- include "railyard.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "railyard.fullname" . }}
+  labels:
+    {{- include "railyard.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "railyard.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "railyard.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}

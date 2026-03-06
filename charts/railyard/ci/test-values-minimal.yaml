@@ -1,0 +1,5 @@
+git:
+  owner: testuser
+  repo: git@github.com:test/repo.git
+auth:
+  apiKey: test-key

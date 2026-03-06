@@ -460,10 +460,6 @@ func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, r
 				}
 			}
 
-			commitHash := getHeadCommit(ymDir)
-			if err := CreateReindexJob(db, c.Track, commitHash); err != nil {
-				log.Printf("create reindex job for %s: %v", c.Track, err)
-			}
 		} else if !result.TestsPassed {
 			fmt.Fprintf(out, "Car %s tests failed — blocked\n", c.ID)
 		}

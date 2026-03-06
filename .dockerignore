@@ -1,0 +1,11 @@
+.git
+.github
+.railyard
+.beads
+coverage.out
+*.test
+cocoindex/.venv
+cocoindex/__pycache__
+.golangci*.yml
+.env
+*.bck.*

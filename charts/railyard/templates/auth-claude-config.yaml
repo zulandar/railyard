@@ -1,0 +1,11 @@
+{{- if eq .Values.auth.method "oauth_token" }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "railyard.fullname" . }}-claude-config
+  labels:
+    {{- include "railyard.labels" . | nindent 4 }}
+data:
+  claude.json: |
+    {"hasCompletedOnboarding": true}
+{{- end }}

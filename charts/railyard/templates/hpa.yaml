@@ -1,0 +1,26 @@
+{{- $fullname := include "railyard.fullname" . -}}
+{{- range .Values.tracks }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ $fullname }}-engine-{{ .name }}
+  labels:
+    {{- include "railyard.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: engine
+    railyard.dev/track: {{ .name }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ $fullname }}-engine-{{ .name }}
+  minReplicas: {{ .minReplicas | default 1 }}
+  maxReplicas: {{ .maxReplicas | default 3 }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+{{- end }}
