@@ -16,7 +16,7 @@ git:
 # Container image
 # ---------------------------------------------------------------------------
 image:
-  repository: ghcr.io/zulandar/railyard
+  repository: ghcr.io/zulandar/railyard/engine
   tag: ""  # defaults to .Chart.AppVersion
   pullPolicy: IfNotPresent
 

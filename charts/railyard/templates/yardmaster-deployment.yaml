@@ -22,12 +22,27 @@ spec:
       imagePullSecrets:
         - name: {{ .Values.imagePullSecret }}
       {{- end }}
+      initContainers:
+        - name: git-clone
+          image: {{ include "railyard.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["sh", "-c"]
+          args:
+            - |
+              git clone {{ .Values.git.repo }} /repo &&
+              cd /repo &&
+              git config user.name "railyard" &&
+              git config user.email "railyard@railyard.dev"
+          volumeMounts:
+            - name: repo
+              mountPath: /repo
       containers:
         - name: yardmaster
           image: {{ include "railyard.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["ry"]
           args: ["yardmaster", "-c", "/etc/railyard/railyard.yaml"]
+          workingDir: /repo
           env:
             - name: DOLT_PASSWORD
               valueFrom:
@@ -41,6 +56,8 @@ spec:
             - name: config
               mountPath: /etc/railyard
               readOnly: true
+            - name: repo
+              mountPath: /repo
             {{- include "railyard.authVolumeMounts" . | nindent 12 }}
           {{- with .Values.yardmaster.resources }}
           resources:
@@ -50,4 +67,6 @@ spec:
         - name: config
           configMap:
             name: {{ include "railyard.fullname" . }}-config
+        - name: repo
+          emptyDir: {}
         {{- include "railyard.authVolumes" . | nindent 8 }}

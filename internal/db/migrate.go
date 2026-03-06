@@ -29,11 +29,13 @@ func AllModels() []interface{} {
 
 // AutoMigrate creates or updates all Phase 1 tables.
 func AutoMigrate(db *gorm.DB) error {
-	if err := db.AutoMigrate(AllModels()...); err != nil {
-		return fmt.Errorf("db: auto-migrate: %w", err)
-	}
+	// Rename legacy vmid column BEFORE AutoMigrate adds pod_name,
+	// otherwise the rename fails with a duplicate-column error.
 	if err := migrateRenameVMIDToPodName(db); err != nil {
 		return err
+	}
+	if err := db.AutoMigrate(AllModels()...); err != nil {
+		return fmt.Errorf("db: auto-migrate: %w", err)
 	}
 	return nil
 }
