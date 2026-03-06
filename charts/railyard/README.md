@@ -84,6 +84,7 @@ helm install railyard ./charts/railyard \
 | `tracks[].maxReplicas` | Maximum replicas for HPA | `3` |
 | `tracks[].language` | Programming language | (required) |
 | `tracks[].testCommand` | Test command to run | (required) |
+| `tracks[].preTestCommand` | Command to run before tests (e.g., setup, migrations) | `""` |
 
 ### Engine
 
@@ -123,6 +124,26 @@ helm install railyard ./charts/railyard \
 | `telegraph.discord.botToken` | Discord bot token | `""` |
 | `telegraph.discord.guildID` | Discord guild ID | `""` |
 | `telegraph.discord.channelID` | Discord channel ID | `""` |
+
+### CI Test Values
+
+The `ci/` directory contains example values files for chart validation:
+
+| File | Description |
+|------|-------------|
+| `ci/test-values-minimal.yaml` | Bare minimum — git and auth only. Good for `helm template` smoke tests. |
+| `ci/test-values-external-db.yaml` | External databases with `dolt.internal=false` and `pgvector.internal=false`. |
+| `ci/test-values-full.yaml` | Full configuration — ingress, OAuth2 proxy, multiple tracks, Telegraph. |
+
+Use these to validate chart rendering:
+
+```bash
+# Lint the chart
+helm lint ./charts/railyard -f ./charts/railyard/ci/test-values-minimal.yaml
+
+# Render templates without installing
+helm template railyard ./charts/railyard -f ./charts/railyard/ci/test-values-full.yaml
+```
 
 ## Usage Examples
 

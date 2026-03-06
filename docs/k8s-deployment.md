@@ -247,7 +247,275 @@ engine:
       effect: NoSchedule
 ```
 
-## 6. Monitoring and Logs
+## 6. Resource Tuning
+
+The Helm chart sets `resources: {}` for all components by default, which means no requests or limits. For anything beyond a quick test you should set explicit values to ensure stable scheduling and prevent resource contention.
+
+### What drives resource needs
+
+| Component | CPU driver | Memory driver |
+|-----------|-----------|--------------|
+| **Dolt** | Query load from dispatch/yardmaster | Working set size; grows slowly with metadata volume |
+| **pgvector** | Vector similarity search (CocoIndex queries) | Index size; pgvector loads HNSW indexes into RAM |
+| **Engine** | Git operations, test execution, agent tool calls | Cloned repo size, test suite memory, agent context window |
+| **Dispatch** | Car assignment loop (lightweight) | Minimal -- in-memory state is small |
+| **Yardmaster** | Engine lifecycle polling (lightweight) | Minimal |
+| **Dashboard** | HTTP request serving | Minimal |
+| **Telegraph** | Websocket connection handling | One goroutine per connection; minimal unless fan-out is large |
+
+### Recommended resource settings
+
+| Component | | Small (dev/test) | Medium (team) | Large (org-wide) |
+|-----------|---|-----------------|---------------|-----------------|
+| **Dolt** | requests | 250m / 256Mi | 500m / 512Mi | 1 CPU / 1Gi |
+| | limits | 500m / 512Mi | 1 CPU / 1Gi | 2 CPU / 2Gi |
+| **pgvector** | requests | 250m / 512Mi | 500m / 1Gi | 1 CPU / 2Gi |
+| | limits | 500m / 1Gi | 1 CPU / 2Gi | 2 CPU / 4Gi |
+| **Engine** | requests | 250m / 512Mi | 500m / 1Gi | 1 CPU / 2Gi |
+| | limits | 1 CPU / 2Gi | 2 CPU / 4Gi | 4 CPU / 8Gi |
+| **Dispatch** | requests | 50m / 64Mi | 100m / 128Mi | 250m / 256Mi |
+| | limits | 200m / 128Mi | 500m / 256Mi | 1 CPU / 512Mi |
+| **Yardmaster** | requests | 50m / 64Mi | 100m / 128Mi | 250m / 256Mi |
+| | limits | 200m / 128Mi | 500m / 256Mi | 1 CPU / 512Mi |
+| **Dashboard** | requests | 50m / 64Mi | 100m / 128Mi | 250m / 256Mi |
+| | limits | 200m / 256Mi | 500m / 512Mi | 1 CPU / 512Mi |
+| **Telegraph** | requests | 50m / 64Mi | 100m / 128Mi | 250m / 256Mi |
+| | limits | 200m / 128Mi | 500m / 256Mi | 1 CPU / 512Mi |
+
+**Tier guidance:**
+- **Small** -- single developer or CI testing; 1-2 tracks, 1-3 engine slots.
+- **Medium** -- team of 5-15; 2-5 tracks, 5-15 total engine slots.
+- **Large** -- organization-wide; many tracks, 15+ engine slots, large repositories.
+
+### Example values.yaml for a medium deployment
+
+```yaml
+dolt:
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "512Mi"
+    limits:
+      cpu: "1"
+      memory: "1Gi"
+
+pgvector:
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "1Gi"
+    limits:
+      cpu: "1"
+      memory: "2Gi"
+
+engine:
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "1Gi"
+    limits:
+      cpu: "2"
+      memory: "4Gi"
+
+dispatch:
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "500m"
+      memory: "256Mi"
+
+yardmaster:
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "500m"
+      memory: "256Mi"
+
+dashboard:
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+
+telegraph:
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "500m"
+      memory: "256Mi"
+```
+
+> **Tip:** Start with medium values and adjust based on `kubectl top pods -n railyard`. If pgvector OOMKills under load, increase its memory limit first -- vector index size is the most common surprise.
+
+## 7. Storage and PVC Sizing
+
+The internal Dolt and pgvector StatefulSets each create a PersistentVolumeClaim (PVC). This section covers sizing, storage class selection, and how to resize PVCs after initial deployment.
+
+### Sizing guidelines
+
+| Component | What it stores | Default size | Sizing rule of thumb |
+|-----------|---------------|-------------|---------------------|
+| **Dolt** | Car/engine/track metadata + git-like version history | `10Gi` | Grows slowly. 10Gi covers most single-project deployments. Large orgs with many tracks and high car throughput may need 20-50Gi. |
+| **pgvector** | CocoIndex vector embeddings of indexed source code | `10Gi` | Scales with codebase size. Estimate ~1GB per 100K lines of indexed code. A monorepo with 500K lines should start at 10Gi; 1M+ lines should use 20Gi or more. |
+
+Configure sizes in your values file:
+
+```yaml
+dolt:
+  storage:
+    size: 10Gi
+    storageClass: ""   # empty string uses the cluster default
+
+pgvector:
+  storage:
+    size: 10Gi
+    storageClass: ""
+```
+
+### Storage class recommendations
+
+| Environment | Recommended `storageClass` | Notes |
+|------------|---------------------------|-------|
+| Minikube | `standard` (default) | Uses hostPath; fine for local testing |
+| AWS EKS | `gp3` | Good balance of cost and performance; default `gp2` also works |
+| GCP GKE | `premium-rwo` (SSD) or `standard-rwo` (HDD) | Use SSD for pgvector if query latency matters |
+| Azure AKS | `managed-premium` (SSD) | Falls back to `managed` for standard HDD |
+
+### Resizing PVCs
+
+PVC expansion requires a storage class that supports `allowVolumeExpansion: true` (most cloud providers do by default).
+
+**Step 1** -- Update your values file with the new size and upgrade:
+
+```bash
+helm upgrade railyard ./charts/railyard \
+  --namespace railyard \
+  -f my-values.yaml
+```
+
+**Step 2** -- If the StatefulSet PVC is not updated automatically, patch it directly:
+
+```bash
+# Resize Dolt PVC
+kubectl patch pvc data-railyard-dolt-0 -n railyard \
+  -p '{"spec":{"resources":{"requests":{"storage":"20Gi"}}}}'
+
+# Resize pgvector PVC
+kubectl patch pvc data-railyard-pgvector-0 -n railyard \
+  -p '{"spec":{"resources":{"requests":{"storage":"20Gi"}}}}'
+```
+
+The underlying volume expands online for most cloud storage classes. No pod restart is needed.
+
+### Data persistence warning
+
+> **Warning:** Deleting a PVC permanently destroys all data on the underlying volume. `helm uninstall` does **not** delete PVCs (this is intentional), but running `kubectl delete pvc` will. If you are using internal databases, back up Dolt and pgvector data before removing PVCs. There is no recovery path once the volume is deleted.
+
+## 8. Telegraph (Chat Bridge)
+
+Telegraph bridges railyard events (car status changes, build failures, merge completions) to Slack or Discord. It runs as an optional deployment managed by the Helm chart. For local setup details see [telegraph-setup.md](telegraph-setup.md); this section covers Kubernetes-specific configuration.
+
+Enable Telegraph by setting `telegraph.enabled: true` in your values file.
+
+### Slack configuration
+
+```yaml
+telegraph:
+  enabled: true
+  replicas: 1
+  platform: slack
+  channel: "#railyard-notifications"
+  slack:
+    botToken: "xoxb-..."
+    appToken: "xapp-..."
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "250m"
+      memory: "256Mi"
+```
+
+### Discord configuration
+
+```yaml
+telegraph:
+  enabled: true
+  replicas: 1
+  platform: discord
+  discord:
+    botToken: "MTI..."
+    guildID: "123456789012345678"
+    channelID: "987654321098765432"
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "250m"
+      memory: "256Mi"
+```
+
+### Using an existing Secret for tokens
+
+Storing bot tokens directly in values files is fine for development but should be avoided in production. Create a Secret containing your tokens and reference it with `existingSecret`:
+
+```bash
+kubectl create secret generic telegraph-tokens \
+  --from-literal=slack-bot-token="xoxb-..." \
+  --from-literal=slack-app-token="xapp-..." \
+  -n railyard
+```
+
+Then in your values file:
+
+```yaml
+telegraph:
+  enabled: true
+  platform: slack
+  channel: "#railyard-notifications"
+  existingSecret: telegraph-tokens
+```
+
+The chart expects the Secret keys to match the platform (`slack-bot-token` / `slack-app-token` for Slack, `discord-bot-token` for Discord).
+
+## 9. Service Networking and DNS
+
+All Railyard components deploy into a single namespace (e.g. `railyard` or `railyard-{project}`). Pods discover each other through Kubernetes DNS using the pattern `<service>.<namespace>.svc.cluster.local`. In practice you rarely need the full form -- the Helm-generated `railyard.yaml` configmap already uses the short service names (e.g. `railyard-dolt`), which resolve within the same namespace automatically.
+
+### Internal services
+
+| Service | Port | Type | Description |
+|---------|------|------|-------------|
+| `railyard-dolt` | 3306 | Headless ClusterIP | Dolt MySQL-compatible metadata database |
+| `railyard-pgvector` | 5432 | Headless ClusterIP | pgvector PostgreSQL for CocoIndex vector storage |
+| `railyard-dashboard` | 8080 | ClusterIP | Dashboard web UI |
+
+Dispatch, yardmaster, and engine pods all read connection strings from the `railyard-config` ConfigMap. The Helm helpers (`railyard.doltHost`, `railyard.pgvectorHost`) resolve to the internal service names when `dolt.internal` and `pgvector.internal` are `true`.
+
+### External database mode
+
+When you set `dolt.internal: false` or `pgvector.internal: false`, the chart skips creating the corresponding Service and StatefulSet. The ConfigMap is populated with the external host you provide in values (see section 3). Internal services for the other components are unaffected.
+
+### Network policies
+
+The chart does not install any NetworkPolicy resources by default. All pods within the namespace can communicate freely over any port. If your cluster enforces network policies globally, ensure the following traffic is permitted within the Railyard namespace:
+
+- Engine, dispatch, and yardmaster pods to `railyard-dolt` on port 3306
+- Engine pods to `railyard-pgvector` on port 5432
+- All pods to `railyard-dashboard` on port 8080 (optional, only needed for health checks or internal links)
+
+## 10. Monitoring and Logs
 
 ### Check pod status
 
@@ -290,7 +558,7 @@ The dashboard provides a live view of:
 
 Access it via port-forward or ingress as described in section 4.
 
-## 7. Troubleshooting
+## 11. Troubleshooting
 
 ### Pods in CrashLoopBackOff
 
