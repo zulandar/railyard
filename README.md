@@ -267,6 +267,7 @@ For detailed configuration and setup guides, see:
 - [`charts/railyard/README.md`](charts/railyard/README.md) — full Helm chart configuration reference
 - [`docs/k8s-authentication.md`](docs/k8s-authentication.md) — authentication setup (API keys, OAuth, Bedrock, Vertex, Foundry)
 - [`docs/k8s-deployment.md`](docs/k8s-deployment.md) — step-by-step deployment guide
+- [`docs/k8s-local-testing.md`](docs/k8s-local-testing.md) — local testing with minikube
 
 ### Merging
 
