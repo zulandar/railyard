@@ -919,4 +919,3 @@ func createDraftPR(repoDir, title, body, branch string) (string, error) {
 	}
 	return strings.TrimSpace(string(out)), nil
 }
-

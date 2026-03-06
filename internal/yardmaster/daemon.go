@@ -460,7 +460,7 @@ func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, r
 				}
 			}
 
-			} else if !result.TestsPassed {
+		} else if !result.TestsPassed {
 			fmt.Fprintf(out, "Car %s tests failed — blocked\n", c.ID)
 		}
 	}

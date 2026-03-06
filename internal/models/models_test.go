@@ -235,7 +235,6 @@ func TestRailyardConfig_Fields(t *testing.T) {
 	assertFieldType(t, typ, "Owner", "string")
 }
 
-
 func TestCar_Instantiation(t *testing.T) {
 	parentID := "parent-001"
 	now := time.Now()
@@ -498,7 +497,6 @@ func TestTelegraphConversation_Instantiation(t *testing.T) {
 		t.Errorf("Role = %q, want %q", tc.Role, "user")
 	}
 }
-
 
 // ---------------------------------------------------------------------------
 // CRUD tests — verify AutoMigrate creates tables and basic operations work
