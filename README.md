@@ -249,6 +249,25 @@ ry telegraph sessions -c railyard.yaml --clear  # Clear all session history
 
 See [Telegraph Setup Guide](docs/telegraph-setup.md) for platform setup and configuration.
 
+### Kubernetes Deployment
+
+Railyard can run on Kubernetes using the provided Helm chart. Instead of tmux sessions, engines run as Kubernetes pods with auto-scaling, TLS-secured database connections, and multi-project isolation.
+
+```bash
+helm install railyard charts/railyard \
+  --set git.owner=yourname \
+  --set git.repo=git@github.com:org/repo.git \
+  --set auth.apiKey=$ANTHROPIC_API_KEY
+```
+
+For multi-project setups, set the `project` field in your `railyard.yaml` to isolate namespaces, database names, and branch prefixes per project.
+
+For detailed configuration and setup guides, see:
+
+- [`charts/railyard/README.md`](charts/railyard/README.md) — full Helm chart configuration reference
+- [`docs/k8s-authentication.md`](docs/k8s-authentication.md) — authentication setup (API keys, OAuth, Bedrock, Vertex, Foundry)
+- [`docs/k8s-deployment.md`](docs/k8s-deployment.md) — step-by-step deployment guide
+
 ### Merging
 
 ```bash
