@@ -383,6 +383,53 @@ func TestConnectWithConfig_Error(t *testing.T) {
 	}
 }
 
+func TestConnectWithConfig_TLSEnabled_RegistersBeforeOpen(t *testing.T) {
+	// With TLS enabled and SkipVerify, RegisterTLS should succeed.
+	// The connection will fail (no server) but the error should be a
+	// connection error, NOT "invalid value / unknown config name: custom".
+	cfg := config.DoltConfig{
+		Host:     "127.0.0.1",
+		Port:     1,
+		Database: "testdb",
+		Username: "root",
+		TLS: config.TLSConfig{
+			Enabled:    true,
+			SkipVerify: true,
+		},
+	}
+	_, err := ConnectWithConfig(cfg)
+	if err == nil {
+		t.Fatal("expected error connecting to invalid port")
+	}
+	// Should be a connection error, not a TLS registration error.
+	if strings.Contains(err.Error(), "unknown") || strings.Contains(err.Error(), "invalid") {
+		t.Errorf("TLS not registered before open: %s", err.Error())
+	}
+	if !strings.Contains(err.Error(), "db: connect to") {
+		t.Errorf("error = %q, want connection error containing %q", err.Error(), "db: connect to")
+	}
+}
+
+func TestConnectWithConfig_TLSBadCACert_ReturnsRegisterError(t *testing.T) {
+	cfg := config.DoltConfig{
+		Host:     "127.0.0.1",
+		Port:     3306,
+		Database: "testdb",
+		Username: "root",
+		TLS: config.TLSConfig{
+			Enabled: true,
+			CACert:  "/nonexistent/ca.pem",
+		},
+	}
+	_, err := ConnectWithConfig(cfg)
+	if err == nil {
+		t.Fatal("expected TLS registration error")
+	}
+	if !strings.Contains(err.Error(), "register TLS") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "register TLS")
+	}
+}
+
 func TestMarshalJSON_Error(t *testing.T) {
 	// Channels cannot be marshaled to JSON.
 	_, err := marshalJSON(make(chan int))
