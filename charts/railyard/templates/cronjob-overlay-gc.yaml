@@ -37,6 +37,11 @@ spec:
                     secretKeyRef:
                       name: {{ include "railyard.fullname" . }}-db
                       key: dolt-password
+                - name: PGVECTOR_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "railyard.fullname" . }}-db
+                      key: pgvector-password
               volumeMounts:
                 - name: config
                   mountPath: /etc/railyard
