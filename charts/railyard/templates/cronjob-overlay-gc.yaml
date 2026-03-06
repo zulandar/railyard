@@ -1,0 +1,47 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "railyard.fullname" . }}-overlay-gc
+  labels:
+    {{- include "railyard.labels" . | nindent 4 }}
+    app.kubernetes.io/component: overlay-gc
+spec:
+  schedule: "0 3 * * *"
+  jobTemplate:
+    metadata:
+      labels:
+        {{- include "railyard.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: overlay-gc
+    spec:
+      template:
+        metadata:
+          labels:
+            {{- include "railyard.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: overlay-gc
+        spec:
+          serviceAccountName: {{ include "railyard.serviceAccountName" . }}
+          {{- if .Values.imagePullSecret }}
+          imagePullSecrets:
+            - name: {{ .Values.imagePullSecret }}
+          {{- end }}
+          restartPolicy: OnFailure
+          containers:
+            - name: overlay-gc
+              image: {{ include "railyard.image" . }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              command: ["ry"]
+              args: ["overlay", "gc", "-c", "/etc/railyard/railyard.yaml"]
+              env:
+                - name: DOLT_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "railyard.fullname" . }}-db
+                      key: dolt-password
+              volumeMounts:
+                - name: config
+                  mountPath: /etc/railyard
+                  readOnly: true
+          volumes:
+            - name: config
+              configMap:
+                name: {{ include "railyard.fullname" . }}-config

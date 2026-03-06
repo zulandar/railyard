@@ -1,0 +1,55 @@
+{{- if .Values.telegraph.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "railyard.fullname" . }}-telegraph
+  labels:
+    {{- include "railyard.labels" . | nindent 4 }}
+    app.kubernetes.io/component: telegraph
+spec:
+  replicas: {{ .Values.telegraph.replicas }}
+  selector:
+    matchLabels:
+      {{- include "railyard.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: telegraph
+  template:
+    metadata:
+      labels:
+        {{- include "railyard.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: telegraph
+    spec:
+      serviceAccountName: {{ include "railyard.serviceAccountName" . }}
+      {{- if .Values.imagePullSecret }}
+      imagePullSecrets:
+        - name: {{ .Values.imagePullSecret }}
+      {{- end }}
+      containers:
+        - name: telegraph
+          image: {{ include "railyard.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["ry"]
+          args: ["telegraph", "start", "-c", "/etc/railyard/railyard.yaml"]
+          env:
+            - name: DOLT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "railyard.fullname" . }}-db
+                  key: dolt-password
+            {{- include "railyard.authExtraEnv" . | nindent 12 }}
+          envFrom:
+            {{- include "railyard.authEnvFrom" . | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/railyard
+              readOnly: true
+            {{- include "railyard.authVolumeMounts" . | nindent 12 }}
+          {{- with .Values.telegraph.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "railyard.fullname" . }}-config
+        {{- include "railyard.authVolumes" . | nindent 8 }}
+{{- end }}
