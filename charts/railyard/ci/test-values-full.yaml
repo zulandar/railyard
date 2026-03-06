@@ -1,0 +1,33 @@
+project: myproject
+git:
+  owner: testuser
+  repo: git@github.com:test/repo.git
+auth:
+  method: oauth_token
+  oauthToken: test-token
+dashboard:
+  ingress:
+    enabled: true
+    host: dashboard.example.com
+    className: nginx
+  oauth2proxy:
+    enabled: true
+    clientID: test-id
+    clientSecret: test-secret
+    cookieSecret: test-cookie
+telegraph:
+  enabled: true
+  channel: C123456
+tracks:
+  - name: backend
+    engineSlots: 3
+    minReplicas: 1
+    maxReplicas: 5
+    language: go
+    testCommand: "go test ./..."
+  - name: frontend
+    engineSlots: 2
+    minReplicas: 1
+    maxReplicas: 3
+    language: typescript
+    testCommand: "npm test"
