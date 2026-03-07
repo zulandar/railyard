@@ -26,6 +26,7 @@ type Car struct {
 	Acceptance  string  `gorm:"type:text"`
 	SkipTests   bool    `gorm:"default:false"`
 	RequestedBy string  `gorm:"size:64"`
+	SourceIssue int
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 	ClaimedAt   *time.Time

@@ -24,6 +24,7 @@ func AllModels() []interface{} {
 		&models.RailyardConfig{},
 		&models.DispatchSession{},
 		&models.TelegraphConversation{},
+		&models.BullIssue{},
 	}
 }
 

@@ -499,6 +499,61 @@ func TestTelegraphConversation_Instantiation(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// BullIssue model tests
+// ---------------------------------------------------------------------------
+
+func TestBullIssue_Fields(t *testing.T) {
+	typ := reflect.TypeOf(BullIssue{})
+
+	assertGormTag(t, typ, "ID", "primaryKey")
+	assertGormTag(t, typ, "ID", "autoIncrement")
+	assertGormTag(t, typ, "IssueNumber", "uniqueIndex")
+	assertGormTag(t, typ, "CarID", "size:32")
+	assertGormTag(t, typ, "CarID", "index")
+	assertGormTag(t, typ, "LastKnownStatus", "size:32")
+	assertGormTag(t, typ, "TriageSummary", "type:text")
+	assertGormTag(t, typ, "TriageMode", "size:16")
+
+	assertFieldType(t, typ, "ID", "uint")
+	assertFieldType(t, typ, "IssueNumber", "int")
+	assertFieldType(t, typ, "CarID", "string")
+	assertFieldType(t, typ, "LastKnownStatus", "string")
+	assertFieldType(t, typ, "TriageSummary", "string")
+	assertFieldType(t, typ, "TriageMode", "string")
+	assertFieldType(t, typ, "LastSyncedAt", "*time.Time")
+	assertFieldType(t, typ, "CreatedAt", "time.Time")
+	assertFieldType(t, typ, "UpdatedAt", "time.Time")
+}
+
+func TestBullIssue_Instantiation(t *testing.T) {
+	now := time.Now()
+	bi := BullIssue{
+		ID:              1,
+		IssueNumber:     42,
+		CarID:           "car-001",
+		LastKnownStatus: "open",
+		TriageSummary:   "Bug report about login failure",
+		TriageMode:      "standard",
+		LastSyncedAt:    &now,
+	}
+	if bi.IssueNumber != 42 {
+		t.Errorf("IssueNumber = %d, want 42", bi.IssueNumber)
+	}
+	if bi.CarID != "car-001" {
+		t.Errorf("CarID = %q, want %q", bi.CarID, "car-001")
+	}
+	if bi.TriageMode != "standard" {
+		t.Errorf("TriageMode = %q, want %q", bi.TriageMode, "standard")
+	}
+}
+
+func TestCar_SourceIssue_Field(t *testing.T) {
+	typ := reflect.TypeOf(Car{})
+
+	assertFieldType(t, typ, "SourceIssue", "int")
+}
+
+// ---------------------------------------------------------------------------
 // CRUD tests — verify AutoMigrate creates tables and basic operations work
 // ---------------------------------------------------------------------------
 
@@ -510,7 +565,7 @@ func openTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("open test db: %v", err)
 	}
-	if err := db.AutoMigrate(&DispatchSession{}, &TelegraphConversation{}); err != nil {
+	if err := db.AutoMigrate(&Car{}, &DispatchSession{}, &TelegraphConversation{}, &BullIssue{}); err != nil {
 		t.Fatalf("migrate test db: %v", err)
 	}
 	return db
@@ -632,6 +687,86 @@ func TestTelegraphConversation_CRUD(t *testing.T) {
 	result := db.First(&TelegraphConversation{}, conv.ID)
 	if result.Error == nil {
 		t.Fatal("expected record not found after delete")
+	}
+}
+
+func TestBullIssue_CRUD(t *testing.T) {
+	db := openTestDB(t)
+	now := time.Now()
+
+	// Create
+	bi := BullIssue{
+		IssueNumber:     99,
+		CarID:           "car-bull-01",
+		LastKnownStatus: "open",
+		TriageSummary:   "User reports crash on startup",
+		TriageMode:      "standard",
+		LastSyncedAt:    &now,
+	}
+	if err := db.Create(&bi).Error; err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if bi.ID == 0 {
+		t.Fatal("expected auto-increment ID to be set")
+	}
+
+	// Read
+	var found BullIssue
+	if err := db.First(&found, bi.ID).Error; err != nil {
+		t.Fatalf("First: %v", err)
+	}
+	if found.IssueNumber != 99 {
+		t.Errorf("IssueNumber = %d, want 99", found.IssueNumber)
+	}
+	if found.CarID != "car-bull-01" {
+		t.Errorf("CarID = %q, want %q", found.CarID, "car-bull-01")
+	}
+
+	// Unique index on IssueNumber
+	dup := BullIssue{IssueNumber: 99, LastKnownStatus: "open", TriageMode: "standard"}
+	if err := db.Create(&dup).Error; err == nil {
+		t.Fatal("expected unique constraint error for duplicate IssueNumber")
+	}
+
+	// Update
+	if err := db.Model(&found).Update("last_known_status", "closed").Error; err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	var updated BullIssue
+	db.First(&updated, bi.ID)
+	if updated.LastKnownStatus != "closed" {
+		t.Errorf("LastKnownStatus = %q, want %q", updated.LastKnownStatus, "closed")
+	}
+
+	// Delete
+	if err := db.Delete(&BullIssue{}, bi.ID).Error; err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	result := db.First(&BullIssue{}, bi.ID)
+	if result.Error == nil {
+		t.Fatal("expected record not found after delete")
+	}
+}
+
+func TestCar_SourceIssue_CRUD(t *testing.T) {
+	db := openTestDB(t)
+
+	car := Car{
+		ID:          "car-src-01",
+		Title:       "Fix from issue #42",
+		Status:      "open",
+		SourceIssue: 42,
+	}
+	if err := db.Create(&car).Error; err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	var found Car
+	if err := db.First(&found, "id = ?", "car-src-01").Error; err != nil {
+		t.Fatalf("First: %v", err)
+	}
+	if found.SourceIssue != 42 {
+		t.Errorf("SourceIssue = %d, want 42", found.SourceIssue)
 	}
 }
 
