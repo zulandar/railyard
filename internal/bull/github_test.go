@@ -305,11 +305,14 @@ func TestGetIssue_ServerError(t *testing.T) {
 // ---------- Rate limit ----------
 
 func TestRateLimitBackoff_BelowThreshold(t *testing.T) {
+	// Use a reset time far enough in the future to avoid races between
+	// handler execution and client-side time.Until() calculation.
+	resetTime := time.Now().Add(2 * time.Second).Unix()
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/repos/testowner/testrepo/issues/1", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("X-RateLimit-Remaining", "10")
-		resetTime := time.Now().Add(1 * time.Second).Unix()
 		w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(resetTime, 10))
 		issue := github.Issue{Number: github.Ptr(1), Title: github.Ptr("test")}
 		json.NewEncoder(w).Encode(issue)
@@ -327,7 +330,7 @@ func TestRateLimitBackoff_BelowThreshold(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// Should have waited ~1 second due to rate limit backoff
+	// Should have waited until reset time due to rate limit backoff.
 	if elapsed < 500*time.Millisecond {
 		t.Errorf("expected rate limit backoff wait, but elapsed = %v", elapsed)
 	}
