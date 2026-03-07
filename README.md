@@ -8,6 +8,12 @@
   <a href="http://discord.gg/qNtYxa7mYf"><strong>Discord</strong></a>
 </p>
 
+<p align="center">
+  <a href="https://github.com/zulandar/railyard/releases/latest"><img src="https://img.shields.io/github/v/release/zulandar/railyard" alt="GitHub Release"></a>
+  <a href="https://goreportcard.com/report/github.com/zulandar/railyard"><img src="https://goreportcard.com/badge/github.com/zulandar/railyard" alt="Go Report Card"></a>
+  <a href="https://github.com/zulandar/railyard/blob/main/LICENSE"><img src="https://img.shields.io/github/license/zulandar/railyard" alt="License"></a>
+</p>
+
 Multi-agent AI orchestration for coding. Railyard coordinates multiple AI coding agents (Claude Code, Codex, Gemini, OpenCode) across tracks (backend, frontend, infra) with per-branch isolation, a version-controlled SQL database, semantic code search, and automated supervision.
 
 Each developer runs their own Railyard instance against the same repo. Agents work on isolated branches (`ry/{owner}/{track}/{car-id}`), and a supervisor (Yardmaster) handles merges, stall detection, and dependency management.
