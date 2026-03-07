@@ -1,10 +1,17 @@
 # Dockerfile.engine — Railyard engine container image.
 # The ry binary is built in CI and placed in the build context.
+#
+# Build with a specific provider:
+#   docker build --build-arg AGENT_PROVIDER=codex -f Dockerfile.engine .
+#
+# Supported providers: claude (default), codex, gemini, opencode
 
-FROM ubuntu:24.04
+FROM ubuntu:24.04 AS base
 
 # Prevent interactive prompts during package installation.
 ENV DEBIAN_FRONTEND=noninteractive
+
+ARG AGENT_PROVIDER=claude
 
 # ── System packages ──────────────────────────────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -18,12 +25,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   && rm -rf /var/lib/apt/lists/*
 
 # ── Node.js 22 LTS (NodeSource) ─────────────────────────────────────────────
-RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
-  && apt-get install -y --no-install-recommends nodejs \
-  && rm -rf /var/lib/apt/lists/*
+# Required for claude, codex, and gemini (all npm-based CLIs).
+RUN if [ "$AGENT_PROVIDER" != "opencode" ]; then \
+      curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+      && apt-get install -y --no-install-recommends nodejs \
+      && rm -rf /var/lib/apt/lists/*; \
+    fi
 
-# ── Claude Code CLI ─────────────────────────────────────────────────────────
-RUN npm install -g @anthropic-ai/claude-code
+# ── AI CLI provider ─────────────────────────────────────────────────────────
+RUN case "$AGENT_PROVIDER" in \
+      claude)   npm install -g @anthropic-ai/claude-code ;; \
+      codex)    npm install -g @openai/codex ;; \
+      gemini)   npm install -g @google/gemini-cli ;; \
+      opencode) \
+        curl -fsSL https://go.dev/dl/go1.24.1.linux-amd64.tar.gz | tar -C /usr/local -xzf - \
+        && /usr/local/go/bin/go install github.com/opencode-ai/opencode@latest \
+        && cp /root/go/bin/opencode /usr/local/bin/opencode \
+        && rm -rf /usr/local/go /root/go ;; \
+      *) echo "Unknown AGENT_PROVIDER: $AGENT_PROVIDER" && exit 1 ;; \
+    esac
 
 # ── Railyard binary (pre-built in CI) ───────────────────────────────────────
 COPY ry /usr/local/bin/ry
@@ -35,17 +55,21 @@ COPY cocoindex/ /opt/railyard/cocoindex/
 # ── Non-root user ───────────────────────────────────────────────────────────
 RUN useradd -m -s /bin/bash railyard
 
-# Ensure .claude directory exists for OAuth token mounting.
-RUN mkdir -p /home/railyard/.claude \
-  && chown railyard:railyard /home/railyard/.claude
-
-# Create default .claude.json to bypass onboarding.
-RUN echo '{"hasCompletedOnboarding": true}' > /home/railyard/.claude.json \
-  && chown railyard:railyard /home/railyard/.claude.json
+# ── Provider-specific setup ─────────────────────────────────────────────────
+# Claude: create .claude directory for OAuth token mounting and bypass onboarding.
+RUN if [ "$AGENT_PROVIDER" = "claude" ]; then \
+      mkdir -p /home/railyard/.claude \
+      && chown railyard:railyard /home/railyard/.claude \
+      && echo '{"hasCompletedOnboarding": true}' > /home/railyard/.claude.json \
+      && chown railyard:railyard /home/railyard/.claude.json; \
+    fi
 
 # ── Workspace ────────────────────────────────────────────────────────────────
 RUN mkdir -p /home/railyard/workspace \
   && chown railyard:railyard /home/railyard/workspace
+
+# Store the provider for runtime introspection.
+ENV RAILYARD_AGENT_PROVIDER=$AGENT_PROVIDER
 
 WORKDIR /home/railyard/workspace
 

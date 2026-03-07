@@ -91,3 +91,18 @@ jobs:
       - name: Helm template (Kind CI)
         run: helm template railyard charts/railyard -f charts/railyard/ci/test-values-kind.yaml > /dev/null
 
+  docker-build:
+    name: Docker Build Smoke Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build ry binary
+        run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o ry ./cmd/ry/
+
+      - name: Build Docker image (claude)
+        run: docker build --build-arg AGENT_PROVIDER=claude -f Dockerfile.engine .

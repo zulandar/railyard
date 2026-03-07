@@ -81,15 +81,15 @@ func Start(opts StartOpts) error {
 }
 
 // BuildCommand constructs the exec.Cmd for the dispatch agent session.
-// Exported for testing. Uses the default claude provider.
-func BuildCommand(prompt string) *exec.Cmd {
-	provider, err := engine.GetProvider("claude")
-	if err != nil {
-		// Fallback to direct command if provider not registered.
-		return exec.Command("claude",
-			"--dangerously-skip-permissions",
-			"--append-system-prompt", prompt,
-		)
+// Exported for testing. Uses the provided provider name, defaulting to "claude".
+func BuildCommand(prompt string, providerName ...string) (*exec.Cmd, error) {
+	name := "claude"
+	if len(providerName) > 0 && providerName[0] != "" {
+		name = providerName[0]
 	}
-	return provider.BuildInteractiveCommand(prompt, "")
+	provider, err := engine.GetProvider(name)
+	if err != nil {
+		return nil, fmt.Errorf("dispatch: resolve provider %q: %w", name, err)
+	}
+	return provider.BuildInteractiveCommand(prompt, ""), nil
 }
