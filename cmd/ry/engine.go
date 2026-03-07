@@ -251,18 +251,29 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 			continue
 		}
 
-		// Reset worktree to clean state at the car's base branch before branching.
-		if err := engine.ResetWorktree(workDir, claimed.BaseBranch); err != nil {
-			log.Printf("reset worktree error: %v", err)
-			sleepWithContext(ctx, pollInterval)
-			continue
-		}
+		// Set up git branch — revision cars resume existing branch, new cars branch off base.
+		isRevision := claimed.CompletedAt != nil && claimed.Branch != ""
+		if isRevision {
+			log.Printf("Revision car %s — checking out existing branch %s", claimed.ID, claimed.Branch)
+			if err := engine.CheckoutExistingBranch(workDir, claimed.Branch); err != nil {
+				log.Printf("checkout existing branch error: %v", err)
+				sleepWithContext(ctx, pollInterval)
+				continue
+			}
+		} else {
+			// Reset worktree to clean state at the car's base branch before branching.
+			if err := engine.ResetWorktree(workDir, claimed.BaseBranch); err != nil {
+				log.Printf("reset worktree error: %v", err)
+				sleepWithContext(ctx, pollInterval)
+				continue
+			}
 
-		// Create git branch from the car's base branch.
-		if err := engine.CreateBranch(workDir, claimed.Branch, claimed.BaseBranch); err != nil {
-			log.Printf("create branch error: %v", err)
-			sleepWithContext(ctx, pollInterval)
-			continue
+			// Create git branch from the car's base branch.
+			if err := engine.CreateBranch(workDir, claimed.Branch, claimed.BaseBranch); err != nil {
+				log.Printf("create branch error: %v", err)
+				sleepWithContext(ctx, pollInterval)
+				continue
+			}
 		}
 
 		// Build overlay index and write MCP config (non-fatal).
