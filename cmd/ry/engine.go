@@ -252,15 +252,15 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 		}
 
 		// Set up git branch — revision cars resume existing branch, new cars branch off base.
-		isRevision := claimed.CompletedAt != nil && claimed.Branch != ""
+		isRevision := claimed.CompletedAt != nil && claimed.Branch != "" && engine.RemoteBranchExists(workDir, claimed.Branch)
 		if isRevision {
 			log.Printf("Revision car %s — checking out existing branch %s", claimed.ID, claimed.Branch)
 			if err := engine.CheckoutExistingBranch(workDir, claimed.Branch); err != nil {
-				log.Printf("checkout existing branch error: %v", err)
-				sleepWithContext(ctx, pollInterval)
-				continue
+				log.Printf("checkout existing branch error (falling back to new branch): %v", err)
+				isRevision = false
 			}
-		} else {
+		}
+		if !isRevision {
 			// Reset worktree to clean state at the car's base branch before branching.
 			if err := engine.ResetWorktree(workDir, claimed.BaseBranch); err != nil {
 				log.Printf("reset worktree error: %v", err)

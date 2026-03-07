@@ -854,21 +854,30 @@ func handlePrOpenCars(db *gorm.DB, viewer PRViewer, out io.Writer) error {
 		switch {
 		case status.State == "MERGED":
 			now := time.Now()
-			db.Model(&models.Car{}).Where("id = ?", c.ID).Updates(map[string]interface{}{
+			if err := db.Model(&models.Car{}).Where("id = ?", c.ID).Updates(map[string]interface{}{
 				"status":       "merged",
 				"completed_at": now,
-			})
+			}).Error; err != nil {
+				log.Printf("update car %s to merged: %v", c.ID, err)
+				continue
+			}
 			fmt.Fprintf(out, "PR merged for car %s — status → merged\n", c.ID)
 
 		case status.State == "CLOSED":
-			db.Model(&models.Car{}).Where("id = ?", c.ID).Update("status", "cancelled")
+			if err := db.Model(&models.Car{}).Where("id = ?", c.ID).Update("status", "cancelled").Error; err != nil {
+				log.Printf("update car %s to cancelled: %v", c.ID, err)
+				continue
+			}
 			fmt.Fprintf(out, "PR closed for car %s — status → cancelled\n", c.ID)
 
 		case status.ReviewDecision == "CHANGES_REQUESTED":
-			db.Model(&models.Car{}).Where("id = ?", c.ID).Updates(map[string]interface{}{
+			if err := db.Model(&models.Car{}).Where("id = ?", c.ID).Updates(map[string]interface{}{
 				"status":   "open",
 				"assignee": "",
-			})
+			}).Error; err != nil {
+				log.Printf("update car %s to open: %v", c.ID, err)
+				continue
+			}
 			var reviewText strings.Builder
 			reviewText.WriteString("PR review: changes requested\n")
 			for _, r := range status.Reviews {

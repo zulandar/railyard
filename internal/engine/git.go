@@ -439,6 +439,19 @@ func SyncWorktreeToBranch(wtDir, branch, repoDir string) error {
 	return nil
 }
 
+// RemoteBranchExists returns true if the given branch exists on origin.
+// It runs git fetch first to ensure refs are up to date.
+func RemoteBranchExists(wtDir, branch string) bool {
+	fetch := exec.Command("git", "fetch", "origin")
+	fetch.Dir = wtDir
+	if _, err := fetch.CombinedOutput(); err != nil {
+		return false
+	}
+	check := exec.Command("git", "ls-remote", "--exit-code", "--heads", "origin", branch)
+	check.Dir = wtDir
+	return check.Run() == nil
+}
+
 // CheckoutExistingBranch fetches origin and checks out an existing remote branch.
 // Used for revision cars that already have a pushed branch with prior work.
 func CheckoutExistingBranch(wtDir, branch string) error {
@@ -454,6 +467,13 @@ func CheckoutExistingBranch(wtDir, branch string) error {
 	fetch.Dir = wtDir
 	if out, err := fetch.CombinedOutput(); err != nil {
 		return fmt.Errorf("engine: fetch origin: %s", strings.TrimSpace(string(out)))
+	}
+
+	// Verify the branch still exists on the remote.
+	check := exec.Command("git", "ls-remote", "--exit-code", "--heads", "origin", branch)
+	check.Dir = wtDir
+	if err := check.Run(); err != nil {
+		return fmt.Errorf("engine: remote branch %q no longer exists on origin", branch)
 	}
 
 	// Try checking out the local branch if it exists.

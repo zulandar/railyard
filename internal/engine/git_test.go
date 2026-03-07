@@ -1006,6 +1006,100 @@ func TestCheckoutExistingBranch_EmptyBranch(t *testing.T) {
 	}
 }
 
+func TestRemoteBranchExists_True(t *testing.T) {
+	bareDir := t.TempDir()
+	parentDir := t.TempDir()
+
+	run := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("%v in %s: %s", args, dir, out)
+		}
+	}
+
+	run(bareDir, "git", "init", "--bare", "-b", "main")
+	run(parentDir, "git", "clone", bareDir, "repo")
+	repoDir := filepath.Join(parentDir, "repo")
+	run(repoDir, "git", "config", "user.email", "test@test.com")
+	run(repoDir, "git", "config", "user.name", "test")
+	run(repoDir, "git", "commit", "--allow-empty", "-m", "init")
+	run(repoDir, "git", "push", "origin", "main")
+	run(repoDir, "git", "checkout", "-b", "ry/feature")
+	run(repoDir, "git", "commit", "--allow-empty", "-m", "feature")
+	run(repoDir, "git", "push", "origin", "ry/feature")
+	run(repoDir, "git", "checkout", "main")
+
+	if !RemoteBranchExists(repoDir, "ry/feature") {
+		t.Error("expected RemoteBranchExists to return true for pushed branch")
+	}
+}
+
+func TestRemoteBranchExists_False(t *testing.T) {
+	bareDir := t.TempDir()
+	parentDir := t.TempDir()
+
+	run := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("%v in %s: %s", args, dir, out)
+		}
+	}
+
+	run(bareDir, "git", "init", "--bare", "-b", "main")
+	run(parentDir, "git", "clone", bareDir, "repo")
+	repoDir := filepath.Join(parentDir, "repo")
+	run(repoDir, "git", "config", "user.email", "test@test.com")
+	run(repoDir, "git", "config", "user.name", "test")
+	run(repoDir, "git", "commit", "--allow-empty", "-m", "init")
+	run(repoDir, "git", "push", "origin", "main")
+
+	if RemoteBranchExists(repoDir, "ry/nonexistent") {
+		t.Error("expected RemoteBranchExists to return false for non-existent branch")
+	}
+}
+
+func TestCheckoutExistingBranch_DeletedRemote(t *testing.T) {
+	bareDir := t.TempDir()
+	parentDir := t.TempDir()
+
+	run := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("%v in %s: %s", args, dir, out)
+		}
+	}
+
+	run(bareDir, "git", "init", "--bare", "-b", "main")
+	run(parentDir, "git", "clone", bareDir, "repo")
+	repoDir := filepath.Join(parentDir, "repo")
+	run(repoDir, "git", "config", "user.email", "test@test.com")
+	run(repoDir, "git", "config", "user.name", "test")
+	run(repoDir, "git", "commit", "--allow-empty", "-m", "init")
+	run(repoDir, "git", "push", "origin", "main")
+
+	// Create, push, then delete remote branch.
+	run(repoDir, "git", "checkout", "-b", "ry/deleted")
+	run(repoDir, "git", "commit", "--allow-empty", "-m", "will be deleted")
+	run(repoDir, "git", "push", "origin", "ry/deleted")
+	run(repoDir, "git", "checkout", "main")
+	run(repoDir, "git", "push", "origin", "--delete", "ry/deleted")
+
+	// CheckoutExistingBranch should fail because remote branch is gone.
+	err := CheckoutExistingBranch(repoDir, "ry/deleted")
+	if err == nil {
+		t.Fatal("expected error when remote branch was deleted")
+	}
+}
+
 func TestSyncWorktreeToBranch_PreservesRailyardFiles(t *testing.T) {
 	dir := initTestRepo(t)
 
