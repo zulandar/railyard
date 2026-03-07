@@ -101,11 +101,6 @@ func runBullTriage(cmd *cobra.Command, configPath, issueArg string) error {
 	fmt.Fprintf(out, "Issue #%d: %s\n", issue.GetNumber(), issue.GetTitle())
 
 	// Heuristic pre-filter.
-	var tracks []string
-	for _, t := range cfg.Tracks {
-		tracks = append(tracks, t.Name)
-	}
-
 	filterResult := bull.FilterIssue(issue, cfg.Bull.Labels.Ignore, nil)
 	if !filterResult.Pass {
 		fmt.Fprintf(out, "Filtered: %s\n", filterResult.Reason)

@@ -52,7 +52,7 @@ type TriageOpts struct {
 	Tracks       []string
 	IgnoreLabel  string
 	Tracked      []ExistingIssue
-	CodeContext   string
+	CodeContext  string
 	BranchPrefix string
 }
 

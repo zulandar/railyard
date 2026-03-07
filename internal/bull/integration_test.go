@@ -47,7 +47,7 @@ func integrationTriageOpts(
 		Tracks:       []string{"backend", "frontend"},
 		IgnoreLabel:  cfg.Labels.Ignore,
 		Tracked:      tracked,
-		CodeContext:   "",
+		CodeContext:  "",
 		BranchPrefix: "ry/bull",
 	}
 }

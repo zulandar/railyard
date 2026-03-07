@@ -219,7 +219,7 @@ func (g *GitHubClient) ListReleases(ctx context.Context, since time.Time) ([]*gi
 
 	var filtered []*github.RepositoryRelease
 	for _, r := range releases {
-		if r.CreatedAt != nil && r.CreatedAt.Time.After(since) {
+		if r.CreatedAt != nil && r.CreatedAt.After(since) {
 			filtered = append(filtered, r)
 		}
 	}

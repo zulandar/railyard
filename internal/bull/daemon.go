@@ -62,7 +62,10 @@ type DaemonOpts struct {
 //  4. AI triage for passing issues
 //  5. Reverse sync car statuses
 //  6. Release scan
-func RunDaemon(ctx context.Context, deps interface{ DaemonClient; DaemonStore }, opts DaemonOpts) error {
+func RunDaemon(ctx context.Context, deps interface {
+	DaemonClient
+	DaemonStore
+}, opts DaemonOpts) error {
 	if opts.PollInterval <= 0 {
 		if opts.Config.PollIntervalSec > 0 {
 			opts.PollInterval = time.Duration(opts.Config.PollIntervalSec) * time.Second

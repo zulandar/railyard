@@ -19,10 +19,6 @@ type mockDaemonDeps struct {
 	// GitHub issues returned by ListNewIssues
 	issues []*github.Issue
 
-	// Triage
-	triageResults map[int]*TriageOutcome // keyed by issue number
-	triageErr     error
-
 	// Sync
 	syncTrackedIssues []models.BullIssue
 	syncCarStatuses   map[string]string
@@ -35,13 +31,24 @@ type mockDaemonDeps struct {
 	releaseErr       error
 
 	// Tracking
-	phasesRun      []string
-	triageCalled   []int // issue numbers that went to triage
-	closedIssues   []int
-	removedLabels  []struct{ number int; label string }
-	addedLabels    []struct{ number int; label string }
-	addedComments  []struct{ number int; body string }
-	statusUpdates  []struct{ issueID uint; newStatus string }
+	phasesRun    []string
+	closedIssues []int
+	removedLabels []struct {
+		number int
+		label  string
+	}
+	addedLabels []struct {
+		number int
+		label  string
+	}
+	addedComments []struct {
+		number int
+		body   string
+	}
+	statusUpdates []struct {
+		issueID   uint
+		newStatus string
+	}
 	savedCheckTime *time.Time
 	recordedIssues []models.BullIssue
 	createdCars    []CarCreateOpts
@@ -63,17 +70,26 @@ func (m *mockDaemonDeps) GetIssue(ctx context.Context, number int) (*github.Issu
 
 // TriageClient methods
 func (m *mockDaemonDeps) AddLabel(ctx context.Context, number int, label string) error {
-	m.addedLabels = append(m.addedLabels, struct{ number int; label string }{number, label})
+	m.addedLabels = append(m.addedLabels, struct {
+		number int
+		label  string
+	}{number, label})
 	return nil
 }
 
 func (m *mockDaemonDeps) RemoveLabel(ctx context.Context, number int, label string) error {
-	m.removedLabels = append(m.removedLabels, struct{ number int; label string }{number, label})
+	m.removedLabels = append(m.removedLabels, struct {
+		number int
+		label  string
+	}{number, label})
 	return nil
 }
 
 func (m *mockDaemonDeps) AddComment(ctx context.Context, number int, body string) error {
-	m.addedComments = append(m.addedComments, struct{ number int; body string }{number, body})
+	m.addedComments = append(m.addedComments, struct {
+		number int
+		body   string
+	}{number, body})
 	return nil
 }
 
@@ -88,7 +104,7 @@ func (m *mockDaemonDeps) ListReleases(ctx context.Context, since time.Time) ([]*
 	}
 	var filtered []*github.RepositoryRelease
 	for _, r := range m.releases {
-		if r.CreatedAt != nil && r.CreatedAt.Time.After(since) {
+		if r.CreatedAt != nil && r.CreatedAt.After(since) {
 			filtered = append(filtered, r)
 		}
 	}
@@ -112,7 +128,10 @@ func (m *mockDaemonDeps) GetCarStatus(ctx context.Context, carID string) (string
 }
 
 func (m *mockDaemonDeps) UpdateIssueStatus(ctx context.Context, issueID uint, newStatus string) error {
-	m.statusUpdates = append(m.statusUpdates, struct{ issueID uint; newStatus string }{issueID, newStatus})
+	m.statusUpdates = append(m.statusUpdates, struct {
+		issueID   uint
+		newStatus string
+	}{issueID, newStatus})
 	return nil
 }
 
@@ -237,12 +256,12 @@ func TestRunDaemon_GracefulShutdown(t *testing.T) {
 
 func TestRunDaemon_PhaseErrorDoesNotCrashLoop(t *testing.T) {
 	deps := &mockDaemonDeps{
-		issues:          []*github.Issue{},
+		issues:            []*github.Issue{},
 		syncTrackedIssues: []models.BullIssue{},
-		syncCarStatuses: map[string]string{},
-		syncErr:         errors.New("sync database error"),
-		releases:        []*github.RepositoryRelease{},
-		mergedIssues:    []models.BullIssue{},
+		syncCarStatuses:   map[string]string{},
+		syncErr:           errors.New("sync database error"),
+		releases:          []*github.RepositoryRelease{},
+		mergedIssues:      []models.BullIssue{},
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())

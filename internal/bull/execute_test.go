@@ -15,8 +15,8 @@ import (
 // --- Mock implementations ---
 
 type mockTriageClient struct {
-	comments     []mockComment
-	labelsAdded  []mockLabel
+	comments      []mockComment
+	labelsAdded   []mockLabel
 	labelsRemoved []mockLabel
 }
 
@@ -57,11 +57,11 @@ func (m *mockTriageAI) RunPrompt(_ context.Context, _ string) (string, error) {
 }
 
 type mockTriageStore struct {
-	createdCars   []CarCreateOpts
+	createdCars    []CarCreateOpts
 	recordedIssues []models.BullIssue
-	carIDToReturn string
-	createErr     error
-	recordErr     error
+	carIDToReturn  string
+	createErr      error
+	recordErr      error
 }
 
 func (m *mockTriageStore) CreateCar(_ context.Context, opts CarCreateOpts) (string, error) {
@@ -124,7 +124,7 @@ func defaultOpts(client *mockTriageClient, ai *mockTriageAI, store *mockTriageSt
 		Tracks:       []string{"backend", "frontend"},
 		IgnoreLabel:  "bull:ignore",
 		Tracked:      nil,
-		CodeContext:   "",
+		CodeContext:  "",
 		BranchPrefix: "ry/bull",
 	}
 }

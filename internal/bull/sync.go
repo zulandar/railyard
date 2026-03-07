@@ -94,7 +94,7 @@ func SyncReleases(ctx context.Context, client ReleaseClient, store ReleaseStore,
 	var latestTime time.Time
 	var latestTag, latestURL string
 	for _, r := range releases {
-		if r.CreatedAt != nil && r.CreatedAt.Time.After(latestTime) {
+		if r.CreatedAt != nil && r.CreatedAt.After(latestTime) {
 			latestTime = r.CreatedAt.Time
 			latestTag = r.GetTagName()
 			latestURL = r.GetHTMLURL()
