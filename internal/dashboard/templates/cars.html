@@ -14,19 +14,19 @@
 <div class="filters">
     <form method="get" action="/cars">
         <label>Track:
-            <select name="track" onchange="this.form.submit()">
+            <select name="track" data-autosubmit>
                 <option value="">All</option>
                 {{range .Tracks}}<option value="{{.}}"{{if eq . $.ActiveTrack}} selected{{end}}>{{.}}</option>{{end}}
             </select>
         </label>
         <label>Status:
-            <select name="status" onchange="this.form.submit()">
+            <select name="status" data-autosubmit>
                 <option value="">All</option>
                 {{range .Statuses}}<option value="{{.}}"{{if eq . $.ActiveStatus}} selected{{end}}>{{.}}</option>{{end}}
             </select>
         </label>
         <label>Type:
-            <select name="type" onchange="this.form.submit()">
+            <select name="type" data-autosubmit>
                 <option value="">All</option>
                 {{range .Types}}<option value="{{.}}"{{if eq . $.ActiveType}} selected{{end}}>{{.}}</option>{{end}}
             </select>

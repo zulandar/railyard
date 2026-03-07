@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/zulandar/railyard/internal/config"
 	"github.com/zulandar/railyard/internal/db"
+	"golang.org/x/term"
 )
 
 // Pre-compiled regexps for sanitizeOwner.
@@ -135,6 +136,37 @@ func promptChoice(in io.Reader, out io.Writer, label string, choices []string, d
 // Returns the default if the user presses Enter without typing.
 func promptValue(in io.Reader, out io.Writer, label, defaultVal string) string {
 	fmt.Fprintf(out, "  %s [%s]: ", label, defaultVal)
+	scanner := bufio.NewScanner(in)
+	if scanner.Scan() {
+		val := strings.TrimSpace(scanner.Text())
+		if val != "" {
+			return val
+		}
+	}
+	return defaultVal
+}
+
+// promptPassword reads a password without echoing it to the terminal.
+// If stdin is not a terminal (e.g., piped input in tests), it falls back
+// to reading a line with bufio.Scanner.
+func promptPassword(in io.Reader, out io.Writer, label, defaultVal string) string {
+	hint := "(input hidden)"
+	if defaultVal != "" {
+		hint = "(input hidden, Enter to keep current)"
+	}
+	fmt.Fprintf(out, "  %s %s: ", label, hint)
+
+	// If stdin is a real terminal file, use term.ReadPassword to suppress echo.
+	if f, ok := in.(*os.File); ok && term.IsTerminal(int(f.Fd())) {
+		pw, err := term.ReadPassword(int(f.Fd()))
+		fmt.Fprintln(out) // newline after hidden input
+		if err != nil || len(pw) == 0 {
+			return defaultVal
+		}
+		return strings.TrimSpace(string(pw))
+	}
+
+	// Fallback for non-terminal input (tests, pipes).
 	scanner := bufio.NewScanner(in)
 	if scanner.Scan() {
 		val := strings.TrimSpace(scanner.Text())
@@ -511,7 +543,7 @@ func runInit(cmd *cobra.Command, configPath string, yes, skipDB, skipCoco, skipT
 		remote = promptValue(in, out, "Git remote URL", remote)
 		doltHost = promptValue(in, out, "Dolt host", doltHost)
 		doltUser = promptValue(in, out, "Dolt user", doltUser)
-		doltPassword = promptValue(in, out, "Dolt password (empty for none)", doltPassword)
+		doltPassword = promptPassword(in, out, "Dolt password (empty for none)", doltPassword)
 		portStr := promptValue(in, out, "Dolt port", fmt.Sprintf("%d", doltPort))
 		if v, err := fmt.Sscanf(portStr, "%d", &doltPort); v != 1 || err != nil {
 			return fmt.Errorf("invalid port: %s", portStr)

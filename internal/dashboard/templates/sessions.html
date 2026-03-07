@@ -14,19 +14,19 @@
 <div class="filters">
     <form method="get" action="/sessions">
         <label>Source:
-            <select name="source" onchange="this.form.submit()">
+            <select name="source" data-autosubmit>
                 <option value="">All</option>
                 {{range .Sources}}<option value="{{.}}"{{if eq . $.ActiveSource}} selected{{end}}>{{.}}</option>{{end}}
             </select>
         </label>
         <label>Status:
-            <select name="status" onchange="this.form.submit()">
+            <select name="status" data-autosubmit>
                 <option value="">All</option>
                 {{range .Statuses}}<option value="{{.}}"{{if eq . $.ActiveStatus}} selected{{end}}>{{.}}</option>{{end}}
             </select>
         </label>
         <label>User:
-            <select name="user" onchange="this.form.submit()">
+            <select name="user" data-autosubmit>
                 <option value="">All</option>
                 {{range .Users}}<option value="{{.}}"{{if eq . $.ActiveUser}} selected{{end}}>{{.}}</option>{{end}}
             </select>

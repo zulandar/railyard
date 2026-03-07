@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os/exec"
+	"regexp"
 	"sync"
 	"syscall"
 	"time"
@@ -220,7 +221,7 @@ func (w *logWriter) Flush() error {
 		return nil
 	}
 
-	content := w.buf.String()
+	content := redactSecrets(w.buf.String())
 	w.buf.Reset()
 
 	log := models.AgentLog{
@@ -248,6 +249,30 @@ func (w *logWriter) Flush() error {
 // Close performs a final flush.
 func (w *logWriter) Close() error {
 	return w.Flush()
+}
+
+// secretPatterns matches common secret formats for redaction before DB storage.
+var secretPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`sk-[a-zA-Z0-9_\-]{20,}`),          // OpenAI/Anthropic API keys
+	regexp.MustCompile(`ghp_[a-zA-Z0-9]{36}`),             // GitHub PATs
+	regexp.MustCompile(`gho_[a-zA-Z0-9]{36}`),             // GitHub OAuth tokens
+	regexp.MustCompile(`ghs_[a-zA-Z0-9]{36}`),             // GitHub app tokens
+	regexp.MustCompile(`github_pat_[a-zA-Z0-9_]{60,}`),    // GitHub fine-grained PATs
+	regexp.MustCompile(`xoxb-[a-zA-Z0-9-]+`),              // Slack bot tokens
+	regexp.MustCompile(`xoxp-[a-zA-Z0-9-]+`),              // Slack user tokens
+	regexp.MustCompile(`xapp-[a-zA-Z0-9-]+`),              // Slack app tokens
+	regexp.MustCompile(`AKIA[0-9A-Z]{16}`),                // AWS access keys
+	regexp.MustCompile(`AIza[0-9A-Za-z_\-]{35}`),          // Google/Gemini API keys
+	regexp.MustCompile(`Bearer [a-zA-Z0-9._\-]{20,}`),     // Bearer tokens
+	regexp.MustCompile(`(\w+):([^@\s]{8,})@[a-zA-Z0-9.]`), // user:password@host in DSNs
+}
+
+// redactSecrets strips known secret patterns from log content before storage.
+func redactSecrets(content string) string {
+	for _, pat := range secretPatterns {
+		content = pat.ReplaceAllString(content, "[REDACTED]")
+	}
+	return content
 }
 
 // startFlusher launches a goroutine that periodically flushes the logWriter.

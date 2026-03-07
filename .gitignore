@@ -9,3 +9,14 @@ railyard.yaml
 beads_railyard/
 docs/plans/
 .worktrees/
+coverage.out
+
+# Secrets & credentials
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+*.secret
+credentials.json

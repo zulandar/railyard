@@ -74,12 +74,12 @@ func writeCurrentCar(w *strings.Builder, car *models.Car) {
 	fmt.Fprintf(w, "Priority: %d\n", car.Priority)
 	fmt.Fprintf(w, "Branch: %s\n", car.Branch)
 	w.WriteString("\n### Description\n")
-	w.WriteString(car.Description)
-	w.WriteString("\n\n### Design Notes\n")
-	w.WriteString(car.DesignNotes)
-	w.WriteString("\n\n### Acceptance Criteria\n")
-	w.WriteString(car.Acceptance)
-	w.WriteString("\n\n")
+	writeUserContent(w, car.Description)
+	w.WriteString("\n### Design Notes\n")
+	writeUserContent(w, car.DesignNotes)
+	w.WriteString("\n### Acceptance Criteria\n")
+	writeUserContent(w, car.Acceptance)
+	w.WriteString("\n")
 }
 
 func writeProgress(w *strings.Builder, progress []models.CarProgress) {
@@ -89,8 +89,7 @@ func writeProgress(w *strings.Builder, progress []models.CarProgress) {
 	w.WriteString("## Previous Progress (if resuming)\n")
 	for _, p := range progress {
 		fmt.Fprintf(w, "### Cycle %d\n", p.Cycle)
-		w.WriteString(p.Note)
-		w.WriteString("\n")
+		writeUserContent(w, p.Note)
 		if p.FilesChanged != "" {
 			fmt.Fprintf(w, "Files: %s\n", p.FilesChanged)
 		}
@@ -109,8 +108,8 @@ func writeMessages(w *strings.Builder, messages []models.Message) {
 	for _, m := range messages {
 		fmt.Fprintf(w, "### [%s] %s\n", m.Priority, m.Subject)
 		fmt.Fprintf(w, "From: %s | %s\n", m.FromAgent, m.CreatedAt.Format("2006-01-02 15:04"))
-		w.WriteString(m.Body)
-		w.WriteString("\n\n")
+		writeUserContent(w, m.Body)
+		w.WriteString("\n")
 	}
 }
 
@@ -166,6 +165,23 @@ func writeInstructions(w *strings.Builder, engineID string) {
 	w.WriteString("```\n")
 	w.WriteString("**Scope rule**: Fix issues that are **inside** your car's scope directly — don't file bugs for your own work. ")
 	w.WriteString("Only file bugs for problems that belong to a different car or track.\n")
+}
+
+// writeUserContent wraps user-supplied content in XML-style delimiters to
+// reduce prompt injection risk. The delimiters signal to the LLM that
+// enclosed text is data, not instructions.
+func writeUserContent(w *strings.Builder, content string) {
+	if content == "" {
+		return
+	}
+	// Strip any attempts to close the delimiter tag within content.
+	safe := strings.ReplaceAll(content, "</user-content>", "")
+	w.WriteString("<user-content>\n")
+	w.WriteString(safe)
+	if !strings.HasSuffix(safe, "\n") {
+		w.WriteString("\n")
+	}
+	w.WriteString("</user-content>\n")
 }
 
 // formatConventions parses JSON conventions into bullet points.

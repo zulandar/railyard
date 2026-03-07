@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 
 	gomysql "github.com/go-sql-driver/mysql"
@@ -58,8 +59,13 @@ func sanitizeDBError(errMsg, password string) string {
 	if password != "" {
 		errMsg = strings.ReplaceAll(errMsg, password, "***")
 	}
+	// Strip user:pass@host patterns that drivers may include in DSN fragments.
+	errMsg = dsnCredentialPattern.ReplaceAllString(errMsg, "$1***@")
 	return errMsg
 }
+
+// dsnCredentialPattern matches user:password@ in DSN-style strings.
+var dsnCredentialPattern = regexp.MustCompile(`(\w+):([^@]+)@`)
 
 // RegisterTLS registers a custom TLS configuration with the MySQL driver.
 // If cfg.Enabled is false, this is a no-op.
@@ -122,8 +128,14 @@ func ConnectWithConfig(cfg config.DoltConfig) (*gorm.DB, error) {
 	return db, nil
 }
 
+// validDBName matches safe database identifier names (alphanumeric, underscore, hyphen).
+var validDBName = regexp.MustCompile(`^[a-zA-Z0-9_\-]+$`)
+
 // DropDatabase drops the named database if it exists.
 func DropDatabase(adminDB *gorm.DB, name string) error {
+	if !validDBName.MatchString(name) {
+		return fmt.Errorf("db: invalid database name: %q", name)
+	}
 	sql := fmt.Sprintf("DROP DATABASE IF EXISTS `%s`", name)
 	if err := adminDB.Exec(sql).Error; err != nil {
 		return fmt.Errorf("db: drop database %s: %w", name, err)
@@ -133,6 +145,9 @@ func DropDatabase(adminDB *gorm.DB, name string) error {
 
 // CreateDatabase creates the named database if it doesn't already exist.
 func CreateDatabase(adminDB *gorm.DB, name string) error {
+	if !validDBName.MatchString(name) {
+		return fmt.Errorf("db: invalid database name: %q", name)
+	}
 	sql := fmt.Sprintf("CREATE DATABASE IF NOT EXISTS `%s`", name)
 	if err := adminDB.Exec(sql).Error; err != nil {
 		return fmt.Errorf("db: create database %s: %w", name, err)

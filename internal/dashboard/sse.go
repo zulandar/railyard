@@ -4,12 +4,20 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/zulandar/railyard/internal/models"
 	"gorm.io/gorm"
 )
+
+// maxSSEConnections limits concurrent SSE clients to prevent resource exhaustion.
+const maxSSEConnections = 50
+
+// sseConnectionCount tracks active SSE connections.
+var sseConnectionCount atomic.Int64
 
 // escalationEvent holds data for an escalation SSE event.
 type escalationEvent struct {
@@ -24,6 +32,15 @@ type escalationEvent struct {
 // handleSSE creates a real SSE handler that polls for new escalations.
 func handleSSE(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// Enforce connection limit to prevent resource exhaustion.
+		// Increment first, then check — avoids TOCTOU race between Load and Add.
+		if n := sseConnectionCount.Add(1); n > maxSSEConnections {
+			sseConnectionCount.Add(-1)
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "too many SSE connections"})
+			return
+		}
+		defer sseConnectionCount.Add(-1)
+
 		c.Header("Content-Type", "text/event-stream")
 		c.Header("Cache-Control", "no-cache")
 		c.Header("Connection", "keep-alive")

@@ -189,6 +189,30 @@ func TestServerBindAddress_AllInterfaces(t *testing.T) {
 	}
 }
 
+// TestCSP_NoUnsafeInlineScript verifies that the CSP does not allow
+// unsafe-inline for scripts, which would weaken XSS protection.
+func TestCSP_NoUnsafeInlineScript(t *testing.T) {
+	router := gin.New()
+	router.Use(securityHeaders())
+	router.GET("/test", func(c *gin.Context) { c.String(200, "ok") })
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/test", nil)
+	router.ServeHTTP(w, req)
+
+	csp := w.Header().Get("Content-Security-Policy")
+	if strings.Contains(csp, "script-src") && strings.Contains(csp, "'unsafe-inline'") {
+		// Check it's not in the style-src directive
+		parts := strings.Split(csp, ";")
+		for _, part := range parts {
+			trimmed := strings.TrimSpace(part)
+			if strings.HasPrefix(trimmed, "script-src") && strings.Contains(trimmed, "'unsafe-inline'") {
+				t.Errorf("CSP script-src allows 'unsafe-inline': %s", csp)
+			}
+		}
+	}
+}
+
 // TestNoCSRFProtection documents that the dashboard has no CSRF protection.
 // Currently all routes are GET-only (read-only dashboard), so CSRF risk is low.
 // If POST/PUT/DELETE routes are added, CSRF middleware must be added.
@@ -208,6 +232,43 @@ func TestNoCSRFProtection(t *testing.T) {
 				t.Errorf("%s / = 200, expected 404/405 (dashboard should be read-only)", method)
 			}
 		})
+	}
+}
+
+// TestSSEConnectionLimit verifies that the SSE endpoint enforces a max
+// connection limit to prevent resource exhaustion.
+func TestSSEConnectionLimit(t *testing.T) {
+	router := testRouter()
+	router.Use(securityHeaders())
+
+	// Reset the counter for test isolation.
+	sseConnectionCount.Store(maxSSEConnections)
+	defer sseConnectionCount.Store(0)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/events", nil)
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("SSE at max connections returned %d, want %d", w.Code, http.StatusServiceUnavailable)
+	}
+}
+
+// TestSSEConnectionLimit_BelowMax verifies SSE works when under the limit.
+func TestSSEConnectionLimit_BelowMax(t *testing.T) {
+	router := testRouter()
+
+	// Ensure counter is at 0 (below limit).
+	sseConnectionCount.Store(0)
+	defer sseConnectionCount.Store(0)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/events", nil)
+	router.ServeHTTP(w, req)
+
+	// With nil DB, SSE sends "connected" and returns immediately (200).
+	if w.Code != http.StatusOK {
+		t.Errorf("SSE below limit returned %d, want 200", w.Code)
 	}
 }
 

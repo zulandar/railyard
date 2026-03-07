@@ -9,6 +9,7 @@ require (
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/slack-go/slack v0.18.0
 	github.com/spf13/cobra v1.10.2
+	golang.org/x/term v0.40.0
 	gopkg.in/yaml.v3 v3.0.1
 	gorm.io/driver/mysql v1.6.0
 	gorm.io/driver/sqlite v1.6.0

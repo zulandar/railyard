@@ -172,6 +172,7 @@ func startTestServer(ctx context.Context, port int) error {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	router.Use(gin.Recovery())
+	router.Use(securityHeaders())
 
 	tmpl, err := parseTemplates()
 	if err != nil {

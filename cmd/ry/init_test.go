@@ -1020,3 +1020,52 @@ func TestInitCmd_ConfigAnchoredToGitRoot(t *testing.T) {
 		t.Error("railyard.yaml should NOT be in the subdirectory")
 	}
 }
+
+// TestPromptPassword_PipedInput verifies that promptPassword falls back to
+// line-based reading when stdin is not a terminal (e.g., piped in tests).
+func TestPromptPassword_PipedInput(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		defVal string
+		want   string
+	}{
+		{"typed password", "mySecret\n", "", "mySecret"},
+		{"empty uses default", "\n", "existing", "existing"},
+		{"whitespace trimmed", "  secret123  \n", "", "secret123"},
+		{"no default empty input", "\n", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			in := strings.NewReader(tt.input)
+			var out bytes.Buffer
+			got := promptPassword(in, &out, "Password", tt.defVal)
+			if got != tt.want {
+				t.Errorf("promptPassword() = %q, want %q", got, tt.want)
+			}
+			// Verify the prompt label was written to output.
+			if !strings.Contains(out.String(), "Password") {
+				t.Error("expected prompt label in output")
+			}
+			// Verify the prompt shows "(input hidden)" hint.
+			if !strings.Contains(out.String(), "input hidden") {
+				t.Error("expected '(input hidden)' hint in output")
+			}
+		})
+	}
+}
+
+// TestPromptPassword_NotEchoed verifies the prompt does not echo the password
+// back in its output (the output buffer should only contain the prompt label).
+func TestPromptPassword_NotEchoed(t *testing.T) {
+	in := strings.NewReader("superSecret123\n")
+	var out bytes.Buffer
+	got := promptPassword(in, &out, "Enter password", "")
+	if got != "superSecret123" {
+		t.Fatalf("promptPassword() = %q, want %q", got, "superSecret123")
+	}
+	// The output should contain the prompt but NOT the password.
+	if strings.Contains(out.String(), "superSecret123") {
+		t.Error("password was echoed in output — should be hidden")
+	}
+}

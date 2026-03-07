@@ -61,19 +61,19 @@
 <div class="filters">
     <form method="get" action="/logs">
         <label>Engine:
-            <select name="engine" onchange="this.form.submit()">
+            <select name="engine" data-autosubmit>
                 <option value="">All</option>
                 {{range .Engines}}<option value="{{.}}"{{if eq . $.ActiveEngine}} selected{{end}}>{{.}}</option>{{end}}
             </select>
         </label>
         <label>Car:
-            <select name="car" onchange="this.form.submit()">
+            <select name="car" data-autosubmit>
                 <option value="">All</option>
                 {{range .Cars}}<option value="{{.}}"{{if eq . $.ActiveCar}} selected{{end}}>{{.}}</option>{{end}}
             </select>
         </label>
         <label>Direction:
-            <select name="direction" onchange="this.form.submit()">
+            <select name="direction" data-autosubmit>
                 <option value="">All</option>
                 {{range .Directions}}<option value="{{.}}"{{if eq . $.ActiveDirection}} selected{{end}}>{{.}}</option>{{end}}
             </select>

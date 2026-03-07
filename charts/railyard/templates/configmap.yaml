@@ -28,7 +28,7 @@ data:
 
     {{- if or .Values.pgvector.internal .Values.pgvector.host }}
     cocoindex:
-      database_url: "postgresql://{{ .Values.pgvector.username }}:${PGVECTOR_PASSWORD}@{{ include "railyard.pgvectorHost" . }}:{{ .Values.pgvector.port }}/{{ .Values.pgvector.database }}"
+      database_url: "postgresql://{{ .Values.pgvector.username }}:${PGVECTOR_PASSWORD}@{{ include "railyard.pgvectorHost" . }}:{{ .Values.pgvector.port }}/{{ .Values.pgvector.database }}?sslmode={{ .Values.pgvector.sslmode | default "prefer" }}"
     {{- end }}
 
     tracks:
