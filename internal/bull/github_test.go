@@ -338,14 +338,19 @@ func TestRateLimitBackoff_BelowThreshold(t *testing.T) {
 
 func TestRateLimitBackoff_403Response(t *testing.T) {
 	callCount := 0
+	// Use a reset time far enough in the past so that after our sleep,
+	// go-github's internal rate limiter allows the retry request.
+	// The trick: set reset to now (the handler sleeps have already happened
+	// by the time the retry fires). We use time.Now() at test start.
+	resetAt := time.Now().Add(500 * time.Millisecond)
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/repos/testowner/testrepo/issues/1", func(w http.ResponseWriter, r *http.Request) {
 		callCount++
 		if callCount == 1 {
 			w.Header().Set("Content-Type", "application/json")
 			w.Header().Set("X-RateLimit-Remaining", "0")
-			resetTime := time.Now().Add(1 * time.Second).Unix()
-			w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(resetTime, 10))
+			w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(resetAt.Unix(), 10))
 			w.WriteHeader(http.StatusForbidden)
 			fmt.Fprintf(w, `{"message":"API rate limit exceeded"}`)
 			return
