@@ -15,6 +15,8 @@ func newDashboardCmd() *cobra.Command {
 	var (
 		configPath string
 		port       int
+		tlsCert    string
+		tlsKey     string
 	)
 
 	cmd := &cobra.Command{
@@ -22,16 +24,18 @@ func newDashboardCmd() *cobra.Command {
 		Short: "Start the read-only web dashboard",
 		Long:  "Launches a local web dashboard for monitoring Railyard status in real-time.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runDashboard(cmd, configPath, port)
+			return runDashboard(cmd, configPath, port, tlsCert, tlsKey)
 		},
 	}
 
 	cmd.Flags().StringVarP(&configPath, "config", "c", "railyard.yaml", "path to Railyard config file")
 	cmd.Flags().IntVarP(&port, "port", "p", 8080, "port to listen on")
+	cmd.Flags().StringVar(&tlsCert, "tls-cert", "", "path to TLS certificate file (enables HTTPS)")
+	cmd.Flags().StringVar(&tlsKey, "tls-key", "", "path to TLS private key file (enables HTTPS)")
 	return cmd
 }
 
-func runDashboard(cmd *cobra.Command, configPath string, port int) error {
+func runDashboard(cmd *cobra.Command, configPath string, port int, tlsCert, tlsKey string) error {
 	_, gormDB, err := connectFromConfig(configPath)
 	if err != nil {
 		return err
@@ -49,8 +53,10 @@ func runDashboard(cmd *cobra.Command, configPath string, port int) error {
 	}()
 
 	return dashboard.Start(ctx, dashboard.StartOpts{
-		DB:   gormDB,
-		Port: port,
-		Out:  cmd.OutOrStdout(),
+		DB:      gormDB,
+		Port:    port,
+		Out:     cmd.OutOrStdout(),
+		TLSCert: tlsCert,
+		TLSKey:  tlsKey,
 	})
 }

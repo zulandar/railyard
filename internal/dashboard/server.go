@@ -15,9 +15,11 @@ import (
 
 // StartOpts holds configuration for the dashboard server.
 type StartOpts struct {
-	DB   *gorm.DB
-	Port int
-	Out  io.Writer
+	DB      *gorm.DB
+	Port    int
+	Out     io.Writer
+	TLSCert string // path to TLS certificate file (optional)
+	TLSKey  string // path to TLS private key file (optional)
 }
 
 // Start launches the dashboard HTTP server. It blocks until ctx is cancelled,
@@ -33,6 +35,7 @@ func Start(ctx context.Context, opts StartOpts) error {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
 	router.Use(gin.Recovery())
+	router.Use(securityHeaders())
 
 	// Parse embedded templates.
 	tmpl, err := parseTemplates()
@@ -59,12 +62,23 @@ func Start(ctx context.Context, opts StartOpts) error {
 		srv.Shutdown(shutdownCtx)
 	}()
 
+	useTLS := opts.TLSCert != "" && opts.TLSKey != ""
 	if opts.Out != nil {
-		fmt.Fprintf(opts.Out, "Dashboard running at http://localhost:%d\n", opts.Port)
+		scheme := "http"
+		if useTLS {
+			scheme = "https"
+		}
+		fmt.Fprintf(opts.Out, "Dashboard running at %s://localhost:%d\n", scheme, opts.Port)
 	}
 
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		return fmt.Errorf("dashboard: %w", err)
+	var listenErr error
+	if useTLS {
+		listenErr = srv.ListenAndServeTLS(opts.TLSCert, opts.TLSKey)
+	} else {
+		listenErr = srv.ListenAndServe()
+	}
+	if listenErr != nil && listenErr != http.ErrServerClosed {
+		return fmt.Errorf("dashboard: %w", listenErr)
 	}
 	return nil
 }
@@ -104,6 +118,18 @@ func parseTemplates() (*template.Template, error) {
 		return nil, fmt.Errorf("parse templates: %w", err)
 	}
 	return tmpl, nil
+}
+
+// securityHeaders returns middleware that sets standard security response headers.
+func securityHeaders() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Header("X-Content-Type-Options", "nosniff")
+		c.Header("X-Frame-Options", "DENY")
+		c.Header("Referrer-Policy", "strict-origin-when-cross-origin")
+		c.Header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		c.Header("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'")
+		c.Next()
+	}
 }
 
 // TimeAgo formats a time as a human-readable relative duration.
