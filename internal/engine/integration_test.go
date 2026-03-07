@@ -556,7 +556,7 @@ func TestIntegration_ClaimCar_SkipsBlocked(t *testing.T) {
 	}
 }
 
-func TestIntegration_ClaimCar_BlockerDone(t *testing.T) {
+func TestIntegration_ClaimCar_BlockerMerged(t *testing.T) {
 	dbName := "railyard_eng_claimbd"
 	srv := setupTestDB(t, dbName)
 	gormDB := connectDB(t, srv, dbName)
@@ -566,7 +566,7 @@ func TestIntegration_ClaimCar_BlockerDone(t *testing.T) {
 		t.Fatalf("Register: %v", err)
 	}
 
-	// Create and complete a blocker.
+	// Create and merge a blocker.
 	blocker, err := car.Create(gormDB, car.CreateOpts{
 		Title:        "Blocker",
 		Track:        "backend",
@@ -576,8 +576,8 @@ func TestIntegration_ClaimCar_BlockerDone(t *testing.T) {
 		t.Fatalf("car.Create blocker: %v", err)
 	}
 
-	// Transition blocker to done.
-	for _, status := range []string{"ready", "claimed", "in_progress", "done"} {
+	// Transition blocker to merged (done → merged via switch).
+	for _, status := range []string{"ready", "claimed", "in_progress", "done", "merged"} {
 		updates := map[string]interface{}{"status": status}
 		if status == "claimed" {
 			updates["assignee"] = "other-engine"
@@ -587,7 +587,7 @@ func TestIntegration_ClaimCar_BlockerDone(t *testing.T) {
 		}
 	}
 
-	// Create a car that depends on the now-done blocker.
+	// Create a car that depends on the now-merged blocker.
 	dependent, err := car.Create(gormDB, car.CreateOpts{
 		Title:        "Dependent car",
 		Track:        "backend",
@@ -602,13 +602,68 @@ func TestIntegration_ClaimCar_BlockerDone(t *testing.T) {
 		t.Fatalf("AddDep: %v", err)
 	}
 
-	// Since blocker is done, dependent should be claimable.
+	// Since blocker is merged, dependent should be claimable.
 	claimed, err := ClaimCar(gormDB, eng.ID, "backend")
 	if err != nil {
 		t.Fatalf("ClaimCar: %v", err)
 	}
 	if claimed.ID != dependent.ID {
-		t.Errorf("claimed ID = %q, want %q (blocker is done)", claimed.ID, dependent.ID)
+		t.Errorf("claimed ID = %q, want %q (blocker is merged)", claimed.ID, dependent.ID)
+	}
+}
+
+func TestIntegration_ClaimCar_BlockerDoneNotClaimable(t *testing.T) {
+	dbName := "railyard_eng_claimdnc"
+	srv := setupTestDB(t, dbName)
+	gormDB := connectDB(t, srv, dbName)
+
+	eng, err := Register(gormDB, RegisterOpts{Track: "backend"})
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	// Create a blocker in "done" state (not yet merged).
+	blocker, err := car.Create(gormDB, car.CreateOpts{
+		Title:        "Blocker",
+		Track:        "backend",
+		BranchPrefix: "ry/test",
+	})
+	if err != nil {
+		t.Fatalf("car.Create blocker: %v", err)
+	}
+
+	for _, status := range []string{"ready", "claimed", "in_progress", "done"} {
+		updates := map[string]interface{}{"status": status}
+		if status == "claimed" {
+			updates["assignee"] = "other-engine"
+		}
+		if err := car.Update(gormDB, blocker.ID, updates); err != nil {
+			t.Fatalf("car.Update blocker %s: %v", status, err)
+		}
+	}
+
+	// Create a car that depends on the done (not merged) blocker.
+	dependent, err := car.Create(gormDB, car.CreateOpts{
+		Title:        "Dependent car",
+		Track:        "backend",
+		Priority:     1,
+		BranchPrefix: "ry/test",
+	})
+	if err != nil {
+		t.Fatalf("car.Create dependent: %v", err)
+	}
+
+	if err := car.AddDep(gormDB, dependent.ID, blocker.ID, "blocks"); err != nil {
+		t.Fatalf("AddDep: %v", err)
+	}
+
+	// Blocker is only "done" (not merged) — dependent should NOT be claimable.
+	claimed, err := ClaimCar(gormDB, eng.ID, "backend")
+	if err != nil {
+		t.Fatalf("ClaimCar: %v", err)
+	}
+	if claimed != nil {
+		t.Errorf("expected no claimable car, got %q (blocker is done, not merged)", claimed.ID)
 	}
 }
 

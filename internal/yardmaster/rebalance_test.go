@@ -270,10 +270,10 @@ func TestCountReadyWork(t *testing.T) {
 	db.Create(&models.Car{ID: "blocker", Track: "frontend", Status: "open", Type: "task"})
 	db.Create(&models.CarDep{CarID: "c7", BlockedBy: "blocker"})
 
-	// Blocked by a done car → NOT excluded (blocker resolved).
+	// Blocked by a merged car → NOT excluded (blocker resolved).
 	db.Create(&models.Car{ID: "c8", Track: "backend", Status: "open", Type: "task"})
-	db.Create(&models.Car{ID: "done-blocker", Track: "backend", Status: "done", Type: "task"})
-	db.Create(&models.CarDep{CarID: "c8", BlockedBy: "done-blocker"})
+	db.Create(&models.Car{ID: "merged-blocker", Track: "backend", Status: "merged", Type: "task"})
+	db.Create(&models.CarDep{CarID: "c8", BlockedBy: "merged-blocker"})
 
 	count, err := countReadyWork(db, "backend")
 	if err != nil {

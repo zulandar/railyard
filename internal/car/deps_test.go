@@ -260,7 +260,7 @@ func TestReadyCars_IncludesWhenBlockerResolved(t *testing.T) {
 	db.Model(a).Update("status", "open")
 
 	blocker := createCar(t, db, CreateOpts{Title: "Blocker", Track: "backend"})
-	db.Model(blocker).Update("status", "done") // done = resolved.
+	db.Model(blocker).Update("status", "merged") // merged = resolved.
 
 	AddDep(db, a.ID, blocker.ID, "blocks")
 
@@ -319,6 +319,56 @@ func TestReadyCars_AllTracks(t *testing.T) {
 	}
 }
 
+func TestReadyCars_DoneBlockerDoesNotUnblock(t *testing.T) {
+	db := testDB(t)
+
+	dependent := createCar(t, db, CreateOpts{Title: "Dependent", Track: "backend"})
+	db.Model(dependent).Update("status", "open")
+
+	blocker := createCar(t, db, CreateOpts{Title: "Blocker", Track: "backend"})
+	db.Model(blocker).Update("status", "done") // done should NOT unblock.
+
+	AddDep(db, dependent.ID, blocker.ID, "blocks")
+
+	ready, err := ReadyCars(db, "")
+	if err != nil {
+		t.Fatalf("ReadyCars: %v", err)
+	}
+
+	for _, c := range ready {
+		if c.ID == dependent.ID {
+			t.Error("car with done blocker should NOT appear in ready list")
+		}
+	}
+}
+
+func TestReadyCars_MergedBlockerUnblocks(t *testing.T) {
+	db := testDB(t)
+
+	dependent := createCar(t, db, CreateOpts{Title: "Dependent", Track: "backend"})
+	db.Model(dependent).Update("status", "open")
+
+	blocker := createCar(t, db, CreateOpts{Title: "Blocker", Track: "backend"})
+	db.Model(blocker).Update("status", "merged") // merged SHOULD unblock.
+
+	AddDep(db, dependent.ID, blocker.ID, "blocks")
+
+	ready, err := ReadyCars(db, "")
+	if err != nil {
+		t.Fatalf("ReadyCars: %v", err)
+	}
+
+	found := false
+	for _, c := range ready {
+		if c.ID == dependent.ID {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("car with merged blocker should appear in ready list")
+	}
+}
+
 // --- DB error tests ---
 
 func TestAddDep_DBError(t *testing.T) {
@@ -356,8 +406,8 @@ func TestReadyCars_DBError(t *testing.T) {
 func TestReadyCars_ResolvedStatuses(t *testing.T) {
 	db := testDB(t)
 
-	// Test all resolved blocker statuses: done, cancelled, merged.
-	for _, resolvedStatus := range []string{"done", "cancelled", "merged"} {
+	// Test all resolved blocker statuses: cancelled, merged.
+	for _, resolvedStatus := range []string{"cancelled", "merged"} {
 		car := createCar(t, db, CreateOpts{Title: "Ready " + resolvedStatus, Track: "backend"})
 		db.Model(car).Update("status", "open")
 
@@ -371,7 +421,7 @@ func TestReadyCars_ResolvedStatuses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadyCars: %v", err)
 	}
-	if len(ready) != 3 {
-		t.Errorf("ReadyCars with resolved blockers: got %d, want 3", len(ready))
+	if len(ready) != 2 {
+		t.Errorf("ReadyCars with resolved blockers: got %d, want 2", len(ready))
 	}
 }

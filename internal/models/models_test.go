@@ -44,7 +44,7 @@ func assertFieldType(t *testing.T, typ reflect.Type, fieldName, expectedType str
 }
 
 func TestResolvedBlockerStatuses(t *testing.T) {
-	expected := map[string]bool{"done": true, "cancelled": true, "merged": true}
+	expected := map[string]bool{"cancelled": true, "merged": true}
 	if len(ResolvedBlockerStatuses) != len(expected) {
 		t.Fatalf("ResolvedBlockerStatuses has %d entries, want %d", len(ResolvedBlockerStatuses), len(expected))
 	}

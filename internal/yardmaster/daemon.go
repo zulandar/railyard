@@ -471,7 +471,7 @@ func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, r
 // handleBlockedCars is a safety-net sweep that tries to unblock cars whose
 // dependencies may have resolved outside the normal switch flow.
 func handleBlockedCars(db *gorm.DB, out io.Writer) error {
-	for _, status := range []string{"done", "merged"} {
+	for _, status := range []string{"merged"} {
 		completedCars, err := car.List(db, car.ListFilters{Status: status})
 		if err != nil {
 			return err

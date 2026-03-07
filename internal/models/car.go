@@ -7,7 +7,7 @@ import "time"
 // Every query that checks for unresolved blockers must use this list to stay
 // consistent. Forgetting a status here causes dependent cars to appear
 // permanently blocked.
-var ResolvedBlockerStatuses = []string{"done", "cancelled", "merged"}
+var ResolvedBlockerStatuses = []string{"cancelled", "merged"}
 
 // Car is the core work item in Railyard.
 type Car struct {
