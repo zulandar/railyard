@@ -107,6 +107,56 @@ func (g *GitHubClient) RemoveLabel(ctx context.Context, number int, label string
 	return nil
 }
 
+// CreateLabel creates a new label in the repository.
+func (g *GitHubClient) CreateLabel(ctx context.Context, name, color, description string) error {
+	label := &github.Label{
+		Name:        github.Ptr(name),
+		Color:       github.Ptr(strings.TrimPrefix(color, "#")),
+		Description: github.Ptr(description),
+	}
+	_, resp, err := g.client.Issues.CreateLabel(ctx, g.owner, g.repo, label)
+	if err != nil {
+		if _, ok := g.handleRateLimitError(resp, err); ok {
+			_, resp, err = g.client.Issues.CreateLabel(ctx, g.owner, g.repo, label)
+			if err != nil {
+				return fmt.Errorf("bull: create label %q retry: %w", name, err)
+			}
+		} else {
+			return fmt.Errorf("bull: create label %q: %w", name, err)
+		}
+	}
+	g.waitIfRateLimited(resp)
+	return nil
+}
+
+// ListLabels returns the names of all labels in the repository.
+func (g *GitHubClient) ListLabels(ctx context.Context) ([]string, error) {
+	opts := &github.ListOptions{PerPage: 100}
+	var allNames []string
+	for {
+		labels, resp, err := g.client.Issues.ListLabels(ctx, g.owner, g.repo, opts)
+		if err != nil {
+			if _, ok := g.handleRateLimitError(resp, err); ok {
+				labels, resp, err = g.client.Issues.ListLabels(ctx, g.owner, g.repo, opts)
+				if err != nil {
+					return nil, fmt.Errorf("bull: list labels retry: %w", err)
+				}
+			} else {
+				return nil, fmt.Errorf("bull: list labels: %w", err)
+			}
+		}
+		for _, l := range labels {
+			allNames = append(allNames, l.GetName())
+		}
+		g.waitIfRateLimited(resp)
+		if resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+	return allNames, nil
+}
+
 // AddComment posts a comment on the given issue.
 func (g *GitHubClient) AddComment(ctx context.Context, number int, body string) error {
 	comment := &github.IssueComment{Body: github.Ptr(body)}
