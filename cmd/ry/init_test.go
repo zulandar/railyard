@@ -1025,10 +1025,10 @@ func TestInitCmd_ConfigAnchoredToGitRoot(t *testing.T) {
 // line-based reading when stdin is not a terminal (e.g., piped in tests).
 func TestPromptPassword_PipedInput(t *testing.T) {
 	tests := []struct {
-		name     string
-		input    string
-		defVal   string
-		want     string
+		name   string
+		input  string
+		defVal string
+		want   string
 	}{
 		{"typed password", "mySecret\n", "", "mySecret"},
 		{"empty uses default", "\n", "existing", "existing"},
