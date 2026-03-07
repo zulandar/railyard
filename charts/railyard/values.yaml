@@ -118,6 +118,9 @@ auth:
   foundry:
     apiKey: ""
     endpoint: ""
+  # -- GitHub PAT for PR operations (require_pr mode). Needs repo scope.
+  # Sets GH_TOKEN env var used by gh CLI for PR creation and review detection.
+  githubToken: ""
   # -- Advanced: apiKeyHelper command for dynamic key rotation (e.g. Vault).
   # When set, ANTHROPIC_API_KEY_HELPER is set to this value.
   apiKeyHelper: ""
