@@ -144,6 +144,7 @@ type BullConfig struct {
 	GitHubToken     string             `yaml:"github_token"`
 	PollIntervalSec int                `yaml:"poll_interval_sec"`
 	TriageMode      string             `yaml:"triage_mode"`
+	AgentProvider   string             `yaml:"agent_provider"`
 	Comments        BullCommentsConfig `yaml:"comments"`
 	Labels          BullLabelsConfig   `yaml:"labels"`
 }
@@ -277,6 +278,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.AgentProvider == "" {
 		c.AgentProvider = "claude"
+	}
+	if c.Bull.AgentProvider == "" {
+		c.Bull.AgentProvider = c.AgentProvider
 	}
 	for i := range c.Tracks {
 		if c.Tracks[i].EngineSlots == 0 {

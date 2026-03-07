@@ -59,6 +59,11 @@ func Start(ctx context.Context, opts StartOpts) error {
 		tracks = append(tracks, t.Name)
 	}
 
+	ai, err := NewProviderAI(opts.Config.Bull.AgentProvider)
+	if err != nil {
+		return err
+	}
+
 	deps := &daemonDeps{client: client, store: store}
 
 	return RunDaemon(ctx, deps, DaemonOpts{
@@ -67,6 +72,7 @@ func Start(ctx context.Context, opts StartOpts) error {
 		BranchPrefix: opts.Config.BranchPrefix,
 		PollInterval: opts.PollInterval,
 		Out:          out,
+		AI:           ai,
 	})
 }
 
