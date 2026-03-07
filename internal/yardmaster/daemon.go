@@ -2,6 +2,7 @@ package yardmaster
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -124,6 +125,14 @@ func RunDaemon(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath,
 		// Phase 5: Reconcile stale cars whose branches are already merged.
 		if err := reconcileStaleCars(db, repoDir, out); err != nil {
 			log.Printf("yardmaster reconcile error: %v", err)
+		}
+
+		// Phase 5b: Poll pr_open cars for GitHub review feedback.
+		if cfg.RequirePR {
+			prViewer := &ghPRViewer{repoDir: repoDir}
+			if err := handlePrOpenCars(db, prViewer, out); err != nil {
+				log.Printf("yardmaster pr review error: %v", err)
+			}
 		}
 
 		// Phase 6: Rebalance idle engines to busy tracks.
@@ -765,6 +774,114 @@ func getHeadCommit(repoDir string) string {
 		return ""
 	}
 	return strings.TrimSpace(string(out))
+}
+
+// prReview holds a single review comment from a PR.
+type prReview struct {
+	Body   string
+	Author string
+}
+
+// prStatus holds the GitHub PR status for a branch.
+type prStatus struct {
+	State          string     // OPEN, MERGED, CLOSED
+	ReviewDecision string     // APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED, ""
+	Reviews        []prReview
+}
+
+// PRViewer abstracts GitHub PR status lookups for testability.
+type PRViewer interface {
+	ViewPR(branch string) (*prStatus, error)
+}
+
+// ghPRViewer implements PRViewer using the gh CLI.
+type ghPRViewer struct {
+	repoDir string // git working directory (gh infers repo from remote)
+}
+
+func (g *ghPRViewer) ViewPR(branch string) (*prStatus, error) {
+	cmd := exec.Command("gh", "pr", "view", branch,
+		"--json", "state,reviewDecision,reviews")
+	cmd.Dir = g.repoDir
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("gh pr view %s: %w", branch, err)
+	}
+
+	var result struct {
+		State          string `json:"state"`
+		ReviewDecision string `json:"reviewDecision"`
+		Reviews        []struct {
+			Body   string `json:"body"`
+			Author struct {
+				Login string `json:"login"`
+			} `json:"author"`
+		} `json:"reviews"`
+	}
+	if err := json.Unmarshal(out, &result); err != nil {
+		return nil, fmt.Errorf("parse gh pr view: %w", err)
+	}
+
+	ps := &prStatus{
+		State:          result.State,
+		ReviewDecision: result.ReviewDecision,
+	}
+	for _, r := range result.Reviews {
+		ps.Reviews = append(ps.Reviews, prReview{Body: r.Body, Author: r.Author.Login})
+	}
+	return ps, nil
+}
+
+// handlePrOpenCars polls pr_open cars for GitHub review status and transitions
+// them based on the PR state: changes_requested → open, merged → merged, closed → cancelled.
+func handlePrOpenCars(db *gorm.DB, viewer PRViewer, out io.Writer) error {
+	prCars, err := car.List(db, car.ListFilters{Status: "pr_open"})
+	if err != nil {
+		return err
+	}
+
+	for _, c := range prCars {
+		if c.Branch == "" {
+			continue
+		}
+
+		status, err := viewer.ViewPR(c.Branch)
+		if err != nil {
+			log.Printf("pr status for %s: %v", c.ID, err)
+			continue
+		}
+
+		switch {
+		case status.State == "MERGED":
+			now := time.Now()
+			db.Model(&models.Car{}).Where("id = ?", c.ID).Updates(map[string]interface{}{
+				"status":       "merged",
+				"completed_at": now,
+			})
+			fmt.Fprintf(out, "PR merged for car %s — status → merged\n", c.ID)
+
+		case status.State == "CLOSED":
+			db.Model(&models.Car{}).Where("id = ?", c.ID).Update("status", "cancelled")
+			fmt.Fprintf(out, "PR closed for car %s — status → cancelled\n", c.ID)
+
+		case status.ReviewDecision == "CHANGES_REQUESTED":
+			db.Model(&models.Car{}).Where("id = ?", c.ID).Updates(map[string]interface{}{
+				"status":   "open",
+				"assignee": "",
+			})
+			var reviewText strings.Builder
+			reviewText.WriteString("PR review: changes requested\n")
+			for _, r := range status.Reviews {
+				if r.Body != "" {
+					fmt.Fprintf(&reviewText, "- @%s: %s\n", r.Author, r.Body)
+				}
+			}
+			writeProgressNote(db, c.ID, "yardmaster", reviewText.String())
+			fmt.Fprintf(out, "PR changes requested for car %s — status → open\n", c.ID)
+		}
+	}
+
+	return nil
 }
 
 // sleepWithContext sleeps for duration d, returning early if ctx is cancelled.

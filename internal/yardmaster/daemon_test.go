@@ -708,6 +708,165 @@ func TestHandleEscalateResult_NilResult(t *testing.T) {
 // handleCompletedCars — epic skip tests
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// handlePrOpenCars tests
+// ---------------------------------------------------------------------------
+
+func TestHandlePrOpenCars_ChangesRequested(t *testing.T) {
+	db := testDB(t)
+
+	db.Create(&models.Car{
+		ID:     "car-pro1",
+		Branch: "ry/backend/car-pro1",
+		Status: "pr_open",
+		Track:  "backend",
+	})
+
+	viewer := &mockPRViewer{
+		reviewDecision: "CHANGES_REQUESTED",
+		state:          "OPEN",
+		reviews:        []prReview{{Body: "Fix the error handling", Author: "reviewer1"}},
+	}
+
+	var buf bytes.Buffer
+	err := handlePrOpenCars(db, viewer, &buf)
+	if err != nil {
+		t.Fatalf("handlePrOpenCars: %v", err)
+	}
+
+	var c models.Car
+	db.First(&c, "id = ?", "car-pro1")
+	if c.Status != "open" {
+		t.Errorf("status = %q, want %q", c.Status, "open")
+	}
+	if c.Assignee != "" {
+		t.Errorf("assignee = %q, want empty", c.Assignee)
+	}
+
+	var notes []models.CarProgress
+	db.Where("car_id = ?", "car-pro1").Find(&notes)
+	if len(notes) == 0 {
+		t.Error("expected progress note with review comments")
+	}
+}
+
+func TestHandlePrOpenCars_Merged(t *testing.T) {
+	db := testDB(t)
+
+	db.Create(&models.Car{
+		ID:     "car-pro2",
+		Branch: "ry/backend/car-pro2",
+		Status: "pr_open",
+		Track:  "backend",
+	})
+
+	viewer := &mockPRViewer{state: "MERGED"}
+
+	var buf bytes.Buffer
+	err := handlePrOpenCars(db, viewer, &buf)
+	if err != nil {
+		t.Fatalf("handlePrOpenCars: %v", err)
+	}
+
+	var c models.Car
+	db.First(&c, "id = ?", "car-pro2")
+	if c.Status != "merged" {
+		t.Errorf("status = %q, want %q", c.Status, "merged")
+	}
+}
+
+func TestHandlePrOpenCars_Closed(t *testing.T) {
+	db := testDB(t)
+
+	db.Create(&models.Car{
+		ID:     "car-pro3",
+		Branch: "ry/backend/car-pro3",
+		Status: "pr_open",
+		Track:  "backend",
+	})
+
+	viewer := &mockPRViewer{state: "CLOSED"}
+
+	var buf bytes.Buffer
+	err := handlePrOpenCars(db, viewer, &buf)
+	if err != nil {
+		t.Fatalf("handlePrOpenCars: %v", err)
+	}
+
+	var c models.Car
+	db.First(&c, "id = ?", "car-pro3")
+	if c.Status != "cancelled" {
+		t.Errorf("status = %q, want %q", c.Status, "cancelled")
+	}
+}
+
+func TestHandlePrOpenCars_NoPrOpenCars(t *testing.T) {
+	db := testDB(t)
+
+	viewer := &mockPRViewer{state: "OPEN"}
+
+	var buf bytes.Buffer
+	err := handlePrOpenCars(db, viewer, &buf)
+	if err != nil {
+		t.Fatalf("handlePrOpenCars: %v", err)
+	}
+}
+
+func TestHandlePrOpenCars_ApprovedNoAction(t *testing.T) {
+	db := testDB(t)
+
+	db.Create(&models.Car{
+		ID:     "car-pro4",
+		Branch: "ry/backend/car-pro4",
+		Status: "pr_open",
+		Track:  "backend",
+	})
+
+	viewer := &mockPRViewer{
+		reviewDecision: "APPROVED",
+		state:          "OPEN",
+	}
+
+	var buf bytes.Buffer
+	err := handlePrOpenCars(db, viewer, &buf)
+	if err != nil {
+		t.Fatalf("handlePrOpenCars: %v", err)
+	}
+
+	// Approved but still OPEN — no transition yet (waiting for merge).
+	var c models.Car
+	db.First(&c, "id = ?", "car-pro4")
+	if c.Status != "pr_open" {
+		t.Errorf("status = %q, want %q (approved but not merged)", c.Status, "pr_open")
+	}
+}
+
+func TestHandlePrOpenCars_NoBranch(t *testing.T) {
+	db := testDB(t)
+
+	db.Create(&models.Car{
+		ID:     "car-pro5",
+		Branch: "",
+		Status: "pr_open",
+		Track:  "backend",
+	})
+
+	viewer := &mockPRViewer{state: "CLOSED"}
+
+	var buf bytes.Buffer
+	err := handlePrOpenCars(db, viewer, &buf)
+	if err != nil {
+		t.Fatalf("handlePrOpenCars: %v", err)
+	}
+
+	// Car with no branch should be skipped.
+	var c models.Car
+	db.First(&c, "id = ?", "car-pro5")
+	if c.Status != "pr_open" {
+		t.Errorf("status = %q, want %q (no branch, should be skipped)", c.Status, "pr_open")
+	}
+}
+
 func TestHandleCompletedCars_SkipsEpicAndMarkesMerged(t *testing.T) {
 	db := testDB(t)
 
@@ -832,4 +991,26 @@ func TestHandleCompletedCars_EpicWithPendingChildren_StaysDone(t *testing.T) {
 	if epic.Status != "done" {
 		t.Errorf("epic status = %q, want %q (children not all complete)", epic.Status, "done")
 	}
+}
+
+// ---------------------------------------------------------------------------
+// mockPRViewer for handlePrOpenCars tests
+// ---------------------------------------------------------------------------
+
+type mockPRViewer struct {
+	reviewDecision string
+	state          string
+	reviews        []prReview
+	err            error
+}
+
+func (m *mockPRViewer) ViewPR(branch string) (*prStatus, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return &prStatus{
+		State:          m.state,
+		ReviewDecision: m.reviewDecision,
+		Reviews:        m.reviews,
+	}, nil
 }
