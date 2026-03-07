@@ -122,10 +122,26 @@ func TestIsValidTransition(t *testing.T) {
 }
 
 func TestValidTransitions_AllStatusesPresent(t *testing.T) {
-	expected := []string{"draft", "open", "ready", "claimed", "in_progress", "blocked", "merge-failed"}
+	expected := []string{"draft", "open", "ready", "claimed", "in_progress", "blocked", "merge-failed", "pr_open"}
 	for _, status := range expected {
 		if _, ok := ValidTransitions[status]; !ok {
 			t.Errorf("ValidTransitions missing key %q", status)
+		}
+	}
+}
+
+func TestValidTransitions_PrOpen(t *testing.T) {
+	targets, ok := ValidTransitions["pr_open"]
+	if !ok {
+		t.Fatal("ValidTransitions missing pr_open")
+	}
+	want := map[string]bool{"open": true, "merged": true, "cancelled": true}
+	if len(targets) != len(want) {
+		t.Fatalf("pr_open targets = %v, want %v", targets, want)
+	}
+	for _, s := range targets {
+		if !want[s] {
+			t.Errorf("unexpected pr_open target: %q", s)
 		}
 	}
 }

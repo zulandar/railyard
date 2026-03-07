@@ -54,6 +54,7 @@ var ValidTransitions = map[string][]string{
 	"done":         {"merged", "merge-failed"},
 	"blocked":      {"open", "ready"},
 	"merge-failed": {"done"},
+	"pr_open":      {"open", "merged", "cancelled"},
 }
 
 // GenerateID creates a unique car ID in car-xxxxx format (5-char hex).
