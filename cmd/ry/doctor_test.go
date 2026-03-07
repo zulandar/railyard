@@ -106,6 +106,37 @@ func TestCheckCredentials_RootWithPassword(t *testing.T) {
 	}
 }
 
+func TestBinaryLabel_Gh(t *testing.T) {
+	got := binaryLabel("gh")
+	if got != "GitHub CLI" {
+		t.Errorf("binaryLabel(\"gh\") = %q, want %q", got, "GitHub CLI")
+	}
+}
+
+func TestCheckGhAuth_ReturnsCheckResult(t *testing.T) {
+	result := checkGhAuth()
+	if result.name != "GitHub CLI auth" {
+		t.Errorf("name = %q, want %q", result.name, "GitHub CLI auth")
+	}
+	// gh may or may not be installed/authenticated; just verify status is PASS or WARN
+	if result.status != "PASS" && result.status != "WARN" {
+		t.Errorf("status = %q, want PASS or WARN", result.status)
+	}
+}
+
+func TestCheckGhAuth_DetailContent(t *testing.T) {
+	result := checkGhAuth()
+	if result.status == "PASS" {
+		if !strings.Contains(result.detail, "authenticated") {
+			t.Errorf("PASS detail should contain 'authenticated', got: %s", result.detail)
+		}
+	} else if result.status == "WARN" {
+		if !strings.Contains(result.detail, "gh auth login") {
+			t.Errorf("WARN detail should contain 'gh auth login', got: %s", result.detail)
+		}
+	}
+}
+
 func TestRootCmd_HasDoctorSubcommand(t *testing.T) {
 	cmd := newRootCmd()
 	buf := new(bytes.Buffer)

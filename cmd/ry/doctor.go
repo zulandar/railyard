@@ -57,6 +57,15 @@ func runDoctor(cmd *cobra.Command, configPath string) error {
 		results = append(results, checkProviderBinaries(cfg)...)
 	}
 
+	// 3b. GitHub CLI (only when require_pr is enabled)
+	if cfg != nil && cfg.RequirePR {
+		ghResult := checkBinary("gh")
+		results = append(results, ghResult)
+		if ghResult.status == "PASS" {
+			results = append(results, checkGhAuth())
+		}
+	}
+
 	// 4. Credentials
 	if cfg != nil {
 		results = append(results, checkCredentials(cfg.Dolt.Username, cfg.Dolt.Password))
@@ -137,6 +146,8 @@ func checkBinary(name string) checkResult {
 		switch name {
 		case "claude":
 			return checkResult{"Claude CLI", "WARN", "not found (engines need this to spawn agents)"}
+		case "gh":
+			return checkResult{"GitHub CLI", "WARN", "not found — install: https://cli.github.com"}
 		}
 		return checkResult{label, "FAIL", "not found in PATH"}
 	}
@@ -176,6 +187,8 @@ func binaryLabel(name string) string {
 		return "tmux"
 	case "claude":
 		return "Claude CLI"
+	case "gh":
+		return "GitHub CLI"
 	default:
 		return name
 	}
@@ -272,6 +285,14 @@ func checkCredentials(username, password string) checkResult {
 		return checkResult{"Credentials", "WARN", "using default root with empty password — set dolt.password in config"}
 	}
 	return checkResult{"Credentials", "PASS", "non-default credentials configured"}
+}
+
+func checkGhAuth() checkResult {
+	cmd := exec.Command("gh", "auth", "status")
+	if err := cmd.Run(); err != nil {
+		return checkResult{"GitHub CLI auth", "WARN", "not authenticated — run gh auth login"}
+	}
+	return checkResult{"GitHub CLI auth", "PASS", "authenticated"}
 }
 
 func checkGitRepo() checkResult {
