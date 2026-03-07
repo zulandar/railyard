@@ -938,6 +938,74 @@ func TestResetWorktree_PreservesRailyardFiles(t *testing.T) {
 	}
 }
 
+// --- CheckoutExistingBranch tests ---
+
+func TestCheckoutExistingBranch(t *testing.T) {
+	bareDir := t.TempDir()
+	parentDir := t.TempDir()
+
+	run := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("%v in %s: %s", args, dir, out)
+		}
+	}
+
+	// Create bare remote.
+	run(bareDir, "git", "init", "--bare", "-b", "main")
+
+	// Clone, commit, push.
+	run(parentDir, "git", "clone", bareDir, "repo")
+	repoDir := filepath.Join(parentDir, "repo")
+	run(repoDir, "git", "config", "user.email", "test@test.com")
+	run(repoDir, "git", "config", "user.name", "test")
+	run(repoDir, "git", "commit", "--allow-empty", "-m", "init")
+	run(repoDir, "git", "push", "origin", "main")
+
+	// Create a feature branch, add a file, push it.
+	run(repoDir, "git", "checkout", "-b", "ry/backend/car-abc")
+	os.WriteFile(filepath.Join(repoDir, "feature.txt"), []byte("work"), 0644)
+	run(repoDir, "git", "add", "feature.txt")
+	run(repoDir, "git", "commit", "-m", "feature work")
+	run(repoDir, "git", "push", "origin", "ry/backend/car-abc")
+
+	// Go back to main.
+	run(repoDir, "git", "checkout", "main")
+
+	// Now checkout the existing branch.
+	if err := CheckoutExistingBranch(repoDir, "ry/backend/car-abc"); err != nil {
+		t.Fatalf("CheckoutExistingBranch: %v", err)
+	}
+
+	// Verify we're on the right branch.
+	got := currentBranch(t, repoDir)
+	if got != "ry/backend/car-abc" {
+		t.Errorf("branch = %q, want %q", got, "ry/backend/car-abc")
+	}
+
+	// Verify the feature file exists.
+	if _, err := os.Stat(filepath.Join(repoDir, "feature.txt")); err != nil {
+		t.Error("feature.txt should exist on the checked-out branch")
+	}
+}
+
+func TestCheckoutExistingBranch_EmptyDir(t *testing.T) {
+	err := CheckoutExistingBranch("", "ry/test")
+	if err == nil {
+		t.Fatal("expected error for empty dir")
+	}
+}
+
+func TestCheckoutExistingBranch_EmptyBranch(t *testing.T) {
+	err := CheckoutExistingBranch("/tmp", "")
+	if err == nil {
+		t.Fatal("expected error for empty branch")
+	}
+}
+
 func TestSyncWorktreeToBranch_PreservesRailyardFiles(t *testing.T) {
 	dir := initTestRepo(t)
 

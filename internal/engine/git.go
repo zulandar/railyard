@@ -439,6 +439,43 @@ func SyncWorktreeToBranch(wtDir, branch, repoDir string) error {
 	return nil
 }
 
+// CheckoutExistingBranch fetches origin and checks out an existing remote branch.
+// Used for revision cars that already have a pushed branch with prior work.
+func CheckoutExistingBranch(wtDir, branch string) error {
+	if wtDir == "" {
+		return fmt.Errorf("engine: worktree directory is required")
+	}
+	if branch == "" {
+		return fmt.Errorf("engine: branch name is required")
+	}
+
+	// Fetch to get latest remote refs.
+	fetch := exec.Command("git", "fetch", "origin")
+	fetch.Dir = wtDir
+	if out, err := fetch.CombinedOutput(); err != nil {
+		return fmt.Errorf("engine: fetch origin: %s", strings.TrimSpace(string(out)))
+	}
+
+	// Try checking out the local branch if it exists.
+	checkout := exec.Command("git", "checkout", branch)
+	checkout.Dir = wtDir
+	if _, err := checkout.CombinedOutput(); err != nil {
+		// Branch doesn't exist locally — create from remote tracking branch.
+		checkoutRemote := exec.Command("git", "checkout", "-b", branch, "origin/"+branch)
+		checkoutRemote.Dir = wtDir
+		if rOut, rErr := checkoutRemote.CombinedOutput(); rErr != nil {
+			return fmt.Errorf("engine: checkout existing branch %q: %s", branch, strings.TrimSpace(string(rOut)))
+		}
+	}
+
+	// Pull latest changes on the branch.
+	pull := exec.Command("git", "pull", "--ff-only", "origin", branch)
+	pull.Dir = wtDir
+	pull.CombinedOutput() // Non-fatal — branch may already be up to date.
+
+	return nil
+}
+
 // symlinkRailyardYaml creates a symlink to railyard.yaml in the worktree
 // so the dispatcher can find the config.
 func symlinkRailyardYaml(repoDir, wtDir string) {
