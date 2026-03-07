@@ -45,6 +45,11 @@ repo: git@github.com:org/myproject.git
 # to main. The PR includes a rich description with summary, acceptance
 # criteria, design notes, diff stats, and progress notes.
 # require_pr: false
+#
+# Prerequisites when require_pr is true:
+#   - gh CLI installed (https://cli.github.com/)
+#   - GitHub PAT with repo scope — set GH_TOKEN env var or run `gh auth login`
+#   - In Kubernetes: set auth.githubToken in Helm values
 
 # Git attribution: Engine commits include a Co-Authored-By trailer
 # (e.g. "Co-Authored-By: Railyard Engine eng-abc123 <railyard-engine@noreply>")

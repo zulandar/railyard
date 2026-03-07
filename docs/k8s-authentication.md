@@ -152,6 +152,37 @@ helm upgrade --install railyard ./charts/railyard \
   --set auth.foundry.endpoint="https://my-resource.openai.azure.com/"
 ```
 
+## GitHub PAT (PR Mode)
+
+**Required when:** `require_pr: true` is set in your Railyard config.
+
+When PR mode is enabled, the yardmaster creates draft PRs for completed cars and monitors them for review feedback. This requires the `gh` CLI (pre-installed in the engine image) and a GitHub Personal Access Token with **repo** scope.
+
+The chart sets `GH_TOKEN` in the auth secret. This env var is used by the `gh` CLI for all GitHub API operations.
+
+### Steps
+
+1. Create a fine-grained PAT at [github.com/settings/tokens](https://github.com/settings/tokens?type=beta) with repository permissions for **Contents** (read/write) and **Pull requests** (read/write).
+
+2. Set it in your Helm values:
+
+```yaml
+auth:
+  githubToken: "ghp_..."
+```
+
+3. Install or upgrade:
+
+```bash
+helm upgrade --install railyard ./charts/railyard \
+  -f values.yaml \
+  --set auth.githubToken="ghp_..."
+```
+
+**Note:** `auth.githubToken` is independent of the agent auth method. You can combine it with any method (API key, OAuth token, Bedrock, etc.).
+
+**Using an existing secret:** If you set `auth.existingSecret`, add `GH_TOKEN` to your pre-created Secret alongside the agent credentials.
+
 ## Advanced: Vault-based Key Rotation
 
 For dynamic credential rotation (e.g. via HashiCorp Vault), use `auth.apiKeyHelper` instead of a static key. When set, the chart populates the `ANTHROPIC_API_KEY_HELPER` environment variable. The agent runtime calls this helper command each time it needs a key, so credentials can rotate without redeploying pods.

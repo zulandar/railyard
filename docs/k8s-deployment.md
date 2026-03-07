@@ -186,6 +186,30 @@ python3 -c 'import os,base64; print(base64.b64encode(os.urandom(32)).decode())'
 
 For full details on authentication methods (API keys, OAuth tokens, cloud provider auth), see [k8s-authentication.md](k8s-authentication.md).
 
+### GitHub PAT for PR mode
+
+When `require_pr: true` is set in your Railyard config, the yardmaster and engines use the `gh` CLI to create PRs and detect review feedback. The `gh` CLI is pre-installed in the engine container image, but it needs a GitHub Personal Access Token (PAT) to authenticate.
+
+1. Create a **fine-grained PAT** at [github.com/settings/tokens](https://github.com/settings/tokens?type=beta) with **repo** scope (or the `Contents` and `Pull requests` repository permissions for fine-grained tokens).
+
+2. Set the token in your Helm values:
+
+```yaml
+auth:
+  githubToken: "ghp_..."
+```
+
+Or pass it at install/upgrade time:
+
+```bash
+helm upgrade --install railyard ./charts/railyard \
+  --namespace railyard \
+  -f my-values.yaml \
+  --set auth.githubToken="ghp_..."
+```
+
+The chart adds `GH_TOKEN` to the auth secret, which is mounted in engine, yardmaster, and dispatch pods via `envFrom`. See [k8s-authentication.md](k8s-authentication.md) for details.
+
 ## 5. Scaling
 
 Each track has its own pool of engine pods. Scaling is controlled by the `tracks` configuration and Kubernetes HPA (Horizontal Pod Autoscaler).

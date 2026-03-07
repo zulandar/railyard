@@ -71,6 +71,7 @@ Each developer runs their own Railyard instance against the same repo. Agents wo
   - Gemini — `npm install -g @google/gemini-cli`
   - OpenCode — `go install github.com/opencode-ai/opencode@latest`
 - **Docker** (optional) — for pgvector/CocoIndex semantic search
+- **GitHub CLI** (optional, required when `require_pr: true`) — [install](https://cli.github.com/)
 - **Python 3.13+** (optional) — for CocoIndex semantic search
 
 ## Quickstart
