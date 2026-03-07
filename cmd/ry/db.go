@@ -51,23 +51,29 @@ func runDBInit(cmd *cobra.Command, configPath string) error {
 	}
 	fmt.Fprintf(out, "Loaded config for owner %q from %s\n", cfg.Owner, configPath)
 
-	// Connect to Dolt server (admin, no database selected)
-	adminDB, err := db.ConnectAdmin(cfg.Dolt.Host, cfg.Dolt.Port, cfg.Dolt.Username, cfg.Dolt.Password)
-	if err != nil {
-		return fmt.Errorf("connect to Dolt at %s:%d: %w", cfg.Dolt.Host, cfg.Dolt.Port, err)
-	}
-	fmt.Fprintf(out, "Connected to Dolt at %s:%d\n", cfg.Dolt.Host, cfg.Dolt.Port)
+	// Try connecting directly to the target database first (it may already
+	// exist, e.g. created by the Helm init configmap in K8s).
+	gormDB, directErr := db.Connect(cfg.Dolt.Host, cfg.Dolt.Port, cfg.Dolt.Database, cfg.Dolt.Username, cfg.Dolt.Password)
+	if directErr == nil {
+		fmt.Fprintf(out, "Connected to Dolt at %s:%d\n", cfg.Dolt.Host, cfg.Dolt.Port)
+		fmt.Fprintf(out, "Database %s already exists, skipping creation\n", cfg.Dolt.Database)
+	} else {
+		// Database doesn't exist yet — create it via admin connection.
+		adminDB, err := db.ConnectAdmin(cfg.Dolt.Host, cfg.Dolt.Port, cfg.Dolt.Username, cfg.Dolt.Password)
+		if err != nil {
+			return fmt.Errorf("connect to Dolt at %s:%d: %w", cfg.Dolt.Host, cfg.Dolt.Port, err)
+		}
+		fmt.Fprintf(out, "Connected to Dolt at %s:%d\n", cfg.Dolt.Host, cfg.Dolt.Port)
 
-	// Create database
-	if err := db.CreateDatabase(adminDB, cfg.Dolt.Database); err != nil {
-		return err
-	}
-	fmt.Fprintf(out, "Database %s ready\n", cfg.Dolt.Database)
+		if err := db.CreateDatabase(adminDB, cfg.Dolt.Database); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "Database %s ready\n", cfg.Dolt.Database)
 
-	// Connect to the railyard database
-	gormDB, err := db.Connect(cfg.Dolt.Host, cfg.Dolt.Port, cfg.Dolt.Database, cfg.Dolt.Username, cfg.Dolt.Password)
-	if err != nil {
-		return fmt.Errorf("connect to %s: %w", cfg.Dolt.Database, err)
+		gormDB, err = db.Connect(cfg.Dolt.Host, cfg.Dolt.Port, cfg.Dolt.Database, cfg.Dolt.Username, cfg.Dolt.Password)
+		if err != nil {
+			return fmt.Errorf("connect to %s: %w", cfg.Dolt.Database, err)
+		}
 	}
 
 	// AutoMigrate all tables
