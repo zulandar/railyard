@@ -69,15 +69,14 @@ func TestStart_NoTracks(t *testing.T) {
 	}
 }
 
-func TestStart_ValidConfig_ReturnsStoreError(t *testing.T) {
+func TestStart_NilDB(t *testing.T) {
 	cfg := validBullConfig()
-	err := Start(context.Background(), StartOpts{Config: cfg})
+	err := Start(context.Background(), StartOpts{Config: cfg, DB: nil})
 	if err == nil {
-		t.Fatal("expected error (store not yet implemented)")
+		t.Fatal("expected error for nil DB")
 	}
-	// Valid config should pass all validation and hit the store TODO.
-	if !strings.Contains(err.Error(), "bull: store not yet implemented") {
-		t.Errorf("error = %q, want to contain %q", err.Error(), "bull: store not yet implemented")
+	if !strings.Contains(err.Error(), "bull: database connection is required") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "bull: database connection is required")
 	}
 }
 

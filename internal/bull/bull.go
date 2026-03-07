@@ -6,7 +6,9 @@ import (
 	"io"
 	"time"
 
+	"github.com/google/go-github/v68/github"
 	"github.com/zulandar/railyard/internal/config"
+	"github.com/zulandar/railyard/internal/models"
 	"gorm.io/gorm"
 )
 
@@ -34,7 +36,83 @@ func Start(ctx context.Context, opts StartOpts) error {
 	if len(opts.Config.Tracks) == 0 {
 		return fmt.Errorf("bull: at least one track must be configured")
 	}
+	if opts.DB == nil {
+		return fmt.Errorf("bull: database connection is required")
+	}
 
-	// TODO: construct DaemonStore from opts.DB once the store layer is built.
-	return fmt.Errorf("bull: store not yet implemented")
+	out := opts.Out
+	if out == nil {
+		out = io.Discard
+	}
+
+	client := NewClient(opts.Config.Owner, opts.Config.Repo, opts.Config.Bull.GitHubToken)
+	store := NewStore(opts.DB, opts.Config.BranchPrefix)
+
+	var tracks []string
+	for _, t := range opts.Config.Tracks {
+		tracks = append(tracks, t.Name)
+	}
+
+	deps := &daemonDeps{client: client, store: store}
+
+	return RunDaemon(ctx, deps, DaemonOpts{
+		Config:       opts.Config.Bull,
+		Tracks:       tracks,
+		BranchPrefix: opts.Config.BranchPrefix,
+		PollInterval: opts.PollInterval,
+		Out:          out,
+	})
+}
+
+// daemonDeps bundles a DaemonClient and DaemonStore into a single value
+// that satisfies the interface{ DaemonClient; DaemonStore } constraint.
+type daemonDeps struct {
+	client DaemonClient
+	store  DaemonStore
+}
+
+// DaemonClient methods — delegate to client.
+func (d *daemonDeps) ListNewIssues(ctx context.Context, since time.Time) ([]*github.Issue, error) {
+	return d.client.ListNewIssues(ctx, since)
+}
+func (d *daemonDeps) AddComment(ctx context.Context, number int, body string) error {
+	return d.client.AddComment(ctx, number, body)
+}
+func (d *daemonDeps) AddLabel(ctx context.Context, number int, label string) error {
+	return d.client.AddLabel(ctx, number, label)
+}
+func (d *daemonDeps) RemoveLabel(ctx context.Context, number int, label string) error {
+	return d.client.RemoveLabel(ctx, number, label)
+}
+func (d *daemonDeps) ListReleases(ctx context.Context, since time.Time) ([]*github.RepositoryRelease, error) {
+	return d.client.ListReleases(ctx, since)
+}
+func (d *daemonDeps) CloseIssue(ctx context.Context, number int, comment string) error {
+	return d.client.CloseIssue(ctx, number, comment)
+}
+
+// DaemonStore methods — delegate to store.
+func (d *daemonDeps) GetTrackedIssues(ctx context.Context) ([]models.BullIssue, error) {
+	return d.store.GetTrackedIssues(ctx)
+}
+func (d *daemonDeps) GetCarStatus(ctx context.Context, carID string) (string, error) {
+	return d.store.GetCarStatus(ctx, carID)
+}
+func (d *daemonDeps) UpdateIssueStatus(ctx context.Context, issueID uint, newStatus string) error {
+	return d.store.UpdateIssueStatus(ctx, issueID, newStatus)
+}
+func (d *daemonDeps) GetMergedIssues(ctx context.Context) ([]models.BullIssue, error) {
+	return d.store.GetMergedIssues(ctx)
+}
+func (d *daemonDeps) GetLastReleaseCheck(ctx context.Context) (time.Time, error) {
+	return d.store.GetLastReleaseCheck(ctx)
+}
+func (d *daemonDeps) SetLastReleaseCheck(ctx context.Context, t time.Time) error {
+	return d.store.SetLastReleaseCheck(ctx, t)
+}
+func (d *daemonDeps) CreateCar(ctx context.Context, opts CarCreateOpts) (string, error) {
+	return d.store.CreateCar(ctx, opts)
+}
+func (d *daemonDeps) RecordTriagedIssue(ctx context.Context, issue models.BullIssue) error {
+	return d.store.RecordTriagedIssue(ctx, issue)
 }

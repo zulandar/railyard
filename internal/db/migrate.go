@@ -25,6 +25,7 @@ func AllModels() []interface{} {
 		&models.DispatchSession{},
 		&models.TelegraphConversation{},
 		&models.BullIssue{},
+		&models.BullMeta{},
 	}
 }
 

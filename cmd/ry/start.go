@@ -72,6 +72,9 @@ func runStart(cmd *cobra.Command, configPath string, engines int, withTelegraph 
 	if result.TelegraphSession != "" {
 		fmt.Fprintf(out, "  Telegraph:   %s\n", result.TelegraphSession)
 	}
+	if result.BullSession != "" {
+		fmt.Fprintf(out, "  Bull:        %s\n", result.BullSession)
+	}
 	fmt.Fprintf(out, "  Engines:     %d\n", len(result.EngineSessions))
 	for _, es := range result.EngineSessions {
 		fmt.Fprintf(out, "    %s → %s\n", es.Session, es.Track)

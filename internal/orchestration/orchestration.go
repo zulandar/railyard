@@ -25,6 +25,7 @@ type StartOpts struct {
 type StartResult struct {
 	YardmasterSession string
 	TelegraphSession  string // set when Telegraph=true
+	BullSession       string // set when bull.enabled=true
 	EngineSessions    []EngineSessionInfo
 }
 
@@ -122,6 +123,23 @@ func Start(opts StartOpts) (*StartResult, error) {
 			return nil, fmt.Errorf("orchestration: start telegraph: %w", err)
 		}
 		result.TelegraphSession = tgSession
+	}
+
+	// Optional bull daemon session.
+	if opts.Config.Bull.Enabled {
+		bullSess := BullSession(owner)
+		if err := opts.Tmux.CreateSession(bullSess); err != nil {
+			cleanup()
+			return nil, fmt.Errorf("orchestration: create bull session: %w", err)
+		}
+		createdSessions = append(createdSessions, bullSess)
+
+		bullCmd := fmt.Sprintf("ry bull --config %s", opts.ConfigPath)
+		if err := opts.Tmux.SendKeys(bullSess, bullCmd); err != nil {
+			cleanup()
+			return nil, fmt.Errorf("orchestration: start bull: %w", err)
+		}
+		result.BullSession = bullSess
 	}
 
 	// Engine sessions — one per engine.
