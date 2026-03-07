@@ -133,6 +133,9 @@ func securityHeaders() gin.HandlerFunc {
 		c.Header("Referrer-Policy", "strict-origin-when-cross-origin")
 		c.Header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
 		c.Header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'")
+		if c.Request.TLS != nil {
+			c.Header("Strict-Transport-Security", "max-age=63072000; includeSubDomains")
+		}
 		c.Next()
 	}
 }

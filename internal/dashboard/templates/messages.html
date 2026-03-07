@@ -42,19 +42,19 @@
 <div class="filters">
     <form method="get" action="/messages">
         <label>Agent:
-            <select name="agent" onchange="this.form.submit()">
+            <select name="agent" data-autosubmit>
                 <option value="">All</option>
                 {{range .Agents}}<option value="{{.}}"{{if eq . $.ActiveAgent}} selected{{end}}>{{.}}</option>{{end}}
             </select>
         </label>
         <label>Priority:
-            <select name="priority" onchange="this.form.submit()">
+            <select name="priority" data-autosubmit>
                 <option value="">All</option>
                 {{range .Priorities}}<option value="{{.}}"{{if eq . $.ActivePriority}} selected{{end}}>{{.}}</option>{{end}}
             </select>
         </label>
         <label>
-            <input type="checkbox" name="unacked" value="true"{{if .ActiveUnacked}} checked{{end}} onchange="this.form.submit()">
+            <input type="checkbox" name="unacked" value="true"{{if .ActiveUnacked}} checked{{end}} data-autosubmit>
             Unacknowledged only
         </label>
     </form>

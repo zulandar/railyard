@@ -33,11 +33,12 @@ type escalationEvent struct {
 func handleSSE(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Enforce connection limit to prevent resource exhaustion.
-		if sseConnectionCount.Load() >= maxSSEConnections {
+		// Increment first, then check — avoids TOCTOU race between Load and Add.
+		if n := sseConnectionCount.Add(1); n > maxSSEConnections {
+			sseConnectionCount.Add(-1)
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "too many SSE connections"})
 			return
 		}
-		sseConnectionCount.Add(1)
 		defer sseConnectionCount.Add(-1)
 
 		c.Header("Content-Type", "text/event-stream")
