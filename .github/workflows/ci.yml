@@ -16,6 +16,7 @@ permissions:
 jobs:
   test:
     name: Test
+    needs: [lint, helm-lint]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -47,6 +48,7 @@ jobs:
 
   govulncheck:
     name: Vulnerability Check
+    needs: [lint, helm-lint]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -93,6 +95,7 @@ jobs:
 
   docker-build:
     name: Docker Build Smoke Test
+    needs: [lint, helm-lint]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
