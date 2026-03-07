@@ -72,5 +72,5 @@ func WriteDispatchMCPConfig(workDir string, cfg *config.Config) error {
 	if err != nil {
 		return fmt.Errorf("dispatch: marshal .mcp.json: %w", err)
 	}
-	return os.WriteFile(mcpPath, data, 0644)
+	return os.WriteFile(mcpPath, data, 0600)
 }

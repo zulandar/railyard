@@ -68,6 +68,8 @@ pgvector:
   database: cocoindex
   username: cocoindex
   password: cocoindex
+  # -- PostgreSQL sslmode for client connections (prefer, require, verify-ca, verify-full).
+  sslmode: prefer
   # -- Storage settings for the internal StatefulSet.
   storage:
     size: 10Gi

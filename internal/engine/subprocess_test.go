@@ -629,3 +629,29 @@ func TestSpawnAgent_DoneChannel(t *testing.T) {
 		t.Fatal("timed out waiting on Done()")
 	}
 }
+
+// --- Redaction tests ---
+
+func TestRedactSecrets_APIKeys(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"anthropic key", "key is sk-ant-api03-abcdefghijklmnopqrstuvwxyz", "key is [REDACTED]"},
+		{"openai key", "OPENAI_API_KEY=sk-abcdefghijklmnopqrstuvwxyz1234", "OPENAI_API_KEY=[REDACTED]"},
+		{"github PAT", "token: ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefgh12", "token: [REDACTED]"},
+		{"slack bot", "SLACK_BOT_TOKEN=xoxb-123-456-abcdef", "SLACK_BOT_TOKEN=[REDACTED]"},
+		{"aws key", "aws_access_key_id = AKIAIOSFODNN7EXAMPLE", "aws_access_key_id = [REDACTED]"},
+		{"bearer token", "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.test", "Authorization: [REDACTED]"},
+		{"no secrets", "normal log output with no secrets", "normal log output with no secrets"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := redactSecrets(tt.input)
+			if got != tt.want {
+				t.Errorf("redactSecrets(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}

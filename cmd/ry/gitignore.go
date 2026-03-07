@@ -282,6 +282,15 @@ func railyardPatterns() []string {
 		".beads/",
 		"cocoindex/.venv/",
 		"cocoindex/__pycache__/",
+		"coverage.out",
+		".env",
+		".env.*",
+		"*.pem",
+		"*.key",
+		"*.p12",
+		"*.pfx",
+		"*.secret",
+		"credentials.json",
 	}
 }
 

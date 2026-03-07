@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 
 	gomysql "github.com/go-sql-driver/mysql"
@@ -58,8 +59,13 @@ func sanitizeDBError(errMsg, password string) string {
 	if password != "" {
 		errMsg = strings.ReplaceAll(errMsg, password, "***")
 	}
+	// Strip user:pass@host patterns that drivers may include in DSN fragments.
+	errMsg = dsnCredentialPattern.ReplaceAllString(errMsg, "$1***@")
 	return errMsg
 }
+
+// dsnCredentialPattern matches user:password@ in DSN-style strings.
+var dsnCredentialPattern = regexp.MustCompile(`(\w+):([^@]+)@`)
 
 // RegisterTLS registers a custom TLS configuration with the MySQL driver.
 // If cfg.Enabled is false, this is a no-op.

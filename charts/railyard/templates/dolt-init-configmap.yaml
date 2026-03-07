@@ -9,6 +9,6 @@ metadata:
 data:
   01-create-remote-user.sql: |
     CREATE DATABASE IF NOT EXISTS `{{ include "railyard.doltDatabase" . }}`;
-    CREATE USER IF NOT EXISTS 'root'@'%' IDENTIFIED BY '{{ .Values.dolt.password }}';
-    GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' WITH GRANT OPTION;
+    CREATE USER IF NOT EXISTS '{{ .Values.dolt.username }}'@'%' IDENTIFIED BY '{{ .Values.dolt.password }}';
+    GRANT ALL PRIVILEGES ON `{{ include "railyard.doltDatabase" . }}`.* TO '{{ .Values.dolt.username }}'@'%';
 {{- end }}

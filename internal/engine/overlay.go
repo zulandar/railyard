@@ -165,7 +165,7 @@ func WriteMCPConfig(workDir, engineID, track string, cfg *config.Config) error {
 	}
 
 	mcpPath := filepath.Join(workDir, ".mcp.json")
-	if err := os.WriteFile(mcpPath, data, 0644); err != nil {
+	if err := os.WriteFile(mcpPath, data, 0600); err != nil {
 		return fmt.Errorf("overlay: write %s: %w", mcpPath, err)
 	}
 

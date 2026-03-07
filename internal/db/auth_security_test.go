@@ -91,3 +91,23 @@ func TestSanitizeDBError_EmptyPassword(t *testing.T) {
 		t.Errorf("sanitizeDBError with empty password should not modify message: %s", got)
 	}
 }
+
+func TestSanitizeDBError_DSNPattern(t *testing.T) {
+	// Regex should catch user:pass@host patterns even without explicit password
+	errMsg := "dial tcp admin:s3cret@tcp(127.0.0.1:3306): connection refused"
+	got := sanitizeDBError(errMsg, "")
+	if strings.Contains(got, "s3cret") {
+		t.Errorf("sanitizeDBError should strip DSN credentials: %s", got)
+	}
+	if !strings.Contains(got, "***@") {
+		t.Errorf("sanitizeDBError should replace DSN creds with ***@: %s", got)
+	}
+}
+
+func TestSanitizeDBError_PostgresDSNPattern(t *testing.T) {
+	errMsg := "failed to connect: user:password@pghost:5432/db"
+	got := sanitizeDBError(errMsg, "")
+	if strings.Contains(got, "password") {
+		t.Errorf("sanitizeDBError should strip postgres DSN creds: %s", got)
+	}
+}
