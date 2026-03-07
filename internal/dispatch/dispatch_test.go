@@ -268,7 +268,10 @@ func TestStart_EmptyAgentProvider_DefaultsToClaude(t *testing.T) {
 }
 
 func TestBuildCommand_Args(t *testing.T) {
-	cmd := BuildCommand("test prompt")
+	cmd, err := BuildCommand("test prompt")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if cmd.Path == "" {
 		t.Fatal("command path is empty")
 	}
@@ -300,10 +303,23 @@ func TestBuildCommand_Args(t *testing.T) {
 }
 
 func TestBuildCommand_NoOneShot(t *testing.T) {
-	cmd := BuildCommand("prompt")
+	cmd, err := BuildCommand("prompt")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	for _, a := range cmd.Args {
 		if a == "-p" || a == "--print" {
 			t.Errorf("found one-shot flag %q; dispatch must be interactive", a)
 		}
+	}
+}
+
+func TestBuildCommand_UnknownProvider(t *testing.T) {
+	_, err := BuildCommand("prompt", "nonexistent")
+	if err == nil {
+		t.Fatal("expected error for unregistered provider")
+	}
+	if !strings.Contains(err.Error(), "resolve provider") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "resolve provider")
 	}
 }

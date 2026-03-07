@@ -82,15 +82,14 @@ func Start(opts StartOpts) error {
 
 // BuildCommand constructs the exec.Cmd for the dispatch agent session.
 // Exported for testing. Uses the provided provider name, defaulting to "claude".
-func BuildCommand(prompt string, providerName ...string) *exec.Cmd {
+func BuildCommand(prompt string, providerName ...string) (*exec.Cmd, error) {
 	name := "claude"
 	if len(providerName) > 0 && providerName[0] != "" {
 		name = providerName[0]
 	}
 	provider, err := engine.GetProvider(name)
 	if err != nil {
-		// Fallback to direct command if provider not registered.
-		return exec.Command(name, "--prompt", prompt)
+		return nil, fmt.Errorf("dispatch: resolve provider %q: %w", name, err)
 	}
-	return provider.BuildInteractiveCommand(prompt, "")
+	return provider.BuildInteractiveCommand(prompt, ""), nil
 }
