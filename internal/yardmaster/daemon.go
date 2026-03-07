@@ -784,8 +784,8 @@ type prReview struct {
 
 // prStatus holds the GitHub PR status for a branch.
 type prStatus struct {
-	State          string     // OPEN, MERGED, CLOSED
-	ReviewDecision string     // APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED, ""
+	State          string // OPEN, MERGED, CLOSED
+	ReviewDecision string // APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED, ""
 	Reviews        []prReview
 }
 
