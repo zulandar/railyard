@@ -85,6 +85,8 @@ chmod +x quickstart.sh
 ./quickstart.sh
 ```
 
+> **Already have a `railyard.yaml` in your repo?** If you're cloning an existing Railyard project to a new machine, see [New Machine Setup](docs/new-machine-setup.md) — you don't need `ry init`.
+
 ### Manual Setup
 
 If you prefer to set things up step by step:
