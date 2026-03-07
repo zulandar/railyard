@@ -1610,6 +1610,55 @@ Dispatch creates (in railyard_webapp):
 
 ---
 
+## Bull — GitHub Issue Triage
+
+Bull bridges GitHub Issues with Railyard's car-based work system. It runs as an optional daemon (like Telegraph) and does not require a git checkout or AI coding CLI.
+
+### Daemon Loop (Six Phases)
+
+Each cycle:
+1. **Poll** — fetch new/updated issues from the GitHub API (respects `poll_interval_sec`)
+2. **Filter tracked** — skip issues already in the bull_issues table
+3. **Heuristic filter** — fast rejection of spam, duplicates, and known non-actionable patterns
+4. **AI triage** — send passing issues through the configured AI provider for severity assessment, track assignment, and effort estimation
+5. **Reverse sync** — update GitHub labels based on car status changes (under review → in progress → fix merged)
+6. **Release scan** — detect merged PRs / releases and close resolved issues
+
+### Triage Pipeline
+
+Two modes control how issues flow through phases 3–4:
+
+- **Standard** (default): heuristic filter runs first. Only issues that pass heuristics go to AI triage. Lower cost, faster.
+- **Full**: all issues go directly to AI triage. More thorough, higher API cost.
+
+AI triage produces a structured decision: accept (with track, priority, effort estimate) or reject (with reason). Accepted issues become cars; rejected issues optionally get a comment explaining why.
+
+### Label Lifecycle
+
+Bull uses four GitHub labels to reflect issue state:
+
+```
+New issue → "bull: under review" → AI triage
+  ├─ Accepted → car created → "bull: in progress" → engine works → "bull: fix merged"
+  └─ Rejected → "bull: ignore" (optional comment posted)
+```
+
+Labels are additive (old labels are not removed) so the full history is visible on the issue.
+
+### Data Model
+
+Bull state lives in the `bull_issues` table (see `models.BullIssue`):
+- Links GitHub issue number to Railyard car ID
+- Tracks triage status, AI decision, and sync timestamps
+- Enables idempotent re-processing (issues are never triaged twice)
+
+### Deployment
+
+- **Local**: `ry bull start -c railyard.yaml` — runs in foreground or tmux
+- **Kubernetes**: optional Deployment in the Helm chart (`bull.enabled: true`). Shares the ConfigMap and auth secret with other components. Does not need a git repo volume.
+
+---
+
 ## Local ↔ Production Parity
 
 The same config.yaml, GORM models, and `ry` CLI work in both modes. The only differences:
