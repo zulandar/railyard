@@ -262,6 +262,7 @@ var secretPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`xoxp-[a-zA-Z0-9-]+`),               // Slack user tokens
 	regexp.MustCompile(`xapp-[a-zA-Z0-9-]+`),               // Slack app tokens
 	regexp.MustCompile(`AKIA[0-9A-Z]{16}`),                  // AWS access keys
+	regexp.MustCompile(`AIza[0-9A-Za-z_\-]{35}`),            // Google/Gemini API keys
 	regexp.MustCompile(`Bearer [a-zA-Z0-9._\-]{20,}`),      // Bearer tokens
 	regexp.MustCompile(`(\w+):([^@\s]{8,})@[a-zA-Z0-9.]`),  // user:password@host in DSNs
 }

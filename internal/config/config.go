@@ -3,6 +3,7 @@ package config
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"regexp"
 	"strings"
@@ -183,6 +184,13 @@ type ConversationsConfig struct {
 
 // Load reads a YAML config file from path and returns a validated Config.
 func Load(path string) (*Config, error) {
+	// Warn if the config file is world-readable (may contain credentials).
+	if info, err := os.Stat(path); err == nil {
+		if perm := info.Mode().Perm(); perm&0o077 != 0 {
+			log.Printf("config: WARNING: %s has permissive permissions %04o (recommended: 0600)", path, perm)
+		}
+	}
+
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("config: read %s: %w", path, err)
@@ -380,10 +388,14 @@ func (c *Config) validate() error {
 }
 
 // resolveEnvVars replaces ${VAR_NAME} tokens in s with the corresponding
-// environment variable value. Unset variables resolve to empty string.
+// environment variable value. Logs a warning for unset variables.
 func resolveEnvVars(s string) string {
 	return envVarRe.ReplaceAllStringFunc(s, func(match string) string {
 		name := envVarRe.FindStringSubmatch(match)[1]
-		return os.Getenv(name)
+		val, ok := os.LookupEnv(name)
+		if !ok {
+			log.Printf("config: WARNING: environment variable %s is not set (referenced as ${%s})", name, name)
+		}
+		return val
 	})
 }

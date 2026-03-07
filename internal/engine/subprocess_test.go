@@ -645,6 +645,7 @@ func TestRedactSecrets_APIKeys(t *testing.T) {
 		{"aws key", "aws_access_key_id = AKIAIOSFODNN7EXAMPLE", "aws_access_key_id = [REDACTED]"},
 		{"bearer token", "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.test", "Authorization: [REDACTED]"},
 		{"no secrets", "normal log output with no secrets", "normal log output with no secrets"},
+		{"gemini key", "GEMINI_API_KEY=AIzaSyB-1234567890abcdefghijklmnopqrstu", "GEMINI_API_KEY=[REDACTED]"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -437,3 +437,43 @@ func TestMarshalJSON_Error(t *testing.T) {
 		t.Fatal("expected error marshaling channel")
 	}
 }
+
+// TestDatabaseNameValidation verifies that DropDatabase and CreateDatabase
+// reject names containing backticks or other injection characters.
+func TestDatabaseNameValidation(t *testing.T) {
+	// Only test invalid names (valid names need a real DB connection).
+	invalidNames := []struct {
+		name   string
+		dbName string
+	}{
+		{"backtick injection", "test`; DROP TABLE cars; --"},
+		{"semicolon", "test; DROP TABLE"},
+		{"space", "test db"},
+		{"empty", ""},
+		{"dot", "test.db"},
+		{"slash", "test/db"},
+		{"quotes", `test"db`},
+	}
+	for _, tt := range invalidNames {
+		t.Run("Drop_"+tt.name, func(t *testing.T) {
+			err := DropDatabase(nil, tt.dbName)
+			if err == nil || !strings.Contains(err.Error(), "invalid database name") {
+				t.Errorf("DropDatabase(%q) should reject invalid name, got: %v", tt.dbName, err)
+			}
+		})
+		t.Run("Create_"+tt.name, func(t *testing.T) {
+			err := CreateDatabase(nil, tt.dbName)
+			if err == nil || !strings.Contains(err.Error(), "invalid database name") {
+				t.Errorf("CreateDatabase(%q) should reject invalid name, got: %v", tt.dbName, err)
+			}
+		})
+	}
+
+	// Verify valid patterns are accepted by the regex directly.
+	validNames := []string{"railyard", "railyard_test", "railyard-test", "db123"}
+	for _, name := range validNames {
+		if !validDBName.MatchString(name) {
+			t.Errorf("validDBName should accept %q", name)
+		}
+	}
+}
