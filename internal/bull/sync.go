@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/go-github/v68/github"
 	"github.com/zulandar/railyard/internal/config"
 	"github.com/zulandar/railyard/internal/models"
 )
@@ -52,6 +53,76 @@ func SyncCarStatuses(ctx context.Context, client SyncClient, store SyncStore, cf
 		if err := store.UpdateIssueStatus(ctx, issue.ID, carStatus); err != nil {
 			return fmt.Errorf("sync: update issue status for #%d: %w", issue.IssueNumber, err)
 		}
+	}
+
+	return nil
+}
+
+// ReleaseClient abstracts GitHub operations needed for release sync.
+type ReleaseClient interface {
+	ListReleases(ctx context.Context, since time.Time) ([]*github.RepositoryRelease, error)
+	CloseIssue(ctx context.Context, number int, comment string) error
+	RemoveLabel(ctx context.Context, number int, label string) error
+}
+
+// ReleaseStore abstracts database operations for release sync.
+type ReleaseStore interface {
+	GetMergedIssues(ctx context.Context) ([]models.BullIssue, error)
+	GetLastReleaseCheck(ctx context.Context) (time.Time, error)
+	SetLastReleaseCheck(ctx context.Context, t time.Time) error
+	UpdateIssueStatus(ctx context.Context, issueID uint, newStatus string) error
+}
+
+// SyncReleases polls for new GitHub releases and closes issues that have the
+// fix-merged label. It persists the last-checked timestamp to avoid reprocessing.
+func SyncReleases(ctx context.Context, client ReleaseClient, store ReleaseStore, cfg config.BullConfig) error {
+	since, err := store.GetLastReleaseCheck(ctx)
+	if err != nil {
+		return fmt.Errorf("sync: get last release check: %w", err)
+	}
+
+	releases, err := client.ListReleases(ctx, since)
+	if err != nil {
+		return fmt.Errorf("sync: list releases: %w", err)
+	}
+
+	if len(releases) == 0 {
+		return nil
+	}
+
+	// Find the latest release time for the checkpoint.
+	var latestTime time.Time
+	var latestTag, latestURL string
+	for _, r := range releases {
+		if r.CreatedAt != nil && r.CreatedAt.Time.After(latestTime) {
+			latestTime = r.CreatedAt.Time
+			latestTag = r.GetTagName()
+			latestURL = r.GetHTMLURL()
+		}
+	}
+
+	issues, err := store.GetMergedIssues(ctx)
+	if err != nil {
+		return fmt.Errorf("sync: get merged issues: %w", err)
+	}
+
+	for _, issue := range issues {
+		comment := fmt.Sprintf("This issue has been resolved in release [%s](%s).", latestTag, latestURL)
+		if err := client.CloseIssue(ctx, issue.IssueNumber, comment); err != nil {
+			return fmt.Errorf("sync: close issue #%d: %w", issue.IssueNumber, err)
+		}
+
+		if err := client.RemoveLabel(ctx, issue.IssueNumber, cfg.Labels.FixMerged); err != nil {
+			return fmt.Errorf("sync: remove fix-merged label from #%d: %w", issue.IssueNumber, err)
+		}
+
+		if err := store.UpdateIssueStatus(ctx, issue.ID, "released"); err != nil {
+			return fmt.Errorf("sync: update issue status for #%d: %w", issue.IssueNumber, err)
+		}
+	}
+
+	if err := store.SetLastReleaseCheck(ctx, latestTime); err != nil {
+		return fmt.Errorf("sync: set last release check: %w", err)
 	}
 
 	return nil
