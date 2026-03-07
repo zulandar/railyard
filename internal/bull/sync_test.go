@@ -12,23 +12,41 @@ import (
 // ---------- Mock SyncClient ----------
 
 type mockSyncClient struct {
-	addedLabels   []struct{ number int; label string }
-	removedLabels []struct{ number int; label string }
-	comments      []struct{ number int; body string }
+	addedLabels []struct {
+		number int
+		label  string
+	}
+	removedLabels []struct {
+		number int
+		label  string
+	}
+	comments []struct {
+		number int
+		body   string
+	}
 }
 
 func (m *mockSyncClient) AddLabel(_ context.Context, number int, label string) error {
-	m.addedLabels = append(m.addedLabels, struct{ number int; label string }{number, label})
+	m.addedLabels = append(m.addedLabels, struct {
+		number int
+		label  string
+	}{number, label})
 	return nil
 }
 
 func (m *mockSyncClient) RemoveLabel(_ context.Context, number int, label string) error {
-	m.removedLabels = append(m.removedLabels, struct{ number int; label string }{number, label})
+	m.removedLabels = append(m.removedLabels, struct {
+		number int
+		label  string
+	}{number, label})
 	return nil
 }
 
 func (m *mockSyncClient) AddComment(_ context.Context, number int, body string) error {
-	m.comments = append(m.comments, struct{ number int; body string }{number, body})
+	m.comments = append(m.comments, struct {
+		number int
+		body   string
+	}{number, body})
 	return nil
 }
 
@@ -80,7 +98,10 @@ func testBullConfig(commentsEnabled bool) config.BullConfig {
 	}
 }
 
-func hasLabel(labels []struct{ number int; label string }, number int, label string) bool {
+func hasLabel(labels []struct {
+	number int
+	label  string
+}, number int, label string) bool {
 	for _, l := range labels {
 		if l.number == number && l.label == label {
 			return true
@@ -89,7 +110,10 @@ func hasLabel(labels []struct{ number int; label string }, number int, label str
 	return false
 }
 
-func hasComment(comments []struct{ number int; body string }, number int) bool {
+func hasComment(comments []struct {
+	number int
+	body   string
+}, number int) bool {
 	for _, c := range comments {
 		if c.number == number {
 			return true
@@ -307,9 +331,9 @@ func TestSyncCarStatuses_MultipleIssues(t *testing.T) {
 			{ID: 3, IssueNumber: 30, CarID: "car-3", LastKnownStatus: "open"},
 		},
 		carStatuses: map[string]string{
-			"car-1": "ready",     // draft→ready: apply InProgress, remove UnderReview
-			"car-2": "merged",    // open→merged: apply FixMerged, remove InProgress, comment
-			"car-3": "open",      // no change
+			"car-1": "ready",  // draft→ready: apply InProgress, remove UnderReview
+			"car-2": "merged", // open→merged: apply FixMerged, remove InProgress, comment
+			"car-3": "open",   // no change
 		},
 	}
 	cfg := testBullConfig(true)

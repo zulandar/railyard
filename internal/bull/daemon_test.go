@@ -31,8 +31,8 @@ type mockDaemonDeps struct {
 	releaseErr       error
 
 	// Tracking
-	phasesRun    []string
-	closedIssues []int
+	phasesRun     []string
+	closedIssues  []int
 	removedLabels []struct {
 		number int
 		label  string

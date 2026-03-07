@@ -13,9 +13,15 @@ import (
 type mockLabelClient struct {
 	existingLabels []string
 	createdLabels  []struct{ name, color, description string }
-	addedLabels    []struct{ number int; label string }
-	removedLabels  []struct{ number int; label string }
-	removeErr      error
+	addedLabels    []struct {
+		number int
+		label  string
+	}
+	removedLabels []struct {
+		number int
+		label  string
+	}
+	removeErr error
 }
 
 func (m *mockLabelClient) CreateLabel(_ context.Context, name, color, description string) error {
@@ -24,7 +30,10 @@ func (m *mockLabelClient) CreateLabel(_ context.Context, name, color, descriptio
 }
 
 func (m *mockLabelClient) AddLabel(_ context.Context, number int, label string) error {
-	m.addedLabels = append(m.addedLabels, struct{ number int; label string }{number, label})
+	m.addedLabels = append(m.addedLabels, struct {
+		number int
+		label  string
+	}{number, label})
 	return nil
 }
 
@@ -32,7 +41,10 @@ func (m *mockLabelClient) RemoveLabel(_ context.Context, number int, label strin
 	if m.removeErr != nil {
 		return m.removeErr
 	}
-	m.removedLabels = append(m.removedLabels, struct{ number int; label string }{number, label})
+	m.removedLabels = append(m.removedLabels, struct {
+		number int
+		label  string
+	}{number, label})
 	return nil
 }
 

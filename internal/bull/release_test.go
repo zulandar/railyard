@@ -13,9 +13,15 @@ import (
 // ---------- Mock ReleaseClient ----------
 
 type mockReleaseClient struct {
-	releases      []*github.RepositoryRelease
-	closedIssues  []struct{ number int; comment string }
-	removedLabels []struct{ number int; label string }
+	releases     []*github.RepositoryRelease
+	closedIssues []struct {
+		number  int
+		comment string
+	}
+	removedLabels []struct {
+		number int
+		label  string
+	}
 }
 
 func (m *mockReleaseClient) ListReleases(ctx context.Context, since time.Time) ([]*github.RepositoryRelease, error) {
@@ -29,12 +35,18 @@ func (m *mockReleaseClient) ListReleases(ctx context.Context, since time.Time) (
 }
 
 func (m *mockReleaseClient) CloseIssue(ctx context.Context, number int, comment string) error {
-	m.closedIssues = append(m.closedIssues, struct{ number int; comment string }{number, comment})
+	m.closedIssues = append(m.closedIssues, struct {
+		number  int
+		comment string
+	}{number, comment})
 	return nil
 }
 
 func (m *mockReleaseClient) RemoveLabel(ctx context.Context, number int, label string) error {
-	m.removedLabels = append(m.removedLabels, struct{ number int; label string }{number, label})
+	m.removedLabels = append(m.removedLabels, struct {
+		number int
+		label  string
+	}{number, label})
 	return nil
 }
 
