@@ -532,10 +532,12 @@ func sweepOpenEpics(db *gorm.DB, out io.Writer) error {
 }
 
 // reconcileStaleCars detects cars whose branches have already been merged to
-// their base branch (e.g., via a monolithic epic commit) and updates their
-// status to "merged". Checks against origin/{baseBranch} (the remote truth)
-// to avoid false positives from local-only merges that were never pushed.
-// Cars are grouped by base branch so each group is checked against the correct target.
+// their base branch (e.g., via a monolithic epic commit or a PR merged on
+// GitHub) and updates their status to "merged". This includes pr_open cars
+// whose PRs were merged externally. Checks against origin/{baseBranch} (the
+// remote truth) to avoid false positives from local-only merges that were
+// never pushed. Cars are grouped by base branch so each group is checked
+// against the correct target.
 func reconcileStaleCars(db *gorm.DB, repoDir string, out io.Writer) error {
 	// Fetch first to get current remote state.
 	if err := gitFetch(repoDir); err != nil {
@@ -545,7 +547,7 @@ func reconcileStaleCars(db *gorm.DB, repoDir string, out io.Writer) error {
 	// Find active cars with branches.
 	var activeCars []models.Car
 	if err := db.Where("status IN ? AND branch != ''",
-		[]string{"open", "ready", "claimed", "in_progress"}).
+		[]string{"open", "ready", "claimed", "in_progress", "pr_open"}).
 		Find(&activeCars).Error; err != nil {
 		return fmt.Errorf("query active cars: %w", err)
 	}

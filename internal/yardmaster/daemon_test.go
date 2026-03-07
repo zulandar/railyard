@@ -349,6 +349,64 @@ func TestReconcileStaleCars_PerBaseBranch(t *testing.T) {
 	}
 }
 
+func TestReconcileStaleCars_PrOpenMergedBranch(t *testing.T) {
+	bareDir := t.TempDir()
+	parentDir := t.TempDir()
+
+	run := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("%v in %s failed: %s: %v", args, dir, out, err)
+		}
+	}
+
+	run(bareDir, "git", "init", "--bare", "-b", "main")
+	run(parentDir, "git", "clone", bareDir, "repo")
+	repoDir := filepath.Join(parentDir, "repo")
+	run(repoDir, "git", "config", "user.email", "test@test.com")
+	run(repoDir, "git", "config", "user.name", "test")
+	run(repoDir, "git", "commit", "--allow-empty", "-m", "init")
+	run(repoDir, "git", "push", "origin", "main")
+
+	// Branch D: merged into main (simulates a PR merge on GitHub).
+	run(repoDir, "git", "checkout", "-b", "ry/feat-d")
+	run(repoDir, "git", "commit", "--allow-empty", "-m", "feat-d work")
+	run(repoDir, "git", "checkout", "main")
+	run(repoDir, "git", "merge", "--no-ff", "ry/feat-d", "-m", "merge feat-d")
+	run(repoDir, "git", "push", "origin", "main")
+
+	// Branch E: NOT merged (PR still open).
+	run(repoDir, "git", "checkout", "-b", "ry/feat-e")
+	run(repoDir, "git", "commit", "--allow-empty", "-m", "feat-e work")
+	run(repoDir, "git", "checkout", "main")
+
+	db := testDB(t)
+	// Car D: pr_open, branch merged into main → should reconcile to "merged".
+	db.Create(&models.Car{ID: "car-d", Branch: "ry/feat-d", BaseBranch: "main", Status: "pr_open", Track: "backend"})
+	// Car E: pr_open, branch NOT merged → should stay pr_open.
+	db.Create(&models.Car{ID: "car-e", Branch: "ry/feat-e", BaseBranch: "main", Status: "pr_open", Track: "backend"})
+
+	var buf bytes.Buffer
+	if err := reconcileStaleCars(db, repoDir, &buf); err != nil {
+		t.Fatalf("reconcileStaleCars: %v", err)
+	}
+
+	var carD models.Car
+	db.First(&carD, "id = ?", "car-d")
+	if carD.Status != "merged" {
+		t.Errorf("car-d status = %q, want %q (pr_open + branch merged should reconcile)", carD.Status, "merged")
+	}
+
+	var carE models.Car
+	db.First(&carE, "id = ?", "car-e")
+	if carE.Status != "pr_open" {
+		t.Errorf("car-e status = %q, want %q (branch not merged, should stay pr_open)", carE.Status, "pr_open")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // countRecentSwitchFailures tests
 // ---------------------------------------------------------------------------
