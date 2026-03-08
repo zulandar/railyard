@@ -1,0 +1,20 @@
+owner: alice
+repo: git@github.com:org/myapp.git
+tracks:
+  - name: backend
+    language: go
+
+bull:
+  enabled: true
+  github_token: "${GITHUB_TOKEN}"
+  poll_interval_sec: 120
+  triage_mode: full
+  comments:
+    enabled: true
+    reject_template: "Closing: {{.Reason}}"
+    answer_questions: true
+  labels:
+    under_review: "triage: reviewing"
+    in_progress: "triage: active"
+    fix_merged: "triage: done"
+    ignore: "triage: skip"

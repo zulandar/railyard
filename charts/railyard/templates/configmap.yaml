@@ -73,3 +73,19 @@ data:
         {{- end }}
       {{- end }}
     {{- end }}
+
+    {{- if .Values.bull.enabled }}
+    bull:
+      enabled: true
+      github_token: ${GITHUB_TOKEN}
+      poll_interval_sec: {{ .Values.bull.pollIntervalSec | default 60 }}
+      triage_mode: {{ .Values.bull.triageMode | default "standard" | quote }}
+      comments:
+        enabled: {{ .Values.bull.comments.enabled }}
+        answer_questions: {{ .Values.bull.comments.answerQuestions }}
+      labels:
+        under_review: {{ .Values.bull.labels.underReview | quote }}
+        in_progress: {{ .Values.bull.labels.inProgress | quote }}
+        fix_merged: {{ .Values.bull.labels.fixMerged | quote }}
+        ignore: {{ .Values.bull.labels.ignore | quote }}
+    {{- end }}

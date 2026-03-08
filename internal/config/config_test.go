@@ -1489,3 +1489,249 @@ func TestLoad_TelegraphFixture(t *testing.T) {
 		t.Errorf("DispatchLock.HeartbeatIntervalSec = %d, want 15", cfg.Telegraph.DispatchLock.HeartbeatIntervalSec)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Bull config tests
+// ---------------------------------------------------------------------------
+
+func TestParse_BullFullConfig(t *testing.T) {
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+tracks:
+  - name: backend
+    language: go
+bull:
+  enabled: true
+  github_token: "ghp_test123"
+  poll_interval_sec: 120
+  triage_mode: full
+  comments:
+    enabled: true
+    reject_template: "Closing: {{.Reason}}"
+    answer_questions: true
+  labels:
+    under_review: "triage: reviewing"
+    in_progress: "triage: active"
+    fix_merged: "triage: done"
+    ignore: "triage: skip"
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	b := cfg.Bull
+	if !b.Enabled {
+		t.Error("Bull.Enabled = false, want true")
+	}
+	if b.GitHubToken != "ghp_test123" {
+		t.Errorf("Bull.GitHubToken = %q, want ghp_test123", b.GitHubToken)
+	}
+	if b.PollIntervalSec != 120 {
+		t.Errorf("Bull.PollIntervalSec = %d, want 120", b.PollIntervalSec)
+	}
+	if b.TriageMode != "full" {
+		t.Errorf("Bull.TriageMode = %q, want full", b.TriageMode)
+	}
+	if !b.Comments.Enabled {
+		t.Error("Bull.Comments.Enabled = false, want true")
+	}
+	if b.Comments.RejectTemplate != "Closing: {{.Reason}}" {
+		t.Errorf("Bull.Comments.RejectTemplate = %q", b.Comments.RejectTemplate)
+	}
+	if !b.Comments.AnswerQuestions {
+		t.Error("Bull.Comments.AnswerQuestions = false, want true")
+	}
+	if b.Labels.UnderReview != "triage: reviewing" {
+		t.Errorf("Bull.Labels.UnderReview = %q, want %q", b.Labels.UnderReview, "triage: reviewing")
+	}
+	if b.Labels.InProgress != "triage: active" {
+		t.Errorf("Bull.Labels.InProgress = %q, want %q", b.Labels.InProgress, "triage: active")
+	}
+	if b.Labels.FixMerged != "triage: done" {
+		t.Errorf("Bull.Labels.FixMerged = %q, want %q", b.Labels.FixMerged, "triage: done")
+	}
+	if b.Labels.Ignore != "triage: skip" {
+		t.Errorf("Bull.Labels.Ignore = %q, want %q", b.Labels.Ignore, "triage: skip")
+	}
+}
+
+func TestParse_BullDefaults(t *testing.T) {
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+tracks:
+  - name: backend
+    language: go
+bull:
+  enabled: true
+  github_token: "ghp_test123"
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	b := cfg.Bull
+	if b.PollIntervalSec != 60 {
+		t.Errorf("Bull.PollIntervalSec = %d, want 60 (default)", b.PollIntervalSec)
+	}
+	if b.TriageMode != "standard" {
+		t.Errorf("Bull.TriageMode = %q, want standard (default)", b.TriageMode)
+	}
+	if b.Labels.UnderReview != "bull: under review" {
+		t.Errorf("Bull.Labels.UnderReview = %q, want %q (default)", b.Labels.UnderReview, "bull: under review")
+	}
+	if b.Labels.InProgress != "bull: in progress" {
+		t.Errorf("Bull.Labels.InProgress = %q, want %q (default)", b.Labels.InProgress, "bull: in progress")
+	}
+	if b.Labels.FixMerged != "bull: fix merged" {
+		t.Errorf("Bull.Labels.FixMerged = %q, want %q (default)", b.Labels.FixMerged, "bull: fix merged")
+	}
+	if b.Labels.Ignore != "bull: ignore" {
+		t.Errorf("Bull.Labels.Ignore = %q, want %q (default)", b.Labels.Ignore, "bull: ignore")
+	}
+}
+
+func TestParse_BullOmitted(t *testing.T) {
+	cfg, err := Parse([]byte(minimalYAML))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Bull.Enabled {
+		t.Error("Bull.Enabled should be false when section absent")
+	}
+	// Defaults should NOT be applied when bull section is absent.
+	if cfg.Bull.PollIntervalSec != 0 {
+		t.Errorf("defaults should not apply without enabled: PollIntervalSec = %d", cfg.Bull.PollIntervalSec)
+	}
+}
+
+func TestParse_BullValidation_TokenRequired(t *testing.T) {
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+tracks:
+  - name: backend
+    language: go
+bull:
+  enabled: true
+`
+	_, err := Parse([]byte(yaml))
+	if err == nil {
+		t.Fatal("expected error for missing github_token when enabled")
+	}
+	if !strings.Contains(err.Error(), "bull.github_token is required") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "bull.github_token is required")
+	}
+}
+
+func TestParse_BullValidation_InvalidTriageMode(t *testing.T) {
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+tracks:
+  - name: backend
+    language: go
+bull:
+  enabled: true
+  github_token: "ghp_test123"
+  triage_mode: invalid_mode
+`
+	_, err := Parse([]byte(yaml))
+	if err == nil {
+		t.Fatal("expected error for invalid triage_mode")
+	}
+	if !strings.Contains(err.Error(), "bull.triage_mode") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "bull.triage_mode")
+	}
+}
+
+func TestParse_BullDisabled_NoTokenRequired(t *testing.T) {
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+tracks:
+  - name: backend
+    language: go
+bull:
+  enabled: false
+`
+	_, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: disabled bull should not require token: %v", err)
+	}
+}
+
+func TestParse_BullEnvVarResolution(t *testing.T) {
+	t.Setenv("TEST_BULL_GH_TOKEN", "ghp_from_env")
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+tracks:
+  - name: backend
+    language: go
+bull:
+  enabled: true
+  github_token: "${TEST_BULL_GH_TOKEN}"
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Bull.GitHubToken != "ghp_from_env" {
+		t.Errorf("Bull.GitHubToken = %q, want ghp_from_env", cfg.Bull.GitHubToken)
+	}
+}
+
+func TestLoad_BullFixture(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "ghp_fixture_test")
+	cfg, err := Load("testdata/valid_bull.yaml")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !cfg.Bull.Enabled {
+		t.Error("Bull.Enabled = false, want true")
+	}
+	if cfg.Bull.GitHubToken != "ghp_fixture_test" {
+		t.Errorf("Bull.GitHubToken = %q, want ghp_fixture_test", cfg.Bull.GitHubToken)
+	}
+	if cfg.Bull.PollIntervalSec != 120 {
+		t.Errorf("Bull.PollIntervalSec = %d, want 120", cfg.Bull.PollIntervalSec)
+	}
+	if cfg.Bull.TriageMode != "full" {
+		t.Errorf("Bull.TriageMode = %q, want full", cfg.Bull.TriageMode)
+	}
+}
+
+func TestLoad_BullMinimalFixture(t *testing.T) {
+	cfg, err := Load("testdata/valid_bull_minimal.yaml")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Bull.PollIntervalSec != 60 {
+		t.Errorf("Bull.PollIntervalSec = %d, want 60 (default)", cfg.Bull.PollIntervalSec)
+	}
+	if cfg.Bull.TriageMode != "standard" {
+		t.Errorf("Bull.TriageMode = %q, want standard (default)", cfg.Bull.TriageMode)
+	}
+}
+
+func TestLoad_BullNoTokenFixture(t *testing.T) {
+	_, err := Load("testdata/invalid_bull_no_token.yaml")
+	if err == nil {
+		t.Fatal("expected error for missing github_token")
+	}
+	if !strings.Contains(err.Error(), "bull.github_token is required") {
+		t.Errorf("error = %q", err)
+	}
+}
+
+func TestLoad_BullInvalidTriageModeFixture(t *testing.T) {
+	_, err := Load("testdata/invalid_bull_triage_mode.yaml")
+	if err == nil {
+		t.Fatal("expected error for invalid triage_mode")
+	}
+	if !strings.Contains(err.Error(), "bull.triage_mode") {
+		t.Errorf("error = %q", err)
+	}
+}

@@ -221,3 +221,26 @@ tracks:
 #   conversations:
 #     max_turns: 20                    # max turns per dispatch conversation (default: 20)
 #     recovery_lookback_days: 7        # days to look back for session recovery (default: 7)
+
+# ---------------------------------------------------------------------------
+# Bull — GitHub issue triage daemon (optional)
+# ---------------------------------------------------------------------------
+#
+# Bull monitors GitHub Issues and automatically triages them using AI.
+# Accepted issues become Railyard cars; rejected issues get labeled.
+# See docs/bull-setup.md for full setup instructions.
+#
+# bull:
+#   enabled: true
+#   github_token: ${GITHUB_TOKEN}       # PAT with repo scope (or public_repo for public repos)
+#   poll_interval_sec: 60               # How often to poll GitHub for new issues (default: 60)
+#   triage_mode: standard               # "standard" (heuristic + AI) or "full" (AI for all)
+#   agent_provider: claude              # override global agent_provider for triage (default: global)
+#   comments:
+#     enabled: true                     # Post comments on rejected issues (default: false)
+#     answer_questions: true            # Answer questions detected in issues (default: false)
+#   labels:
+#     under_review: "bull: under review"  # Applied during triage (default)
+#     in_progress: "bull: in progress"    # Applied when car is claimed by engine (default)
+#     fix_merged: "bull: fix merged"      # Applied when car's branch is merged (default)
+#     ignore: "bull: ignore"              # Applied to rejected issues / manually ignored (default)

@@ -213,3 +213,27 @@ telegraph:
     botToken: ""
     guildID: ""
     channelID: ""
+
+# ---------------------------------------------------------------------------
+# Bull (GitHub issue triage daemon)
+# ---------------------------------------------------------------------------
+bull:
+  enabled: false
+  replicas: 1
+  resources: {}
+  # -- Poll interval in seconds for checking new GitHub issues.
+  pollIntervalSec: 60
+  # -- Triage mode: "standard" (heuristic + AI) or "full" (AI for all issues).
+  triageMode: standard
+  # -- GitHub token for Bull. If empty, falls back to auth.githubToken.
+  githubToken: ""
+  # -- Issue commenting configuration.
+  comments:
+    enabled: false
+    answerQuestions: false
+  # -- Custom label names (defaults shown).
+  labels:
+    underReview: "bull: under review"
+    inProgress: "bull: in progress"
+    fixMerged: "bull: fix merged"
+    ignore: "bull: ignore"

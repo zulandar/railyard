@@ -44,6 +44,7 @@ func newRootCmd() *cobra.Command {
 	cmd.AddCommand(newGitIgnoreCmd())
 	cmd.AddCommand(newMigrateCmd())
 	cmd.AddCommand(newTelegraphCmd())
+	cmd.AddCommand(newBullCmd())
 	cmd.AddCommand(newInitCmd())
 	return cmd
 }

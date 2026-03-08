@@ -20,6 +20,12 @@ engine:
 dolt:
   password: "ci-test-password"
 
+bull:
+  enabled: true
+  pollIntervalSec: 120
+  triageMode: standard
+  githubToken: "ghp-ci-test-token"
+
 tracks:
   - name: backend
     engineSlots: 1

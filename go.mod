@@ -6,9 +6,11 @@ require (
 	github.com/bwmarrin/discordgo v0.29.0
 	github.com/gin-gonic/gin v1.11.0
 	github.com/go-sql-driver/mysql v1.8.1
+	github.com/google/go-github/v68 v68.0.0
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/slack-go/slack v0.18.0
 	github.com/spf13/cobra v1.10.2
+	golang.org/x/oauth2 v0.35.0
 	golang.org/x/term v0.40.0
 	gopkg.in/yaml.v3 v3.0.1
 	gorm.io/driver/mysql v1.6.0
@@ -28,6 +30,7 @@ require (
 	github.com/go-playground/validator/v10 v10.27.0 // indirect
 	github.com/goccy/go-json v0.10.2 // indirect
 	github.com/goccy/go-yaml v1.18.0 // indirect
+	github.com/google/go-querystring v1.1.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect

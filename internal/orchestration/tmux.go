@@ -31,6 +31,12 @@ func EngineSession(owner string, index int) string {
 	return fmt.Sprintf("railyard_%s_eng%03d", owner, index)
 }
 
+// BullSession returns the tmux session name for the bull daemon.
+// Format: railyard_OWNER_bull
+func BullSession(owner string) string {
+	return fmt.Sprintf("railyard_%s_bull", owner)
+}
+
 // DispatchSession returns the tmux session name for dispatch.
 // Format: railyard_OWNER_dispatch
 func DispatchSession(owner string) string {

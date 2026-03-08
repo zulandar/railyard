@@ -18,6 +18,14 @@ dashboard:
 telegraph:
   enabled: true
   channel: C123456
+bull:
+  enabled: true
+  pollIntervalSec: 30
+  triageMode: standard
+  githubToken: "ghp-test-token"
+  comments:
+    enabled: true
+    answerQuestions: true
 tracks:
   - name: backend
     engineSlots: 3

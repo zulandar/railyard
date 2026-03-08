@@ -1,0 +1,10 @@
+owner: alice
+repo: git@github.com:org/myapp.git
+tracks:
+  - name: backend
+    language: go
+
+bull:
+  enabled: true
+  github_token: "ghp_test123"
+  triage_mode: invalid_mode

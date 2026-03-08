@@ -29,6 +29,7 @@ Each developer runs their own Railyard instance against the same repo. Agents wo
 | **Dispatch** | Planner agent — your interface, decomposes requests into cars |
 | **Switch** | Merging a completed car's branch back to main |
 | **Telegraph** | Chat bridge — connects Railyard to Slack or Discord for commands, events, and dispatch via chat |
+| **Bull** | GitHub issue triage daemon — polls issues, applies AI triage, creates cars, syncs labels |
 | **Overlay** | Per-engine semantic index of changed files for context-aware search |
 
 ## Architecture
@@ -258,6 +259,17 @@ ry telegraph sessions -c railyard.yaml --clear  # Clear all session history
 
 See [Telegraph Setup Guide](docs/telegraph-setup.md) for platform setup and configuration.
 
+### Bull (GitHub Issue Triage)
+
+Bull connects Railyard to GitHub Issues, automatically triaging new issues with AI, creating cars from accepted issues, and syncing statuses back via labels.
+
+```bash
+ry bull start -c railyard.yaml        # Start triage daemon
+ry bull triage -c railyard.yaml --issue 42  # One-shot triage
+```
+
+See [Bull Setup Guide](docs/bull-setup.md) for configuration and label scheme.
+
 ### Kubernetes Deployment
 
 Railyard can run on Kubernetes using the provided Helm chart. Instead of tmux sessions, engines run as Kubernetes pods with auto-scaling, TLS-secured database connections, and multi-project isolation.
@@ -470,6 +482,7 @@ internal/
   telegraph/         Telegraph chat bridge: adapters, routing, watcher, digests
     slack/           Slack Socket Mode adapter
     discord/         Discord Gateway adapter
+  bull/              Bull GitHub issue triage daemon: polling, filtering, AI triage, label sync
 cocoindex/           Python-based semantic search (CocoIndex + pgvector)
   overlay.py         Per-engine overlay indexer (build, cleanup, status)
   mcp_server.py      MCP server for dual-table semantic search

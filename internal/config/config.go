@@ -27,6 +27,7 @@ type Config struct {
 	Tracks            []TrackConfig       `yaml:"tracks"`
 	Notifications     NotificationsConfig `yaml:"notifications"`
 	CocoIndex         CocoIndexConfig     `yaml:"cocoindex"`
+	Bull              BullConfig          `yaml:"bull"`
 	Telegraph         TelegraphConfig     `yaml:"telegraph"`
 	Kubernetes        KubernetesConfig    `yaml:"kubernetes"`
 	AgentProvider     string              `yaml:"agent_provider"`
@@ -120,6 +121,32 @@ type TrackConfig struct {
 	TestCommand    string                 `yaml:"test_command"`
 	Conventions    map[string]interface{} `yaml:"conventions"`
 	AgentProvider  string                 `yaml:"agent_provider"`
+}
+
+// BullCommentsConfig controls Bull's issue commenting behavior.
+type BullCommentsConfig struct {
+	Enabled         bool   `yaml:"enabled"`
+	RejectTemplate  string `yaml:"reject_template"`
+	AnswerQuestions bool   `yaml:"answer_questions"`
+}
+
+// BullLabelsConfig defines the GitHub labels Bull uses for issue triage.
+type BullLabelsConfig struct {
+	UnderReview string `yaml:"under_review"`
+	InProgress  string `yaml:"in_progress"`
+	FixMerged   string `yaml:"fix_merged"`
+	Ignore      string `yaml:"ignore"`
+}
+
+// BullConfig holds settings for the Bull GitHub issue triage daemon.
+type BullConfig struct {
+	Enabled         bool               `yaml:"enabled"`
+	GitHubToken     string             `yaml:"github_token"`
+	PollIntervalSec int                `yaml:"poll_interval_sec"`
+	TriageMode      string             `yaml:"triage_mode"`
+	AgentProvider   string             `yaml:"agent_provider"`
+	Comments        BullCommentsConfig `yaml:"comments"`
+	Labels          BullLabelsConfig   `yaml:"labels"`
 }
 
 // TelegraphConfig holds settings for the Telegraph chat bridge.
@@ -252,6 +279,9 @@ func (c *Config) applyDefaults() {
 	if c.AgentProvider == "" {
 		c.AgentProvider = "claude"
 	}
+	if c.Bull.AgentProvider == "" {
+		c.Bull.AgentProvider = c.AgentProvider
+	}
 	for i := range c.Tracks {
 		if c.Tracks[i].EngineSlots == 0 {
 			c.Tracks[i].EngineSlots = 3
@@ -297,6 +327,28 @@ func (c *Config) applyDefaults() {
 	}
 	if c.CocoIndex.Overlay.BuildTimeoutSec == 0 {
 		c.CocoIndex.Overlay.BuildTimeoutSec = 60
+	}
+	// Bull defaults — only apply when bull is enabled.
+	if c.Bull.Enabled {
+		c.Bull.GitHubToken = resolveEnvVars(c.Bull.GitHubToken)
+		if c.Bull.PollIntervalSec == 0 {
+			c.Bull.PollIntervalSec = 60
+		}
+		if c.Bull.TriageMode == "" {
+			c.Bull.TriageMode = "standard"
+		}
+		if c.Bull.Labels.UnderReview == "" {
+			c.Bull.Labels.UnderReview = "bull: under review"
+		}
+		if c.Bull.Labels.InProgress == "" {
+			c.Bull.Labels.InProgress = "bull: in progress"
+		}
+		if c.Bull.Labels.FixMerged == "" {
+			c.Bull.Labels.FixMerged = "bull: fix merged"
+		}
+		if c.Bull.Labels.Ignore == "" {
+			c.Bull.Labels.Ignore = "bull: ignore"
+		}
 	}
 	// Telegraph defaults — only apply when telegraph section is present (platform set).
 	if c.Telegraph.Platform != "" {
@@ -358,6 +410,18 @@ func (c *Config) validate() error {
 	if c.Kubernetes.Namespace != "" || c.Kubernetes.Image != "" {
 		if c.Kubernetes.Image == "" {
 			errs = append(errs, "kubernetes.image is required when kubernetes is configured")
+		}
+	}
+	// Bull validation (only when enabled).
+	if c.Bull.Enabled {
+		if c.Bull.GitHubToken == "" {
+			errs = append(errs, "bull.github_token is required when bull is enabled")
+		}
+		switch c.Bull.TriageMode {
+		case "standard", "full":
+			// valid
+		default:
+			errs = append(errs, fmt.Sprintf("bull.triage_mode %q is not supported (use standard or full)", c.Bull.TriageMode))
 		}
 	}
 	// Telegraph validation (only when platform is configured).
