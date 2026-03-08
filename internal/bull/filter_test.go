@@ -169,6 +169,21 @@ func TestFilterIssue_ValidIssue(t *testing.T) {
 	}
 }
 
+func TestFilterIssue_EmptyTrackedTitleNotDuplicate(t *testing.T) {
+	issue := &github.Issue{
+		Number: github.Ptr(13),
+		Title:  github.Ptr("Brand new issue title"),
+		Body:   github.Ptr("this body is definitely long enough"),
+	}
+	tracked := []ExistingIssue{
+		{IssueNumber: 5, Title: ""},
+	}
+	result := FilterIssue(issue, "ignore", tracked)
+	if !result.Pass {
+		t.Fatalf("expected issue with empty tracked title to pass, got rejected with reason: %s", result.Reason)
+	}
+}
+
 func TestFilterIssue_Exactly20CharBody(t *testing.T) {
 	issue := &github.Issue{
 		Number: github.Ptr(100),

@@ -59,6 +59,9 @@ func FilterIssue(issue *github.Issue, ignoreLabel string, tracked []ExistingIssu
 	title := strings.ToLower(strings.TrimSpace(issue.GetTitle()))
 	for _, t := range tracked {
 		existing := strings.ToLower(strings.TrimSpace(t.Title))
+		if existing == "" || title == "" {
+			continue
+		}
 		if title == existing || strings.Contains(title, existing) || strings.Contains(existing, title) {
 			return FilterResult{
 				Pass:   false,
