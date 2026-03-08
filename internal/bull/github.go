@@ -32,6 +32,7 @@ func NewClient(owner, repo, token string) *GitHubClient {
 }
 
 // ListNewIssues returns open issues created or updated since the given time.
+// It paginates through all pages to avoid silently dropping issues.
 func (g *GitHubClient) ListNewIssues(ctx context.Context, since time.Time) ([]*github.Issue, error) {
 	opts := &github.IssueListByRepoOptions{
 		State: "open",
@@ -40,20 +41,27 @@ func (g *GitHubClient) ListNewIssues(ctx context.Context, since time.Time) ([]*g
 			PerPage: 100,
 		},
 	}
-	issues, resp, err := g.client.Issues.ListByRepo(ctx, g.owner, g.repo, opts)
-	if err != nil {
-		if retryResp, ok := g.handleRateLimitError(resp, err); ok {
-			_ = retryResp
-			issues, resp, err = g.client.Issues.ListByRepo(ctx, g.owner, g.repo, opts)
-			if err != nil {
-				return nil, fmt.Errorf("bull: list issues retry: %w", err)
+	var allIssues []*github.Issue
+	for {
+		issues, resp, err := g.client.Issues.ListByRepo(ctx, g.owner, g.repo, opts)
+		if err != nil {
+			if _, ok := g.handleRateLimitError(resp, err); ok {
+				issues, resp, err = g.client.Issues.ListByRepo(ctx, g.owner, g.repo, opts)
+				if err != nil {
+					return nil, fmt.Errorf("bull: list issues retry: %w", err)
+				}
+			} else {
+				return nil, fmt.Errorf("bull: list issues: %w", err)
 			}
-		} else {
-			return nil, fmt.Errorf("bull: list issues: %w", err)
 		}
+		allIssues = append(allIssues, issues...)
+		g.waitIfRateLimited(resp)
+		if resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
 	}
-	g.waitIfRateLimited(resp)
-	return issues, nil
+	return allIssues, nil
 }
 
 // GetIssue retrieves a single issue by number.
