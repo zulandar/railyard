@@ -116,12 +116,16 @@ func RunDaemon(ctx context.Context, deps interface {
 		}
 
 		// Phase 1: Poll GitHub for new/updated issues.
+		// Capture the poll boundary before fetching so that issues updated
+		// during processing are not lost on the next cycle.
+		pollBoundary := time.Now()
 		fmt.Fprintf(out, "Phase 1: Polling GitHub for issues since %s\n", lastPoll.Format(time.RFC3339))
 		issues, err := deps.ListNewIssues(ctx, lastPoll)
 		if err != nil {
 			log.Printf("bull: poll error: %v", err)
 			goto endCycle
 		}
+		lastPoll = pollBoundary
 
 		// Phase 2-4: Filter and triage new issues.
 		{
@@ -185,8 +189,6 @@ func RunDaemon(ctx context.Context, deps interface {
 		if err := SyncReleases(ctx, deps, deps, opts.Config); err != nil {
 			log.Printf("bull: release scan error: %v", err)
 		}
-
-		lastPoll = time.Now()
 
 	endCycle:
 		cycle++
