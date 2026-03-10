@@ -85,6 +85,7 @@ pgvector:
 # Methods:
 #   api_key      - ANTHROPIC_API_KEY (claude), OPENAI_API_KEY (codex),
 #                  GEMINI_API_KEY (gemini). Simplest for headless/CI.
+#                  Copilot uses GH_TOKEN (from auth.githubToken or auth.copilot.token).
 #   oauth_token  - CLAUDE_CODE_OAUTH_TOKEN from 'claude setup-token'.
 #                  Uses Max plan subscription budget (no pay-per-token).
 #                  Mounts ~/.claude.json with hasCompletedOnboarding:true.
@@ -123,6 +124,14 @@ auth:
   # -- GitHub PAT for PR operations (require_pr mode). Needs repo scope.
   # Sets GH_TOKEN env var used by gh CLI for PR creation and review detection.
   githubToken: ""
+  # -- GitHub Copilot CLI authentication (used when engine.agentProvider=copilot).
+  # Copilot authenticates via GH_TOKEN using a fine-grained PAT with
+  # "Copilot Requests" permission. When set, the token is exposed as
+  # GITHUB_COPILOT_TOKEN and the copilot subprocess overrides its own
+  # GH_TOKEN at runtime, keeping the pod-level GH_TOKEN (from
+  # auth.githubToken) intact for PR operations and Bull.
+  copilot:
+    token: ""
   # -- Advanced: apiKeyHelper command for dynamic key rotation (e.g. Vault).
   # When set, ANTHROPIC_API_KEY_HELPER is set to this value.
   apiKeyHelper: ""
@@ -143,7 +152,7 @@ tracks:
 # Engine pods
 # ---------------------------------------------------------------------------
 engine:
-  # -- Agent provider: claude, codex, gemini, opencode.
+  # -- Agent provider: claude, codex, gemini, opencode, copilot.
   agentProvider: claude
   # -- Resource requests/limits per engine pod.
   resources: {}

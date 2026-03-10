@@ -62,7 +62,7 @@ repo: git@github.com:org/myproject.git
 # ---------------------------------------------------------------------------
 
 # Which AI coding CLI to use as the engine runtime.
-# Supported providers: claude, codex, gemini, opencode
+# Supported providers: claude, codex, gemini, opencode, copilot
 # This sets the global default — individual tracks can override it.
 # agent_provider: claude
 

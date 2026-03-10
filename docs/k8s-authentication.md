@@ -1,6 +1,6 @@
 # Kubernetes Authentication Guide
 
-Railyard engine pods run AI agents (Claude, Codex, Gemini, or OpenCode) that require provider credentials. This guide covers every supported authentication method and how to configure each one via Helm values.
+Railyard engine pods run AI agents (Claude, Codex, Gemini, OpenCode, or Copilot) that require provider credentials. This guide covers every supported authentication method and how to configure each one via Helm values.
 
 ## Method 1: API Key
 
@@ -14,6 +14,7 @@ An API key is the simplest approach. The chart maps `auth.apiKey` to the correct
 | `codex` | `OPENAI_API_KEY` |
 | `gemini` | `GEMINI_API_KEY` |
 | `opencode` | `ANTHROPIC_API_KEY` |
+| `copilot` | `GH_TOKEN` (via `auth.copilot.token` or `auth.githubToken`) |
 
 ### Steps
 
@@ -183,6 +184,53 @@ helm upgrade --install railyard ./charts/railyard \
 
 **Using an existing secret:** If you set `auth.existingSecret`, add `GH_TOKEN` to your pre-created Secret alongside the agent credentials.
 
+## GitHub Copilot CLI
+
+**Recommended for:** Teams using GitHub Copilot as their AI coding agent.
+
+Copilot CLI authenticates via `GH_TOKEN` (or `GITHUB_TOKEN`) using a GitHub Personal Access Token. The PAT requires the **Copilot Requests** permission (fine-grained token) to access the Copilot API.
+
+The chart keeps `GH_TOKEN` (from `auth.githubToken`) intact for PR operations and Bull, and exposes `auth.copilot.token` as a separate `GITHUB_COPILOT_TOKEN` env var. The copilot provider overrides `GH_TOKEN` only in its own subprocess, so other components always see the repo-scoped token.
+
+This allows simple setups (one PAT for everything) and advanced setups (separate tokens with different scopes).
+
+### Simple setup (shared token)
+
+If your PAT has both **Copilot Requests** and **repo** permissions:
+
+```yaml
+auth:
+  githubToken: "ghp_..."
+
+engine:
+  agentProvider: copilot
+```
+
+### Advanced setup (separate tokens)
+
+Use a dedicated Copilot token with only **Copilot Requests** permission, and a separate PAT for PR operations:
+
+```yaml
+auth:
+  githubToken: "ghp_pr_operations_token"
+  copilot:
+    token: "ghp_copilot_only_token"
+
+engine:
+  agentProvider: copilot
+```
+
+### Helm install
+
+```bash
+helm upgrade --install railyard ./charts/railyard \
+  -f values.yaml \
+  --set auth.copilot.token="ghp_..." \
+  --set engine.agentProvider=copilot
+```
+
+**Cost model:** Copilot is billed through your GitHub Copilot subscription (individual, business, or enterprise).
+
 ## Advanced: Vault-based Key Rotation
 
 For dynamic credential rotation (e.g. via HashiCorp Vault), use `auth.apiKeyHelper` instead of a static key. When set, the chart populates the `ANTHROPIC_API_KEY_HELPER` environment variable. The agent runtime calls this helper command each time it needs a key, so credentials can rotate without redeploying pods.
@@ -205,6 +253,7 @@ This value is set alongside (not instead of) the auth method. It can be combined
 | Google Vertex AI | GCP billing | SA key rotation | Medium | GCP-native orgs |
 | Azure AI Foundry | Azure billing | Portal rotation | Medium | Azure-native orgs |
 | Vault helper | Pay-per-token | Automatic | High | Strict rotation policies |
+| GitHub Copilot | Copilot subscription | PAT rotation | Low | GitHub-native teams |
 
 ## Using Existing Secrets
 
@@ -223,6 +272,7 @@ The Secret is mounted via `envFrom` on all engine pods. It must contain the corr
 | `api_key` (claude/opencode) | `ANTHROPIC_API_KEY` |
 | `api_key` (codex) | `OPENAI_API_KEY` |
 | `api_key` (gemini) | `GEMINI_API_KEY` |
+| `api_key` (copilot) | `GH_TOKEN` |
 | `oauth_token` | `CLAUDE_CODE_OAUTH_TOKEN` |
 | `bedrock` | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION` |
 | `vertex` | `CLOUD_ML_REGION`, `GOOGLE_CLOUD_PROJECT` |

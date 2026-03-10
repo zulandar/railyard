@@ -1,0 +1,21 @@
+# CI test values: copilot provider with dedicated token
+# Validates: copilot auth precedence (copilot.token > githubToken), engine provider
+project: copilot-test
+git:
+  owner: testuser
+  repo: git@github.com:test/repo.git
+auth:
+  method: api_key
+  apiKey: ""
+  githubToken: "ghp-fallback-token"
+  copilot:
+    token: "ghp-copilot-specific-token"
+engine:
+  agentProvider: copilot
+tracks:
+  - name: backend
+    engineSlots: 2
+    minReplicas: 1
+    maxReplicas: 2
+    language: go
+    testCommand: "go test ./..."

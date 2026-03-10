@@ -239,6 +239,51 @@ func TestCheckProviderBinaries_MultipleProviders(t *testing.T) {
 	}
 }
 
+func TestCheckProviderBinaries_Copilot(t *testing.T) {
+	cfg := &config.Config{
+		AgentProvider: "copilot",
+		Tracks: []config.TrackConfig{
+			{Name: "backend", Language: "go", AgentProvider: "copilot"},
+		},
+	}
+	results := checkProviderBinaries(cfg)
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].name != "Provider: copilot" {
+		t.Errorf("name = %q, want %q", results[0].name, "Provider: copilot")
+	}
+	// Provider should be registered (via init import), so status is PASS or
+	// WARN (binary missing) — never an "unknown provider" WARN.
+	if results[0].status == "WARN" && strings.Contains(results[0].detail, "not registered") {
+		t.Error("copilot provider should be registered but got 'not registered'")
+	}
+}
+
+func TestCheckProviderBinaries_CopilotWithOtherProviders(t *testing.T) {
+	cfg := &config.Config{
+		AgentProvider: "claude",
+		Tracks: []config.TrackConfig{
+			{Name: "backend", Language: "go", AgentProvider: "claude"},
+			{Name: "frontend", Language: "typescript", AgentProvider: "copilot"},
+		},
+	}
+	results := checkProviderBinaries(cfg)
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	names := map[string]bool{}
+	for _, r := range results {
+		names[r.name] = true
+	}
+	if !names["Provider: claude"] {
+		t.Error("missing Provider: claude result")
+	}
+	if !names["Provider: copilot"] {
+		t.Error("missing Provider: copilot result")
+	}
+}
+
 func TestCheckProviderBinaries_UnknownProvider(t *testing.T) {
 	cfg := &config.Config{
 		AgentProvider: "nonexistent-provider-xyz",
@@ -274,6 +319,7 @@ func TestProviderInstallHint(t *testing.T) {
 		{"codex", "install: npm install -g @openai/codex"},
 		{"gemini", "install: npm install -g @google/gemini-cli"},
 		{"opencode", "install: go install github.com/opencode-ai/opencode@latest"},
+		{"copilot", "install: gh extension install github/gh-copilot"},
 		{"unknown", `ensure "unknown" is in PATH`},
 	}
 	for _, tt := range tests {
