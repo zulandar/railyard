@@ -14,7 +14,7 @@
   <a href="https://github.com/zulandar/railyard/blob/main/LICENSE"><img src="https://img.shields.io/github/license/zulandar/railyard" alt="License"></a>
 </p>
 
-Multi-agent AI orchestration for coding. Railyard coordinates multiple AI coding agents (Claude Code, Codex, Gemini, OpenCode) across tracks (backend, frontend, infra) with per-branch isolation, a version-controlled SQL database, semantic code search, and automated supervision.
+Multi-agent AI orchestration for coding. Railyard coordinates multiple AI coding agents (Claude Code, Codex, Gemini, OpenCode, Copilot) across tracks (backend, frontend, infra) with per-branch isolation, a version-controlled SQL database, semantic code search, and automated supervision.
 
 Each developer runs their own Railyard instance against the same repo. Agents work on isolated branches (`ry/{owner}/{track}/{car-id}`), and a supervisor (Yardmaster) handles merges, stall detection, and dependency management.
 
@@ -50,7 +50,7 @@ Each developer runs their own Railyard instance against the same repo. Agents wo
   │     └─────┬─────┘     │
   │           │           │
 ┌─▼───────┐ ┌─▼───────┐ ┌─▼───────┐
-│Engine 1 │ │Engine 2 │ │Engine N │  ← AI coding agents (Claude, Codex, Gemini, OpenCode)
+│Engine 1 │ │Engine 2 │ │Engine N │  ← AI coding agents (Claude, Codex, Gemini, OpenCode, Copilot)
 └─────┬───┘ └─────┬───┘ └────┬────┘
       │           │          │
       │     ┌─────▼─────┐   │
@@ -77,6 +77,7 @@ Each developer runs their own Railyard instance against the same repo. Agents wo
   - Codex — `npm install -g @openai/codex`
   - Gemini — `npm install -g @google/gemini-cli`
   - OpenCode — `go install github.com/opencode-ai/opencode@latest`
+  - Copilot — `gh extension install github/gh-copilot`
 - **Docker** (optional) — for pgvector/CocoIndex semantic search
 - **GitHub CLI** (optional, required when `require_pr: true`) — [install](https://cli.github.com/)
 - **Python 3.13+** (optional) — for CocoIndex semantic search
@@ -395,7 +396,7 @@ See [`railyard.example.yaml`](railyard.example.yaml) for a copy-paste ready temp
 ```yaml
 owner: alice                            # Your identity (branch prefix: ry/alice/...)
 repo: git@github.com:org/repo.git       # Target repository
-agent_provider: claude                  # AI CLI provider (claude, codex, gemini, opencode)
+agent_provider: claude                  # AI CLI provider (claude, codex, gemini, opencode, copilot)
 # branch_prefix: ry/alice               # Override default ry/{owner}
 # default_acceptance: "Tests pass, code reviewed"  # Default acceptance criteria for Dispatch
 # require_pr: true                      # Create draft PRs instead of direct merge to main
@@ -474,7 +475,7 @@ internal/
   db/                Dolt/GORM connection and migrations
   dispatch/          Dispatch planner agent (decomposition)
   engine/            Engine daemon: claim, spawn, stall detection, outcomes, overlay
-    providers/       AI CLI provider implementations (Claude, Codex, Gemini, OpenCode)
+    providers/       AI CLI provider implementations (Claude, Codex, Gemini, OpenCode, Copilot)
   messaging/         Agent-to-agent message passing via DB
   models/            GORM models (Car, Engine, Message, Track, etc.)
   orchestration/     tmux session management, start/stop/scale/status

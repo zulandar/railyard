@@ -11,7 +11,7 @@ Railyard is a multi-agent AI orchestration system that coordinates coding agents
 | **Railyard** | An employee's orchestration instance (each person runs their own) |
 | **Track** | An area of concern within the repo (backend, frontend, infra) |
 | **Car** | A unit of work (from the [Beads](https://github.com/steveyegge/beads) model) |
-| **Engine** | A worker agent backed by a configurable **provider** (Claude Code by default; also supports Codex, Gemini CLI, OpenCode) |
+| **Engine** | A worker agent backed by a configurable **provider** (Claude Code by default; also supports Codex, Gemini CLI, OpenCode, Copilot) |
 | **Yardmaster** | The supervisor agent — merges, monitors, coordinates |
 | **Dispatch** | The planner agent — your interface, breaks down work |
 | **Telegraph** | Chat bridge — connects Railyard to Slack/Discord for commands, events, and dispatch |
@@ -580,7 +580,7 @@ project: webapp                      # project name — drives namespace + branc
 
 repo: git@github.com:org/myapp.git   # shared repo
 branch_prefix: ry                    # auto-derived when project is set: branches are ry/{track}/{car_id}
-agent_provider: claude               # default provider for all tracks (claude|codex|gemini|opencode)
+agent_provider: claude               # default provider for all tracks (claude|codex|gemini|opencode|copilot)
 
 dolt:
   host: dolt.railyard-webapp.svc     # k8s Service DNS (per-project namespace)
@@ -906,7 +906,7 @@ Each provider implements a common interface that knows how to:
 - Build the CLI command and arguments for its agent runtime
 - Parse agent output to detect completion, errors, and `/clear` events
 
-Built-in providers: **Claude Code** (default), **Codex**, **Gemini CLI**, **OpenCode**. New providers can be added by implementing the provider interface.
+Built-in providers: **Claude Code** (default), **Codex**, **Gemini CLI**, **OpenCode**, **Copilot**. New providers can be added by implementing the provider interface.
 
 ---
 

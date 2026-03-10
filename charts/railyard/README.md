@@ -45,6 +45,7 @@ helm install railyard ./charts/railyard \
 | `auth.vertex.credentialsSecret` | Secret with service account JSON | `""` |
 | `auth.foundry.apiKey` | Azure API key (for `foundry` method) | `""` |
 | `auth.foundry.endpoint` | Azure endpoint | `""` |
+| `auth.copilot.token` | GitHub PAT for Copilot CLI (overrides `githubToken` for Copilot) | `""` |
 | `auth.apiKeyHelper` | Command for dynamic key rotation | `""` |
 
 ### Dolt Database
@@ -90,7 +91,7 @@ helm install railyard ./charts/railyard \
 
 | Value | Description | Default |
 |-------|-------------|---------|
-| `engine.agentProvider` | Agent provider: `claude`, `codex`, `gemini`, `opencode` | `claude` |
+| `engine.agentProvider` | Agent provider: `claude`, `codex`, `gemini`, `opencode`, `copilot` | `claude` |
 | `engine.resources` | Resource requests/limits per engine pod | `{}` |
 | `engine.nodeSelector` | Node selector for engine pods | `{}` |
 | `engine.tolerations` | Tolerations for engine pods | `[]` |
@@ -134,6 +135,7 @@ The `ci/` directory contains example values files for chart validation:
 | `ci/test-values-minimal.yaml` | Bare minimum — git and auth only. Good for `helm template` smoke tests. |
 | `ci/test-values-external-db.yaml` | External databases with `dolt.internal=false` and `pgvector.internal=false`. |
 | `ci/test-values-full.yaml` | Full configuration — ingress, OAuth2 proxy, multiple tracks, Telegraph. |
+| `ci/test-values-copilot.yaml` | Copilot provider with dedicated auth token. Validates copilot token precedence. |
 
 Use these to validate chart rendering:
 

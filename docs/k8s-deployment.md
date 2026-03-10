@@ -9,7 +9,7 @@ Before you begin, ensure the following are available:
 - **Kubernetes 1.26+** cluster (EKS, GKE, AKS, or self-managed). For local testing with minikube, see [k8s-local-testing.md](k8s-local-testing.md).
 - **kubectl** configured and pointed at your cluster (`kubectl cluster-info` should succeed)
 - **Helm 3.x** installed ([helm.sh/docs/intro/install](https://helm.sh/docs/intro/install/))
-- **Agent credentials** for your chosen AI provider (see [k8s-authentication.md](k8s-authentication.md))
+- **Agent credentials** for your chosen AI provider — API keys for Claude/Codex/Gemini/OpenCode, or a GitHub PAT for Copilot (see [k8s-authentication.md](k8s-authentication.md))
 
 Optional:
 
