@@ -362,6 +362,8 @@ func providerInstallHint(name string) string {
 		return "install: npm install -g @google/gemini-cli"
 	case "opencode":
 		return "install: go install github.com/opencode-ai/opencode@latest"
+	case "copilot":
+		return "install: gh extension install github/gh-copilot"
 	default:
 		return fmt.Sprintf("ensure %q is in PATH", name)
 	}
