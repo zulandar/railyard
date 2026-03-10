@@ -422,11 +422,9 @@ func defaultConnectFromConfig(configPath string) (*config.Config, *gorm.DB, erro
 	}
 
 	// Best-effort audit; do not fail startup if audit logging fails.
-	hasCustomCreds := cfg.Dolt.Username != "root" || cfg.Dolt.Password != ""
 	_ = audit.Log(gormDB, os.Stderr, "config.loaded", "system", configPath, map[string]interface{}{
-		"owner":              cfg.Owner,
-		"tracks":             len(cfg.Tracks),
-		"custom_credentials": hasCustomCreds,
+		"owner":  cfg.Owner,
+		"tracks": len(cfg.Tracks),
 	})
 
 	return cfg, gormDB, nil
