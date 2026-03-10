@@ -44,6 +44,7 @@ var KnownProviders = map[string]bool{
 	"opencode": true,
 	"gemini":   true,
 	"codex":    true,
+	"copilot":  true,
 }
 
 // CocoIndexConfig holds settings for the CocoIndex semantic search integration.
