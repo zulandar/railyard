@@ -1,0 +1,24 @@
+project: myproject
+git:
+  owner: testuser
+  repo: git@github.com:test/repo.git
+auth:
+  method: api_key
+  apiKey: test-key
+networkPolicy:
+  enabled: true
+  dashboard:
+    ingressCIDR:
+      - "10.0.0.0/8"
+telegraph:
+  enabled: true
+bull:
+  enabled: true
+  githubToken: "ghp-test"
+tracks:
+  - name: backend
+    engineSlots: 1
+    minReplicas: 1
+    maxReplicas: 1
+    language: go
+    testCommand: "go test ./..."

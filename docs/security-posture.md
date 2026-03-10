@@ -215,13 +215,9 @@ For any network-exposed deployment, configure one of:
 
 ### 2.2 Network Segmentation
 
-**SOC 2:** CC6.6 (Network Security) | **Status:** Operator-configured
+**SOC 2:** CC6.6 (Network Security) | **Status:** Available (opt-in)
 
-The Helm chart does not install NetworkPolicy resources. All pods within the namespace communicate freely.
-
-**Required action:**
-
-Define NetworkPolicy resources restricting traffic to required paths:
+The Helm chart includes optional NetworkPolicy resources gated by `networkPolicy.enabled`. When enabled, traffic is restricted to required paths only:
 
 | Source | Destination | Port | Purpose |
 |--------|-------------|------|---------|
@@ -229,12 +225,15 @@ Define NetworkPolicy resources restricting traffic to required paths:
 | Engine | Dolt | 3306 | Read/write cars, logs |
 | Engine | AI Provider APIs | 443 | Outbound API calls |
 | Engine | pgvector | 5432 | Overlay reads/writes |
-| Ingress | Dashboard | 8080 | User access |
+| Configured CIDR / namespace | Dashboard | 8080 | User access |
 | Yardmaster | Dolt | 3306 | Health checks, rebalancing |
+| All pods | kube-dns | 53 | DNS resolution |
 
-Block all other intra-namespace and cross-namespace traffic.
+All other intra-namespace and cross-namespace traffic is blocked.
 
-**Roadmap:** Helm chart NetworkPolicy templates are planned (tracked as `railyard-795`).
+**Evidence:**
+- `charts/railyard/templates/networkpolicy.yaml` — per-component NetworkPolicy resources
+- `charts/railyard/ci/test-values-networkpolicy.yaml` — CI test values with policies enabled
 
 ### 2.3 Secrets Management
 

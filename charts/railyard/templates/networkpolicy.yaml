@@ -1,0 +1,317 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- $fullname := include "railyard.fullname" . }}
+# -----------------------------------------------------------------------
+# Dolt: accept connections from engine, dispatch, yardmaster, dashboard, bull
+# -----------------------------------------------------------------------
+{{- if .Values.dolt.internal }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-dolt
+  labels:
+    {{- include "railyard.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dolt
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "railyard.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: dolt
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: engine
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: dispatch
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: yardmaster
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: dashboard
+        {{- if .Values.bull.enabled }}
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: bull
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.dolt.port }}
+  egress:
+    {{- include "railyard.dnsEgress" . | nindent 4 }}
+{{- end }}
+
+# -----------------------------------------------------------------------
+# pgvector: accept connections from engine pods only
+# -----------------------------------------------------------------------
+{{- if .Values.pgvector.internal }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-pgvector
+  labels:
+    {{- include "railyard.labels" . | nindent 4 }}
+    app.kubernetes.io/component: pgvector
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "railyard.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: pgvector
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: engine
+      ports:
+        - protocol: TCP
+          port: {{ .Values.pgvector.port }}
+  egress:
+    {{- include "railyard.dnsEgress" . | nindent 4 }}
+{{- end }}
+
+# -----------------------------------------------------------------------
+# Dashboard: accept from ingress / configurable CIDR; egress to Dolt + DNS
+# -----------------------------------------------------------------------
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-dashboard
+  labels:
+    {{- include "railyard.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dashboard
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "railyard.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: dashboard
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        {{- if .Values.networkPolicy.dashboard.ingressCIDR }}
+        {{- range .Values.networkPolicy.dashboard.ingressCIDR }}
+        - ipBlock:
+            cidr: {{ . }}
+        {{- end }}
+        {{- else }}
+        - podSelector: {}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.dashboard.service.port }}
+  egress:
+    {{- if .Values.dolt.internal }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: dolt
+      ports:
+        - protocol: TCP
+          port: {{ .Values.dolt.port }}
+    {{- end }}
+    {{- include "railyard.dnsEgress" . | nindent 4 }}
+
+# -----------------------------------------------------------------------
+# Engine: egress to Dolt, pgvector, AI provider APIs (443), DNS
+# -----------------------------------------------------------------------
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-engine
+  labels:
+    {{- include "railyard.labels" . | nindent 4 }}
+    app.kubernetes.io/component: engine
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "railyard.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: engine
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress: []
+  egress:
+    {{- if .Values.dolt.internal }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: dolt
+      ports:
+        - protocol: TCP
+          port: {{ .Values.dolt.port }}
+    {{- end }}
+    {{- if .Values.pgvector.internal }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: pgvector
+      ports:
+        - protocol: TCP
+          port: {{ .Values.pgvector.port }}
+    {{- end }}
+    # AI provider API access (HTTPS).
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 443
+    {{- include "railyard.dnsEgress" . | nindent 4 }}
+
+# -----------------------------------------------------------------------
+# Dispatch: egress to Dolt + DNS only
+# -----------------------------------------------------------------------
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-dispatch
+  labels:
+    {{- include "railyard.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dispatch
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "railyard.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: dispatch
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress: []
+  egress:
+    {{- if .Values.dolt.internal }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: dolt
+      ports:
+        - protocol: TCP
+          port: {{ .Values.dolt.port }}
+    {{- end }}
+    {{- include "railyard.dnsEgress" . | nindent 4 }}
+
+# -----------------------------------------------------------------------
+# Yardmaster: egress to Dolt + DNS only
+# -----------------------------------------------------------------------
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-yardmaster
+  labels:
+    {{- include "railyard.labels" . | nindent 4 }}
+    app.kubernetes.io/component: yardmaster
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "railyard.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: yardmaster
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress: []
+  egress:
+    {{- if .Values.dolt.internal }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: dolt
+      ports:
+        - protocol: TCP
+          port: {{ .Values.dolt.port }}
+    {{- end }}
+    {{- include "railyard.dnsEgress" . | nindent 4 }}
+
+# -----------------------------------------------------------------------
+# Bull (optional): egress to Dolt, GitHub API (443), DNS
+# -----------------------------------------------------------------------
+{{- if .Values.bull.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-bull
+  labels:
+    {{- include "railyard.labels" . | nindent 4 }}
+    app.kubernetes.io/component: bull
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "railyard.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: bull
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress: []
+  egress:
+    {{- if .Values.dolt.internal }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: dolt
+      ports:
+        - protocol: TCP
+          port: {{ .Values.dolt.port }}
+    {{- end }}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 443
+    {{- include "railyard.dnsEgress" . | nindent 4 }}
+{{- end }}
+
+# -----------------------------------------------------------------------
+# Telegraph (optional): egress to Dolt, Slack/Discord APIs (443), DNS
+# -----------------------------------------------------------------------
+{{- if .Values.telegraph.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-telegraph
+  labels:
+    {{- include "railyard.labels" . | nindent 4 }}
+    app.kubernetes.io/component: telegraph
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "railyard.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: telegraph
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress: []
+  egress:
+    {{- if .Values.dolt.internal }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: dolt
+      ports:
+        - protocol: TCP
+          port: {{ .Values.dolt.port }}
+    {{- end }}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 443
+    {{- include "railyard.dnsEgress" . | nindent 4 }}
+{{- end }}
+
+{{- end }}

@@ -533,11 +533,29 @@ When you set `dolt.internal: false` or `pgvector.internal: false`, the chart ski
 
 ### Network policies
 
-The chart does not install any NetworkPolicy resources by default. All pods within the namespace can communicate freely over any port. If your cluster enforces network policies globally, ensure the following traffic is permitted within the Railyard namespace:
+The chart includes optional NetworkPolicy resources that restrict inter-pod traffic to only required communication paths. Enable them by setting `networkPolicy.enabled: true` in your values:
 
-- Engine, dispatch, and yardmaster pods to `railyard-dolt` on port 3306
-- Engine pods to `railyard-pgvector` on port 5432
-- All pods to `railyard-dashboard` on port 8080 (optional, only needed for health checks or internal links)
+```yaml
+networkPolicy:
+  enabled: true
+  dashboard:
+    ingressCIDR:
+      - "10.0.0.0/8"  # restrict dashboard access to internal network
+```
+
+When enabled, the following traffic paths are permitted:
+
+| Source | Destination | Port | Purpose |
+|--------|-------------|------|---------|
+| Engine, dispatch, yardmaster, dashboard, bull | Dolt | 3306 | Database access |
+| Engine | pgvector | 5432 | Vector store access |
+| Engine | External (0.0.0.0/0) | 443 | AI provider API calls |
+| Bull | External (0.0.0.0/0) | 443 | GitHub API calls |
+| Telegraph | External (0.0.0.0/0) | 443 | Slack/Discord API calls |
+| Configured CIDR / namespace | Dashboard | 8080 | User access |
+| All pods | kube-dns (kube-system) | 53 | DNS resolution |
+
+All other intra-namespace and cross-namespace traffic is blocked. If `networkPolicy.dashboard.ingressCIDR` is empty, dashboard access is allowed from pods within the same namespace only.
 
 ## 10. Monitoring and Logs
 

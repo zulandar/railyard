@@ -241,3 +241,14 @@ bull:
     inProgress: "bull: in progress"
     fixMerged: "bull: fix merged"
     ignore: "bull: ignore"
+
+# ---------------------------------------------------------------------------
+# Network policies
+# ---------------------------------------------------------------------------
+networkPolicy:
+  # -- Enable NetworkPolicy resources restricting inter-pod traffic.
+  enabled: false
+  dashboard:
+    # -- CIDRs allowed to reach the dashboard (e.g. ["10.0.0.0/8"]).
+    # Empty list allows traffic from the same namespace only.
+    ingressCIDR: []

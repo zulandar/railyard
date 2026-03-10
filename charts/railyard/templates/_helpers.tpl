@@ -167,3 +167,22 @@ Include in container env.
   value: /var/secrets/google/credentials.json
 {{- end }}
 {{- end }}
+
+{{/*
+DNS egress rule — allows DNS resolution via kube-system kube-dns.
+Include in NetworkPolicy egress rules.
+*/}}
+{{- define "railyard.dnsEgress" -}}
+- to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+  ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+{{- end }}
