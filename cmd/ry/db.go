@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/zulandar/railyard/internal/audit"
 	"github.com/zulandar/railyard/internal/config"
 	"github.com/zulandar/railyard/internal/db"
 )
@@ -75,6 +76,12 @@ func runDBInit(cmd *cobra.Command, configPath string) error {
 			return fmt.Errorf("connect to %s: %w", cfg.Dolt.Database, err)
 		}
 	}
+
+	// Best-effort audit; do not fail init if audit logging fails.
+	_ = audit.Log(gormDB, os.Stderr, "config.loaded", "system", configPath, map[string]interface{}{
+		"owner":  cfg.Owner,
+		"tracks": len(cfg.Tracks),
+	})
 
 	// AutoMigrate all tables
 	if err := db.AutoMigrate(gormDB); err != nil {
@@ -199,6 +206,12 @@ func runDBReset(cmd *cobra.Command, configPath, dbName string, skipConfirm bool)
 	if err != nil {
 		return fmt.Errorf("connect to %s: %w", dbName, err)
 	}
+
+	// Best-effort audit; do not fail reset if audit logging fails.
+	_ = audit.Log(gormDB, os.Stderr, "config.loaded", "system", configPath, map[string]interface{}{
+		"owner":  cfg.Owner,
+		"tracks": len(cfg.Tracks),
+	})
 
 	if err := db.AutoMigrate(gormDB); err != nil {
 		return err

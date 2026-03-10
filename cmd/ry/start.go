@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+	"github.com/zulandar/railyard/internal/audit"
 	"github.com/zulandar/railyard/internal/config"
 	"github.com/zulandar/railyard/internal/db"
 	"github.com/zulandar/railyard/internal/orchestration"
@@ -51,6 +52,12 @@ func runStart(cmd *cobra.Command, configPath string, engines int, withTelegraph 
 	if err != nil {
 		return fmt.Errorf("connect to %s: %w", cfg.Dolt.Database, err)
 	}
+
+	// Best-effort audit; do not fail startup if audit logging fails.
+	_ = audit.Log(gormDB, os.Stderr, "config.loaded", "system", configPath, map[string]interface{}{
+		"owner":  cfg.Owner,
+		"tracks": len(cfg.Tracks),
+	})
 
 	// Enable telegraph if --telegraph flag set or config has telegraph section.
 	telegraph := withTelegraph || cfg.Telegraph.Platform != ""

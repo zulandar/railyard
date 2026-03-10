@@ -7,6 +7,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
+	"github.com/zulandar/railyard/internal/audit"
 	"github.com/zulandar/railyard/internal/car"
 	"github.com/zulandar/railyard/internal/config"
 	"github.com/zulandar/railyard/internal/db"
@@ -419,6 +420,14 @@ func defaultConnectFromConfig(configPath string) (*config.Config, *gorm.DB, erro
 	if err != nil {
 		return nil, nil, fmt.Errorf("connect to %s: %w", cfg.Dolt.Database, err)
 	}
+
+	// Best-effort audit; do not fail startup if audit logging fails.
+	hasCustomCreds := cfg.Dolt.Username != "root" || cfg.Dolt.Password != ""
+	_ = audit.Log(gormDB, os.Stderr, "config.loaded", "system", configPath, map[string]interface{}{
+		"owner":              cfg.Owner,
+		"tracks":             len(cfg.Tracks),
+		"custom_credentials": hasCustomCreds,
+	})
 
 	return cfg, gormDB, nil
 }
