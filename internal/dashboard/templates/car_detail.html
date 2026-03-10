@@ -73,6 +73,36 @@
     {{end}}
 </div>
 
+{{if .Car.TotalTokens}}
+    <div class="card">
+        <h3>Token Usage</h3>
+        <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); margin-bottom: 0.5rem;">
+            <div class="card stat">
+                <div class="value" style="color: var(--accent);">{{commaFmt .Car.InputTokens}}</div>
+                <div class="label">Input Tokens</div>
+            </div>
+            <div class="card stat">
+                <div class="value" style="color: var(--green);">{{commaFmt .Car.OutputTokens}}</div>
+                <div class="label">Output Tokens</div>
+            </div>
+            <div class="card stat">
+                <div class="value" style="color: var(--purple);">{{commaFmt .Car.TotalTokens}}</div>
+                <div class="label">Total Tokens</div>
+            </div>
+            {{if .Car.TokenModel}}
+            <div class="card stat">
+                <div class="value" style="color: var(--text-muted); font-size: 0.9rem;">{{.Car.TokenModel}}</div>
+                <div class="label">Model</div>
+            </div>
+            <div class="card stat">
+                <div class="value" style="color: var(--yellow);">{{dollars .Car.EstCost}}</div>
+                <div class="label">Est. Cost</div>
+            </div>
+            {{end}}
+        </div>
+    </div>
+{{end}}
+
 {{if .Car.Description}}
 <div class="card">
     <h3>Description</h3>

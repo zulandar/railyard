@@ -3,6 +3,7 @@ package dashboard
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/zulandar/railyard/internal/models"
@@ -120,14 +121,15 @@ func MessageQueueDepth(db *gorm.DB) (int64, error) {
 
 // CarRow holds car data for display in the list view.
 type CarRow struct {
-	ID        string
-	Title     string
-	Status    string
-	Type      string
-	Track     string
-	Priority  int
-	Assignee  string
-	CreatedAt time.Time
+	ID          string
+	Title       string
+	Status      string
+	Type        string
+	Track       string
+	Priority    int
+	Assignee    string
+	CreatedAt   time.Time
+	TotalTokens int64
 }
 
 // CarListResult holds the car list plus metadata for filter dropdowns.
@@ -162,6 +164,7 @@ func CarList(db *gorm.DB, track, status, carType, parentID string) CarListResult
 	q.Order("priority ASC, created_at ASC").Find(&cars)
 
 	rows := make([]CarRow, len(cars))
+	ids := make([]string, len(cars))
 	for i, c := range cars {
 		rows[i] = CarRow{
 			ID:        c.ID,
@@ -172,6 +175,28 @@ func CarList(db *gorm.DB, track, status, carType, parentID string) CarListResult
 			Priority:  c.Priority,
 			Assignee:  c.Assignee,
 			CreatedAt: c.CreatedAt,
+		}
+		ids[i] = c.ID
+	}
+
+	// Batch-fetch token usage per car.
+	if len(ids) > 0 {
+		type tokenRow struct {
+			CarID       string `gorm:"column:car_id"`
+			TotalTokens int64  `gorm:"column:total_tokens"`
+		}
+		var tokenRows []tokenRow
+		db.Model(&models.AgentLog{}).
+			Select("car_id, COALESCE(SUM(token_count),0) as total_tokens").
+			Where("car_id IN ? AND direction = ?", ids, "out").
+			Group("car_id").
+			Scan(&tokenRows)
+		tokenMap := make(map[string]int64, len(tokenRows))
+		for _, tr := range tokenRows {
+			tokenMap[tr.CarID] = tr.TotalTokens
+		}
+		for i := range rows {
+			rows[i].TotalTokens = tokenMap[rows[i].ID]
 		}
 	}
 
@@ -243,6 +268,12 @@ type CarDetail struct {
 	BlockedBy []DepRow
 	Blocks    []DepRow
 	Progress  []ProgressRow
+
+	InputTokens  int64
+	OutputTokens int64
+	TotalTokens  int64
+	TokenModel   string
+	EstCost      float64
 }
 
 // GetCarDetail returns full car detail data for the detail page.
@@ -339,6 +370,30 @@ func GetCarDetail(db *gorm.DB, id string) (*CarDetail, error) {
 			FilesChanged: p.FilesChanged,
 			CommitHash:   p.CommitHash,
 			CreatedAt:    p.CreatedAt,
+		}
+	}
+
+	// Token usage.
+	var tokenSummary struct {
+		InputTokens  int64 `gorm:"column:input_tokens"`
+		OutputTokens int64 `gorm:"column:output_tokens"`
+		TotalTokens  int64 `gorm:"column:total_tokens"`
+	}
+	if err := db.Model(&models.AgentLog{}).
+		Select("COALESCE(SUM(input_tokens),0) as input_tokens, COALESCE(SUM(output_tokens),0) as output_tokens, COALESCE(SUM(token_count),0) as total_tokens").
+		Where("car_id = ? AND direction = ?", id, "out").
+		Scan(&tokenSummary).Error; err == nil {
+		detail.InputTokens = tokenSummary.InputTokens
+		detail.OutputTokens = tokenSummary.OutputTokens
+		detail.TotalTokens = tokenSummary.TotalTokens
+	}
+	// Most recent model for cost estimation.
+	if detail.TotalTokens > 0 {
+		var logEntry models.AgentLog
+		if err := db.Where("car_id = ? AND direction = ? AND model != ?", id, "out", "").
+			Order("created_at DESC").First(&logEntry).Error; err == nil {
+			detail.TokenModel = logEntry.Model
+			detail.EstCost = estimateTokenCost(logEntry.Model, detail.InputTokens, detail.OutputTokens)
 		}
 	}
 
@@ -1179,4 +1234,24 @@ func YardmasterStatus(db *gorm.DB) *YardmasterInfo {
 		info.Uptime = formatDuration(time.Since(eng.StartedAt))
 	}
 	return info
+}
+
+// estimateTokenCost estimates the USD cost for the given model and token counts.
+func estimateTokenCost(model string, inputTokens, outputTokens int64) float64 {
+	var inputRate, outputRate float64 // per million tokens
+	switch {
+	case strings.HasPrefix(model, "claude-opus"):
+		inputRate = 15.0
+		outputRate = 75.0
+	case strings.HasPrefix(model, "claude-sonnet"):
+		inputRate = 3.0
+		outputRate = 15.0
+	case strings.HasPrefix(model, "claude-haiku"):
+		inputRate = 0.80
+		outputRate = 4.0
+	default:
+		inputRate = 3.0
+		outputRate = 15.0
+	}
+	return float64(inputTokens)/1_000_000*inputRate + float64(outputTokens)/1_000_000*outputRate
 }

@@ -47,6 +47,7 @@
             <th>Track</th>
             <th>Pri</th>
             <th>Assignee</th>
+            <th>Tokens</th>
             <th>Created</th>
         </tr>
     </thead>
@@ -60,10 +61,11 @@
             <td>{{.Track}}</td>
             <td><span class="priority-{{.Priority}}">P{{.Priority}}</span></td>
             <td>{{if .Assignee}}{{.Assignee}}{{else}}—{{end}}</td>
+            <td>{{if .TotalTokens}}{{commaFmt .TotalTokens}}{{else}}—{{end}}</td>
             <td>{{timeAgo .CreatedAt}}</td>
         </tr>
     {{else}}
-        <tr><td colspan="8" style="color: var(--text-muted);">No cars found</td></tr>
+        <tr><td colspan="9" style="color: var(--text-muted);">No cars found</td></tr>
     {{end}}
     </tbody>
 </table>

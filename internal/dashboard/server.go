@@ -96,6 +96,8 @@ func templateFuncs() template.FuncMap {
 		"timeAgo":  TimeAgo,
 		"truncate": Truncate,
 		"deref":    DerefTime,
+		"commaFmt": CommaFmt,
+		"dollars":  Dollars,
 	}
 }
 
@@ -140,6 +142,37 @@ func securityHeaders() gin.HandlerFunc {
 		}
 		c.Next()
 	}
+}
+
+// CommaFmt formats an int64 with comma separators (e.g. 45230 -> "45,230").
+func CommaFmt(n int64) string {
+	if n == 0 {
+		return "0"
+	}
+	if n < 0 {
+		return "-" + CommaFmt(-n)
+	}
+	s := fmt.Sprintf("%d", n)
+	if len(s) <= 3 {
+		return s
+	}
+	var result []byte
+	remainder := len(s) % 3
+	if remainder > 0 {
+		result = append(result, s[:remainder]...)
+	}
+	for i := remainder; i < len(s); i += 3 {
+		if len(result) > 0 {
+			result = append(result, ',')
+		}
+		result = append(result, s[i:i+3]...)
+	}
+	return string(result)
+}
+
+// Dollars formats a float64 as a dollar amount (e.g. 1.5 -> "$1.50").
+func Dollars(f float64) string {
+	return fmt.Sprintf("$%.2f", f)
 }
 
 // TimeAgo formats a time as a human-readable relative duration.
