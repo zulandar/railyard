@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/zulandar/railyard/internal/audit"
 	"github.com/zulandar/railyard/internal/config"
 	"github.com/zulandar/railyard/internal/models"
 	"gorm.io/gorm"
@@ -26,6 +27,7 @@ func AllModels() []interface{} {
 		&models.TelegraphConversation{},
 		&models.BullIssue{},
 		&models.BullMeta{},
+		&audit.AuditEvent{},
 	}
 }
 
