@@ -13,10 +13,12 @@ import (
 
 func newDashboardCmd() *cobra.Command {
 	var (
-		configPath string
-		port       int
-		tlsCert    string
-		tlsKey     string
+		configPath       string
+		port             int
+		tlsCert          string
+		tlsKey           string
+		rateLimitEnabled bool
+		rateLimitRPM     int
 	)
 
 	cmd := &cobra.Command{
@@ -24,7 +26,7 @@ func newDashboardCmd() *cobra.Command {
 		Short: "Start the read-only web dashboard",
 		Long:  "Launches a local web dashboard for monitoring Railyard status in real-time.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runDashboard(cmd, configPath, port, tlsCert, tlsKey)
+			return runDashboard(cmd, configPath, port, tlsCert, tlsKey, rateLimitEnabled, rateLimitRPM)
 		},
 	}
 
@@ -32,10 +34,12 @@ func newDashboardCmd() *cobra.Command {
 	cmd.Flags().IntVarP(&port, "port", "p", 8080, "port to listen on")
 	cmd.Flags().StringVar(&tlsCert, "tls-cert", "", "path to TLS certificate file (enables HTTPS)")
 	cmd.Flags().StringVar(&tlsKey, "tls-key", "", "path to TLS private key file (enables HTTPS)")
+	cmd.Flags().BoolVar(&rateLimitEnabled, "rate-limit", false, "enable per-IP rate limiting")
+	cmd.Flags().IntVar(&rateLimitRPM, "rate-limit-rpm", 120, "max requests per minute per IP (when rate limiting enabled)")
 	return cmd
 }
 
-func runDashboard(cmd *cobra.Command, configPath string, port int, tlsCert, tlsKey string) error {
+func runDashboard(cmd *cobra.Command, configPath string, port int, tlsCert, tlsKey string, rateLimitEnabled bool, rateLimitRPM int) error {
 	_, gormDB, err := connectFromConfig(configPath)
 	if err != nil {
 		return err
@@ -58,5 +62,9 @@ func runDashboard(cmd *cobra.Command, configPath string, port int, tlsCert, tlsK
 		Out:     cmd.OutOrStdout(),
 		TLSCert: tlsCert,
 		TLSKey:  tlsKey,
+		RateLimit: dashboard.RateLimitConfig{
+			Enabled:           rateLimitEnabled,
+			RequestsPerMinute: rateLimitRPM,
+		},
 	})
 }

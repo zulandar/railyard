@@ -27,7 +27,17 @@ spec:
           image: {{ include "railyard.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["ry"]
-          args: ["dashboard", "-c", "/etc/railyard/railyard.yaml", "-p", "8080"]
+          args:
+            - "dashboard"
+            - "-c"
+            - "/etc/railyard/railyard.yaml"
+            - "-p"
+            - "8080"
+            {{- if .Values.dashboard.rateLimit.enabled }}
+            - "--rate-limit"
+            - "--rate-limit-rpm"
+            - {{ .Values.dashboard.rateLimit.requestsPerMinute | quote }}
+            {{- end }}
           ports:
             - name: http
               containerPort: 8080

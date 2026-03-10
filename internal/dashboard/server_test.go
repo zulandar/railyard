@@ -85,6 +85,18 @@ func TestStartOpts_ZeroValue(t *testing.T) {
 	}
 }
 
+func TestStartOpts_RateLimitField(t *testing.T) {
+	opts := StartOpts{
+		RateLimit: RateLimitConfig{Enabled: true, RequestsPerMinute: 60},
+	}
+	if !opts.RateLimit.Enabled {
+		t.Error("RateLimit.Enabled should be true")
+	}
+	if opts.RateLimit.RequestsPerMinute != 60 {
+		t.Errorf("RPM = %d, want 60", opts.RateLimit.RequestsPerMinute)
+	}
+}
+
 // findFreePort finds an available port for testing.
 func findFreePort() int {
 	// Use a high port range unlikely to conflict.

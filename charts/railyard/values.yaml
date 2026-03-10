@@ -185,6 +185,10 @@ dashboard:
     host: ""
     annotations: {}
     tls: []
+  # -- Per-IP rate limiting for dashboard routes.
+  rateLimit:
+    enabled: false
+    requestsPerMinute: 120
   # -- OAuth2 Proxy sidecar for dashboard authentication.
   oauth2proxy:
     enabled: false

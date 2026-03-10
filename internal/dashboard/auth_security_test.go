@@ -27,6 +27,7 @@ func init() {
 func testRouter() *gin.Engine {
 	router := gin.New()
 	router.Use(gin.Recovery())
+	router.Use(rateLimiter(RateLimitConfig{Enabled: true, RequestsPerMinute: 120}))
 
 	// Use a simple HTML template to avoid template parse errors.
 	router.SetHTMLTemplate(mustParseTemplates())
@@ -272,22 +273,36 @@ func TestSSEConnectionLimit_BelowMax(t *testing.T) {
 	}
 }
 
-// TestNoRateLimiting documents that the dashboard has no rate limiting.
-// An attacker could make unlimited requests to scrape all operational data.
-func TestNoRateLimiting(t *testing.T) {
-	router := testRouter()
+// TestRateLimiting_Enforcement verifies that rate limiting middleware
+// returns 429 Too Many Requests when a client exceeds the allowed RPM.
+func TestRateLimiting_Enforcement(t *testing.T) {
+	router := gin.New()
+	router.Use(rateLimiter(RateLimitConfig{Enabled: true, RequestsPerMinute: 5}))
+	router.SetHTMLTemplate(mustParseTemplates())
+	registerRoutes(router, nil)
 
-	// Make 50 rapid requests — all should succeed (no rate limiting)
-	for i := range 50 {
+	// Exhaust the limit.
+	for i := range 5 {
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("GET", "/", nil)
+		req.RemoteAddr = "192.168.1.1:12345"
 		router.ServeHTTP(w, req)
 
 		if w.Code != http.StatusOK {
-			t.Errorf("request %d: GET / = %d, expected 200 (no rate limiting)", i, w.Code)
-			break
+			t.Fatalf("request %d: got %d, want 200", i, w.Code)
 		}
 	}
-	// Document: no rate limiting exists
-	t.Log("SECURITY: no rate limiting on dashboard routes — unlimited scraping possible")
+
+	// Next request should be rate limited.
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/", nil)
+	req.RemoteAddr = "192.168.1.1:12345"
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusTooManyRequests {
+		t.Errorf("exceeded rate limit: got %d, want 429", w.Code)
+	}
+	if w.Header().Get("Retry-After") == "" {
+		t.Error("429 response missing Retry-After header")
+	}
 }
