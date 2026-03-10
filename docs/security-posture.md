@@ -267,20 +267,26 @@ Railyard stores data in Dolt (MySQL-compatible) and optionally pgvector (Postgre
 
 ### 2.5 Monitoring and Alerting
 
-**SOC 2:** CC7.2, CC7.3 | **Status:** Operator-configured
+**SOC 2:** CC7.2, CC7.3 | **Status:** Partially implemented
 
-Railyard writes agent logs to the Dolt `agent_logs` table but does not ship logs to external systems.
+Railyard writes agent logs to the Dolt `agent_logs` table and emits structured audit events for configuration changes.
+
+**Implemented:**
+
+- **Audit event logging** (`internal/audit/`): Config load/reload, track seeding, config seeding, and credential status changes are recorded to the `audit_events` Dolt table and emitted as structured JSON to stderr for SIEM ingestion.
+  - Event types: `config.loaded`, `config.seed_tracks`, `config.seed_config`, `credentials.default_detected`
+  - JSON output includes `"audit": true` marker for easy filtering
+  - Each event captures: event_type, actor, resource, detail, timestamp
 
 **Required action:**
 
-1. Deploy a log shipper (Fluentd, Vector, Promtail) to forward logs to your SIEM
+1. Deploy a log shipper (Fluentd, Vector, Promtail) to forward structured audit JSON from stderr to your SIEM
 2. Configure alerts on:
+   - `credentials.default_detected` events (insecure defaults)
    - Engine stall detection (agent subprocess timeouts)
    - Escalation events (yardmaster escalations indicate agent failures)
    - Failed database connections (may indicate credential issues)
 3. Use Dolt's `dolt log` and `dolt diff` commands for data-layer audit trails
-
-**Roadmap:** Structured audit event logging for config changes is planned (tracked as `railyard-bsk`).
 
 ### 2.6 Dashboard Bind Address
 
