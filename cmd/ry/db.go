@@ -84,7 +84,7 @@ func runDBInit(cmd *cobra.Command, configPath string) error {
 	fmt.Fprintf(out, "Migrated %d tables\n", len(models))
 
 	// Seed tracks
-	if err := db.SeedTracks(gormDB, cfg.Tracks); err != nil {
+	if err := db.SeedTracks(gormDB, cfg.Tracks, os.Stderr); err != nil {
 		return err
 	}
 	fmt.Fprintf(out, "Seeded %d tracks:", len(cfg.Tracks))
@@ -94,7 +94,7 @@ func runDBInit(cmd *cobra.Command, configPath string) error {
 	fmt.Fprintln(out)
 
 	// Seed config
-	if err := db.SeedConfig(gormDB, cfg); err != nil {
+	if err := db.SeedConfig(gormDB, cfg, os.Stderr); err != nil {
 		return err
 	}
 	fmt.Fprintf(out, "Configuration written for owner %q\n", cfg.Owner)
@@ -206,7 +206,7 @@ func runDBReset(cmd *cobra.Command, configPath, dbName string, skipConfirm bool)
 	models := db.AllModels()
 	fmt.Fprintf(out, "Migrated %d tables\n", len(models))
 
-	if err := db.SeedTracks(gormDB, cfg.Tracks); err != nil {
+	if err := db.SeedTracks(gormDB, cfg.Tracks, os.Stderr); err != nil {
 		return err
 	}
 	fmt.Fprintf(out, "Seeded %d tracks:", len(cfg.Tracks))
@@ -215,7 +215,7 @@ func runDBReset(cmd *cobra.Command, configPath, dbName string, skipConfirm bool)
 	}
 	fmt.Fprintln(out)
 
-	if err := db.SeedConfig(gormDB, cfg); err != nil {
+	if err := db.SeedConfig(gormDB, cfg, os.Stderr); err != nil {
 		return err
 	}
 	fmt.Fprintf(out, "Configuration written for owner %q\n", cfg.Owner)

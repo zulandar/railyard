@@ -4,6 +4,7 @@ package db
 
 import (
 	"fmt"
+	"io"
 	"net"
 	"os/exec"
 	"strings"
@@ -294,7 +295,7 @@ func TestIntegration_SeedTracks(t *testing.T) {
 		},
 	}
 
-	if err := SeedTracks(db, tracks); err != nil {
+	if err := SeedTracks(db, tracks, io.Discard); err != nil {
 		t.Fatalf("SeedTracks: %v", err)
 	}
 
@@ -345,7 +346,7 @@ func TestIntegration_SeedConfig(t *testing.T) {
 		Repo:  "git@github.com:org/myapp.git",
 	}
 
-	if err := SeedConfig(db, cfg); err != nil {
+	if err := SeedConfig(db, cfg, io.Discard); err != nil {
 		t.Fatalf("SeedConfig: %v", err)
 	}
 
@@ -401,10 +402,10 @@ func TestIntegration_Idempotent(t *testing.T) {
 	}
 
 	// SeedTracks twice
-	if err := SeedTracks(db, tracks); err != nil {
+	if err := SeedTracks(db, tracks, io.Discard); err != nil {
 		t.Fatalf("SeedTracks (1st): %v", err)
 	}
-	if err := SeedTracks(db, tracks); err != nil {
+	if err := SeedTracks(db, tracks, io.Discard); err != nil {
 		t.Fatalf("SeedTracks (2nd): %v", err)
 	}
 
@@ -416,10 +417,10 @@ func TestIntegration_Idempotent(t *testing.T) {
 	}
 
 	// SeedConfig twice
-	if err := SeedConfig(db, cfg); err != nil {
+	if err := SeedConfig(db, cfg, io.Discard); err != nil {
 		t.Fatalf("SeedConfig (1st): %v", err)
 	}
-	if err := SeedConfig(db, cfg); err != nil {
+	if err := SeedConfig(db, cfg, io.Discard); err != nil {
 		t.Fatalf("SeedConfig (2nd): %v", err)
 	}
 
@@ -481,7 +482,7 @@ func TestIntegration_SeedTracks_Error(t *testing.T) {
 	tracks := []config.TrackConfig{
 		{Name: "backend", Language: "go", EngineSlots: 3},
 	}
-	err := SeedTracks(db, tracks)
+	err := SeedTracks(db, tracks, io.Discard)
 	if err == nil {
 		t.Fatal("expected error from SeedTracks with closed DB")
 	}
@@ -496,7 +497,7 @@ func TestIntegration_SeedConfig_Error(t *testing.T) {
 		Owner: "alice",
 		Repo:  "git@github.com:org/app.git",
 	}
-	err := SeedConfig(db, cfg)
+	err := SeedConfig(db, cfg, io.Discard)
 	if err == nil {
 		t.Fatal("expected error from SeedConfig with closed DB")
 	}
@@ -526,7 +527,7 @@ func TestIntegration_SeedTracks_UpdateExisting(t *testing.T) {
 	initial := []config.TrackConfig{
 		{Name: "backend", Language: "go", EngineSlots: 3},
 	}
-	if err := SeedTracks(db, initial); err != nil {
+	if err := SeedTracks(db, initial, io.Discard); err != nil {
 		t.Fatalf("SeedTracks initial: %v", err)
 	}
 
@@ -534,7 +535,7 @@ func TestIntegration_SeedTracks_UpdateExisting(t *testing.T) {
 	updated := []config.TrackConfig{
 		{Name: "backend", Language: "go", EngineSlots: 7},
 	}
-	if err := SeedTracks(db, updated); err != nil {
+	if err := SeedTracks(db, updated, io.Discard); err != nil {
 		t.Fatalf("SeedTracks updated: %v", err)
 	}
 

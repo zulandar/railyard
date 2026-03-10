@@ -1,6 +1,7 @@
 package db
 
 import (
+	"io"
 	"strings"
 	"testing"
 
@@ -113,7 +114,7 @@ func TestSeedTracks_SingleTrack(t *testing.T) {
 		},
 	}
 
-	if err := SeedTracks(db, tracks); err != nil {
+	if err := SeedTracks(db, tracks, io.Discard); err != nil {
 		t.Fatalf("SeedTracks: %v", err)
 	}
 
@@ -141,7 +142,7 @@ func TestSeedTracks_MultipleTracks(t *testing.T) {
 		{Name: "infra", Language: "python", EngineSlots: 2},
 	}
 
-	if err := SeedTracks(db, tracks); err != nil {
+	if err := SeedTracks(db, tracks, io.Discard); err != nil {
 		t.Fatalf("SeedTracks: %v", err)
 	}
 
@@ -164,7 +165,7 @@ func TestSeedTracks_WithConventions(t *testing.T) {
 		},
 	}
 
-	if err := SeedTracks(db, tracks); err != nil {
+	if err := SeedTracks(db, tracks, io.Discard); err != nil {
 		t.Fatalf("SeedTracks: %v", err)
 	}
 
@@ -187,7 +188,7 @@ func TestSeedTracks_WithFilePatterns(t *testing.T) {
 		},
 	}
 
-	if err := SeedTracks(db, tracks); err != nil {
+	if err := SeedTracks(db, tracks, io.Discard); err != nil {
 		t.Fatalf("SeedTracks: %v", err)
 	}
 
@@ -208,7 +209,7 @@ func TestSeedTracks_UpsertUpdatesExisting(t *testing.T) {
 	initial := []config.TrackConfig{
 		{Name: "backend", Language: "go", EngineSlots: 3},
 	}
-	if err := SeedTracks(db, initial); err != nil {
+	if err := SeedTracks(db, initial, io.Discard); err != nil {
 		t.Fatalf("SeedTracks initial: %v", err)
 	}
 
@@ -216,7 +217,7 @@ func TestSeedTracks_UpsertUpdatesExisting(t *testing.T) {
 	updated := []config.TrackConfig{
 		{Name: "backend", Language: "go", EngineSlots: 7},
 	}
-	if err := SeedTracks(db, updated); err != nil {
+	if err := SeedTracks(db, updated, io.Discard); err != nil {
 		t.Fatalf("SeedTracks updated: %v", err)
 	}
 
@@ -240,7 +241,7 @@ func TestSeedTracks_DBError(t *testing.T) {
 	tracks := []config.TrackConfig{
 		{Name: "backend", Language: "go", EngineSlots: 3},
 	}
-	err := SeedTracks(db, tracks)
+	err := SeedTracks(db, tracks, io.Discard)
 	if err == nil {
 		t.Fatal("expected error from SeedTracks with closed DB")
 	}
@@ -259,7 +260,7 @@ func TestSeedConfig_CreatesConfig(t *testing.T) {
 		Repo:  "git@github.com:org/myapp.git",
 	}
 
-	if err := SeedConfig(db, cfg); err != nil {
+	if err := SeedConfig(db, cfg, io.Discard); err != nil {
 		t.Fatalf("SeedConfig: %v", err)
 	}
 
@@ -288,7 +289,7 @@ func TestSeedConfig_UpsertUpdatesExisting(t *testing.T) {
 		Owner: "alice",
 		Repo:  "git@github.com:org/app-v1.git",
 	}
-	if err := SeedConfig(db, cfg1); err != nil {
+	if err := SeedConfig(db, cfg1, io.Discard); err != nil {
 		t.Fatalf("SeedConfig (1st): %v", err)
 	}
 
@@ -296,7 +297,7 @@ func TestSeedConfig_UpsertUpdatesExisting(t *testing.T) {
 		Owner: "alice",
 		Repo:  "git@github.com:org/app-v2.git",
 	}
-	if err := SeedConfig(db, cfg2); err != nil {
+	if err := SeedConfig(db, cfg2, io.Discard); err != nil {
 		t.Fatalf("SeedConfig (2nd): %v", err)
 	}
 
@@ -321,7 +322,7 @@ func TestSeedConfig_DBError(t *testing.T) {
 		Owner: "alice",
 		Repo:  "git@github.com:org/app.git",
 	}
-	err := SeedConfig(db, cfg)
+	err := SeedConfig(db, cfg, io.Discard)
 	if err == nil {
 		t.Fatal("expected error from SeedConfig with closed DB")
 	}
@@ -342,7 +343,7 @@ func TestSeedTracks_ConventionsMarshalError(t *testing.T) {
 			Conventions: map[string]interface{}{"bad": make(chan int)},
 		},
 	}
-	err := SeedTracks(db, tracks)
+	err := SeedTracks(db, tracks, io.Discard)
 	if err == nil {
 		t.Fatal("expected error from SeedTracks with unmarshalable conventions")
 	}

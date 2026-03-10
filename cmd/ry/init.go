@@ -676,10 +676,10 @@ func runInit(cmd *cobra.Command, configPath string, yes, skipDB, skipCoco, skipT
 	}
 	fmt.Fprintf(out, "Migrated %d tables\n", len(db.AllModels()))
 
-	if err := db.SeedTracks(gormDB, cfg.Tracks); err != nil {
+	if err := db.SeedTracks(gormDB, cfg.Tracks, os.Stderr); err != nil {
 		return err
 	}
-	if err := db.SeedConfig(gormDB, cfg); err != nil {
+	if err := db.SeedConfig(gormDB, cfg, os.Stderr); err != nil {
 		return err
 	}
 	fmt.Fprintf(out, "Seeded %d track(s) and config for owner %q\n", len(cfg.Tracks), cfg.Owner)

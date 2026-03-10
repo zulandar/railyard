@@ -3,6 +3,7 @@ package db
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 
 	"github.com/zulandar/railyard/internal/audit"
 	"github.com/zulandar/railyard/internal/config"
@@ -57,8 +58,10 @@ func migrateRenameVMIDToPodName(db *gorm.DB) error {
 }
 
 // SeedTracks upserts Track rows from configuration.
-func SeedTracks(db *gorm.DB, tracks []config.TrackConfig) error {
+func SeedTracks(db *gorm.DB, tracks []config.TrackConfig, auditOut io.Writer) error {
+	trackNames := make([]string, 0, len(tracks))
 	for _, tc := range tracks {
+		trackNames = append(trackNames, tc.Name)
 		conventions, err := marshalJSON(tc.Conventions)
 		if err != nil {
 			return fmt.Errorf("db: marshal conventions for track %q: %w", tc.Name, err)
@@ -85,11 +88,16 @@ func SeedTracks(db *gorm.DB, tracks []config.TrackConfig) error {
 			return fmt.Errorf("db: seed track %q: %w", tc.Name, result.Error)
 		}
 	}
+	// Best-effort audit; do not fail the seed operation if audit logging fails.
+	_ = audit.Log(db, auditOut, "config.seed_tracks", "system", "tracks", map[string]interface{}{
+		"count": len(tracks),
+		"names": trackNames,
+	})
 	return nil
 }
 
 // SeedConfig writes or updates the RailyardConfig row for this owner.
-func SeedConfig(db *gorm.DB, cfg *config.Config) error {
+func SeedConfig(db *gorm.DB, cfg *config.Config, auditOut io.Writer) error {
 	rc := models.RailyardConfig{
 		Owner:    cfg.Owner,
 		RepoURL:  cfg.Repo,
@@ -104,6 +112,10 @@ func SeedConfig(db *gorm.DB, cfg *config.Config) error {
 	if result.Error != nil {
 		return fmt.Errorf("db: seed config for %q: %w", cfg.Owner, result.Error)
 	}
+	// Best-effort audit; do not fail the seed operation if audit logging fails.
+	_ = audit.Log(db, auditOut, "config.seed_config", "system", cfg.Owner, map[string]interface{}{
+		"repo": cfg.Repo,
+	})
 	return nil
 }
 

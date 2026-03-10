@@ -1,6 +1,7 @@
 package db
 
 import (
+	"io"
 	"strings"
 	"testing"
 
@@ -111,8 +112,8 @@ func TestCreateDatabase_RequiresDolt(t *testing.T) {
 
 func TestAllModels_Count(t *testing.T) {
 	models := AllModels()
-	if len(models) != 13 {
-		t.Errorf("AllModels() returned %d models, want 13", len(models))
+	if len(models) != 14 {
+		t.Errorf("AllModels() returned %d models, want 14", len(models))
 	}
 }
 
@@ -162,7 +163,7 @@ func TestSeedTracks_EmptySlice(t *testing.T) {
 	// SeedTracks with empty slice should be a no-op (no error, no DB call).
 	// We can't fully test without a DB, but we verify the function handles
 	// an empty input without panicking.
-	err := SeedTracks(nil, []config.TrackConfig{})
+	err := SeedTracks(nil, []config.TrackConfig{}, io.Discard)
 	if err != nil {
 		t.Errorf("SeedTracks(nil, []) = %v, want nil", err)
 	}
