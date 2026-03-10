@@ -190,10 +190,7 @@ helm upgrade --install railyard ./charts/railyard \
 
 Copilot CLI authenticates via `GH_TOKEN` (or `GITHUB_TOKEN`) using a GitHub Personal Access Token. The PAT requires the **Copilot Requests** permission (fine-grained token) to access the Copilot API.
 
-The chart uses a layered approach for the `GH_TOKEN` secret:
-
-1. `auth.copilot.token` — dedicated Copilot token (takes precedence when set)
-2. `auth.githubToken` — shared token for both Copilot and PR operations (fallback)
+The chart keeps `GH_TOKEN` (from `auth.githubToken`) intact for PR operations and Bull, and exposes `auth.copilot.token` as a separate `GITHUB_COPILOT_TOKEN` env var. The copilot provider overrides `GH_TOKEN` only in its own subprocess, so other components always see the repo-scoped token.
 
 This allows simple setups (one PAT for everything) and advanced setups (separate tokens with different scopes).
 

@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 
@@ -131,6 +132,83 @@ func TestCopilotProvider_ValidateBinary_Missing(t *testing.T) {
 	err := p.ValidateBinary()
 	if err == nil {
 		t.Error("expected error for missing binary")
+	}
+}
+
+func TestCopilotEnv_NoOverride(t *testing.T) {
+	// When GITHUB_COPILOT_TOKEN is unset, copilotEnv returns nil (inherit env).
+	os.Unsetenv("GITHUB_COPILOT_TOKEN")
+	env := copilotEnv()
+	if env != nil {
+		t.Errorf("expected nil when GITHUB_COPILOT_TOKEN unset, got %d entries", len(env))
+	}
+}
+
+func TestCopilotEnv_OverridesGHToken(t *testing.T) {
+	original := os.Getenv("GH_TOKEN")
+	defer func() {
+		if original != "" {
+			os.Setenv("GH_TOKEN", original)
+		} else {
+			os.Unsetenv("GH_TOKEN")
+		}
+		os.Unsetenv("GITHUB_COPILOT_TOKEN")
+	}()
+
+	os.Setenv("GH_TOKEN", "repo-scoped-token")
+	os.Setenv("GITHUB_COPILOT_TOKEN", "copilot-scoped-token")
+
+	env := copilotEnv()
+	if env == nil {
+		t.Fatal("expected non-nil env")
+	}
+
+	var ghToken string
+	ghTokenCount := 0
+	for _, e := range env {
+		if strings.HasPrefix(e, "GH_TOKEN=") {
+			ghToken = strings.TrimPrefix(e, "GH_TOKEN=")
+			ghTokenCount++
+		}
+	}
+	if ghTokenCount != 1 {
+		t.Errorf("expected exactly 1 GH_TOKEN entry, got %d", ghTokenCount)
+	}
+	if ghToken != "copilot-scoped-token" {
+		t.Errorf("GH_TOKEN = %q, want %q", ghToken, "copilot-scoped-token")
+	}
+}
+
+func TestCopilotProvider_BuildCommand_SetsEnv(t *testing.T) {
+	original := os.Getenv("GITHUB_COPILOT_TOKEN")
+	defer func() {
+		if original != "" {
+			os.Setenv("GITHUB_COPILOT_TOKEN", original)
+		} else {
+			os.Unsetenv("GITHUB_COPILOT_TOKEN")
+		}
+	}()
+
+	os.Setenv("GITHUB_COPILOT_TOKEN", "test-copilot-token")
+
+	p := &CopilotProvider{}
+	cmd, cancel := p.BuildCommand(context.Background(), engine.SpawnOpts{
+		ContextPayload: "test",
+	})
+	defer cancel()
+
+	if cmd.Env == nil {
+		t.Fatal("expected cmd.Env to be set when GITHUB_COPILOT_TOKEN is present")
+	}
+
+	found := false
+	for _, e := range cmd.Env {
+		if e == "GH_TOKEN=test-copilot-token" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("cmd.Env missing GH_TOKEN=test-copilot-token")
 	}
 }
 

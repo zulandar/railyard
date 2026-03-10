@@ -126,9 +126,10 @@ auth:
   githubToken: ""
   # -- GitHub Copilot CLI authentication (used when engine.agentProvider=copilot).
   # Copilot authenticates via GH_TOKEN using a fine-grained PAT with
-  # "Copilot Requests" permission. When auth.copilot.token is set it takes
-  # precedence over auth.githubToken, allowing separate tokens for Copilot
-  # and PR operations.
+  # "Copilot Requests" permission. When set, the token is exposed as
+  # GITHUB_COPILOT_TOKEN and the copilot subprocess overrides its own
+  # GH_TOKEN at runtime, keeping the pod-level GH_TOKEN (from
+  # auth.githubToken) intact for PR operations and Bull.
   copilot:
     token: ""
   # -- Advanced: apiKeyHelper command for dynamic key rotation (e.g. Vault).

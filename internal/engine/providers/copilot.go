@@ -2,7 +2,9 @@ package providers
 
 import (
 	"context"
+	"os"
 	"os/exec"
+	"strings"
 	"syscall"
 	"time"
 
@@ -22,6 +24,26 @@ type CopilotProvider struct {
 
 func (p *CopilotProvider) Name() string { return "copilot" }
 
+// copilotEnv returns a copy of os.Environ with GH_TOKEN set to
+// GITHUB_COPILOT_TOKEN when that variable is present. This keeps the
+// pod-level GH_TOKEN (repo-scoped, used by gh CLI for PRs) intact while
+// giving the copilot subprocess its own Copilot-scoped credential.
+func copilotEnv() []string {
+	tok := os.Getenv("GITHUB_COPILOT_TOKEN")
+	if tok == "" {
+		return nil // inherit process env as-is
+	}
+	env := os.Environ()
+	out := make([]string, 0, len(env))
+	for _, e := range env {
+		if strings.HasPrefix(e, "GH_TOKEN=") {
+			continue // drop; replaced below
+		}
+		out = append(out, e)
+	}
+	return append(out, "GH_TOKEN="+tok)
+}
+
 func (p *CopilotProvider) BuildCommand(ctx context.Context, opts engine.SpawnOpts) (*exec.Cmd, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(ctx)
 
@@ -40,6 +62,7 @@ func (p *CopilotProvider) BuildCommand(ctx context.Context, opts engine.SpawnOpt
 		cmd.Dir = opts.WorkDir
 	}
 
+	cmd.Env = copilotEnv()
 	cmd.Cancel = func() error {
 		return cmd.Process.Signal(syscall.SIGTERM)
 	}
@@ -56,6 +79,7 @@ func (p *CopilotProvider) BuildInteractiveCommand(systemPrompt, workDir string) 
 	cmd := exec.Command(binary,
 		"--system-prompt", systemPrompt,
 	)
+	cmd.Env = copilotEnv()
 	if workDir != "" {
 		cmd.Dir = workDir
 	}
@@ -69,6 +93,7 @@ func (p *CopilotProvider) BuildPromptCommand(ctx context.Context, prompt string)
 		binary = "copilot"
 	}
 	cmd := exec.CommandContext(ctx, binary, "--auto-approve", "-p", prompt)
+	cmd.Env = copilotEnv()
 	return cmd, cancel
 }
 
