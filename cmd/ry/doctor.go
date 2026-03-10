@@ -3,10 +3,12 @@ package main
 import (
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/zulandar/railyard/internal/audit"
 	"github.com/zulandar/railyard/internal/config"
 	"github.com/zulandar/railyard/internal/db"
 	"github.com/zulandar/railyard/internal/engine"
@@ -68,7 +70,7 @@ func runDoctor(cmd *cobra.Command, configPath string) error {
 
 	// 4. Credentials
 	if cfg != nil {
-		results = append(results, checkCredentials(cfg.Dolt.Username, cfg.Dolt.Password))
+		results = append(results, checkCredentials(cfg.Dolt.Username, cfg.Dolt.Password, os.Stderr))
 	}
 
 	// 4. Dolt server
@@ -280,8 +282,12 @@ func checkTmuxSession(cfg *config.Config) []checkResult {
 	return results
 }
 
-func checkCredentials(username, password string) checkResult {
+func checkCredentials(username, password string, auditOut io.Writer) checkResult {
 	if username == "root" && password == "" {
+		_ = audit.Log(nil, auditOut, "credentials.default_detected", "doctor", "dolt", map[string]string{
+			"username": username,
+			"warning":  "using default root with empty password",
+		})
 		return checkResult{"Credentials", "WARN", "using default root with empty password — set dolt.password in config"}
 	}
 	return checkResult{"Credentials", "PASS", "non-default credentials configured"}

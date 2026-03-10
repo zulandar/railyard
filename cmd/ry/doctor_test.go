@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"io"
 	"strings"
 	"testing"
 )
@@ -83,7 +84,7 @@ func TestCheckGitRepo(t *testing.T) {
 }
 
 func TestCheckCredentials_DefaultPassword(t *testing.T) {
-	result := checkCredentials("root", "")
+	result := checkCredentials("root", "", io.Discard)
 	if result.status != "WARN" {
 		t.Errorf("expected WARN for default root/empty-password, got %s: %s", result.status, result.detail)
 	}
@@ -93,14 +94,14 @@ func TestCheckCredentials_DefaultPassword(t *testing.T) {
 }
 
 func TestCheckCredentials_ConfiguredPassword(t *testing.T) {
-	result := checkCredentials("admin", "s3cret")
+	result := checkCredentials("admin", "s3cret", io.Discard)
 	if result.status != "PASS" {
 		t.Errorf("expected PASS for configured credentials, got %s: %s", result.status, result.detail)
 	}
 }
 
 func TestCheckCredentials_RootWithPassword(t *testing.T) {
-	result := checkCredentials("root", "s3cret")
+	result := checkCredentials("root", "s3cret", io.Discard)
 	if result.status != "PASS" {
 		t.Errorf("expected PASS for root with password, got %s: %s", result.status, result.detail)
 	}
