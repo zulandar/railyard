@@ -133,7 +133,7 @@ func TestRenderContext_CurrentCar(t *testing.T) {
 		"## Your Current Car",
 		"Car: car-001",
 		"Title: Implement widget",
-		"Priority: 1",
+		"Priority: P1 (High)",
 		"Branch: ry/alice/backend/car-001",
 		"### Description",
 		"Build the widget feature",

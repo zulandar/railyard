@@ -71,7 +71,7 @@ func writeCurrentCar(w *strings.Builder, car *models.Car) {
 	w.WriteString("## Your Current Car\n")
 	fmt.Fprintf(w, "Car: %s\n", car.ID)
 	fmt.Fprintf(w, "Title: %s\n", car.Title)
-	fmt.Fprintf(w, "Priority: %d\n", car.Priority)
+	fmt.Fprintf(w, "Priority: P%d (%s)\n", car.Priority, priorityLabel(car.Priority))
 	fmt.Fprintf(w, "Branch: %s\n", car.Branch)
 	w.WriteString("\n### Description\n")
 	writeUserContent(w, car.Description)
