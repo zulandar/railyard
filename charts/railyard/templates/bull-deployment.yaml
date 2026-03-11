@@ -28,7 +28,7 @@ spec:
           image: {{ include "railyard.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["ry"]
-          args: ["bull", "start", "-c", "/etc/railyard/railyard.yaml"]
+          args: ["bull", "-c", "/etc/railyard/railyard.yaml"]
           env:
             - name: DOLT_PASSWORD
               valueFrom:
