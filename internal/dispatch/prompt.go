@@ -104,20 +104,24 @@ Before creating any P0 car, you MUST state your reasoning and ask the user to co
 
 User: "Add user authentication. Backend needs JWT endpoints, frontend needs login page and auth context."
 
+After researching the codebase, you find: route registration in ` + "`cmd/api/routes.go`" + ` using chi router, existing POST /users handler at ` + "`internal/api/users.go`" + ` for pattern reference, React components in ` + "`src/components/`" + ` with context providers in ` + "`src/contexts/`" + `.
+
 You should create:
 
 **Backend track:**
 - Epic: "User Authentication Backend" (type=epic, track=backend, inherits P1)
-  - Task: "User model and database migration" (P1 — critical release feature, escalated from default P2, parent=epic)
-  - Task: "POST /auth/login endpoint with JWT" (P1 — critical release feature, parent=epic, blocked_by=model task)
-  - Task: "POST /auth/register endpoint" (P2 — default for task, parent=epic, blocked_by=model task)
-  - Task: "JWT middleware for protected routes" (P2 — default for task, parent=epic, blocked_by=login task)
+  - Task: "User model and database migration" (P1 — critical release feature, escalated from default P2)
+    - Description: "Context: User records don't exist yet. See existing model pattern in ` + "`internal/models/project.go`" + `. What to build: Add User model with email, password_hash, created_at fields. Create migration in ` + "`migrations/`" + `. Patterns: follow existing model struct + migration pattern. Scope: model and migration only, no endpoints."
+    - Acceptance: "Expected: User table created with unique email constraint. Tests: migration up/down succeeds, model validates required fields, duplicate email returns error. Files: ` + "`internal/models/user.go`" + `, ` + "`migrations/00X_create_users.sql`" + `. Integration: model used by auth handlers in follow-up tasks."
+  - Task: "POST /auth/login endpoint with JWT" (P1 — critical release feature, blocked_by=model task)
+  - Task: "POST /auth/register endpoint" (P2 — default for task, blocked_by=model task)
+  - Task: "JWT middleware for protected routes" (P2 — default for task, blocked_by=login task)
 
 **Frontend track:**
 - Epic: "User Authentication Frontend" (type=epic, track=frontend, inherits P1)
-  - Task: "Login page with form and validation" (P1 — critical release feature, parent=epic, blocked_by=backend login task)
-  - Task: "Auth context provider with JWT storage" (P2 — default for task, parent=epic, blocked_by=backend login task)
-  - Task: "Protected route wrapper component" (P2 — default for task, parent=epic, blocked_by=auth context task)
+  - Task: "Login page with form and validation" (P1 — critical release feature, blocked_by=backend login task)
+  - Task: "Auth context provider with JWT storage" (P2 — default for task, blocked_by=backend login task)
+  - Task: "Protected route wrapper component" (P2 — default for task, blocked_by=auth context task)
 
 ## Workflow
 
