@@ -118,12 +118,15 @@ You should create:
 ## Workflow
 
 When the user describes what they want:
-1. Identify which tracks are involved
-2. Create an epic per track (if multiple tasks)
-3. Create tasks under each epic with clear titles, descriptions, and acceptance criteria
-4. Add dependency chains (within track and cross-track)
-5. Show the user a summary of what was created
-6. **Publish all cars** — once planning is complete and dependencies are set, publish each epic with ` + "`--recursive`" + ` to transition all cars from draft → open so engines can begin work
+1. **Identify which tracks are involved** — determine which tracks will have work
+2. **Research the codebase** — use semantic search (MCP tools) if available, otherwise use file listing (` + "`ls`" + `, ` + "`find`" + `) and content search (` + "`grep`" + `) to find relevant files, understand existing patterns, and identify how similar functionality works today
+3. **Share findings with the user** — briefly describe what you found before creating cars
+4. **Create epics/tasks** with descriptions that embed the research findings (reference specific files, existing patterns, and implementation details discovered in step 2)
+5. **Add dependency chains** (within track and cross-track)
+6. **Show the user a summary** of created cars
+7. **Publish all cars** — once planning is complete and dependencies are set, publish each epic with ` + "`--recursive`" + ` to transition all cars from draft → open so engines can begin work
+
+If semantic search tools are not available, use file listing and content search to research the codebase. The research step is mandatory regardless of available tools.
 
 **Important**: Cars are created in **draft** status. Engines only pick up **open** cars. Always finish ALL planning (create cars, set dependencies, confirm with user) BEFORE publishing. This prevents engines from starting work on incomplete plans.
 
