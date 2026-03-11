@@ -55,12 +55,34 @@ ry car show <car-id>
 2. **Epic per track** — when work spans tracks, create one epic per track
 3. **Always set acceptance criteria**{{ if .DefaultAcceptance }} — default: "{{ .DefaultAcceptance }}"{{ end }}
 4. **Always set dependencies** — backend model before handler, backend API before frontend consumer
-5. **Priority ordering** — P0 for foundations, P1 for features, P2 for polish
+5. **Priority ordering** — assign priorities using the Priority Model below
 6. **Use types correctly**: epic (container for related tasks), task (atomic work), spike (research/unknown before committing to implementation), bug (defect in existing code)
 7. **Branch naming** — branches are auto-created as {{ .BranchPrefix }}/<track>/<car-id>
 8. **Skip tests** — use ` + "`--skip-tests`" + ` on cars where the test gate should be skipped (e.g., config-only changes, documentation, spikes). Only use when a human or clear context warrants it.
 9. **Bugs** — when the user reports a bug, create a car with ` + "`--type bug`" + ` and include reproduction steps in the description. Bugs should reference the file/module/endpoint affected.
 10. **Spikes** — when requirements are unclear or the approach is unknown, create a spike first. The spike's output (design notes, findings) informs the follow-up implementation cars.
+
+## Priority Model
+
+| Priority | Label    | Use When                                                                 |
+|----------|----------|--------------------------------------------------------------------------|
+| P0       | Critical | Production outage, security vulnerability, data loss, auth/billing down  |
+| P1       | High     | Major bugs, critical release features, performance degradation           |
+| P2       | Medium   | Standard features, moderate bugs (default priority)                      |
+| P3       | Low      | Minor bugs with workarounds, internal tooling, non-critical tech debt    |
+| P4       | Trivial  | Cosmetic fixes, micro-optimizations, documentation cleanup               |
+
+When in doubt, default to **P2**. Escalate to P0/P1 only when the impact justifies it.
+
+### Type Defaults
+
+Each car type has a default priority. State these defaults when creating cars and only deviate when signal detection warrants it:
+
+- **bug** → P1 (bugs impact users and should be addressed promptly)
+- **feature** → P2 (standard work unless urgency signals are present)
+- **task** → P2 (standard work)
+- **spike** → P3 (research is lower urgency than implementation)
+- **epic** → inherits from its highest-priority child
 
 ## Example Decomposition
 
@@ -69,17 +91,17 @@ User: "Add user authentication. Backend needs JWT endpoints, frontend needs logi
 You should create:
 
 **Backend track:**
-- Epic: "User Authentication Backend" (type=epic, track=backend, P0)
-  - Task: "User model and database migration" (P0, parent=epic)
-  - Task: "POST /auth/login endpoint with JWT" (P0, parent=epic, blocked_by=model task)
-  - Task: "POST /auth/register endpoint" (P0, parent=epic, blocked_by=model task)
-  - Task: "JWT middleware for protected routes" (P1, parent=epic, blocked_by=login task)
+- Epic: "User Authentication Backend" (type=epic, track=backend, inherits P1)
+  - Task: "User model and database migration" (P1 — critical release feature, escalated from default P2, parent=epic)
+  - Task: "POST /auth/login endpoint with JWT" (P1 — critical release feature, parent=epic, blocked_by=model task)
+  - Task: "POST /auth/register endpoint" (P2 — default for task, parent=epic, blocked_by=model task)
+  - Task: "JWT middleware for protected routes" (P2 — default for task, parent=epic, blocked_by=login task)
 
 **Frontend track:**
-- Epic: "User Authentication Frontend" (type=epic, track=frontend, P1)
-  - Task: "Login page with form and validation" (P1, parent=epic, blocked_by=backend login task)
-  - Task: "Auth context provider with JWT storage" (P1, parent=epic, blocked_by=backend login task)
-  - Task: "Protected route wrapper component" (P2, parent=epic, blocked_by=auth context task)
+- Epic: "User Authentication Frontend" (type=epic, track=frontend, inherits P1)
+  - Task: "Login page with form and validation" (P1 — critical release feature, parent=epic, blocked_by=backend login task)
+  - Task: "Auth context provider with JWT storage" (P2 — default for task, parent=epic, blocked_by=backend login task)
+  - Task: "Protected route wrapper component" (P2 — default for task, parent=epic, blocked_by=auth context task)
 
 ## Workflow
 
