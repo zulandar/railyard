@@ -223,7 +223,7 @@ func TestRenderPrompt_ContainsNewSections(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	for _, want := range []string{
-		"Writing Good Car Descriptions",
+		"Required Car Description Format",
 		"Engine Capabilities",
 		"Split work",
 		"File bugs",

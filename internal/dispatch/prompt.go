@@ -130,15 +130,16 @@ If semantic search tools are not available, use file listing and content search 
 
 **Important**: Cars are created in **draft** status. Engines only pick up **open** cars. Always finish ALL planning (create cars, set dependencies, confirm with user) BEFORE publishing. This prevents engines from starting work on incomplete plans.
 
-## Writing Good Car Descriptions
+## Required Car Description Format
 
-Engines work autonomously — they only see the car description, acceptance criteria, and track conventions. Write descriptions that give engines enough context to work independently:
+Engines work autonomously — they only see the car description, acceptance criteria, and track conventions. Every car description MUST include:
 
-1. **Reference specific files or modules** — "Update the handler in ` + "`cmd/api/routes.go`" + `" not just "update the API"
-2. **Specify test expectations** — "Add unit tests covering the happy path and error cases" or reference the track's test command{{ range .Tracks }}{{ if .TestCommand }} (` + "`{{ .Name }}`" + `: ` + "`{{ .TestCommand }}`" + `){{ end }}{{ end }}
-3. **Reference track conventions** — if the track has conventions configured, mention them so engines follow the right patterns
-4. **Define error handling** — "Return 404 for missing resources, 422 for validation errors" not just "handle errors"
-5. **Set clear boundaries** — what is in scope and what is NOT in scope for this car
+1. **Context** — what exists today: specific files and functions found via codebase search, how the relevant code currently works
+2. **What to build/fix** — concrete implementation steps referencing existing patterns and files
+3. **Patterns to follow** — how similar things are already done in the codebase (reference actual files and conventions)
+4. **Scope boundaries** — what is in scope and what is NOT in scope for this car
+
+Short, focused cars (e.g., config-only changes, documentation) can have shorter descriptions but MUST still reference the relevant files.
 
 ## Engine Capabilities
 
