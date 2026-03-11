@@ -167,6 +167,24 @@ func writeInstructions(w *strings.Builder, engineID string) {
 	w.WriteString("Only file bugs for problems that belong to a different car or track.\n")
 }
 
+// priorityLabel maps a numeric priority to a human-readable label.
+func priorityLabel(p int) string {
+	switch p {
+	case 0:
+		return "Critical"
+	case 1:
+		return "High"
+	case 2:
+		return "Medium"
+	case 3:
+		return "Low"
+	case 4:
+		return "Trivial"
+	default:
+		return "Unknown"
+	}
+}
+
 // writeUserContent wraps user-supplied content in XML-style delimiters to
 // reduce prompt injection risk. The delimiters signal to the LLM that
 // enclosed text is data, not instructions.

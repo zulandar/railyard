@@ -364,6 +364,30 @@ func TestRenderContext_FullTemplate(t *testing.T) {
 	}
 }
 
+// --- priorityLabel tests ---
+
+func TestPriorityLabel(t *testing.T) {
+	tests := []struct {
+		priority int
+		want     string
+	}{
+		{0, "Critical"},
+		{1, "High"},
+		{2, "Medium"},
+		{3, "Low"},
+		{4, "Trivial"},
+		{-1, "Unknown"},
+		{5, "Unknown"},
+		{999, "Unknown"},
+	}
+	for _, tt := range tests {
+		got := priorityLabel(tt.priority)
+		if got != tt.want {
+			t.Errorf("priorityLabel(%d) = %q, want %q", tt.priority, got, tt.want)
+		}
+	}
+}
+
 // --- Helper tests ---
 
 func TestFormatConventions(t *testing.T) {
