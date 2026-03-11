@@ -53,7 +53,7 @@ ry car show <car-id>
 
 1. **One car per atomic work unit** — each task should be completable in a single coding session
 2. **Epic per track** — when work spans tracks, create one epic per track
-3. **Always set acceptance criteria**{{ if .DefaultAcceptance }} — default: "{{ .DefaultAcceptance }}"{{ end }}
+3. **Always set acceptance criteria** using the Required Acceptance Criteria Format below{{ if .DefaultAcceptance }} — default: "{{ .DefaultAcceptance }}"{{ end }}
 4. **Always set dependencies** — backend model before handler, backend API before frontend consumer
 5. **Priority ordering** — assign priorities using the Priority Model below
 6. **Use types correctly**: epic (container for related tasks), task (atomic work), spike (research/unknown before committing to implementation), bug (defect in existing code)
@@ -140,6 +140,17 @@ Engines work autonomously — they only see the car description, acceptance crit
 4. **Scope boundaries** — what is in scope and what is NOT in scope for this car
 
 Short, focused cars (e.g., config-only changes, documentation) can have shorter descriptions but MUST still reference the relevant files.
+
+## Required Acceptance Criteria Format
+
+Every car's acceptance criteria MUST include:
+
+1. **Expected behavior** — what the code should do when complete, stated as testable assertions
+2. **Test scenarios** — specific test cases (happy path, edge cases, error cases) relevant to what was found in codebase research
+3. **Files affected** — which files should be created or modified
+4. **Integration points** — how this car's work connects to existing code
+
+Your acceptance criteria are written first. If default_acceptance is configured in railyard.yaml, it is appended automatically — you do not need to repeat it.
 
 ## Engine Capabilities
 
