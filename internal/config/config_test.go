@@ -1606,7 +1606,7 @@ func TestParse_BullOmitted(t *testing.T) {
 	}
 }
 
-func TestParse_BullValidation_TokenRequired(t *testing.T) {
+func TestParse_BullValidation_TokenNotRequiredAtConfigLevel(t *testing.T) {
 	yaml := `
 owner: alice
 repo: git@github.com:org/app.git
@@ -1616,12 +1616,12 @@ tracks:
 bull:
   enabled: true
 `
+	// Token validation is deferred to the bull command at runtime so that
+	// non-Bull pods (dashboard, dispatch, etc.) can load the shared config
+	// without having GITHUB_TOKEN in their environment.
 	_, err := Parse([]byte(yaml))
-	if err == nil {
-		t.Fatal("expected error for missing github_token when enabled")
-	}
-	if !strings.Contains(err.Error(), "bull.github_token is required") {
-		t.Errorf("error = %q, want to contain %q", err.Error(), "bull.github_token is required")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -1717,12 +1717,10 @@ func TestLoad_BullMinimalFixture(t *testing.T) {
 }
 
 func TestLoad_BullNoTokenFixture(t *testing.T) {
+	// Token validation moved to bull command runtime; config load should succeed.
 	_, err := Load("testdata/invalid_bull_no_token.yaml")
-	if err == nil {
-		t.Fatal("expected error for missing github_token")
-	}
-	if !strings.Contains(err.Error(), "bull.github_token is required") {
-		t.Errorf("error = %q", err)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

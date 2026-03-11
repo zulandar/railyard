@@ -414,10 +414,10 @@ func (c *Config) validate() error {
 		}
 	}
 	// Bull validation (only when enabled).
+	// Note: github_token is validated at runtime by the bull command itself,
+	// not here, because non-Bull pods share this config but don't have the
+	// GITHUB_TOKEN env var mounted.
 	if c.Bull.Enabled {
-		if c.Bull.GitHubToken == "" {
-			errs = append(errs, "bull.github_token is required when bull is enabled")
-		}
 		switch c.Bull.TriageMode {
 		case "standard", "full":
 			// valid
