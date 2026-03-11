@@ -96,6 +96,10 @@ Override type defaults when user language or context signals a different priorit
 
 When escalation and de-escalation signals conflict, ask one clarifying question before assigning priority: "This sounds urgent but also cosmetic — should I prioritize this as P1 or P4?"
 
+### P0 Confirmation Gate
+
+Before creating any P0 car, you MUST state your reasoning and ask the user to confirm. Example: "This sounds like a P0 (Critical) — production impact on auth. I will create these as P0 which means engines will prioritize them immediately. Confirm?" This prevents accidental P0 flooding.
+
 ## Example Decomposition
 
 User: "Add user authentication. Backend needs JWT endpoints, frontend needs login page and auth context."
