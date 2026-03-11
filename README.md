@@ -200,6 +200,8 @@ ry stop -c railyard.yaml                # Graceful shutdown
 
 ### Car Management
 
+Cars use a **P0–P4 priority model**: P0=Critical, P1=High, P2=Medium, P3=Low, P4=Trivial. Type defaults: bug→P1, feature→P2, task→P2, spike→P3.
+
 ```bash
 # Create work items (created in draft status — engines won't pick them up yet)
 ry car create -c railyard.yaml --title "Add auth middleware" --track backend --type task
@@ -217,7 +219,7 @@ ry car children <epic-id>              # Children of an epic with status summary
 
 # Update
 ry car update <car-id> --status in_progress
-ry car update <car-id> --priority 0 --description "Updated scope"
+ry car update <car-id> --priority 0 --description "Updated scope"  # P0=Critical, P1=High, P2=Medium, P3=Low, P4=Trivial
 ry car update <car-id> --skip-tests       # Skip test gate during merge
 
 # Dependencies
