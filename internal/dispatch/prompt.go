@@ -84,6 +84,18 @@ Each car type has a default priority. State these defaults when creating cars an
 - **spike** → P3 (research is lower urgency than implementation)
 - **epic** → inherits from its highest-priority child
 
+### Signal Detection
+
+Override type defaults when user language or context signals a different priority:
+
+**Escalate to P0** when you detect: production, outage, down, security, vulnerability, data loss, corruption, auth broken, billing broken
+**Escalate to P1** when you detect: blocking, ASAP, urgent, deadline, launch, release, regression
+
+**De-escalate to P3** when you detect: nice to have, low priority, minor, workaround exists, internal tooling
+**De-escalate to P4** when you detect: cosmetic, typo, cleanup, docs, nitpick, polish
+
+When escalation and de-escalation signals conflict, ask one clarifying question before assigning priority: "This sounds urgent but also cosmetic — should I prioritize this as P1 or P4?"
+
 ## Example Decomposition
 
 User: "Add user authentication. Backend needs JWT endpoints, frontend needs login page and auth context."
