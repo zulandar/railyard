@@ -5,10 +5,13 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/zulandar/railyard/internal/dashboard"
+	"gorm.io/gorm"
 )
 
 func newDashboardCmd() *cobra.Command {
@@ -40,9 +43,25 @@ func newDashboardCmd() *cobra.Command {
 }
 
 func runDashboard(cmd *cobra.Command, configPath string, port int, tlsCert, tlsKey string, rateLimitEnabled bool, rateLimitRPM int) error {
-	_, gormDB, err := connectFromConfig(configPath)
-	if err != nil {
-		return err
+	// Retry DB connection to tolerate the database starting up (e.g. in K8s
+	// where the dashboard pod may start before Dolt is ready).
+	var gormDB *gorm.DB
+	const maxRetries = 30
+	for i := range maxRetries {
+		_, db, err := connectFromConfig(configPath)
+		if err == nil {
+			gormDB = db
+			break
+		}
+		// Config load errors are permanent — don't retry.
+		if strings.Contains(err.Error(), "load config") {
+			return err
+		}
+		if i == maxRetries-1 {
+			return fmt.Errorf("database not ready after %d attempts: %w", maxRetries, err)
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "Waiting for database (%d/%d): %v\n", i+1, maxRetries, err)
+		time.Sleep(2 * time.Second)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
