@@ -229,6 +229,19 @@ func TestRenderPrompt_ContainsNewSections(t *testing.T) {
 		"File bugs",
 		"--type bug",
 		"Spikes",
+		// Research-first workflow
+		"Research the codebase",
+		"file listing",
+		// Mandatory description structure
+		"Context",
+		"Patterns to follow",
+		"Scope boundaries",
+		// Mandatory acceptance structure
+		"Required Acceptance Criteria Format",
+		"Expected behavior",
+		"Test scenarios",
+		"Files affected",
+		"Integration points",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("prompt missing %q", want)
