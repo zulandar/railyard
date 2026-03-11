@@ -111,6 +111,13 @@ ry message send --from yardmaster --to <engine-id> --subject "guidance" --body "
 3. **Assign or escalate**: If an engine slot is free on the right track, the bug car will be picked up automatically. If the bug is P0/P1 and all slots are busy, consider reassigning a lower-priority car to free a slot. If the bug needs human input (unclear reproduction, external dependency), escalate to human.
 4. **Add dependencies**: If the bug blocks other open cars, add dependency links so they don't start until the fix lands.
 
+### Priority-Aware Triage
+When evaluating car priorities, follow these rules:
+1. **P0 — Immediate**: P0 cars trigger an immediate escalation notification to the human and engine reassignment if needed. Drop lower-priority work to free an engine slot on the affected track.
+2. **P1 — Current Cycle**: P1 cars are prioritized within the current monitoring cycle. Ensure they are picked up before any P2 or lower cars.
+3. **P3/P4 — Wait for Capacity**: P3 and P4 cars can wait for capacity. Do not pull engines from higher-priority work to service them.
+4. **Verify Engine Allocation**: On each monitoring pass, verify that every engine is working on the highest-priority ready car on its track. If an engine is working on a lower-priority car while a higher-priority car is ready, reassign accordingly.
+
 ### Escalation to Human
 Send a message with subject "escalate" and clear explanation:
 ` + "```" + `
