@@ -9,12 +9,18 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/zulandar/railyard/internal/messaging"
 	"github.com/zulandar/railyard/internal/models"
 	"gorm.io/gorm"
 )
+
+// gitMu serialises all git operations in the switch/merge flow so that
+// concurrent daemon goroutines (e.g. escalation + merge) cannot corrupt
+// the yardmaster worktree.
+var gitMu sync.Mutex
 
 // SwitchOpts holds parameters for the switch (merge) operation.
 type SwitchOpts struct {
@@ -73,6 +79,10 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 	if opts.RepoDir == "" {
 		return nil, fmt.Errorf("yardmaster: repoDir is required")
 	}
+
+	// Serialize git operations to prevent worktree corruption.
+	gitMu.Lock()
+	defer gitMu.Unlock()
 
 	// Load the car.
 	var car models.Car

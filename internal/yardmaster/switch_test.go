@@ -1712,3 +1712,37 @@ func TestRunTests_ContextPassedThrough(t *testing.T) {
 		t.Errorf("output = %q, want to contain %q", output, "context-test-ok")
 	}
 }
+
+// --- Git mutex tests ---
+
+func TestGitMu_SerializesAccess(t *testing.T) {
+	// Verify gitMu is a usable sync.Mutex that can be locked/unlocked.
+	gitMu.Lock()
+	gitMu.Unlock()
+
+	// Verify it serializes: lock, spawn goroutine that tries to lock,
+	// verify it blocks until we unlock.
+	gitMu.Lock()
+	acquired := make(chan struct{})
+	go func() {
+		gitMu.Lock()
+		close(acquired)
+		gitMu.Unlock()
+	}()
+
+	select {
+	case <-acquired:
+		t.Fatal("goroutine should not acquire lock while held")
+	case <-time.After(50 * time.Millisecond):
+		// expected — goroutine is blocked
+	}
+
+	gitMu.Unlock()
+
+	select {
+	case <-acquired:
+		// expected — goroutine acquired after unlock
+	case <-time.After(time.Second):
+		t.Fatal("goroutine should have acquired lock after unlock")
+	}
+}
