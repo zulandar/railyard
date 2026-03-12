@@ -168,7 +168,7 @@ func (sm *SessionManager) Route(ctx context.Context, channelID, threadID, userNa
 // the resume — it is appended to the recovery context and included in the
 // one-shot prompt so the subprocess can respond to it immediately.
 func (sm *SessionManager) Resume(ctx context.Context, channelID, threadID, userName, newMessage string) (*models.DispatchSession, error) {
-	// Build recovery context from Dolt conversation history.
+	// Build recovery context from database conversation history.
 	recoveryPrompt, err := sm.buildRecoveryContext(channelID, threadID)
 	if err != nil {
 		return nil, fmt.Errorf("telegraph: build recovery context: %w", err)
@@ -332,9 +332,9 @@ func (sm *SessionManager) monitorProcess(key string, sessionID uint, proc Proces
 }
 
 // buildRecoveryContext constructs a recovery prompt from conversation history.
-// Primary source: Dolt TelegraphConversation rows. Fallback: adapter.ThreadHistory().
+// Primary source: database TelegraphConversation rows. Fallback: adapter.ThreadHistory().
 func (sm *SessionManager) buildRecoveryContext(channelID, threadID string) (string, error) {
-	// Try Dolt conversation history first.
+	// Try database conversation history first.
 	var convos []models.TelegraphConversation
 	result := sm.db.Where("session_id IN (?)",
 		sm.db.Model(&models.DispatchSession{}).
@@ -363,7 +363,7 @@ func (sm *SessionManager) buildRecoveryContext(channelID, threadID string) (stri
 	return "", nil
 }
 
-// formatConversationHistory builds a prompt from Dolt conversation rows.
+// formatConversationHistory builds a prompt from database conversation rows.
 func formatConversationHistory(convos []models.TelegraphConversation) string {
 	var b strings.Builder
 	b.WriteString("Previous conversation context:\n\n")

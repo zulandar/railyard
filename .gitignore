@@ -2,8 +2,8 @@
 /ry
 railyard.yaml
 .railyard/
-.dolt/
-.doltcfg/
+.mysql/
+.mysqlcfg/
 .mcp.json
 .beads/
 beads_railyard/

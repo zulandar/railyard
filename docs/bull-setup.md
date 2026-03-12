@@ -18,7 +18,7 @@ Bull runs a six-phase polling cycle:
 - **GitHub Personal Access Token (PAT)** with these scopes:
   - `repo` (for reading issues and writing labels/comments on private repos)
   - OR `public_repo` (for public repos only)
-- Railyard instance with Dolt database initialized (`ry db init`)
+- Railyard instance with database initialized (`ry db init`)
 - At least one track configured in your `railyard.yaml`
 
 ## Configuration

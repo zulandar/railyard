@@ -85,7 +85,7 @@ type pulseDigest struct {
 	Working      int
 }
 
-// Watcher polls Dolt for car lifecycle changes, engine stalls, and
+// Watcher polls the database for car lifecycle changes, engine stalls, and
 // escalation messages. It emits DetectedEvents to a channel for
 // formatting and delivery.
 type Watcher struct {

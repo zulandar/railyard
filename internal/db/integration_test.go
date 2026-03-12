@@ -16,51 +16,34 @@ import (
 	"gorm.io/gorm"
 )
 
-// testDoltServer manages a Dolt SQL server lifecycle for integration tests.
-type testDoltServer struct {
+// testDBServer manages a MySQL server lifecycle for integration tests.
+type testDBServer struct {
 	Port int
 	Dir  string
 	cmd  *exec.Cmd
 }
 
-// startDoltServer initializes a Dolt repo in a temp directory and starts
-// dolt sql-server on a free port. The server is automatically stopped
-// when the test completes.
-func startDoltServer(t *testing.T) *testDoltServer {
+// startDBServer starts mysqld on a free port using a temp data directory.
+// The server is automatically stopped when the test completes.
+func startDBServer(t *testing.T) *testDBServer {
 	t.Helper()
 
 	dir := t.TempDir()
 
-	// Configure dolt identity for the temp repo
-	for _, kv := range [][2]string{
-		{"user.name", "Test Runner"},
-		{"user.email", "test@railyard.dev"},
-	} {
-		cfg := exec.Command("dolt", "config", "--global", "--add", kv[0], kv[1])
-		cfg.Dir = dir
-		cfg.CombinedOutput() // ignore errors if already set
-	}
-
-	// Initialize dolt repo
-	init := exec.Command("dolt", "init")
-	init.Dir = dir
-	if out, err := init.CombinedOutput(); err != nil {
-		t.Fatalf("dolt init: %s\n%s", err, out)
-	}
-
 	port := freePort(t)
 
-	cmd := exec.Command("dolt", "sql-server",
+	cmd := exec.Command("mysqld",
 		"--port", fmt.Sprintf("%d", port),
-		"--host", "127.0.0.1",
+		"--bind-address", "127.0.0.1",
+		"--datadir", dir,
 	)
 	cmd.Dir = dir
 
 	if err := cmd.Start(); err != nil {
-		t.Fatalf("dolt sql-server start: %v", err)
+		t.Fatalf("mysqld start: %v", err)
 	}
 
-	srv := &testDoltServer{Port: port, Dir: dir, cmd: cmd}
+	srv := &testDBServer{Port: port, Dir: dir, cmd: cmd}
 
 	t.Cleanup(func() {
 		srv.cmd.Process.Kill()
@@ -83,7 +66,7 @@ func freePort(t *testing.T) int {
 	return port
 }
 
-// waitForServer polls until the Dolt server accepts TCP connections.
+// waitForServer polls until the database server accepts TCP connections.
 func waitForServer(t *testing.T, port int) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
@@ -96,11 +79,11 @@ func waitForServer(t *testing.T, port int) {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	t.Fatalf("dolt sql-server not ready on port %d after 10s", port)
+	t.Fatalf("mysqld not ready on port %d after 10s", port)
 }
 
 func TestIntegration_ConnectAdmin(t *testing.T) {
-	srv := startDoltServer(t)
+	srv := startDBServer(t)
 	db, err := ConnectAdmin("127.0.0.1", srv.Port, "root", "")
 	if err != nil {
 		t.Fatalf("ConnectAdmin: %v", err)
@@ -115,7 +98,7 @@ func TestIntegration_ConnectAdmin(t *testing.T) {
 }
 
 func TestIntegration_CreateDatabase(t *testing.T) {
-	srv := startDoltServer(t)
+	srv := startDBServer(t)
 	adminDB, err := ConnectAdmin("127.0.0.1", srv.Port, "root", "")
 	if err != nil {
 		t.Fatalf("ConnectAdmin: %v", err)
@@ -139,7 +122,7 @@ func TestIntegration_CreateDatabase(t *testing.T) {
 }
 
 func TestIntegration_Connect(t *testing.T) {
-	srv := startDoltServer(t)
+	srv := startDBServer(t)
 	adminDB, err := ConnectAdmin("127.0.0.1", srv.Port, "root", "")
 	if err != nil {
 		t.Fatalf("ConnectAdmin: %v", err)
@@ -162,7 +145,7 @@ func TestIntegration_Connect(t *testing.T) {
 }
 
 func TestIntegration_AutoMigrate(t *testing.T) {
-	srv := startDoltServer(t)
+	srv := startDBServer(t)
 	adminDB, err := ConnectAdmin("127.0.0.1", srv.Port, "root", "")
 	if err != nil {
 		t.Fatalf("ConnectAdmin: %v", err)
@@ -209,7 +192,7 @@ func TestIntegration_AutoMigrate(t *testing.T) {
 }
 
 func TestIntegration_AutoMigrate_TableColumns(t *testing.T) {
-	srv := startDoltServer(t)
+	srv := startDBServer(t)
 	adminDB, err := ConnectAdmin("127.0.0.1", srv.Port, "root", "")
 	if err != nil {
 		t.Fatalf("ConnectAdmin: %v", err)
@@ -263,7 +246,7 @@ func TestIntegration_AutoMigrate_TableColumns(t *testing.T) {
 }
 
 func TestIntegration_SeedTracks(t *testing.T) {
-	srv := startDoltServer(t)
+	srv := startDBServer(t)
 	adminDB, err := ConnectAdmin("127.0.0.1", srv.Port, "root", "")
 	if err != nil {
 		t.Fatalf("ConnectAdmin: %v", err)
@@ -325,7 +308,7 @@ func TestIntegration_SeedTracks(t *testing.T) {
 }
 
 func TestIntegration_SeedConfig(t *testing.T) {
-	srv := startDoltServer(t)
+	srv := startDBServer(t)
 	adminDB, err := ConnectAdmin("127.0.0.1", srv.Port, "root", "")
 	if err != nil {
 		t.Fatalf("ConnectAdmin: %v", err)
@@ -366,7 +349,7 @@ func TestIntegration_SeedConfig(t *testing.T) {
 }
 
 func TestIntegration_Idempotent(t *testing.T) {
-	srv := startDoltServer(t)
+	srv := startDBServer(t)
 	adminDB, err := ConnectAdmin("127.0.0.1", srv.Port, "root", "")
 	if err != nil {
 		t.Fatalf("ConnectAdmin: %v", err)
@@ -434,11 +417,11 @@ func TestIntegration_Idempotent(t *testing.T) {
 
 // --- Error path tests using a closed connection ---
 
-// closedGormDB starts a Dolt server, opens a connection, then closes the
+// closedGormDB starts a database server, opens a connection, then closes the
 // underlying sql.DB so all subsequent GORM operations fail.
 func closedGormDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	srv := startDoltServer(t)
+	srv := startDBServer(t)
 	adminDB, err := ConnectAdmin("127.0.0.1", srv.Port, "root", "")
 	if err != nil {
 		t.Fatalf("ConnectAdmin: %v", err)
@@ -507,7 +490,7 @@ func TestIntegration_SeedConfig_Error(t *testing.T) {
 }
 
 func TestIntegration_SeedTracks_UpdateExisting(t *testing.T) {
-	srv := startDoltServer(t)
+	srv := startDBServer(t)
 	adminDB, err := ConnectAdmin("127.0.0.1", srv.Port, "root", "")
 	if err != nil {
 		t.Fatalf("ConnectAdmin: %v", err)

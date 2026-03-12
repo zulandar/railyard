@@ -14,12 +14,12 @@ echo ""
 echo "--- Creating Epics ---"
 
 E1=$(bd create --type epic --silent \
-  --title "Foundation — Dolt Database & Project Scaffold" \
+  --title "Foundation — MySQL Database & Project Scaffold" \
   -p 0 \
   -l "phase-1,foundation" \
-  -d "Bedrock of the entire Railyard system. Establishes Go project structure, all GORM models, config loading, Dolt connectivity, and the ry db init command. Every subsequent epic depends on this. Directory layout follows Go conventions: cmd/ry/ for CLI entrypoint, internal/ for private packages (models, db, config, bead, engine, messaging, yardmaster, dispatch). GORM models defined per ARCHITECTURE.md Section 1.5. Config is YAML-based per ARCHITECTURE.md VM Provisioning section. See IMPLEMENTATION_PLAN.md Epic 1 for full details." \
-  --acceptance "ry db init creates railyard_{owner} database in Dolt with all tables. Tracks from config.yaml are seeded. RailyardConfig row written. Tables queryable via mysql client. >90% test coverage for internal/config/ and internal/db/." \
-  --design "See ARCHITECTURE.md Section 1 (Dolt), Section 1.5 (GORM), Section 2 (Schema), and VM Provisioning (config.yaml)")
+  -d "Bedrock of the entire Railyard system. Establishes Go project structure, all GORM models, config loading, MySQL connectivity, and the ry db init command. Every subsequent epic depends on this. Directory layout follows Go conventions: cmd/ry/ for CLI entrypoint, internal/ for private packages (models, db, config, bead, engine, messaging, yardmaster, dispatch). GORM models defined per ARCHITECTURE.md Section 1.5. Config is YAML-based per ARCHITECTURE.md VM Provisioning section. See IMPLEMENTATION_PLAN.md Epic 1 for full details." \
+  --acceptance "ry db init creates railyard_{owner} database in MySQL with all tables. Tracks from config.yaml are seeded. RailyardConfig row written. Tables queryable via mysql client. >90% test coverage for internal/config/ and internal/db/." \
+  --design "See ARCHITECTURE.md Section 1 (MySQL), Section 1.5 (GORM), Section 2 (Schema), and VM Provisioning (config.yaml)")
 echo "Epic 1 (Foundation): $E1"
 
 E2=$(bd create --type epic --silent \
@@ -35,7 +35,7 @@ E3=$(bd create --type epic --silent \
   --title "Engine Core Loop — Bead Execution Runtime" \
   -p 0 \
   -l "phase-1,engine" \
-  -d "The heart of Railyard. Engine daemon polls Dolt for ready beads on its track, claims one atomically, renders context (ARCHITECTURE.md Context Injection Template), spawns Claude Code, monitors subprocess, handles exit (done, /clear, stall). The daemon is a Go binary that manages the AI agent lifecycle — it is NOT an AI agent itself. See ARCHITECTURE.md Section Engine Daemon and IMPLEMENTATION_PLAN.md Epic 3." \
+  -d "The heart of Railyard. Engine daemon polls MySQL for ready beads on its track, claims one atomically, renders context (ARCHITECTURE.md Context Injection Template), spawns Claude Code, monitors subprocess, handles exit (done, /clear, stall). The daemon is a Go binary that manages the AI agent lifecycle — it is NOT an AI agent itself. See ARCHITECTURE.md Section Engine Daemon and IMPLEMENTATION_PLAN.md Epic 3." \
   --acceptance "ry engine start --track backend claims a ready bead, creates git branch, spawns Claude Code with full context template. On completion pushes branch and goes idle. Handles /clear cycles with progress notes. Detects stalls and escalates. >90% test coverage for internal/engine/." \
   --design "See ARCHITECTURE.md sections: Engine Daemon — The Core Loop, Context Injection Template, Railyard API (MCP Server or CLI Wrapper)")
 echo "Epic 3 (Engine Core Loop): $E3"
@@ -71,7 +71,7 @@ E7=$(bd create --type epic --silent \
   --title "Local Orchestration — ry start Full Railyard" \
   -p 1 \
   -l "phase-1,orchestration" \
-  -d "Single command (ry start) brings up entire local railyard: Dolt, Dispatch, Yardmaster, and N engines in tmux. ry stop gracefully shuts down. ry status provides dashboard. Engine count user-controlled (1-100), adjustable dynamically via ry engine scale. See ARCHITECTURE.md Section Local Development Mode and IMPLEMENTATION_PLAN.md Epic 7." \
+  -d "Single command (ry start) brings up entire local railyard: MySQL, Dispatch, Yardmaster, and N engines in tmux. ry stop gracefully shuts down. ry status provides dashboard. Engine count user-controlled (1-100), adjustable dynamically via ry engine scale. See ARCHITECTURE.md Section Local Development Mode and IMPLEMENTATION_PLAN.md Epic 7." \
   --acceptance "ry start --engines 3 creates tmux session with Dispatch, Yardmaster, 3 engines. ry status shows all healthy. ry stop gracefully shuts down. ry engine scale adjusts count dynamically. >90% test coverage for orchestration logic." \
   --design "See ARCHITECTURE.md Section Local Development Mode — tmux session layout, startup sequence")
 echo "Epic 7 (Local Orchestration): $E7"
@@ -105,7 +105,7 @@ T1_1_2=$(bd create --type task --silent --parent "$F1_1" \
   --title "Add core dependencies" \
   -p 0 \
   -l "phase-1,foundation,scaffold" \
-  -d "go get for: gorm.io/gorm, gorm.io/driver/mysql (Dolt is MySQL-compatible), github.com/spf13/cobra (CLI framework), gopkg.in/yaml.v3 (config parsing). Create go.sum. Verify all imports resolve with go build." \
+  -d "go get for: gorm.io/gorm, gorm.io/driver/mysql (MySQL is MySQL-compatible), github.com/spf13/cobra (CLI framework), gopkg.in/yaml.v3 (config parsing). Create go.sum. Verify all imports resolve with go build." \
   --acceptance "go.sum exists. All four dependencies listed in go.mod. go build ./cmd/ry succeeds with all imports. >90% test coverage.")
 echo "    T1.1.2: $T1_1_2"
 
@@ -113,15 +113,15 @@ F1_2=$(bd create --type feature --silent --parent "$E1" \
   --title "Configuration System" \
   -p 0 \
   -l "phase-1,foundation,config" \
-  -d "YAML-based configuration loader reading config.yaml. Config struct mirrors ARCHITECTURE.md VM Provisioning section: owner, repo, branch_prefix, dolt connection (host/port/database), tracks (name, language, file_patterns, engine_slots, conventions). Validates required fields, provides sensible defaults. Excludes provisioner section (production mode, out of scope)." \
-  --acceptance "Load() reads valid YAML and returns typed Config. Missing required fields return clear errors. Defaults applied (dolt host=127.0.0.1, port=3306). >90% test coverage for internal/config/.")
+  -d "YAML-based configuration loader reading config.yaml. Config struct mirrors ARCHITECTURE.md VM Provisioning section: owner, repo, branch_prefix, database connection (host/port/database), tracks (name, language, file_patterns, engine_slots, conventions). Validates required fields, provides sensible defaults. Excludes provisioner section (production mode, out of scope)." \
+  --acceptance "Load() reads valid YAML and returns typed Config. Missing required fields return clear errors. Defaults applied (database host=127.0.0.1, port=3306). >90% test coverage for internal/config/.")
 echo "  F1.2 (Config): $F1_2"
 
 T1_2_1=$(bd create --type task --silent --parent "$F1_2" \
   --title "Define config struct and YAML schema" \
   -p 0 \
   -l "phase-1,foundation,config" \
-  -d "Create internal/config/config.go with Config, DoltConfig, TrackConfig structs. YAML tags for unmarshalling. Fields from ARCHITECTURE.md config.yaml: owner (string, required), repo (string, required), branch_prefix (string, derived from owner), dolt.host (string, default 127.0.0.1), dolt.port (int, default 3306), dolt.database (string, derived railyard_{owner}), tracks[] with name/language/file_patterns/engine_slots/conventions. Exclude provisioner section." \
+  -d "Create internal/config/config.go with Config, MySQLConfig, TrackConfig structs. YAML tags for unmarshalling. Fields from ARCHITECTURE.md config.yaml: owner (string, required), repo (string, required), branch_prefix (string, derived from owner), database.host (string, default 127.0.0.1), database.port (int, default 3306), database.name (string, derived railyard_{owner}), tracks[] with name/language/file_patterns/engine_slots/conventions. Exclude provisioner section." \
   --acceptance "Config struct compiles. YAML tags correct. All ARCHITECTURE.md config fields present (minus provisioner). >90% test coverage.")
 echo "    T1.2.1: $T1_2_1"
 
@@ -129,7 +129,7 @@ T1_2_2=$(bd create --type task --silent --parent "$F1_2" \
   --title "Implement config loader with validation" \
   -p 0 \
   -l "phase-1,foundation,config" \
-  -d "Implement Load(path string) (*Config, error) in internal/config/config.go. Reads YAML file, unmarshals into Config struct, validates required fields (owner, repo, at least one track), applies defaults (dolt host=127.0.0.1, port=3306, database=railyard_{owner}, branch_prefix=ry/{owner}). Returns clear error messages for missing/invalid fields." \
+  -d "Implement Load(path string) (*Config, error) in internal/config/config.go. Reads YAML file, unmarshals into Config struct, validates required fields (owner, repo, at least one track), applies defaults (database host=127.0.0.1, port=3306, database=railyard_{owner}, branch_prefix=ry/{owner}). Returns clear error messages for missing/invalid fields." \
   --acceptance "Load() with valid config returns correct struct. Load() with missing owner returns error mentioning 'owner'. Load() with no tracks returns error. Defaults applied when fields omitted. >90% test coverage.")
 echo "    T1.2.2: $T1_2_2"
 
@@ -161,16 +161,16 @@ F1_4=$(bd create --type feature --silent --parent "$E1" \
   --title "Database Connection & Initialization" \
   -p 0 \
   -l "phase-1,foundation,database" \
-  -d "Dolt connection layer using GORM MySQL driver, AutoMigrate for all tables, track seeding from config, and the ry db init CLI command. This is the first runnable CLI command. Connection follows ARCHITECTURE.md Section 1.5 setup." \
+  -d "MySQL connection layer using GORM MySQL driver, AutoMigrate for all tables, track seeding from config, and the ry db init CLI command. This is the first runnable CLI command. Connection follows ARCHITECTURE.md Section 1.5 setup." \
   --acceptance "ry db init creates railyard_{owner} database, migrates all tables, seeds tracks, writes RailyardConfig. Tables queryable via mysql client. Idempotent (safe to run twice). >90% test coverage for internal/db/.")
 echo "  F1.4 (Database): $F1_4"
 
 T1_4_1=$(bd create --type task --silent --parent "$F1_4" \
-  --title "Implement Dolt connection function" \
+  --title "Implement MySQL connection function" \
   -p 0 \
   -l "phase-1,foundation,database" \
-  -d "Create internal/db/connect.go with Connect(owner, host string, port int) (*gorm.DB, error). DSN format: root@tcp(host:port)/railyard_{owner}?parseTime=true. Handle connection errors with clear messages (Dolt not running, wrong port, database not found). Follows ARCHITECTURE.md Section 1.5 connection setup exactly." \
-  --acceptance "Connect() returns valid *gorm.DB when Dolt is running. Returns clear error when Dolt is not running. DSN format matches ARCHITECTURE.md. >90% test coverage.")
+  -d "Create internal/db/connect.go with Connect(owner, host string, port int) (*gorm.DB, error). DSN format: root@tcp(host:port)/railyard_{owner}?parseTime=true. Handle connection errors with clear messages (MySQL not running, wrong port, database not found). Follows ARCHITECTURE.md Section 1.5 connection setup exactly." \
+  --acceptance "Connect() returns valid *gorm.DB when MySQL is running. Returns clear error when MySQL is not running. DSN format matches ARCHITECTURE.md. >90% test coverage.")
 echo "    T1.4.1: $T1_4_1"
 
 T1_4_2=$(bd create --type task --silent --parent "$F1_4" \
@@ -178,22 +178,22 @@ T1_4_2=$(bd create --type task --silent --parent "$F1_4" \
   -p 0 \
   -l "phase-1,foundation,database" \
   -d "Create internal/db/migrate.go with: AutoMigrate(db *gorm.DB) error — migrates all 9 Phase 1 models (Bead, BeadDep, BeadProgress, Track, Engine, Message, AgentLog, RailyardConfig, ReindexJob). SeedTracks(db *gorm.DB, tracks []config.TrackConfig) error — upserts Track rows from config. SeedConfig(db *gorm.DB, cfg *config.Config) error — writes/updates RailyardConfig row." \
-  --acceptance "AutoMigrate creates all 9 tables in Dolt. SeedTracks populates tracks table from config. SeedConfig writes config row. All idempotent. >90% test coverage.")
+  --acceptance "AutoMigrate creates all 9 tables in MySQL. SeedTracks populates tracks table from config. SeedConfig writes config row. All idempotent. >90% test coverage.")
 echo "    T1.4.2: $T1_4_2"
 
 T1_4_3=$(bd create --type task --silent --parent "$F1_4" \
   --title "Implement ry db init CLI command" \
   -p 0 \
   -l "phase-1,foundation,database" \
-  -d "Add 'db init' subcommand to cobra CLI in cmd/ry/. Flow: load config from config.yaml (or --config flag) → create Dolt database via CREATE DATABASE IF NOT EXISTS railyard_{owner} → connect with GORM → run AutoMigrate → seed tracks from config → seed RailyardConfig → print summary (tables created, tracks seeded, config written). First runnable command in the system." \
-  --acceptance "ry db init creates database and all tables. Prints human-readable summary. Idempotent. --config flag overrides default path. Errors clearly if Dolt not running. >90% test coverage.")
+  -d "Add 'db init' subcommand to cobra CLI in cmd/ry/. Flow: load config from config.yaml (or --config flag) → create MySQL database via CREATE DATABASE IF NOT EXISTS railyard_{owner} → connect with GORM → run AutoMigrate → seed tracks from config → seed RailyardConfig → print summary (tables created, tracks seeded, config written). First runnable command in the system." \
+  --acceptance "ry db init creates database and all tables. Prints human-readable summary. Idempotent. --config flag overrides default path. Errors clearly if MySQL not running. >90% test coverage.")
 echo "    T1.4.3: $T1_4_3"
 
 F1_5=$(bd create --type feature --silent --parent "$E1" \
   --title "Foundation Test Suite" \
   -p 1 \
   -l "phase-1,foundation,testing" \
-  -d "Unit and integration tests for the foundation layer. Config tests use fixture YAML files in testdata/. Database tests require running Dolt instance. Target >90% coverage for internal/config/ and internal/db/." \
+  -d "Unit and integration tests for the foundation layer. Config tests use fixture YAML files in testdata/. Database tests require running MySQL instance. Target >90% coverage for internal/config/ and internal/db/." \
   --acceptance ">90% test coverage for internal/config/ and internal/db/. All tests pass. Integration tests documented with setup requirements.")
 echo "  F1.5 (Tests): $F1_5"
 
@@ -201,7 +201,7 @@ T1_5_1=$(bd create --type task --silent --parent "$F1_5" \
   --title "Config loading unit tests" \
   -p 1 \
   -l "phase-1,foundation,testing" \
-  -d "Create internal/config/config_test.go. Test cases: valid config loads correctly with all fields, missing required fields (owner, repo) return descriptive errors, defaults applied when optional fields omitted (dolt host, port, database), invalid YAML returns parse error, empty tracks array returns error. Use fixture YAML files in testdata/ directory." \
+  -d "Create internal/config/config_test.go. Test cases: valid config loads correctly with all fields, missing required fields (owner, repo) return descriptive errors, defaults applied when optional fields omitted (database host, port, database), invalid YAML returns parse error, empty tracks array returns error. Use fixture YAML files in testdata/ directory." \
   --acceptance "All test cases pass. >90% line coverage for internal/config/. Fixture files in testdata/. go test -cover ./internal/config/ shows coverage.")
 echo "    T1.5.1: $T1_5_1"
 
@@ -209,8 +209,8 @@ T1_5_2=$(bd create --type task --silent --parent "$F1_5" \
   --title "Database initialization integration tests" \
   -p 1 \
   -l "phase-1,foundation,testing" \
-  -d "Create internal/db/db_test.go. Requires running Dolt server. Test cases: Connect() succeeds with valid params, AutoMigrate creates all 9 tables with correct columns, SeedTracks populates tracks from config, SeedConfig writes RailyardConfig row, idempotent (running twice doesn't error). Test helper to start/stop Dolt or use Docker. Build tag for integration tests." \
-  --acceptance "All integration tests pass with Dolt running. >90% line coverage for internal/db/. Test helper manages Dolt lifecycle. Tests tagged for CI skip if Dolt unavailable.")
+  -d "Create internal/db/db_test.go. Requires running MySQL server. Test cases: Connect() succeeds with valid params, AutoMigrate creates all 9 tables with correct columns, SeedTracks populates tracks from config, SeedConfig writes RailyardConfig row, idempotent (running twice doesn't error). Test helper to start/stop MySQL or use Docker. Build tag for integration tests." \
+  --acceptance "All integration tests pass with MySQL running. >90% line coverage for internal/db/. Test helper manages MySQL lifecycle. Tests tagged for CI skip if MySQL unavailable.")
 echo "    T1.5.2: $T1_5_2"
 
 echo ""
@@ -241,7 +241,7 @@ T2_1_2=$(bd create --type task --silent --parent "$F2_1" \
   -p 0 \
   -l "phase-1,bead-mgmt,crud" \
   -d "Cobra subcommand: ry car create --title '...' --track backend --type task --priority 2 --description '...' --acceptance '...' --design '...'. Required: title, track. Defaults: type=task, priority=2, status=open. Prints created bead ID and branch name on success. Loads config for owner/branch_prefix." \
-  --acceptance "Command creates bead in Dolt. Prints ID and branch. Required field validation. Defaults applied. Queryable via mysql after creation. >90% test coverage.")
+  --acceptance "Command creates bead in MySQL. Prints ID and branch. Required field validation. Defaults applied. Queryable via mysql after creation. >90% test coverage.")
 echo "    T2.1.2: $T2_1_2"
 
 T2_1_3=$(bd create --type task --silent --parent "$F2_1" \
@@ -257,7 +257,7 @@ T2_1_4=$(bd create --type task --silent --parent "$F2_1" \
   -p 0 \
   -l "phase-1,bead-mgmt,crud" \
   -d "ry car update <id> --status claimed --assignee engine-01 --priority 1 --description '...' etc. Status transition validation: valid transitions are open→ready, ready→claimed, claimed→in_progress, in_progress→done, open→cancelled, any→blocked. Invalid transitions return error with explanation of valid transitions from current state." \
-  --acceptance "Update modifies fields in Dolt. Invalid status transitions rejected with helpful error. Multiple fields updatable in one command. Non-existent ID returns error. >90% test coverage.")
+  --acceptance "Update modifies fields in MySQL. Invalid status transitions rejected with helpful error. Multiple fields updatable in one command. Non-existent ID returns error. >90% test coverage.")
 echo "    T2.1.4: $T2_1_4"
 
 F2_2=$(bd create --type feature --silent --parent "$E2" \
@@ -312,7 +312,7 @@ F2_4=$(bd create --type feature --silent --parent "$E2" \
   --title "Bead Management Test Suite" \
   -p 1 \
   -l "phase-1,bead-mgmt,testing" \
-  -d "Comprehensive tests for all bead operations. >90% coverage for internal/bead/. Unit tests for ID generation, status validation, cycle detection. Integration tests with Dolt for CRUD, dependencies, and ready detection." \
+  -d "Comprehensive tests for all bead operations. >90% coverage for internal/bead/. Unit tests for ID generation, status validation, cycle detection. Integration tests with MySQL for CRUD, dependencies, and ready detection." \
   --acceptance ">90% line coverage for internal/bead/. All unit and integration tests pass. Edge cases covered (empty results, cancelled blockers, cross-track deps).")
 echo "  F2.4 (Tests): $F2_4"
 
@@ -328,7 +328,7 @@ T2_4_2=$(bd create --type task --silent --parent "$F2_4" \
   --title "Integration tests for dependencies and ready detection" \
   -p 1 \
   -l "phase-1,bead-mgmt,testing" \
-  -d "internal/bead/deps_test.go (integration, requires Dolt). Test: create chain A blocks B blocks C — ReadyBeads returns only A. Complete A — ReadyBeads returns B. Complete B — ReadyBeads returns C. Cross-track deps: backend bead blocks frontend bead, same railyard. Edge case: bead with cancelled blocker is ready. Edge case: bead with mix of done and pending blockers is not ready." \
+  -d "internal/bead/deps_test.go (integration, requires MySQL). Test: create chain A blocks B blocks C — ReadyBeads returns only A. Complete A — ReadyBeads returns B. Complete B — ReadyBeads returns C. Cross-track deps: backend bead blocks frontend bead, same railyard. Edge case: bead with cancelled blocker is ready. Edge case: bead with mix of done and pending blockers is not ready." \
   --acceptance "All integration tests pass. Ready detection correct for chains, cross-track, cancelled blockers, partial completion. >90% coverage for deps.go.")
 echo "    T2.4.2: $T2_4_2"
 
@@ -352,7 +352,7 @@ T3_1_1=$(bd create --type task --silent --parent "$F3_1" \
   -p 0 \
   -l "phase-1,engine,lifecycle" \
   -d "Create internal/engine/engine.go. Register(db *gorm.DB, track string) (*models.Engine, error) — generates engine ID (eng-{5-char-hex}), inserts row: ID, track, role=engine, status=idle, started_at=now. Deregister(db, engineID) error — updates status=dead. Signal handler (SIGINT/SIGTERM) calls Deregister for clean shutdown." \
-  --acceptance "Register creates engine row in Dolt. Deregister updates status to dead. Signal handler triggers deregister. ID format is eng-xxxxx. >90% test coverage.")
+  --acceptance "Register creates engine row in MySQL. Deregister updates status to dead. Signal handler triggers deregister. ID format is eng-xxxxx. >90% test coverage.")
 echo "    T3.1.1: $T3_1_1"
 
 T3_1_2=$(bd create --type task --silent --parent "$F3_1" \
@@ -360,7 +360,7 @@ T3_1_2=$(bd create --type task --silent --parent "$F3_1" \
   -p 0 \
   -l "phase-1,engine,lifecycle" \
   -d "StartHeartbeat(ctx context.Context, db *gorm.DB, engineID string, interval time.Duration) — goroutine that runs UPDATE engines SET last_activity=NOW() WHERE id=engineID every interval (default 10s). Respects context cancellation for clean shutdown. Other components (yardmaster) use stale last_activity to detect dead engines." \
-  --acceptance "Heartbeat updates last_activity in Dolt every 10s. Stops cleanly on context cancel. Stale detection works (engine with old last_activity detectable). >90% test coverage.")
+  --acceptance "Heartbeat updates last_activity in MySQL every 10s. Stops cleanly on context cancel. Stale detection works (engine with old last_activity detectable). >90% test coverage.")
 echo "    T3.1.2: $T3_1_2"
 
 T3_1_3=$(bd create --type task --silent --parent "$F3_1" \
@@ -392,7 +392,7 @@ T3_2_2=$(bd create --type task --silent --parent "$F3_2" \
   -p 0 \
   -l "phase-1,engine,context" \
   -d "Create internal/engine/subprocess.go. SpawnAgent(ctx context.Context, bead *models.Bead, contextPayload string, db *gorm.DB, engineID string) (*Session, error). Spawns claude CLI with rendered context via --prompt flag or stdin. Captures stdout/stderr in real-time via pipe. Writes to agent_logs table: engine_id, session_id (generated per spawn), bead_id, direction=out, content, created_at. Returns Session handle with PID, stdin pipe, wait channel." \
-  --acceptance "Claude CLI spawned as subprocess. stdout/stderr captured. agent_logs rows written to Dolt. Session ID unique per spawn. Context cancellation kills subprocess. >90% test coverage.")
+  --acceptance "Claude CLI spawned as subprocess. stdout/stderr captured. agent_logs rows written to MySQL. Session ID unique per spawn. Context cancellation kills subprocess. >90% test coverage.")
 echo "    T3.2.2: $T3_2_2"
 
 T3_2_3=$(bd create --type task --silent --parent "$F3_2" \
@@ -447,7 +447,7 @@ T3_4_1=$(bd create --type task --silent --parent "$F3_4" \
   --title "Implement ry engine start command (daemon loop)" \
   -p 0 \
   -l "phase-1,engine,cli" \
-  -d "Cobra subcommand: ry engine start --track backend. Flow: load config, connect to Dolt, register engine, start heartbeat goroutine, enter main loop: (1) check inbox, (2) claim ready bead or re-claim current, (3) render context, (4) create branch, (5) spawn Claude Code, (6) monitor subprocess, (7) handle exit (completion/clear/stall), (8) sleep 5s, (9) repeat. Handle SIGINT/SIGTERM for clean deregister." \
+  -d "Cobra subcommand: ry engine start --track backend. Flow: load config, connect to MySQL, register engine, start heartbeat goroutine, enter main loop: (1) check inbox, (2) claim ready bead or re-claim current, (3) render context, (4) create branch, (5) spawn Claude Code, (6) monitor subprocess, (7) handle exit (completion/clear/stall), (8) sleep 5s, (9) repeat. Handle SIGINT/SIGTERM for clean deregister." \
   --acceptance "Daemon loop runs continuously. Claims and executes beads. Handles all exit types. Clean shutdown on signal. --track flag required. >90% test coverage.")
 echo "    T3.4.1: $T3_4_1"
 
@@ -463,8 +463,8 @@ F3_5=$(bd create --type feature --silent --parent "$E3" \
   --title "Engine Test Suite" \
   -p 1 \
   -l "phase-1,engine,testing" \
-  -d ">90% coverage for internal/engine/. Unit tests for context rendering and claim logic. Integration tests with Dolt and mock Claude Code subprocess." \
-  --acceptance ">90% line coverage for internal/engine/. All tests pass. Mock subprocess for automated testing. Integration tests with Dolt.")
+  -d ">90% coverage for internal/engine/. Unit tests for context rendering and claim logic. Integration tests with MySQL and mock Claude Code subprocess." \
+  --acceptance ">90% line coverage for internal/engine/. All tests pass. Mock subprocess for automated testing. Integration tests with MySQL.")
 echo "  F3.5 (Tests): $F3_5"
 
 T3_5_1=$(bd create --type task --silent --parent "$F3_5" \
@@ -479,7 +479,7 @@ T3_5_2=$(bd create --type task --silent --parent "$F3_5" \
   --title "Integration tests with mock subprocess" \
   -p 1 \
   -l "phase-1,engine,testing" \
-  -d "Integration tests requiring Dolt. Seed ready bead, start engine, verify: (1) bead claimed, (2) branch created, (3) mock Claude Code (simple script echoing output and exiting) runs, (4) agent_logs written, (5) bead status transitions correct. Test /clear cycle: mock exits without completing, verify progress note written, bead re-claimed. Test stall: mock hangs, verify stall detection triggers." \
+  -d "Integration tests requiring MySQL. Seed ready bead, start engine, verify: (1) bead claimed, (2) branch created, (3) mock Claude Code (simple script echoing output and exiting) runs, (4) agent_logs written, (5) bead status transitions correct. Test /clear cycle: mock exits without completing, verify progress note written, bead re-claimed. Test stall: mock hangs, verify stall detection triggers." \
   --acceptance "Full engine lifecycle tested end-to-end with mock. Claim, execute, complete flow works. Clear cycle flow works. Stall detection flow works. >90% coverage.")
 echo "    T3.5.2: $T3_5_2"
 
@@ -582,7 +582,7 @@ T4_4_2=$(bd create --type task --silent --parent "$F4_4" \
   --title "Integration tests for inbox polling and broadcast" \
   -p 1 \
   -l "phase-1,messaging,testing" \
-  -d "Integration tests with Dolt. Test: send message to engine, verify engine loop processes and acknowledges it. Broadcast message: send broadcast, verify appears in multiple agents' inboxes, each acks independently. Yardmaster instructions: send abort message to engine, verify bead released. Send pause, verify engine stops claiming." \
+  -d "Integration tests with MySQL. Test: send message to engine, verify engine loop processes and acknowledges it. Broadcast message: send broadcast, verify appears in multiple agents' inboxes, each acks independently. Yardmaster instructions: send abort message to engine, verify bead released. Send pause, verify engine stops claiming." \
   --acceptance "Full inbox polling tested in engine loop context. Broadcast delivery verified. Instruction processing verified. >90% coverage.")
 echo "    T4.4.2: $T4_4_2"
 
@@ -701,7 +701,7 @@ T5_5_1=$(bd create --type task --silent --parent "$F5_5" \
   --title "Implement ry yardmaster CLI command" \
   -p 1 \
   -l "phase-1,yardmaster,testing" \
-  -d "Cobra subcommand: ry yardmaster. Loads config, connects to Dolt, checks no other yardmaster running (query engines WHERE role=yardmaster AND status != dead), starts yardmaster agent. Single instance per railyard enforced — error if one already running." \
+  -d "Cobra subcommand: ry yardmaster. Loads config, connects to MySQL, checks no other yardmaster running (query engines WHERE role=yardmaster AND status != dead), starts yardmaster agent. Single instance per railyard enforced — error if one already running." \
   --acceptance "ry yardmaster starts agent. Second instance returns error. Clean shutdown updates status. >90% test coverage.")
 echo "    T5.5.1: $T5_5_1"
 
@@ -717,7 +717,7 @@ T5_5_3=$(bd create --type task --silent --parent "$F5_5" \
   --title "Integration tests for merge flow and reassignment" \
   -p 1 \
   -l "phase-1,yardmaster,testing" \
-  -d "Integration tests with Dolt and git repo. Test: create bead with branch, add commits, run Switch(), verify merge to main. Test: stalled engine detected, bead reassigned, new engine can claim it. Test: completed backend bead unblocks frontend bead (cross-track). Test: test failure in Switch() blocks bead and sends message." \
+  -d "Integration tests with MySQL and git repo. Test: create bead with branch, add commits, run Switch(), verify merge to main. Test: stalled engine detected, bead reassigned, new engine can claim it. Test: completed backend bead unblocks frontend bead (cross-track). Test: test failure in Switch() blocks bead and sends message." \
   --acceptance "Full merge flow tested end-to-end. Reassignment tested. Cross-track unblocking tested. Test failure handling tested. >90% coverage.")
 echo "    T5.5.3: $T5_5_3"
 
@@ -788,8 +788,8 @@ T6_3_1=$(bd create --type task --silent --parent "$F6_3" \
   --title "Implement ry dispatch CLI command" \
   -p 1 \
   -l "phase-1,dispatch,testing" \
-  -d "Cobra subcommand: ry dispatch. Loads config, connects to Dolt, starts dispatch agent in interactive mode. Opens Claude Code in current terminal for direct conversation. User's primary interface for requesting work." \
-  --acceptance "ry dispatch starts interactive session. User can type requests. Beads created in Dolt. >90% test coverage.")
+  -d "Cobra subcommand: ry dispatch. Loads config, connects to MySQL, starts dispatch agent in interactive mode. Opens Claude Code in current terminal for direct conversation. User's primary interface for requesting work." \
+  --acceptance "ry dispatch starts interactive session. User can type requests. Beads created in MySQL. >90% test coverage.")
 echo "    T6.3.1: $T6_3_1"
 
 T6_3_2=$(bd create --type task --silent --parent "$F6_3" \
@@ -819,15 +819,15 @@ T7_1_1=$(bd create --type task --silent --parent "$F7_1" \
   --title "Implement ry start command" \
   -p 0 \
   -l "phase-1,orchestration,lifecycle" \
-  -d "Cobra subcommand: ry start [--engines N]. Flow: (1) validate config.yaml, (2) check Dolt running (ps aux for dolt sql-server, or try connect), (3) ry db init if database doesn't exist, (4) create tmux session 'railyard', (5) pane 0: launch ry dispatch, (6) pane 1: launch ry yardmaster, (7) panes 2..N+1: launch ry engine start --track {assigned_track} for each engine. Engine count from --engines flag or sum of track engine_slots. Track assignment per Feature 7.2 logic." \
-  --acceptance "ry start creates tmux session with all components. All agents register in Dolt. Pane layout correct. Engine count configurable. >90% test coverage.")
+  -d "Cobra subcommand: ry start [--engines N]. Flow: (1) validate config.yaml, (2) check MySQL running (ps aux for mysql server, or try connect), (3) ry db init if database doesn't exist, (4) create tmux session 'railyard', (5) pane 0: launch ry dispatch, (6) pane 1: launch ry yardmaster, (7) panes 2..N+1: launch ry engine start --track {assigned_track} for each engine. Engine count from --engines flag or sum of track engine_slots. Track assignment per Feature 7.2 logic." \
+  --acceptance "ry start creates tmux session with all components. All agents register in MySQL. Pane layout correct. Engine count configurable. >90% test coverage.")
 echo "    T7.1.1: $T7_1_1"
 
 T7_1_2=$(bd create --type task --silent --parent "$F7_1" \
   --title "Implement ry stop command" \
   -p 0 \
   -l "phase-1,orchestration,lifecycle" \
-  -d "ry stop [--timeout 60s]. Flow: (1) send 'drain' broadcast message via messaging package, (2) wait for in-progress beads to complete (poll engines table for status=working, up to timeout), (3) kill all engine processes (tmux send-keys C-c or kill), (4) kill yardmaster, (5) kill dispatch, (6) kill tmux session 'railyard', (7) update all engine statuses to dead in Dolt." \
+  -d "ry stop [--timeout 60s]. Flow: (1) send 'drain' broadcast message via messaging package, (2) wait for in-progress beads to complete (poll engines table for status=working, up to timeout), (3) kill all engine processes (tmux send-keys C-c or kill), (4) kill yardmaster, (5) kill dispatch, (6) kill tmux session 'railyard', (7) update all engine statuses to dead in MySQL." \
   --acceptance "Graceful shutdown: engines finish current work. Timeout forces kill. All engine statuses updated. Tmux session killed. No orphaned processes. >90% test coverage.")
 echo "    T7.1.2: $T7_1_2"
 
@@ -883,7 +883,7 @@ T7_3_1=$(bd create --type task --silent --parent "$F7_3" \
   --title "Integration tests for start/stop lifecycle" \
   -p 1 \
   -l "phase-1,orchestration,testing" \
-  -d "Test: ry start --engines 2 creates tmux session with 4 panes (dispatch, yardmaster, 2 engines). Verify tmux session exists. Verify engines registered in Dolt. Verify ry status shows all components. ry stop kills session and updates engine statuses to dead. Verify no orphaned processes (ps check)." \
+  -d "Test: ry start --engines 2 creates tmux session with 4 panes (dispatch, yardmaster, 2 engines). Verify tmux session exists. Verify engines registered in MySQL. Verify ry status shows all components. ry stop kills session and updates engine statuses to dead. Verify no orphaned processes (ps check)." \
   --acceptance "Full lifecycle tested. Tmux session verified. Engine registration verified. Clean shutdown verified. No orphans. >90% coverage.")
 echo "    T7.3.1: $T7_3_1"
 

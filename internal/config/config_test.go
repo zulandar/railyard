@@ -1131,7 +1131,7 @@ func TestParse_TLSConfig_Full(t *testing.T) {
 owner: alice
 repo: git@github.com:org/app.git
 database:
-  host: dolt.k8s.internal
+  host: db.k8s.internal
   port: 3306
   tls:
     enabled: true

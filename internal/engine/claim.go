@@ -18,7 +18,7 @@ const claimMaxRetries = 3
 // and assigns it to the engine. It uses SELECT ... FOR UPDATE SKIP LOCKED for
 // concurrency safety.
 //
-// Dolt does not fully support row-level SKIP LOCKED and falls back to
+// MySQL does not fully support row-level SKIP LOCKED and falls back to
 // transaction serialization. When two engines race for the same car, the loser
 // gets Error 1213 (serialization failure). We retry with jittered backoff.
 func ClaimCar(db *gorm.DB, engineID, track string) (*models.Car, error) {
@@ -97,7 +97,7 @@ func ClaimCar(db *gorm.DB, engineID, track string) (*models.Car, error) {
 	return nil, fmt.Errorf("engine: claim failed after %d retries: %w", claimMaxRetries, lastErr)
 }
 
-// isSerializationError checks if an error is a MySQL/Dolt serialization failure
+// isSerializationError checks if an error is a MySQL serialization failure
 // (Error 1213) or deadlock that should be retried.
 func isSerializationError(err error) bool {
 	if err == nil {

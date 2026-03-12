@@ -167,7 +167,7 @@ func runDBReset(cmd *cobra.Command, configPath, dbName string, skipConfirm bool)
 		}
 	}
 
-	// Connect to Dolt admin.
+	// Connect to database admin.
 	host := "127.0.0.1"
 	port := 3306
 	username := "root"

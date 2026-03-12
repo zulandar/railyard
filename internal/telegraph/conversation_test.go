@@ -380,7 +380,7 @@ func TestLoadHistory_IsolatedSessions(t *testing.T) {
 // RecoverFromThread tests
 // ---------------------------------------------------------------------------
 
-func TestRecoverFromThread_DoltPrimary(t *testing.T) {
+func TestRecoverFromThread_DBPrimary(t *testing.T) {
 	db := openConvTestDB(t)
 	cs, _ := NewConversationStore(ConversationStoreOpts{DB: db})
 	session := createTestSession(t, db, "C01", "thread-1")
@@ -412,7 +412,7 @@ func TestRecoverFromThread_AdapterFallback(t *testing.T) {
 
 	cs, _ := NewConversationStore(ConversationStoreOpts{DB: db, Adapter: adapter})
 
-	// No Dolt records — should fall back to adapter.
+	// No database records — should fall back to adapter.
 	convos, err := cs.RecoverFromThread(context.Background(), "C01", "thread-1")
 	if err != nil {
 		t.Fatalf("RecoverFromThread: %v", err)

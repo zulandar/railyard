@@ -1,2 +1,2 @@
-// Package db provides Dolt database connection and migration utilities.
+// Package db provides database connection and migration utilities.
 package db

@@ -20,7 +20,7 @@ This tutorial walks you through building a Todo List API using Railyard to orche
 Before starting, make sure you have:
 
 - **Railyard** installed (`ry` binary on your PATH) — see the [quickstart](../quickstart.sh) or [README](../README.md)
-- **Dolt** running on port 3306 (or whichever port you configured)
+- **MySQL** running on port 3306 (or whichever port you configured)
 - **Claude Code CLI** installed (`npm install -g @anthropic-ai/claude-code`)
 - **tmux** installed
 - Your language toolchain installed (Go, PHP, Node.js, etc.)
@@ -83,7 +83,7 @@ Pick the config for your language:
 owner: yourname
 repo: ~/projects/todo-app
 
-dolt:
+database:
   host: 127.0.0.1
   port: 3306
 
@@ -105,7 +105,7 @@ tracks:
 owner: yourname
 repo: ~/projects/todo-app
 
-dolt:
+database:
   host: 127.0.0.1
   port: 3306
 
@@ -127,7 +127,7 @@ tracks:
 owner: yourname
 repo: ~/projects/todo-app
 
-dolt:
+database:
   host: 127.0.0.1
   port: 3306
 
@@ -162,7 +162,7 @@ tracks:
 ry db init -c railyard.yaml
 ```
 
-This creates the Dolt database tables for your project. You only need to do this once.
+This creates the database tables for your project. You only need to do this once.
 
 Verify it worked:
 
@@ -392,13 +392,13 @@ If something isn't working, run the doctor:
 ry doctor -c railyard.yaml
 ```
 
-This checks prerequisites (Go, Dolt, tmux, Claude Code), validates your config, tests database connectivity, and verifies the git repo.
+This checks prerequisites (Go, MySQL, tmux, Claude Code), validates your config, tests database connectivity, and verifies the git repo.
 
 ### Common issues
 
 | Problem | Fix |
 |---|---|
-| Dolt not running after reboot | `ry db start -c railyard.yaml` |
+| Database not running after reboot | `ry db start -c railyard.yaml` |
 | Engine stuck / stalled | Yardmaster auto-detects stalls. Check `ry engine list` |
 | pgvector container not running | `docker compose -f docker/docker-compose.pgvector.yaml up -d` |
 | Python venv missing ensurepip | `sudo apt install python3.13-venv` or let `ry cocoindex init` auto-fallback |

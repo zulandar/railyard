@@ -101,7 +101,7 @@ func (w *Watcher) BuildWeeklyDigest() (*DetectedEvent, error) {
 	}, nil
 }
 
-// buildDailyReport queries Dolt for metrics within the given time range.
+// buildDailyReport queries the database for metrics within the given time range.
 func buildDailyReport(db *gorm.DB, since, until time.Time) (*DailyReport, error) {
 	report := &DailyReport{
 		PeriodStart: since,
@@ -160,7 +160,7 @@ func buildDailyReport(db *gorm.DB, since, until time.Time) (*DailyReport, error)
 	return report, nil
 }
 
-// buildWeeklyReport queries Dolt for metrics within the given time range.
+// buildWeeklyReport queries the database for metrics within the given time range.
 func buildWeeklyReport(db *gorm.DB, since, until time.Time) (*WeeklyReport, error) {
 	report := &WeeklyReport{
 		PeriodStart: since,
@@ -243,7 +243,7 @@ func buildTrackBreakdown(db *gorm.DB, since, until time.Time) []TrackDigest {
 		td.Open = int(open)
 
 		// Average completion time for cars completed in period.
-		// Computed in Go for portability across SQLite (tests) and MySQL/Dolt (production).
+		// Computed in Go for portability across SQLite (tests) and MySQL (production).
 		var completionRows []struct {
 			ClaimedAt   time.Time
 			CompletedAt time.Time
