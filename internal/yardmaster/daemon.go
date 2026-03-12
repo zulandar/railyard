@@ -1041,11 +1041,19 @@ func runPostMerge(db *gorm.DB, c models.Car, out io.Writer) {
 	if ubErr != nil {
 		log.Printf("unblock deps for %s: %v", c.ID, ubErr)
 	}
-	for _, u := range unblocked {
-		fmt.Fprintf(out, "Unblocked car %s (dependency %s merged)\n", u.ID, c.ID)
-		if u.Type == "epic" {
-			TryCloseEpic(db, u.ID)
+	if len(unblocked) > 0 {
+		titles := make([]string, len(unblocked))
+		for i, u := range unblocked {
+			titles[i] = u.ID
+			fmt.Fprintf(out, "Unblocked car %s (dependency %s merged)\n", u.ID, c.ID)
+			if u.Type == "epic" {
+				TryCloseEpic(db, u.ID)
+			}
 		}
+		messaging.Send(db, "yardmaster", "broadcast", "deps-unblocked",
+			fmt.Sprintf("Merged %s, unblocked: %s", c.ID, strings.Join(titles, ", ")),
+			messaging.SendOpts{CarID: c.ID},
+		)
 	}
 	if c.ParentID != nil && *c.ParentID != "" {
 		TryCloseEpic(db, *c.ParentID)
