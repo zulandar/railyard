@@ -2,7 +2,10 @@ package yardmaster
 
 import (
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestBuildEscalationPrompt_ContainsCarDetails(t *testing.T) {
@@ -142,5 +145,84 @@ func TestEscalateActions_Values(t *testing.T) {
 		if string(tt.action) != tt.want {
 			t.Errorf("action %q != %q", tt.action, tt.want)
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// EscalationTracker tests
+// ---------------------------------------------------------------------------
+
+func TestEscalationTracker_FirstCallAllowed(t *testing.T) {
+	et := NewEscalationTracker(10 * time.Minute)
+	if !et.ShouldEscalate("car-1") {
+		t.Error("first call to ShouldEscalate should return true")
+	}
+}
+
+func TestEscalationTracker_CooldownBlocks(t *testing.T) {
+	et := NewEscalationTracker(10 * time.Minute)
+	if !et.ShouldEscalate("car-1") {
+		t.Fatal("first call should return true")
+	}
+	if et.ShouldEscalate("car-1") {
+		t.Error("second call within cooldown should return false")
+	}
+}
+
+func TestEscalationTracker_CooldownExpires(t *testing.T) {
+	et := NewEscalationTracker(10 * time.Millisecond)
+	if !et.ShouldEscalate("car-1") {
+		t.Fatal("first call should return true")
+	}
+	time.Sleep(20 * time.Millisecond)
+	if !et.ShouldEscalate("car-1") {
+		t.Error("call after cooldown expiry should return true")
+	}
+}
+
+func TestEscalationTracker_DifferentCars(t *testing.T) {
+	et := NewEscalationTracker(10 * time.Minute)
+	if !et.ShouldEscalate("car-1") {
+		t.Fatal("car-1 first call should return true")
+	}
+	if !et.ShouldEscalate("car-2") {
+		t.Error("car-2 should be allowed even though car-1 is in cooldown")
+	}
+}
+
+func TestEscalationTracker_Reset(t *testing.T) {
+	et := NewEscalationTracker(10 * time.Minute)
+	if !et.ShouldEscalate("car-1") {
+		t.Fatal("first call should return true")
+	}
+	if et.ShouldEscalate("car-1") {
+		t.Fatal("second call within cooldown should return false")
+	}
+	et.Reset("car-1")
+	if !et.ShouldEscalate("car-1") {
+		t.Error("call after Reset should return true")
+	}
+}
+
+func TestEscalationTracker_ConcurrentAccess(t *testing.T) {
+	et := NewEscalationTracker(10 * time.Millisecond)
+	var wg sync.WaitGroup
+	var allowed atomic.Int64
+
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if et.ShouldEscalate("car-race") {
+				allowed.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+
+	// At least one goroutine should have been allowed; the exact count
+	// depends on timing but there must be no race detector failures.
+	if allowed.Load() < 1 {
+		t.Errorf("expected at least 1 allowed escalation, got %d", allowed.Load())
 	}
 }

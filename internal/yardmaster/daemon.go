@@ -83,6 +83,12 @@ func RunDaemon(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath,
 	var escWg sync.WaitGroup
 	defer escWg.Wait()
 
+	// Per-car escalation cooldown tracker.
+	escTracker := NewEscalationTracker(time.Duration(cfg.Stall.EscalationCooldownSec) * time.Second)
+
+	// Semaphore to limit concurrent escalation goroutines.
+	escSem := make(chan struct{}, cfg.Stall.MaxConcurrentEscalations)
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -93,7 +99,7 @@ func RunDaemon(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath,
 		}
 
 		// Phase 1: Process inbox.
-		draining, err := processInbox(ctx, db, cfg, configPath, repoDir, startedAt, &escWg, out)
+		draining, err := processInbox(ctx, db, cfg, configPath, repoDir, startedAt, &escWg, escTracker, escSem, out)
 		if err != nil {
 			log.Printf("yardmaster inbox error: %v", err)
 		}
@@ -108,7 +114,7 @@ func RunDaemon(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath,
 		}
 
 		// Phase 3: Handle completed cars.
-		if err := handleCompletedCars(ctx, db, cfg, repoDir, ymDir, &escWg, out); err != nil {
+		if err := handleCompletedCars(ctx, db, cfg, repoDir, ymDir, &escWg, escTracker, escSem, out); err != nil {
 			log.Printf("yardmaster completed cars error: %v", err)
 		}
 
@@ -180,7 +186,7 @@ func registerYardmaster(db *gorm.DB, providerName string) error {
 // Returns true if a drain message was received (yardmaster should shut down).
 // startedAt is when this yardmaster instance started; drain messages older than
 // this are stale leftovers from a previous shutdown and are silently acked.
-func processInbox(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath, repoDir string, startedAt time.Time, escWg *sync.WaitGroup, out io.Writer) (draining bool, err error) {
+func processInbox(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath, repoDir string, startedAt time.Time, escWg *sync.WaitGroup, escTracker *EscalationTracker, escSem chan struct{}, out io.Writer) (draining bool, err error) {
 	msgs, err := messaging.Inbox(db, YardmasterID)
 	if err != nil {
 		return false, err
@@ -217,8 +223,15 @@ func processInbox(ctx context.Context, db *gorm.DB, cfg *config.Config, configPa
 
 		case subject == "help" || subject == "stuck":
 			fmt.Fprintf(out, "Inbox: %s from %s (car %s) — escalating to agent\n", subject, msg.FromAgent, msg.CarID)
+			if escTracker != nil && !escTracker.ShouldEscalate(msg.CarID) {
+				fmt.Fprintf(out, "Car %s escalation skipped (cooldown active)\n", msg.CarID)
+				ackMsg(db, msg)
+				continue
+			}
+			escSem <- struct{}{} // acquire semaphore
 			escWg.Add(1)
 			go func(m models.Message) {
+				defer func() { <-escSem }() // release semaphore
 				defer escWg.Done()
 				result, escErr := EscalateToAgent(ctx, EscalateOpts{
 					CarID:        m.CarID,
@@ -337,7 +350,7 @@ func handleStaleEngines(db *gorm.DB, cfg *config.Config, configPath string, out 
 // Switch() marks cars as "merged" after successful merge, so they won't reappear.
 // ymDir is the yardmaster worktree where switch operations happen; repoDir is
 // the primary repo (used for engine worktree detachment).
-func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, repoDir, ymDir string, escWg *sync.WaitGroup, out io.Writer) error {
+func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, repoDir, ymDir string, escWg *sync.WaitGroup, escTracker *EscalationTracker, escSem chan struct{}, out io.Writer) error {
 	cars, err := car.List(db, car.ListFilters{Status: "done"})
 	if err != nil {
 		return err
@@ -439,7 +452,7 @@ func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, r
 			if result != nil {
 				conflictDetails = result.ConflictDetails
 			}
-			maybeSwitchEscalate(ctx, db, cfg, c.ID, failCategory, err, conflictDetails, escWg, out)
+			maybeSwitchEscalate(ctx, db, cfg, c.ID, failCategory, err, conflictDetails, escWg, escTracker, escSem, out)
 			continue
 		}
 
@@ -450,7 +463,7 @@ func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, r
 				note += "\n" + result.ConflictDetails
 			}
 			writeProgressNote(db, c.ID, YardmasterID, note)
-			maybeSwitchEscalate(ctx, db, cfg, c.ID, failCategory, result.Error, result.ConflictDetails, escWg, out)
+			maybeSwitchEscalate(ctx, db, cfg, c.ID, failCategory, result.Error, result.ConflictDetails, escWg, escTracker, escSem, out)
 		}
 
 		if result.PRCreated {
@@ -693,7 +706,7 @@ func switchFailureReason(cat SwitchFailureCategory) string {
 
 // maybeSwitchEscalate checks whether a car has exceeded the switch failure
 // threshold and, if so, escalates to Claude with the failure category.
-func maybeSwitchEscalate(ctx context.Context, db *gorm.DB, cfg *config.Config, carID string, cat SwitchFailureCategory, switchErr error, conflictDetails string, escWg *sync.WaitGroup, out io.Writer) {
+func maybeSwitchEscalate(ctx context.Context, db *gorm.DB, cfg *config.Config, carID string, cat SwitchFailureCategory, switchErr error, conflictDetails string, escWg *sync.WaitGroup, escTracker *EscalationTracker, escSem chan struct{}, out io.Writer) {
 	// Infrastructure failures escalate immediately — no threshold needed.
 	// The human message was already sent by Switch(); here we also escalate
 	// to Claude for a suggested action.
@@ -708,8 +721,10 @@ func maybeSwitchEscalate(ctx context.Context, db *gorm.DB, cfg *config.Config, c
 		}
 		fmt.Fprintf(out, "Car %s status → merge-failed\n", carID)
 
+		escSem <- struct{}{} // acquire semaphore
 		escWg.Add(1)
 		go func(carID, reason string) {
+			defer func() { <-escSem }() // release semaphore
 			defer escWg.Done()
 			res, escErr := EscalateToAgent(ctx, EscalateOpts{
 				CarID:        carID,
@@ -724,6 +739,11 @@ func maybeSwitchEscalate(ctx context.Context, db *gorm.DB, cfg *config.Config, c
 			}
 			handleEscalateResult(db, "", carID, res, out)
 		}(carID, reason)
+		return
+	}
+
+	if escTracker != nil && !escTracker.ShouldEscalate(carID) {
+		fmt.Fprintf(out, "Car %s escalation skipped (cooldown active)\n", carID)
 		return
 	}
 
@@ -747,8 +767,10 @@ func maybeSwitchEscalate(ctx context.Context, db *gorm.DB, cfg *config.Config, c
 	}
 	fmt.Fprintf(out, "Car %s status → merge-failed\n", carID)
 
+	escSem <- struct{}{} // acquire semaphore
 	escWg.Add(1)
 	go func(carID string, failCount int, reason string) {
+		defer func() { <-escSem }() // release semaphore
 		defer escWg.Done()
 		res, escErr := EscalateToAgent(ctx, EscalateOpts{
 			CarID:        carID,
