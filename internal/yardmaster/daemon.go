@@ -7,6 +7,8 @@ import (
 	"io"
 	"log"
 	"os/exec"
+	"runtime/debug"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -105,54 +107,99 @@ func RunDaemon(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath,
 		default:
 		}
 
-		hs.RecordPoll()
+		// Panic recovery: catch panics in the daemon loop body, log the
+		// stack trace, and continue the loop rather than crashing.
+		draining := func() (drain bool) {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("yardmaster: PANIC recovered: %v\n%s", r, debug.Stack())
+					fmt.Fprintf(out, "PANIC recovered in daemon loop: %v (continuing)\n", r)
+				}
+			}()
 
-		// Phase 1: Process inbox.
-		draining, err := processInbox(ctx, db, cfg, configPath, repoDir, startedAt, &escWg, escTracker, escSem, out)
-		if err != nil {
-			log.Printf("yardmaster inbox error: %v", err)
-		}
+			hs.RecordPoll()
+
+			// timePhase logs a warning when a phase exceeds 5 seconds.
+			timePhase := func(name string, fn func()) {
+				start := time.Now()
+				fn()
+				if elapsed := time.Since(start); elapsed > 5*time.Second {
+					log.Printf("yardmaster: WARN phase %s took %s", name, elapsed)
+					fmt.Fprintf(out, "WARN: phase %s took %s\n", name, elapsed)
+				}
+			}
+
+			// Phase 1: Process inbox.
+			var shouldDrain bool
+			timePhase("inbox", func() {
+				var pErr error
+				shouldDrain, pErr = processInbox(ctx, db, cfg, configPath, repoDir, startedAt, &escWg, escTracker, escSem, out)
+				if pErr != nil {
+					log.Printf("yardmaster inbox error: %v", pErr)
+				}
+			})
+			if shouldDrain {
+				return true
+			}
+
+			// Phase 2: Handle stale engines.
+			timePhase("stale-engines", func() {
+				if err := handleStaleEngines(db, cfg, configPath, out); err != nil {
+					log.Printf("yardmaster stale engines error: %v", err)
+				}
+			})
+
+			// Phase 3: Handle completed cars.
+			timePhase("completed-cars", func() {
+				if err := handleCompletedCars(ctx, db, cfg, repoDir, ymDir, &escWg, escTracker, escSem, out); err != nil {
+					log.Printf("yardmaster completed cars error: %v", err)
+				}
+			})
+
+			// Phase 4: Handle blocked cars (safety-net sweep).
+			timePhase("blocked-cars", func() {
+				if err := handleBlockedCars(db, out); err != nil {
+					log.Printf("yardmaster blocked cars error: %v", err)
+				}
+			})
+
+			// Phase 4b: Sweep open epics whose children may all be complete.
+			timePhase("sweep-epics", func() {
+				if err := sweepOpenEpics(db, out); err != nil {
+					log.Printf("yardmaster sweep open epics error: %v", err)
+				}
+			})
+
+			// Phase 5: Reconcile stale cars whose branches are already merged.
+			timePhase("reconcile", func() {
+				if err := reconcileStaleCars(db, repoDir, out); err != nil {
+					log.Printf("yardmaster reconcile error: %v", err)
+				}
+			})
+
+			// Phase 5b: Poll pr_open cars for GitHub review feedback.
+			timePhase("pr-review", func() {
+				if cfg.RequirePR {
+					prViewer := &ghPRViewer{repoDir: repoDir}
+					if err := handlePrOpenCars(db, prViewer, out); err != nil {
+						log.Printf("yardmaster pr review error: %v", err)
+					}
+				}
+			})
+
+			// Phase 6: Rebalance idle engines to busy tracks.
+			timePhase("rebalance", func() {
+				if err := rebalanceEngines(db, cfg, configPath, rbState, out); err != nil {
+					log.Printf("yardmaster rebalance error: %v", err)
+				}
+			})
+
+			return false
+		}()
+
 		if draining {
 			fmt.Fprintf(out, "Drain received, shutting down...\n")
 			return nil
-		}
-
-		// Phase 2: Handle stale engines.
-		if err := handleStaleEngines(db, cfg, configPath, out); err != nil {
-			log.Printf("yardmaster stale engines error: %v", err)
-		}
-
-		// Phase 3: Handle completed cars.
-		if err := handleCompletedCars(ctx, db, cfg, repoDir, ymDir, &escWg, escTracker, escSem, out); err != nil {
-			log.Printf("yardmaster completed cars error: %v", err)
-		}
-
-		// Phase 4: Handle blocked cars (safety-net sweep).
-		if err := handleBlockedCars(db, out); err != nil {
-			log.Printf("yardmaster blocked cars error: %v", err)
-		}
-
-		// Phase 4b: Sweep open epics whose children may all be complete.
-		if err := sweepOpenEpics(db, out); err != nil {
-			log.Printf("yardmaster sweep open epics error: %v", err)
-		}
-
-		// Phase 5: Reconcile stale cars whose branches are already merged.
-		if err := reconcileStaleCars(db, repoDir, out); err != nil {
-			log.Printf("yardmaster reconcile error: %v", err)
-		}
-
-		// Phase 5b: Poll pr_open cars for GitHub review feedback.
-		if cfg.RequirePR {
-			prViewer := &ghPRViewer{repoDir: repoDir}
-			if err := handlePrOpenCars(db, prViewer, out); err != nil {
-				log.Printf("yardmaster pr review error: %v", err)
-			}
-		}
-
-		// Phase 6: Rebalance idle engines to busy tracks.
-		if err := rebalanceEngines(db, cfg, configPath, rbState, out); err != nil {
-			log.Printf("yardmaster rebalance error: %v", err)
 		}
 
 		sleepWithContext(ctx, pollInterval)
@@ -200,6 +247,22 @@ func processInbox(ctx context.Context, db *gorm.DB, cfg *config.Config, configPa
 	if err != nil {
 		return false, err
 	}
+
+	// Deduplicate messages by (FromAgent, Subject, CarID). Ack duplicates
+	// without processing so repeated messages don't trigger duplicate work.
+	type dedupKey struct{ From, Subject, CarID string }
+	seen := make(map[dedupKey]bool, len(msgs))
+	deduped := msgs[:0]
+	for _, msg := range msgs {
+		key := dedupKey{msg.FromAgent, strings.ToLower(msg.Subject), msg.CarID}
+		if seen[key] {
+			ackMsg(db, msg)
+			continue
+		}
+		seen[key] = true
+		deduped = append(deduped, msg)
+	}
+	msgs = deduped
 
 	for _, msg := range msgs {
 		subject := strings.ToLower(msg.Subject)
@@ -318,7 +381,11 @@ func ackMsg(db *gorm.DB, msg models.Message) {
 // handleStaleEngines detects engines with stale heartbeats, reassigns their cars,
 // and restarts the engines.
 func handleStaleEngines(db *gorm.DB, cfg *config.Config, configPath string, out io.Writer) error {
-	stale, err := StaleEngines(db)
+	threshold := DefaultStaleThreshold
+	if cfg.Stall.StaleEngineThresholdSec > 0 {
+		threshold = time.Duration(cfg.Stall.StaleEngineThresholdSec) * time.Second
+	}
+	stale, err := CheckEngineHealth(db, threshold)
 	if err != nil {
 		return err
 	}
@@ -364,6 +431,14 @@ func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, r
 	if err != nil {
 		return err
 	}
+
+	// Sort by priority ASC (lower = higher priority), then CreatedAt ASC.
+	sort.Slice(cars, func(i, j int) bool {
+		if cars[i].Priority != cars[j].Priority {
+			return cars[i].Priority < cars[j].Priority
+		}
+		return cars[i].CreatedAt.Before(cars[j].CreatedAt)
+	})
 
 	for _, c := range cars {
 		// Epics are container cars — no engine ever commits to their branch.
