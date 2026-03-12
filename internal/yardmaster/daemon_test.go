@@ -1143,6 +1143,47 @@ func TestRunPostMerge_UnblocksAndClosesEpic(t *testing.T) {
 	}
 }
 
+func TestRunPostMerge_EmitsDepsUnblockedBroadcast(t *testing.T) {
+	db := testDB(t)
+
+	mergedCar := models.Car{ID: "car-bc1", Status: "merged", Track: "backend", Title: "Broadcast Car"}
+	db.Create(&mergedCar)
+
+	// Car B blocked by car-bc1.
+	db.Create(&models.Car{ID: "car-bc2", Status: "blocked", Track: "backend"})
+	db.Create(&models.CarDep{CarID: "car-bc2", BlockedBy: "car-bc1"})
+
+	var buf bytes.Buffer
+	runPostMerge(db, mergedCar, &buf)
+
+	// Verify the deps-unblocked broadcast message was sent.
+	var msg models.Message
+	db.Where("to_agent = ? AND subject = ? AND car_id = ?", "broadcast", "deps-unblocked", "car-bc1").First(&msg)
+	if msg.ID == 0 {
+		t.Fatal("expected deps-unblocked broadcast message")
+	}
+	if !strings.Contains(msg.Body, "car-bc2") {
+		t.Errorf("broadcast body = %q, want it to mention unblocked car ID", msg.Body)
+	}
+}
+
+func TestRunPostMerge_NoBroadcastWhenNoDeps(t *testing.T) {
+	db := testDB(t)
+
+	mergedCar := models.Car{ID: "car-bc3", Status: "merged", Track: "backend"}
+	db.Create(&mergedCar)
+
+	var buf bytes.Buffer
+	runPostMerge(db, mergedCar, &buf)
+
+	// No deps to unblock — no broadcast should be sent.
+	var count int64
+	db.Model(&models.Message{}).Where("subject = ? AND car_id = ?", "deps-unblocked", "car-bc3").Count(&count)
+	if count != 0 {
+		t.Errorf("expected no deps-unblocked broadcast, got %d", count)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Switch timeout wiring test (fix 2)
 // ---------------------------------------------------------------------------
