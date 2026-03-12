@@ -506,12 +506,13 @@ func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, r
 		}
 
 		result, err := Switch(db, c.ID, SwitchOpts{
-			RepoDir:        ymDir,
-			PrimaryRepoDir: repoDir,
-			BaseBranch:     baseBranch,
-			PreTestCommand: preTestCommand,
-			TestCommand:    testCommand,
-			RequirePR:      cfg.RequirePR,
+			RepoDir:          ymDir,
+			PrimaryRepoDir:   repoDir,
+			BaseBranch:       baseBranch,
+			PreTestCommand:   preTestCommand,
+			TestCommand:      testCommand,
+			RequirePR:        cfg.RequirePR,
+			SwitchTimeoutSec: cfg.Stall.SwitchTimeoutSec,
 		})
 
 		// Handle any failure — write a categorized progress note and check
@@ -689,7 +690,9 @@ func reconcileStaleCars(db *gorm.DB, repoDir string, out io.Writer) error {
 					"completed_at": now,
 				}).Error; err != nil {
 					log.Printf("reconcile car %s to merged: %v", c.ID, err)
+					continue
 				}
+				runPostMerge(db, c, out)
 			}
 		}
 	}
@@ -980,6 +983,7 @@ func handlePrOpenCars(db *gorm.DB, viewer PRViewer, autoMerge bool, out io.Write
 				continue
 			}
 			fmt.Fprintf(out, "PR merged for car %s — status → merged\n", c.ID)
+			runPostMerge(db, c, out)
 
 		case status.State == "CLOSED":
 			if err := db.Model(&models.Car{}).Where("id = ?", c.ID).Update("status", "cancelled").Error; err != nil {
@@ -1003,19 +1007,7 @@ func handlePrOpenCars(db *gorm.DB, viewer PRViewer, autoMerge bool, out io.Write
 				continue
 			}
 			fmt.Fprintf(out, "PR approved and auto-merged for car %s\n", c.ID)
-
-			unblocked, ubErr := UnblockDeps(db, c.ID)
-			if ubErr != nil {
-				log.Printf("unblock deps for %s: %v", c.ID, ubErr)
-			}
-			for _, u := range unblocked {
-				if u.Type == "epic" {
-					TryCloseEpic(db, u.ID)
-				}
-			}
-			if c.ParentID != nil && *c.ParentID != "" {
-				TryCloseEpic(db, *c.ParentID)
-			}
+			runPostMerge(db, c, out)
 
 		case status.ReviewDecision == "CHANGES_REQUESTED":
 			if err := db.Model(&models.Car{}).Where("id = ?", c.ID).Updates(map[string]interface{}{
@@ -1038,6 +1030,26 @@ func handlePrOpenCars(db *gorm.DB, viewer PRViewer, autoMerge bool, out io.Write
 	}
 
 	return nil
+}
+
+// runPostMerge performs dependency unblocking and parent epic closure after a
+// car is marked as merged. All merge paths (normal switch, auto-merge,
+// externally merged PR, reconciliation) should call this to ensure consistent
+// post-merge behavior.
+func runPostMerge(db *gorm.DB, c models.Car, out io.Writer) {
+	unblocked, ubErr := UnblockDeps(db, c.ID)
+	if ubErr != nil {
+		log.Printf("unblock deps for %s: %v", c.ID, ubErr)
+	}
+	for _, u := range unblocked {
+		fmt.Fprintf(out, "Unblocked car %s (dependency %s merged)\n", u.ID, c.ID)
+		if u.Type == "epic" {
+			TryCloseEpic(db, u.ID)
+		}
+	}
+	if c.ParentID != nil && *c.ParentID != "" {
+		TryCloseEpic(db, *c.ParentID)
+	}
 }
 
 // sleepWithContext sleeps for duration d, returning early if ctx is cancelled.

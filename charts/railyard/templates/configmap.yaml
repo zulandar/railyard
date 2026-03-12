@@ -53,6 +53,20 @@ data:
         {{- end }}
     {{- end }}
 
+    stall:
+      stdout_timeout_sec: {{ .Values.stall.stdoutTimeoutSec }}
+      repeated_error_max: {{ .Values.stall.repeatedErrorMax }}
+      max_clear_cycles: {{ .Values.stall.maxClearCycles }}
+      max_switch_failures: {{ .Values.stall.maxSwitchFailures }}
+      switch_timeout_sec: {{ .Values.stall.switchTimeoutSec }}
+      escalation_cooldown_sec: {{ .Values.stall.escalationCooldownSec }}
+      max_concurrent_escalations: {{ .Values.stall.maxConcurrentEscalations }}
+      stale_engine_threshold_sec: {{ .Values.stall.staleEngineThresholdSec }}
+
+    yardmaster:
+      health_port: {{ .Values.yardmaster.healthPort | default 8081 }}
+      auto_merge_on_approval: {{ .Values.yardmaster.autoMergeOnApproval | default false }}
+
     {{- if .Values.telegraph.enabled }}
     telegraph:
       platform: {{ .Values.telegraph.platform | quote }}
