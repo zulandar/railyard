@@ -12,7 +12,7 @@ repo: git@github.com:zulandar/railyard.git
 require_pr: true
 # branch_prefix defaults to ry/{owner} if omitted
 
-dolt:
+database:
   host: 127.0.0.1
   port: 3306
   # database defaults to railyard_{owner} if omitted
