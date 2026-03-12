@@ -299,10 +299,18 @@ func runDBStart(cmd *cobra.Command, configPath string) error {
 	exec.Command("docker", "rm", "-f", dbContainerName).Run()
 
 	// Start MySQL via Docker.
+	// When a password is configured, set MYSQL_ROOT_PASSWORD so the
+	// container's root account matches what the readiness check expects.
+	var mysqlEnv string
+	if cfg.Database.Password != "" {
+		mysqlEnv = "MYSQL_ROOT_PASSWORD=" + cfg.Database.Password
+	} else {
+		mysqlEnv = "MYSQL_ALLOW_EMPTY_PASSWORD=yes"
+	}
 	args := []string{
 		"run", "-d",
 		"--name", dbContainerName,
-		"-e", "MYSQL_ALLOW_EMPTY_PASSWORD=yes",
+		"-e", mysqlEnv,
 		"-p", fmt.Sprintf("%d:3306", port),
 		"-v", dataDir + ":/var/lib/mysql",
 		"mysql:8.0",

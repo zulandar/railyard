@@ -234,10 +234,18 @@ func ensureDBRunning(out io.Writer, host string, port int, username, password st
 	exec.Command("docker", "rm", "-f", containerName).Run()
 
 	// Start MySQL via Docker.
+	// When a password is provided, configure the container to use it;
+	// otherwise allow empty password for convenience in local dev.
+	var mysqlEnv string
+	if password != "" {
+		mysqlEnv = "MYSQL_ROOT_PASSWORD=" + password
+	} else {
+		mysqlEnv = "MYSQL_ALLOW_EMPTY_PASSWORD=yes"
+	}
 	args := []string{
 		"run", "-d",
 		"--name", containerName,
-		"-e", "MYSQL_ALLOW_EMPTY_PASSWORD=yes",
+		"-e", mysqlEnv,
 		"-p", fmt.Sprintf("%d:3306", port),
 		"-v", dataDir + ":/var/lib/mysql",
 		"mysql:8.0",
