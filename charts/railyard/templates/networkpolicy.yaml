@@ -1,22 +1,22 @@
 {{- if .Values.networkPolicy.enabled }}
 {{- $fullname := include "railyard.fullname" . }}
 # -----------------------------------------------------------------------
-# Dolt: accept connections from engine, dispatch, yardmaster, dashboard, bull
+# MySQL: accept connections from engine, dispatch, yardmaster, dashboard, bull
 # -----------------------------------------------------------------------
-{{- if .Values.dolt.internal }}
+{{- if .Values.database.internal }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: {{ $fullname }}-dolt
+  name: {{ $fullname }}-mysql
   labels:
     {{- include "railyard.labels" . | nindent 4 }}
-    app.kubernetes.io/component: dolt
+    app.kubernetes.io/component: mysql
 spec:
   podSelector:
     matchLabels:
       {{- include "railyard.selectorLabels" . | nindent 6 }}
-      app.kubernetes.io/component: dolt
+      app.kubernetes.io/component: mysql
   policyTypes:
     - Ingress
     - Egress
@@ -41,7 +41,7 @@ spec:
         {{- end }}
       ports:
         - protocol: TCP
-          port: {{ .Values.dolt.port }}
+          port: {{ .Values.database.port }}
   egress:
     {{- include "railyard.dnsEgress" . | nindent 4 }}
 {{- end }}
@@ -79,7 +79,7 @@ spec:
 {{- end }}
 
 # -----------------------------------------------------------------------
-# Dashboard: accept from ingress / configurable CIDR; egress to Dolt + DNS
+# Dashboard: accept from ingress / configurable CIDR; egress to MySQL + DNS
 # -----------------------------------------------------------------------
 ---
 apiVersion: networking.k8s.io/v1
@@ -111,19 +111,19 @@ spec:
         - protocol: TCP
           port: {{ .Values.dashboard.service.port }}
   egress:
-    {{- if .Values.dolt.internal }}
+    {{- if .Values.database.internal }}
     - to:
         - podSelector:
             matchLabels:
-              app.kubernetes.io/component: dolt
+              app.kubernetes.io/component: mysql
       ports:
         - protocol: TCP
-          port: {{ .Values.dolt.port }}
+          port: {{ .Values.database.port }}
     {{- end }}
     {{- include "railyard.dnsEgress" . | nindent 4 }}
 
 # -----------------------------------------------------------------------
-# Engine: egress to Dolt, pgvector, AI provider APIs (443), DNS
+# Engine: egress to MySQL, pgvector, AI provider APIs (443), DNS
 # -----------------------------------------------------------------------
 ---
 apiVersion: networking.k8s.io/v1
@@ -143,14 +143,14 @@ spec:
     - Egress
   ingress: []
   egress:
-    {{- if .Values.dolt.internal }}
+    {{- if .Values.database.internal }}
     - to:
         - podSelector:
             matchLabels:
-              app.kubernetes.io/component: dolt
+              app.kubernetes.io/component: mysql
       ports:
         - protocol: TCP
-          port: {{ .Values.dolt.port }}
+          port: {{ .Values.database.port }}
     {{- end }}
     {{- if .Values.pgvector.internal }}
     - to:
@@ -171,7 +171,7 @@ spec:
     {{- include "railyard.dnsEgress" . | nindent 4 }}
 
 # -----------------------------------------------------------------------
-# Dispatch: egress to Dolt + DNS only
+# Dispatch: egress to MySQL + DNS only
 # -----------------------------------------------------------------------
 ---
 apiVersion: networking.k8s.io/v1
@@ -191,19 +191,19 @@ spec:
     - Egress
   ingress: []
   egress:
-    {{- if .Values.dolt.internal }}
+    {{- if .Values.database.internal }}
     - to:
         - podSelector:
             matchLabels:
-              app.kubernetes.io/component: dolt
+              app.kubernetes.io/component: mysql
       ports:
         - protocol: TCP
-          port: {{ .Values.dolt.port }}
+          port: {{ .Values.database.port }}
     {{- end }}
     {{- include "railyard.dnsEgress" . | nindent 4 }}
 
 # -----------------------------------------------------------------------
-# Yardmaster: egress to Dolt + DNS only
+# Yardmaster: egress to MySQL + DNS only
 # -----------------------------------------------------------------------
 ---
 apiVersion: networking.k8s.io/v1
@@ -223,19 +223,19 @@ spec:
     - Egress
   ingress: []
   egress:
-    {{- if .Values.dolt.internal }}
+    {{- if .Values.database.internal }}
     - to:
         - podSelector:
             matchLabels:
-              app.kubernetes.io/component: dolt
+              app.kubernetes.io/component: mysql
       ports:
         - protocol: TCP
-          port: {{ .Values.dolt.port }}
+          port: {{ .Values.database.port }}
     {{- end }}
     {{- include "railyard.dnsEgress" . | nindent 4 }}
 
 # -----------------------------------------------------------------------
-# Bull (optional): egress to Dolt, GitHub API (443), DNS
+# Bull (optional): egress to MySQL, GitHub API (443), DNS
 # -----------------------------------------------------------------------
 {{- if .Values.bull.enabled }}
 ---
@@ -256,14 +256,14 @@ spec:
     - Egress
   ingress: []
   egress:
-    {{- if .Values.dolt.internal }}
+    {{- if .Values.database.internal }}
     - to:
         - podSelector:
             matchLabels:
-              app.kubernetes.io/component: dolt
+              app.kubernetes.io/component: mysql
       ports:
         - protocol: TCP
-          port: {{ .Values.dolt.port }}
+          port: {{ .Values.database.port }}
     {{- end }}
     - to:
         - ipBlock:
@@ -275,7 +275,7 @@ spec:
 {{- end }}
 
 # -----------------------------------------------------------------------
-# Telegraph (optional): egress to Dolt, Slack/Discord APIs (443), DNS
+# Telegraph (optional): egress to MySQL, Slack/Discord APIs (443), DNS
 # -----------------------------------------------------------------------
 {{- if .Values.telegraph.enabled }}
 ---
@@ -296,14 +296,14 @@ spec:
     - Egress
   ingress: []
   egress:
-    {{- if .Values.dolt.internal }}
+    {{- if .Values.database.internal }}
     - to:
         - podSelector:
             matchLabels:
-              app.kubernetes.io/component: dolt
+              app.kubernetes.io/component: mysql
       ports:
         - protocol: TCP
-          port: {{ .Values.dolt.port }}
+          port: {{ .Values.database.port }}
     {{- end }}
     - to:
         - ipBlock:

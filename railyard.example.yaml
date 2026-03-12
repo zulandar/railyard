@@ -67,10 +67,10 @@ repo: git@github.com:org/myproject.git
 # agent_provider: claude
 
 # ---------------------------------------------------------------------------
-# Dolt database connection (optional — defaults shown)
+# Database connection (optional — defaults shown)
 # ---------------------------------------------------------------------------
 
-# dolt:
+# database:
 #   host: 127.0.0.1
 #   port: 3306
 #   username: root                   # default: root
@@ -78,9 +78,9 @@ repo: git@github.com:org/myproject.git
 #   database: railyard_yourname      # default: railyard_{owner}
 #   tls:
 #     enabled: false
-#     ca_cert: /path/to/ca.pem         # or ${DOLT_TLS_CA_CERT}
-#     client_cert: /path/to/client.pem # or ${DOLT_TLS_CLIENT_CERT}
-#     client_key: /path/to/client-key.pem # or ${DOLT_TLS_CLIENT_KEY}
+#     ca_cert: /path/to/ca.pem         # or ${DB_TLS_CA_CERT}
+#     client_cert: /path/to/client.pem # or ${DB_TLS_CLIENT_CERT}
+#     client_key: /path/to/client-key.pem # or ${DB_TLS_CLIENT_KEY}
 #     skip_verify: false
 
 # ---------------------------------------------------------------------------

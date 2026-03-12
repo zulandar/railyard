@@ -260,7 +260,7 @@ func newOverlayGCCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "gc",
 		Short: "Clean up orphaned overlays for engines that no longer exist",
-		Long: `Cross-references overlay_meta in pgvector with the engines table in Dolt.
+		Long: `Cross-references overlay_meta in pgvector with the engines table in the database.
 Any overlay whose engine_id doesn't correspond to an active engine gets cleaned up.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Load(configPath)
@@ -294,7 +294,7 @@ func runOverlayGC(cmd *cobra.Command, cfg *config.Config, dryRun bool) error {
 		return nil
 	}
 
-	// Step 2: Get active engine IDs from Dolt.
+	// Step 2: Get active engine IDs from the database.
 	activeEngines, err := getActiveEngineIDs(cfg)
 	if err != nil {
 		return fmt.Errorf("query engines table: %w", err)
@@ -371,11 +371,11 @@ print(json.dumps([r[0] for r in rows]))
 	return ids, nil
 }
 
-// getActiveEngineIDs queries the Dolt engines table for active engine IDs.
+// getActiveEngineIDs queries the engines table for active engine IDs.
 func getActiveEngineIDs(cfg *config.Config) ([]string, error) {
-	gormDB, err := db.ConnectAdmin(cfg.Dolt.Host, cfg.Dolt.Port, cfg.Dolt.Username, cfg.Dolt.Password)
+	gormDB, err := db.ConnectAdmin(cfg.Database.Host, cfg.Database.Port, cfg.Database.Username, cfg.Database.Password)
 	if err != nil {
-		return nil, fmt.Errorf("connect to Dolt: %w", err)
+		return nil, fmt.Errorf("connect to database: %w", err)
 	}
 
 	sqlDB, err := gormDB.DB()
@@ -385,7 +385,7 @@ func getActiveEngineIDs(cfg *config.Config) ([]string, error) {
 	defer sqlDB.Close()
 
 	// Use the database for this owner.
-	if err := gormDB.Exec(fmt.Sprintf("USE `%s`", cfg.Dolt.Database)).Error; err != nil {
+	if err := gormDB.Exec(fmt.Sprintf("USE `%s`", cfg.Database.Database)).Error; err != nil {
 		return nil, fmt.Errorf("use database: %w", err)
 	}
 

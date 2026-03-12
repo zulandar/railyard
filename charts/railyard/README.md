@@ -48,18 +48,18 @@ helm install railyard ./charts/railyard \
 | `auth.copilot.token` | GitHub PAT for Copilot CLI (overrides `githubToken` for Copilot) | `""` |
 | `auth.apiKeyHelper` | Command for dynamic key rotation | `""` |
 
-### Dolt Database
+### Database (MySQL)
 
 | Value | Description | Default |
 |-------|-------------|---------|
-| `dolt.internal` | Deploy Dolt as a StatefulSet inside the cluster | `true` |
-| `dolt.host` | Dolt host (auto-derived when `internal=true`) | `""` |
-| `dolt.port` | Dolt port | `3306` |
-| `dolt.database` | Database name (defaults to `railyard_{project}`) | `""` |
-| `dolt.username` | Database username | `root` |
-| `dolt.password` | Database password | `""` |
-| `dolt.storage.size` | PVC size for internal Dolt | `10Gi` |
-| `dolt.storage.storageClass` | Storage class for internal Dolt | `""` |
+| `database.internal` | Deploy MySQL as a StatefulSet inside the cluster | `true` |
+| `database.host` | Database host (auto-derived when `internal=true`) | `""` |
+| `database.port` | Database port | `3306` |
+| `database.database` | Database name (defaults to `railyard_{project}`) | `""` |
+| `database.username` | Database username | `root` |
+| `database.password` | Database password | `""` |
+| `database.storage.size` | PVC size for internal MySQL | `10Gi` |
+| `database.storage.storageClass` | Storage class for internal MySQL | `""` |
 
 ### pgvector (PostgreSQL)
 
@@ -133,7 +133,7 @@ The `ci/` directory contains example values files for chart validation:
 | File | Description |
 |------|-------------|
 | `ci/test-values-minimal.yaml` | Bare minimum — git and auth only. Good for `helm template` smoke tests. |
-| `ci/test-values-external-db.yaml` | External databases with `dolt.internal=false` and `pgvector.internal=false`. |
+| `ci/test-values-external-db.yaml` | External databases with `database.internal=false` and `pgvector.internal=false`. |
 | `ci/test-values-full.yaml` | Full configuration — ingress, OAuth2 proxy, multiple tracks, Telegraph. |
 | `ci/test-values-copilot.yaml` | Copilot provider with dedicated auth token. Validates copilot token precedence. |
 
@@ -165,10 +165,10 @@ helm install railyard ./charts/railyard \
   --set git.owner=myorg \
   --set git.repo=git@github.com:myorg/myrepo.git \
   --set auth.apiKey=sk-ant-XXXX \
-  --set dolt.internal=false \
-  --set dolt.host=mysql.example.com \
-  --set dolt.database=railyard_prod \
-  --set dolt.password=secret \
+  --set database.internal=false \
+  --set database.host=mysql.example.com \
+  --set database.database=railyard_prod \
+  --set database.password=secret \
   --set pgvector.internal=false \
   --set pgvector.host=pgvector.example.com \
   --set pgvector.password=secret

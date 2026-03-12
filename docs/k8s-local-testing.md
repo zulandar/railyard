@@ -111,7 +111,7 @@ You should see something like:
 
 ```
 NAME                                    READY   STATUS    RESTARTS   AGE
-railyard-dolt-0                         1/1     Running   0          90s
+railyard-mysql-0                         1/1     Running   0          90s
 railyard-pgvector-0                     1/1     Running   0          90s
 railyard-dispatch-6b8f9c7d4-xxxxx       1/1     Running   0          90s
 railyard-yardmaster-5c4d8e9f1-xxxxx     1/1     Running   0          90s
@@ -131,7 +131,7 @@ Open [http://localhost:8080](http://localhost:8080) in your browser.
 
 ## 7. Test it out
 
-With the dashboard open, you can submit work through railyard's normal workflow. Use `ry` locally (pointed at the same Dolt instance via port-forward) or create cars directly through the dashboard.
+With the dashboard open, you can submit work through railyard's normal workflow. Use `ry` locally (pointed at the same MySQL instance via port-forward) or create cars directly through the dashboard.
 
 To verify engines are processing, check engine logs:
 
@@ -218,15 +218,15 @@ kubectl get hpa -n railyard
 
 The `TARGETS` column should show actual CPU values instead of `<unknown>`.
 
-### Dolt or pgvector CrashLoopBackOff
+### MySQL or pgvector CrashLoopBackOff
 
 **Cause:** Usually a storage issue on the minikube node.
 
 **Fix:** Check the pod logs and events:
 
 ```bash
-kubectl logs railyard-dolt-0 -n railyard
-kubectl describe pod railyard-dolt-0 -n railyard
+kubectl logs railyard-mysql-0 -n railyard
+kubectl describe pod railyard-mysql-0 -n railyard
 kubectl get pvc -n railyard
 ```
 

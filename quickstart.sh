@@ -4,7 +4,7 @@ set -euo pipefail
 # Railyard Quickstart — Fresh WSL Setup
 #
 # For a FRESH WSL container where you've cloned the repo.
-# Installs prerequisites, builds ry, starts Dolt, initializes the DB,
+# Installs prerequisites, builds ry, starts MySQL, initializes the DB,
 # optionally sets up pgvector for CocoIndex, and gets you ready to run `ry start`.
 #
 # Usage:
@@ -54,8 +54,8 @@ check_port_process() {
     fi
 }
 
-# Test that Dolt is actually query-ready, not just listening.
-check_dolt_ready() {
+# Test that MySQL is actually query-ready, not just listening.
+check_mysql_ready() {
     local host=$1 port=$2
     if command -v mysql &>/dev/null; then
         mysql -h "$host" -P "$port" -u root -e 'SELECT 1' &>/dev/null 2>&1
@@ -72,18 +72,18 @@ fi
 cd "${REPO_DIR}"
 
 # ─── Cleanup trap ───────────────────────────────────────────────────────────
-# If the script fails midway, stop any Dolt we started so it doesn't orphan.
+# If the script fails midway, stop any MySQL we started so it doesn't orphan.
 
 SCRIPT_SUCCESS=false
-DOLT_STARTED_BY_US=false
+MYSQL_STARTED_BY_US=false
 PGVECTOR_STARTED_BY_US=false
-DOLT_PORT=3306  # May be overridden later by port conflict detection.
+DB_PORT=3306  # May be overridden later by port conflict detection.
 
 cleanup() {
     if ! $SCRIPT_SUCCESS; then
-        if $DOLT_STARTED_BY_US; then
-            warn "Script failed — stopping Dolt server we started on port ${DOLT_PORT}..."
-            pkill -f "dolt sql-server.*--port ${DOLT_PORT}" 2>/dev/null || true
+        if $MYSQL_STARTED_BY_US; then
+            warn "Script failed — stopping MySQL container we started on port ${DB_PORT}..."
+            docker stop railyard-mysql 2>/dev/null || true
         fi
         if $PGVECTOR_STARTED_BY_US; then
             warn "Script failed — stopping pgvector container..."
@@ -103,7 +103,7 @@ echo ""
 
 info "Checking prerequisites..."
 
-# curl is needed to install Go and Dolt.
+# curl is needed to install Go.
 check_cmd curl || fail "curl is required but not found. Install: sudo apt-get install curl"
 
 if ! check_cmd go; then
@@ -122,12 +122,10 @@ if ! check_cmd go; then
 fi
 ok "Go $(go version | grep -oP '\d+\.\d+' | head -1)"
 
-if ! check_cmd dolt; then
-    warn "Dolt not found. Installing..."
-    sudo bash -c 'curl -L https://github.com/dolthub/dolt/releases/latest/download/install.sh | bash'
-    check_cmd dolt || fail "Dolt installation failed."
+if ! check_cmd docker; then
+    fail "Docker is required but not found. Install Docker: https://docs.docker.com/engine/install/"
 fi
-ok "Dolt $(dolt version 2>&1 | head -1)"
+ok "Docker $(docker --version 2>&1 | grep -oP '\d+\.\d+\.\d+' | head -1)"
 
 if ! check_cmd tmux; then
     warn "tmux not found. Installing..."
@@ -206,57 +204,61 @@ info "Running tests..."
 if go test ./... -count=1 -timeout 120s > /tmp/ry-test.txt 2>&1; then
     ok "All tests passed"
 else
-    warn "Some tests failed (may need Dolt running):"
+    warn "Some tests failed (may need MySQL running):"
     tail -10 /tmp/ry-test.txt
 fi
 
-# ─── Step 4: Setup Dolt ──────────────────────────────────────────────────────
+# ─── Step 4: Setup MySQL ──────────────────────────────────────────────────────
 
-DOLT_DATA="${HOME}/.railyard/dolt-data"
-info "Setting up Dolt at ${DOLT_DATA}..."
-mkdir -p "${DOLT_DATA}"
-if [ ! -d "${DOLT_DATA}/.dolt" ]; then
-    (cd "${DOLT_DATA}" && dolt init --name "railyard" --email "railyard@local")
-fi
+DB_DATA="${HOME}/.railyard/mysql-data"
+info "Setting up MySQL via Docker..."
+mkdir -p "${DB_DATA}"
 
-# Start Dolt if not already running.
-# Check for port conflicts — if something else (e.g. MySQL) occupies 3306, use 3307.
-DOLT_RUNNING=false
+# Start MySQL if not already running.
+# Check for port conflicts — if something else occupies 3306, use 3307.
+MYSQL_RUNNING=false
 
-if check_port 3306; then
-    # Something is on 3306 — check if it's actually Dolt.
-    if check_port_process 3306 "dolt"; then
-        DOLT_RUNNING=true
-    else
-        warn "Port 3306 is in use by another process (MySQL/MariaDB?)."
-        warn "Switching Dolt to port 3307."
-        DOLT_PORT=3307
-        if check_port 3307; then
-            if check_port_process 3307 "dolt"; then
-                DOLT_RUNNING=true
-            else
-                fail "Ports 3306 and 3307 are both in use by non-Dolt processes. Free one and retry."
-            fi
-        fi
+if docker inspect --format '{{.State.Running}}' railyard-mysql 2>/dev/null | grep -q "true"; then
+    RUNNING_PORT=$(docker inspect --format '{{(index (index .NetworkSettings.Ports "3306/tcp") 0).HostPort}}' railyard-mysql 2>/dev/null || echo "")
+    if [ -n "${RUNNING_PORT}" ]; then
+        DB_PORT="${RUNNING_PORT}"
+        MYSQL_RUNNING=true
     fi
 fi
 
-if ! $DOLT_RUNNING; then
-    info "Starting Dolt server on port ${DOLT_PORT}..."
+if ! $MYSQL_RUNNING; then
+    # Remove any stopped container with the same name.
+    docker rm -f railyard-mysql 2>/dev/null || true
+
+    if check_port 3306; then
+        warn "Port 3306 is in use by another process."
+        warn "Switching MySQL to port 3307."
+        DB_PORT=3307
+        if check_port 3307; then
+            fail "Ports 3306 and 3307 are both in use. Free one and retry."
+        fi
+    fi
+
+    info "Starting MySQL server on port ${DB_PORT}..."
     mkdir -p "${HOME}/.railyard"
-    (cd "${DOLT_DATA}" && nohup dolt sql-server --host 127.0.0.1 --port "${DOLT_PORT}" > "${HOME}/.railyard/dolt.log" 2>&1 &)
-    DOLT_STARTED_BY_US=true
+    docker run -d \
+        --name railyard-mysql \
+        -e MYSQL_ALLOW_EMPTY_PASSWORD=yes \
+        -p "${DB_PORT}:3306" \
+        -v "${DB_DATA}:/var/lib/mysql" \
+        mysql:8.0 > /dev/null 2>&1
+    MYSQL_STARTED_BY_US=true
     READY=false
-    for i in $(seq 1 20); do
-        if check_dolt_ready 127.0.0.1 "${DOLT_PORT}"; then
+    for i in $(seq 1 30); do
+        if check_mysql_ready 127.0.0.1 "${DB_PORT}"; then
             READY=true
             break
         fi
         sleep 1
     done
-    $READY || fail "Dolt failed to become ready on port ${DOLT_PORT}. Check ~/.railyard/dolt.log"
+    $READY || fail "MySQL failed to become ready on port ${DB_PORT}. Check: docker logs railyard-mysql"
 fi
-ok "Dolt server running and ready on port ${DOLT_PORT}"
+ok "MySQL server running and ready on port ${DB_PORT}"
 
 # ─── Step 5: Create railyard.yaml ─────────────────────────────────────────────
 
@@ -267,9 +269,9 @@ if [ ! -f railyard.yaml ]; then
 owner: ${OWNER}
 repo: ${REPO_DIR}
 
-dolt:
+database:
   host: 127.0.0.1
-  port: ${DOLT_PORT}
+  port: ${DB_PORT}
 
 tracks:
   - name: backend
@@ -475,8 +477,8 @@ echo ""
 echo "  # Stop"
 echo "  ry stop -c railyard.yaml"
 echo ""
-info "Dolt log: ~/.railyard/dolt.log"
-info "Stop Dolt: pkill -f 'dolt sql-server'"
+info "MySQL container: railyard-mysql (docker logs railyard-mysql)"
+info "Stop MySQL: docker stop railyard-mysql"
 if [ "${PGVECTOR_STATUS}" = "ready" ]; then
     echo ""
     info "pgvector: running on port ${PG_PORT} (container: railyard-pgvector)"
@@ -486,7 +488,7 @@ elif [ "${PGVECTOR_STATUS}" != "skipped" ]; then
     warn "pgvector: ${PGVECTOR_STATUS} — run 'ry cocoindex init' to set up"
 fi
 echo ""
-warn "NOTE: Dolt does not survive WSL/system reboots."
+warn "NOTE: The MySQL container does not auto-start after WSL/system reboots."
 echo "  After a reboot, restart it with:"
-echo "  ry db start -c railyard.yaml"
+echo "  docker start railyard-mysql"
 echo ""

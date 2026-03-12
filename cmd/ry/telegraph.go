@@ -105,9 +105,9 @@ func runTelegraphSessions(cmd *cobra.Command, configPath string, clear bool) err
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	gormDB, err := db.Connect(cfg.Dolt.Host, cfg.Dolt.Port, cfg.Dolt.Database, cfg.Dolt.Username, cfg.Dolt.Password)
+	gormDB, err := db.Connect(cfg.Database.Host, cfg.Database.Port, cfg.Database.Database, cfg.Database.Username, cfg.Database.Password)
 	if err != nil {
-		return fmt.Errorf("connect to %s: %w", cfg.Dolt.Database, err)
+		return fmt.Errorf("connect to %s: %w", cfg.Database.Database, err)
 	}
 
 	out := cmd.OutOrStdout()
@@ -166,9 +166,9 @@ func runTelegraphStart(cmd *cobra.Command, configPath string) error {
 		return fmt.Errorf("telegraph: no platform configured in %s (add telegraph.platform)", configPath)
 	}
 
-	gormDB, err := db.Connect(cfg.Dolt.Host, cfg.Dolt.Port, cfg.Dolt.Database, cfg.Dolt.Username, cfg.Dolt.Password)
+	gormDB, err := db.Connect(cfg.Database.Host, cfg.Database.Port, cfg.Database.Database, cfg.Database.Username, cfg.Database.Password)
 	if err != nil {
-		return fmt.Errorf("connect to %s: %w", cfg.Dolt.Database, err)
+		return fmt.Errorf("connect to %s: %w", cfg.Database.Database, err)
 	}
 
 	adapter, err := createAdapter(cfg)

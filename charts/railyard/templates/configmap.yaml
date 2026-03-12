@@ -14,16 +14,16 @@ data:
     default_branch: {{ .Values.git.defaultBranch | quote }}
     agent_provider: {{ .Values.engine.agentProvider | quote }}
 
-    dolt:
-      host: {{ include "railyard.doltHost" . | quote }}
-      port: {{ .Values.dolt.port }}
-      database: {{ include "railyard.doltDatabase" . | quote }}
-      username: {{ .Values.dolt.username | quote }}
-      password: ${DOLT_PASSWORD}
-      {{- if .Values.dolt.tls.enabled }}
+    database:
+      host: {{ include "railyard.dbHost" . | quote }}
+      port: {{ .Values.database.port }}
+      database: {{ include "railyard.dbDatabase" . | quote }}
+      username: {{ .Values.database.username | quote }}
+      password: ${DB_PASSWORD}
+      {{- if .Values.database.tls.enabled }}
       tls:
         enabled: true
-        skip_verify: {{ .Values.dolt.tls.skipVerify }}
+        skip_verify: {{ .Values.database.tls.skipVerify }}
       {{- end }}
 
     {{- if or .Values.pgvector.internal .Values.pgvector.host }}

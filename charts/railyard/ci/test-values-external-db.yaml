@@ -3,7 +3,7 @@ git:
   repo: git@github.com:test/repo.git
 auth:
   apiKey: test-key
-dolt:
+database:
   internal: false
   host: mysql.example.com
   database: railyard_test

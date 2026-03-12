@@ -19,46 +19,32 @@ import (
 	"gorm.io/gorm"
 )
 
-// testDoltServer manages a Dolt SQL server lifecycle for integration tests.
-type testDoltServer struct {
+// testDBServer manages a MySQL server lifecycle for integration tests.
+type testDBServer struct {
 	Port int
 	Dir  string
 	cmd  *exec.Cmd
 }
 
-func startDoltServer(t *testing.T) *testDoltServer {
+func startDBServer(t *testing.T) *testDBServer {
 	t.Helper()
 
 	dir := t.TempDir()
 
-	for _, kv := range [][2]string{
-		{"user.name", "Test Runner"},
-		{"user.email", "test@railyard.dev"},
-	} {
-		cfg := exec.Command("dolt", "config", "--global", "--add", kv[0], kv[1])
-		cfg.Dir = dir
-		cfg.CombinedOutput()
-	}
-
-	init := exec.Command("dolt", "init")
-	init.Dir = dir
-	if out, err := init.CombinedOutput(); err != nil {
-		t.Fatalf("dolt init: %s\n%s", err, out)
-	}
-
 	port := freePort(t)
 
-	cmd := exec.Command("dolt", "sql-server",
+	cmd := exec.Command("mysqld",
 		"--port", fmt.Sprintf("%d", port),
-		"--host", "127.0.0.1",
+		"--bind-address", "127.0.0.1",
+		"--datadir", dir,
 	)
 	cmd.Dir = dir
 
 	if err := cmd.Start(); err != nil {
-		t.Fatalf("dolt sql-server start: %v", err)
+		t.Fatalf("mysqld start: %v", err)
 	}
 
-	srv := &testDoltServer{Port: port, Dir: dir, cmd: cmd}
+	srv := &testDBServer{Port: port, Dir: dir, cmd: cmd}
 
 	t.Cleanup(func() {
 		srv.cmd.Process.Kill()
@@ -92,12 +78,12 @@ func waitForServer(t *testing.T, port int) {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	t.Fatalf("dolt sql-server not ready on port %d after 10s", port)
+	t.Fatalf("mysqld not ready on port %d after 10s", port)
 }
 
-func setupTestDB(t *testing.T, dbName string) *testDoltServer {
+func setupTestDB(t *testing.T, dbName string) *testDBServer {
 	t.Helper()
-	srv := startDoltServer(t)
+	srv := startDBServer(t)
 
 	adminDB, err := db.ConnectAdmin("127.0.0.1", srv.Port, "root", "")
 	if err != nil {
@@ -116,7 +102,7 @@ func setupTestDB(t *testing.T, dbName string) *testDoltServer {
 	return srv
 }
 
-func connectDB(t *testing.T, srv *testDoltServer, dbName string) *gorm.DB {
+func connectDB(t *testing.T, srv *testDBServer, dbName string) *gorm.DB {
 	t.Helper()
 	gormDB, err := db.Connect("127.0.0.1", srv.Port, dbName, "root", "")
 	if err != nil {

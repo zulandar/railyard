@@ -162,14 +162,14 @@ func TestDoctorCmd_RunsChecks(t *testing.T) {
 	cmd.SetArgs([]string{"doctor", "--config", writeTestConfig(t)})
 	err := cmd.Execute()
 	if err == nil {
-		t.Fatal("expected error from doctor (Dolt not running)")
+		t.Fatal("expected error from doctor (database not running)")
 	}
 	out := buf.String()
 	if !strings.Contains(out, "PASS") {
 		t.Errorf("expected output to contain PASS (config check), got: %s", out)
 	}
 	if !strings.Contains(out, "FAIL") {
-		t.Errorf("expected output to contain FAIL (Dolt checks), got: %s", out)
+		t.Errorf("expected output to contain FAIL (database checks), got: %s", out)
 	}
 }
 

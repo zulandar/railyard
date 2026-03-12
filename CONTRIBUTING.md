@@ -5,7 +5,7 @@ Thanks for your interest in contributing to Railyard! This guide covers everythi
 ## Prerequisites
 
 - **Go 1.25+**
-- **Dolt** — version-controlled SQL database ([install](https://docs.dolthub.com/introduction/installation))
+- **MySQL 8.0+** — SQL database
 - **tmux** — terminal multiplexer
 - **AI coding CLI** (at least one) — Claude Code (default): `npm install -g @anthropic-ai/claude-code`; alternatives: Codex, Gemini, OpenCode, Copilot (see README for install commands)
 - **Docker** (optional) — for pgvector/CocoIndex semantic search
@@ -26,7 +26,7 @@ cd railyard
 go build -o ry ./cmd/ry/
 ```
 
-3. Run the quickstart to set up Dolt and the database:
+3. Run the quickstart to set up MySQL and the database:
 
 ```bash
 ./quickstart.sh
@@ -47,7 +47,7 @@ cmd/ry/              CLI entry point (Cobra commands)
 internal/
   car/               Car CRUD, dependencies, ready detection
   config/            YAML config loading and validation
-  db/                Dolt/GORM connection and migrations
+  db/                MySQL/GORM connection and migrations
   dispatch/          Dispatch planner agent (decomposition)
   engine/            Engine daemon: claim, spawn, stall detection, outcomes, overlay
     providers/       AI CLI provider implementations (Claude, Codex, Gemini, OpenCode, Copilot)
@@ -145,10 +145,10 @@ go test -v -run TestClaimCar ./internal/engine/...
 
 ### Integration Tests
 
-Integration tests require a running Dolt instance and are tagged accordingly:
+Integration tests require a running MySQL instance and are tagged accordingly:
 
 ```bash
-# These run automatically if Dolt is available
+# These run automatically if MySQL is available
 go test ./... -count=1 -timeout 300s
 ```
 
@@ -176,7 +176,7 @@ Use [GitHub Issues](https://github.com/zulandar/railyard/issues) to report bugs 
 
 - Steps to reproduce (for bugs)
 - Expected vs actual behavior
-- Environment details (OS, Go version, Dolt version)
+- Environment details (OS, Go version, MySQL version)
 
 ## Architecture Overview
 
@@ -187,7 +187,7 @@ Railyard coordinates multiple AI coding agents:
 - **Yardmaster** — supervisor that monitors engines, runs tests, and merges completed work
 - **Telegraph** — chat bridge for Slack/Discord integration
 
-All state lives in **Dolt** (version-controlled MySQL). See [ARCHITECTURE.md](ARCHITECTURE.md) for details.
+All state lives in **MySQL**. See [ARCHITECTURE.md](ARCHITECTURE.md) for details.
 
 ## License
 

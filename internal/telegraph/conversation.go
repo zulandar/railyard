@@ -17,7 +17,7 @@ const (
 )
 
 // ConversationStore handles dual-write persistence and recovery of dispatch
-// conversation history. Every message is written to Dolt (primary) and
+// conversation history. Every message is written to the database (primary) and
 // optionally echoed to the chat platform via the adapter.
 type ConversationStore struct {
 	db                   *gorm.DB
@@ -56,7 +56,7 @@ func NewConversationStore(opts ConversationStoreOpts) (*ConversationStore, error
 }
 
 // WriteUserMessage records a user message in the conversation. It writes to
-// Dolt and, if an adapter is configured, sends the message text to the chat
+// the database and, if an adapter is configured, sends the message text to the chat
 // platform thread. Returns ErrMaxTurnsExceeded if the session has reached
 // the maximum number of turns.
 func (cs *ConversationStore) WriteUserMessage(ctx context.Context, sessionID uint, userName, text, platformMsgID string) error {
@@ -81,7 +81,7 @@ func (cs *ConversationStore) WriteUserMessage(ctx context.Context, sessionID uin
 	}
 
 	// Dual-write: echo to adapter if configured. This is best-effort — a
-	// failure here does not roll back the Dolt write.
+	// failure here does not roll back the database write.
 	if cs.adapter != nil {
 		session := cs.lookupSession(sessionID)
 		if session != nil {
@@ -97,7 +97,7 @@ func (cs *ConversationStore) WriteUserMessage(ctx context.Context, sessionID uin
 }
 
 // WriteAssistantMessage records an assistant response in the conversation.
-// It writes to Dolt and, if an adapter is configured, sends the response to
+// It writes to the database and, if an adapter is configured, sends the response to
 // the chat platform thread.
 func (cs *ConversationStore) WriteAssistantMessage(ctx context.Context, sessionID uint, text, platformMsgID string, carsReferenced []string) error {
 	seq, err := cs.nextSequence(sessionID)
@@ -153,7 +153,7 @@ func (cs *ConversationStore) LoadHistory(sessionID uint) ([]models.TelegraphConv
 }
 
 // RecoverFromThread retrieves conversation history for a thread/channel,
-// falling back to the adapter's ThreadHistory when no Dolt records exist.
+// falling back to the adapter's ThreadHistory when no database records exist.
 // Only sessions within the lookback window are included.
 func (cs *ConversationStore) RecoverFromThread(ctx context.Context, channelID, threadID string) ([]models.TelegraphConversation, error) {
 	cutoff := time.Now().AddDate(0, 0, -cs.recoveryLookbackDays)

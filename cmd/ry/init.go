@@ -196,75 +196,78 @@ func promptYesNo(in io.Reader, out io.Writer, question string, defaultYes bool) 
 	return defaultYes
 }
 
-// ensureDoltDataDir creates the Dolt data directory and initializes it
-// with `dolt init` if the .dolt subdirectory doesn't exist.
-func ensureDoltDataDir(dataDir string) error {
+// ensureDBDataDir creates the database data directory if it doesn't exist.
+func ensureDBDataDir(dataDir string) error {
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
-		return fmt.Errorf("create dolt data dir: %w", err)
-	}
-	dotDolt := filepath.Join(dataDir, ".dolt")
-	if _, err := os.Stat(dotDolt); err == nil {
-		return nil // already initialized
-	}
-	cmd := exec.Command("dolt", "init", "--name", "railyard", "--email", "railyard@local")
-	cmd.Dir = dataDir
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("dolt init: %s: %w", out, err)
+		return fmt.Errorf("create database data dir: %w", err)
 	}
 	return nil
 }
 
-// ensureDoltRunning checks if Dolt is reachable on host:port. If not, it
-// starts dolt sql-server in the background using ~/.railyard/dolt-data.
-func ensureDoltRunning(out io.Writer, host string, port int, username, password string) error {
-	// Check if already running.
+// containerName is the Docker container name used for the Railyard MySQL instance.
+const containerName = "railyard-mysql"
+
+// ensureDBRunning checks if the database is reachable on host:port. If not,
+// and the host is local, it starts a MySQL 8.0 Docker container. For remote
+// hosts, it returns an error without touching local containers.
+func ensureDBRunning(out io.Writer, host string, port int, username, password string) error {
+	// Only manage local Docker containers. For remote hosts, the user is
+	// responsible for ensuring the database is running.
+	if !isLocalHost(host) {
+		return fmt.Errorf("database host %s is not local — auto-provisioning only works for 127.0.0.1/localhost.\nEnsure the remote database at %s:%d is running, or use --skip-db", host, host, port)
+	}
+
+	// Local host: check if already running.
 	if _, err := db.ConnectAdmin(host, port, username, password); err == nil {
-		fmt.Fprintf(out, "Dolt is already running on %s:%d\n", host, port)
+		fmt.Fprintf(out, "Database is already running on %s:%d\n", host, port)
 		return nil
 	}
 
-	dataDir := os.ExpandEnv("${HOME}/.railyard/dolt-data")
-	fmt.Fprintf(out, "Setting up Dolt at %s...\n", dataDir)
+	dataDir := os.ExpandEnv("${HOME}/.railyard/mysql-data")
+	fmt.Fprintf(out, "Setting up database at %s...\n", dataDir)
 
-	if err := ensureDoltDataDir(dataDir); err != nil {
+	if err := ensureDBDataDir(dataDir); err != nil {
 		return err
 	}
 
-	// Start Dolt in the background.
-	logFile := os.ExpandEnv("${HOME}/.railyard/dolt.log")
-	doltCmd := exec.Command("dolt", "sql-server",
-		"--host", host,
-		"--port", fmt.Sprintf("%d", port),
-	)
-	doltCmd.Dir = dataDir
+	// Remove any stopped container with the same name to avoid conflicts.
+	exec.Command("docker", "rm", "-f", containerName).Run()
 
-	lf, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	// Start MySQL via Docker.
+	// When a password is provided, configure the container to use it;
+	// otherwise allow empty password for convenience in local dev.
+	var mysqlEnv string
+	if password != "" {
+		mysqlEnv = "MYSQL_ROOT_PASSWORD=" + password
+	} else {
+		mysqlEnv = "MYSQL_ALLOW_EMPTY_PASSWORD=yes"
+	}
+	args := []string{
+		"run", "-d",
+		"--name", containerName,
+		"-e", mysqlEnv,
+		"-p", fmt.Sprintf("%d:3306", port),
+		"-v", dataDir + ":/var/lib/mysql",
+		"mysql:8.0",
+	}
+	dbCmd := exec.Command("docker", args...)
+
+	cmdOut, err := dbCmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("open dolt log %s: %w", logFile, err)
+		return fmt.Errorf("start database container: %s: %w", strings.TrimSpace(string(cmdOut)), err)
 	}
-	doltCmd.Stdout = lf
-	doltCmd.Stderr = lf
 
-	if err := doltCmd.Start(); err != nil {
-		lf.Close()
-		return fmt.Errorf("start dolt: %w", err)
-	}
-	go func() {
-		doltCmd.Wait()
-		lf.Close()
-	}()
+	fmt.Fprintf(out, "Starting MySQL container on %s:%d...\n", host, port)
 
-	fmt.Fprintf(out, "Starting Dolt on %s:%d (PID %d)...\n", host, port, doltCmd.Process.Pid)
-
-	// Wait for readiness.
-	for i := range 20 {
+	// Wait for readiness (MySQL in Docker can take 15-30s on first init).
+	for i := range 60 {
 		time.Sleep(500 * time.Millisecond)
 		if _, err := db.ConnectAdmin(host, port, username, password); err == nil {
-			fmt.Fprintf(out, "Dolt is ready (took %dms)\n", (i+1)*500)
+			fmt.Fprintf(out, "Database is ready (took %dms)\n", (i+1)*500)
 			return nil
 		}
 	}
-	return fmt.Errorf("dolt did not become ready within 10s — check %s", logFile)
+	return fmt.Errorf("database did not become ready within 30s — check: docker logs %s", containerName)
 }
 
 // languagePreset returns a sensible default TrackConfig for a given language.
@@ -363,12 +366,12 @@ var configTemplate = template.Must(template.New("config").Funcs(template.FuncMap
 owner: {{ .Owner }}
 repo: {{ .Repo }}
 
-dolt:
-  host: {{ .DoltHost }}
-  port: {{ .DoltPort }}
-  username: {{ .DoltUser }}
-{{- if .DoltPassword }}
-  password: {{ .DoltPassword }}
+database:
+  host: {{ .DBHost }}
+  port: {{ .DBPort }}
+  username: {{ .DBUser }}
+{{- if .DBPassword }}
+  password: {{ .DBPassword }}
 {{- end }}
 
 tracks:
@@ -419,28 +422,28 @@ type telegraphTemplateData struct {
 
 // configTemplateData holds the values for rendering railyard.yaml.
 type configTemplateData struct {
-	Owner        string
-	Repo         string
-	DoltHost     string
-	DoltPort     int
-	DoltUser     string
-	DoltPassword string
-	Tracks       []config.TrackConfig
-	Telegraph    *telegraphTemplateData
+	Owner      string
+	Repo       string
+	DBHost     string
+	DBPort     int
+	DBUser     string
+	DBPassword string
+	Tracks     []config.TrackConfig
+	Telegraph  *telegraphTemplateData
 }
 
 // renderConfig generates a railyard.yaml string from the given parameters.
-func renderConfig(owner, repo, doltHost string, doltPort int, doltUser, doltPassword string, tracks []config.TrackConfig, tg *telegraphTemplateData) (string, error) {
+func renderConfig(owner, repo, dbHost string, dbPort int, dbUser, dbPassword string, tracks []config.TrackConfig, tg *telegraphTemplateData) (string, error) {
 	var buf bytes.Buffer
 	data := configTemplateData{
-		Owner:        owner,
-		Repo:         repo,
-		DoltHost:     doltHost,
-		DoltPort:     doltPort,
-		DoltUser:     doltUser,
-		DoltPassword: doltPassword,
-		Tracks:       tracks,
-		Telegraph:    tg,
+		Owner:      owner,
+		Repo:       repo,
+		DBHost:     dbHost,
+		DBPort:     dbPort,
+		DBUser:     dbUser,
+		DBPassword: dbPassword,
+		Tracks:     tracks,
+		Telegraph:  tg,
 	}
 	if err := configTemplate.Execute(&buf, data); err != nil {
 		return "", fmt.Errorf("render config: %w", err)
@@ -456,10 +459,10 @@ func newInitCmd() *cobra.Command {
 		skipDB        bool
 		skipCoco      bool
 		skipTelegraph bool
-		doltHost      string
-		doltPort      int
-		doltUser      string
-		doltPassword  string
+		dbHost        string
+		dbPort        int
+		dbUser        string
+		dbPassword    string
 	)
 
 	cmd := &cobra.Command{
@@ -467,30 +470,30 @@ func newInitCmd() *cobra.Command {
 		Short: "Initialize Railyard in this repository",
 		Long: `Initialize Railyard in this repository.
 
-Detects your repo's languages, generates railyard.yaml, starts Dolt,
-initializes the database, and optionally sets up CocoIndex semantic search
+Detects your repo's languages, generates railyard.yaml, starts the database,
+initializes tables, and optionally sets up CocoIndex semantic search
 and Telegraph chat bridge (Slack/Discord).
 
 Run this once in any git repository to get started with Railyard.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runInit(cmd, configPath, yes, skipDB, skipCoco, skipTelegraph, doltHost, doltPort, doltUser, doltPassword)
+			return runInit(cmd, configPath, yes, skipDB, skipCoco, skipTelegraph, dbHost, dbPort, dbUser, dbPassword)
 		},
 	}
 
 	cmd.Flags().StringVarP(&configPath, "config", "c", "railyard.yaml", "path to write the config file")
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "accept all defaults without prompting")
-	cmd.Flags().BoolVar(&skipDB, "skip-db", false, "skip Dolt startup and database initialization")
+	cmd.Flags().BoolVar(&skipDB, "skip-db", false, "skip database startup and initialization")
 	cmd.Flags().BoolVar(&skipCoco, "skip-cocoindex", false, "skip CocoIndex setup prompt")
 	cmd.Flags().BoolVar(&skipTelegraph, "skip-telegraph", false, "skip Telegraph chat bridge setup")
-	cmd.Flags().IntVarP(&doltPort, "port", "p", 3306, "Dolt SQL server port")
-	cmd.Flags().StringVarP(&doltHost, "host", "H", "127.0.0.1", "Dolt SQL server host address")
-	cmd.Flags().StringVarP(&doltUser, "user", "u", "root", "Dolt SQL server username")
-	cmd.Flags().StringVar(&doltPassword, "password", "", "Dolt SQL server password (or use ${ENV_VAR} in config)")
+	cmd.Flags().IntVarP(&dbPort, "port", "p", 3306, "database server port")
+	cmd.Flags().StringVarP(&dbHost, "host", "H", "127.0.0.1", "database server host address")
+	cmd.Flags().StringVarP(&dbUser, "user", "u", "root", "database server username")
+	cmd.Flags().StringVar(&dbPassword, "password", "", "database server password (or use ${ENV_VAR} in config)")
 	return cmd
 }
 
 // runInit is the main orchestrator for the "ry init" command.
-func runInit(cmd *cobra.Command, configPath string, yes, skipDB, skipCoco, skipTelegraph bool, doltHost string, doltPort int, doltUser, doltPassword string) error {
+func runInit(cmd *cobra.Command, configPath string, yes, skipDB, skipCoco, skipTelegraph bool, dbHost string, dbPort int, dbUser, dbPassword string) error {
 	out := cmd.OutOrStdout()
 	in := io.Reader(byteReader{cmd.InOrStdin()})
 
@@ -542,11 +545,11 @@ func runInit(cmd *cobra.Command, configPath string, yes, skipDB, skipCoco, skipT
 		fmt.Fprintln(out, "\nConfigure Railyard:")
 		owner = promptValue(in, out, "Owner", owner)
 		remote = promptValue(in, out, "Git remote URL", remote)
-		doltHost = promptValue(in, out, "Dolt host", doltHost)
-		doltUser = promptValue(in, out, "Dolt user", doltUser)
-		doltPassword = promptPassword(in, out, "Dolt password (empty for none)", doltPassword)
-		portStr := promptValue(in, out, "Dolt port", fmt.Sprintf("%d", doltPort))
-		if v, err := fmt.Sscanf(portStr, "%d", &doltPort); v != 1 || err != nil {
+		dbHost = promptValue(in, out, "Database host", dbHost)
+		dbUser = promptValue(in, out, "Database user", dbUser)
+		dbPassword = promptPassword(in, out, "Database password (empty for none)", dbPassword)
+		portStr := promptValue(in, out, "Database port", fmt.Sprintf("%d", dbPort))
+		if v, err := fmt.Sscanf(portStr, "%d", &dbPort); v != 1 || err != nil {
 			return fmt.Errorf("invalid port: %s", portStr)
 		}
 	}
@@ -616,7 +619,7 @@ func runInit(cmd *cobra.Command, configPath string, yes, skipDB, skipCoco, skipT
 	}
 
 	// Step 5: Render and write config.
-	yamlContent, err := renderConfig(owner, remote, doltHost, doltPort, doltUser, doltPassword, tracks, tg)
+	yamlContent, err := renderConfig(owner, remote, dbHost, dbPort, dbUser, dbPassword, tracks, tg)
 	if err != nil {
 		return err
 	}
@@ -646,10 +649,10 @@ func runInit(cmd *cobra.Command, configPath string, yes, skipDB, skipCoco, skipT
 		return nil
 	}
 
-	// Step 6: Ensure Dolt is running.
+	// Step 6: Ensure database is running.
 	fmt.Fprintln(out, "")
-	if err := ensureDoltRunning(out, doltHost, doltPort, doltUser, doltPassword); err != nil {
-		return fmt.Errorf("ensure dolt: %w", err)
+	if err := ensureDBRunning(out, dbHost, dbPort, dbUser, dbPassword); err != nil {
+		return fmt.Errorf("ensure database: %w", err)
 	}
 
 	// Step 7: Initialize the database.
@@ -659,18 +662,18 @@ func runInit(cmd *cobra.Command, configPath string, yes, skipDB, skipCoco, skipT
 		return fmt.Errorf("load generated config: %w", err)
 	}
 
-	adminDB, err := db.ConnectAdmin(cfg.Dolt.Host, cfg.Dolt.Port, cfg.Dolt.Username, cfg.Dolt.Password)
+	adminDB, err := db.ConnectAdmin(cfg.Database.Host, cfg.Database.Port, cfg.Database.Username, cfg.Database.Password)
 	if err != nil {
-		return fmt.Errorf("connect to Dolt: %w", err)
+		return fmt.Errorf("connect to database: %w", err)
 	}
-	if err := db.CreateDatabase(adminDB, cfg.Dolt.Database); err != nil {
+	if err := db.CreateDatabase(adminDB, cfg.Database.Database); err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "Database %s ready\n", cfg.Dolt.Database)
+	fmt.Fprintf(out, "Database %s ready\n", cfg.Database.Database)
 
-	gormDB, err := db.Connect(cfg.Dolt.Host, cfg.Dolt.Port, cfg.Dolt.Database, cfg.Dolt.Username, cfg.Dolt.Password)
+	gormDB, err := db.Connect(cfg.Database.Host, cfg.Database.Port, cfg.Database.Database, cfg.Database.Username, cfg.Database.Password)
 	if err != nil {
-		return fmt.Errorf("connect to %s: %w", cfg.Dolt.Database, err)
+		return fmt.Errorf("connect to %s: %w", cfg.Database.Database, err)
 	}
 
 	// Best-effort audit; do not fail init if audit logging fails.

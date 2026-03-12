@@ -4,7 +4,7 @@ set -euo pipefail
 # Railyard Quickstart Test — Isolated in /tmp
 #
 # Tests Railyard without modifying the source repo. Creates a fully isolated
-# environment at /tmp/railyard-test with its own Dolt server (port 3307),
+# environment at /tmp/railyard-test with its own MySQL container (port 3307),
 # dummy git repo, and sample cars.
 #
 # Run from the railyard source repo root:
@@ -14,9 +14,8 @@ set -euo pipefail
 #   /tmp/railyard-test/
 #     project/           — dummy git repo (engines work here)
 #       ry               — compiled binary
-#       railyard.yaml    — config (Dolt :3307, owner testuser)
-#     dolt-data/         — isolated Dolt database files
-#     dolt.log           — Dolt server log
+#       railyard.yaml    — config (MySQL :3307, owner testuser)
+#     mysql-data/        — isolated MySQL database files
 #     test-output.txt    — test results
 #
 # Clean up:
@@ -51,8 +50,8 @@ check_port() {
     fi
 }
 
-# Test that Dolt is actually query-ready, not just listening.
-check_dolt_ready() {
+# Test that MySQL is actually query-ready, not just listening.
+check_mysql_ready() {
     local host=$1 port=$2
     if command -v mysql &>/dev/null; then
         mysql -h "$host" -P "$port" -u root -e 'SELECT 1' &>/dev/null 2>&1
@@ -65,18 +64,19 @@ check_dolt_ready() {
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TEST_DIR="/tmp/railyard-test"
 PROJECT_DIR="${TEST_DIR}/project"
-DOLT_DATA="${TEST_DIR}/dolt-data"
-DOLT_PORT=3307
+DB_DATA="${TEST_DIR}/mysql-data"
+DB_PORT=3307
 
 # ─── Cleanup trap ───────────────────────────────────────────────────────────
 
 SCRIPT_SUCCESS=false
-DOLT_STARTED_BY_US=false
+MYSQL_STARTED_BY_US=false
 
 cleanup() {
-    if ! $SCRIPT_SUCCESS && $DOLT_STARTED_BY_US; then
-        warn "Script failed — stopping Dolt server we started on port ${DOLT_PORT}..."
-        pkill -f "dolt sql-server.*--port ${DOLT_PORT}" 2>/dev/null || true
+    if ! $SCRIPT_SUCCESS && $MYSQL_STARTED_BY_US; then
+        warn "Script failed — stopping MySQL container we started on port ${DB_PORT}..."
+        docker stop railyard-mysql-test 2>/dev/null || true
+        docker rm railyard-mysql-test 2>/dev/null || true
     fi
 }
 trap cleanup EXIT
@@ -87,11 +87,12 @@ if [ "${1:-}" = "--clean" ]; then
     info "Cleaning up test environment..."
     (cd "${PROJECT_DIR}" 2>/dev/null && "${PROJECT_DIR}/ry" stop -c railyard.yaml 2>/dev/null) || true
     tmux kill-session -t railyard 2>/dev/null || true
-    pkill -f "dolt sql-server.*--port ${DOLT_PORT}" 2>/dev/null || true
+    docker stop railyard-mysql-test 2>/dev/null || true
+    docker rm railyard-mysql-test 2>/dev/null || true
     sleep 1
     rm -rf "${TEST_DIR}"
     rm -f "${HOME}/.local/bin/ry"
-    ok "Cleaned: ${TEST_DIR} removed, ry unlinked, Dolt stopped."
+    ok "Cleaned: ${TEST_DIR} removed, ry unlinked, MySQL stopped."
     exit 0
 fi
 
@@ -106,16 +107,16 @@ echo "╚═══════════════════════�
 echo ""
 info "Source repo: ${REPO_DIR}"
 info "Test env:    ${TEST_DIR}"
-info "Dolt port:   ${DOLT_PORT} (isolated from default 3306)"
+info "MySQL port:  ${DB_PORT} (isolated from default 3306)"
 echo ""
 
 # ─── Step 1: Verify prerequisites ────────────────────────────────────────────
 
 info "Checking prerequisites..."
-check_cmd go   || fail "Go required. Install from https://go.dev/dl/"
-check_cmd dolt || fail "Dolt required. Install: sudo bash -c 'curl -L https://github.com/dolthub/dolt/releases/latest/download/install.sh | bash'"
-check_cmd tmux || fail "tmux required. Install: sudo apt install tmux"
-ok "go $(go version | grep -oP '\d+\.\d+' | head -1), dolt $(dolt version 2>&1 | grep -oP '\d+\.\d+\.\d+' | head -1), tmux $(tmux -V 2>&1 | grep -oP '[\d.]+')"
+check_cmd go     || fail "Go required. Install from https://go.dev/dl/"
+check_cmd docker || fail "Docker required. Install: https://docs.docker.com/engine/install/"
+check_cmd tmux   || fail "tmux required. Install: sudo apt install tmux"
+ok "go $(go version | grep -oP '\d+\.\d+' | head -1), docker $(docker --version 2>&1 | grep -oP '\d+\.\d+\.\d+' | head -1), tmux $(tmux -V 2>&1 | grep -oP '[\d.]+')"
 
 if check_cmd claude; then
     ok "Claude Code CLI found"
@@ -134,20 +135,18 @@ ok "Built ry"
 
 # ─── Step 3: Clean previous test env (if any) ────────────────────────────────
 
-if check_port "${DOLT_PORT}"; then
-    info "Stopping previous Dolt on port ${DOLT_PORT}..."
-    pkill -f "dolt sql-server.*--port ${DOLT_PORT}" 2>/dev/null || true
-    sleep 2
-fi
+# Remove any previous container (running or stopped) with the same name.
+docker rm -f railyard-mysql-test 2>/dev/null || true
+sleep 2
 tmux kill-session -t railyard 2>/dev/null || true
 
 # Remove old test dirs but keep the binary we just built.
-rm -rf "${PROJECT_DIR}" "${DOLT_DATA}" "${TEST_DIR}/dolt.log"
+rm -rf "${PROJECT_DIR}" "${DB_DATA}"
 
 # ─── Step 4: Create project directory ─────────────────────────────────────────
 
 info "Creating test project..."
-mkdir -p "${PROJECT_DIR}" "${DOLT_DATA}"
+mkdir -p "${PROJECT_DIR}" "${DB_DATA}"
 
 # Copy binary into project dir (engines run from here).
 cp "${TEST_DIR}/ry-binary" "${PROJECT_DIR}/ry"
@@ -177,9 +176,9 @@ cat > "${PROJECT_DIR}/railyard.yaml" <<EOF
 owner: testuser
 repo: ${PROJECT_DIR}
 
-dolt:
+database:
   host: 127.0.0.1
-  port: ${DOLT_PORT}
+  port: ${DB_PORT}
 
 stall:
   stdout_timeout_sec: 120
@@ -197,25 +196,27 @@ tracks:
 EOF
 ok "Config at ${PROJECT_DIR}/railyard.yaml"
 
-# ─── Step 6: Start Dolt ──────────────────────────────────────────────────────
+# ─── Step 6: Start MySQL ──────────────────────────────────────────────────────
 
-info "Initializing Dolt..."
-(cd "${DOLT_DATA}" && dolt init --name "railyard-test" --email "test@local" > /dev/null 2>&1)
-
-info "Starting Dolt server on port ${DOLT_PORT}..."
-(cd "${DOLT_DATA}" && nohup dolt sql-server --host 127.0.0.1 --port "${DOLT_PORT}" > "${TEST_DIR}/dolt.log" 2>&1 &)
-DOLT_STARTED_BY_US=true
+info "Starting MySQL server on port ${DB_PORT}..."
+docker run -d \
+    --name railyard-mysql-test \
+    -e MYSQL_ALLOW_EMPTY_PASSWORD=yes \
+    -p "${DB_PORT}:3306" \
+    -v "${DB_DATA}:/var/lib/mysql" \
+    mysql:8.0 > /dev/null 2>&1
+MYSQL_STARTED_BY_US=true
 
 READY=false
-for i in $(seq 1 20); do
-    if check_dolt_ready 127.0.0.1 "${DOLT_PORT}"; then
+for i in $(seq 1 30); do
+    if check_mysql_ready 127.0.0.1 "${DB_PORT}"; then
         READY=true
         break
     fi
     sleep 1
 done
-$READY || fail "Dolt failed to become ready. Check ${TEST_DIR}/dolt.log"
-ok "Dolt running and ready on port ${DOLT_PORT}"
+$READY || fail "MySQL failed to become ready. Check: docker logs railyard-mysql-test"
+ok "MySQL running and ready on port ${DB_PORT}"
 
 # ─── Step 7: Initialize database ─────────────────────────────────────────────
 

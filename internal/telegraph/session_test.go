@@ -448,7 +448,7 @@ func TestLookupThreadChannel_ReturnsMostRecent(t *testing.T) {
 // Resume tests
 // ---------------------------------------------------------------------------
 
-func TestResume_WithDoltHistory(t *testing.T) {
+func TestResume_WithDBHistory(t *testing.T) {
 	db := openSessionTestDB(t)
 	spawner := &mockSpawner{}
 	sm, _ := NewSessionManager(SessionManagerOpts{DB: db, Spawner: spawner})
@@ -519,7 +519,7 @@ func TestResume_WithAdapterFallback(t *testing.T) {
 		Adapter: adapter,
 	})
 
-	// No Dolt history — should fall back to adapter.
+	// No database history — should fall back to adapter.
 	newSession, err := sm.Resume(context.Background(), "C01", "thread-1", "alice", "pick up where we left off")
 	if err != nil {
 		t.Fatalf("Resume: %v", err)

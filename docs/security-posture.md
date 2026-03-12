@@ -2,7 +2,7 @@
 
 **Audience:** Security engineers, DevOps/SecOps, compliance reviewers (SOC 2, OWASP)
 **Last updated:** 2026-03-08
-**Scope:** Railyard — an AI agent orchestration platform that spawns, monitors, and coordinates coding agents (Claude, Codex, Gemini, OpenCode) against a Dolt database and optional pgvector instance.
+**Scope:** Railyard — an AI agent orchestration platform that spawns, monitors, and coordinates coding agents (Claude, Codex, Gemini, OpenCode) against a MySQL database and optional pgvector instance.
 
 ---
 
@@ -27,7 +27,7 @@ Controls provided by Railyard out of the box. Each control references the releva
 
 Railyard uses parameterized queries and identifier quoting across all database interactions to prevent SQL injection.
 
-**Go (Dolt/MySQL via GORM):**
+**Go (MySQL via GORM):**
 All database operations use GORM's parameterized query interface. No raw string interpolation is used in SQL statements. The `internal/db/` package handles all database connectivity.
 
 **Python (pgvector via psycopg2):**
@@ -137,7 +137,7 @@ Agent subprocesses are spawned with:
 
 **SOC 2:** CC7.2, CC7.3 (Monitoring and Detection)
 
-Every agent interaction is logged to the Dolt `agent_logs` table:
+Every agent interaction is logged to the `agent_logs` table:
 
 | Column | Content |
 |--------|---------|
@@ -148,7 +148,7 @@ Every agent interaction is logged to the Dolt `agent_logs` table:
 | `content` | Full text (redacted of credentials) |
 | `created_at` | Timestamp |
 
-Dolt's built-in version control provides git-like history for all data changes, giving inherent auditability of the log table itself.
+The database provides a persistent audit trail of all agent interactions.
 
 ### 1.8 OWASP Top 10 Regression Suite
 
@@ -221,12 +221,12 @@ The Helm chart includes optional NetworkPolicy resources gated by `networkPolicy
 
 | Source | Destination | Port | Purpose |
 |--------|-------------|------|---------|
-| Dashboard | Dolt | 3306 | Query operational data |
-| Engine | Dolt | 3306 | Read/write cars, logs |
+| Dashboard | MySQL | 3306 | Query operational data |
+| Engine | MySQL | 3306 | Read/write cars, logs |
 | Engine | AI Provider APIs | 443 | Outbound API calls |
 | Engine | pgvector | 5432 | Overlay reads/writes |
 | Configured CIDR / namespace | Dashboard | 8080 | User access |
-| Yardmaster | Dolt | 3306 | Health checks, rebalancing |
+| Yardmaster | MySQL | 3306 | Health checks, rebalancing |
 | All pods | kube-dns | 53 | DNS resolution |
 
 All other intra-namespace and cross-namespace traffic is blocked.
@@ -257,23 +257,23 @@ All other intra-namespace and cross-namespace traffic is blocked.
 
 **SOC 2:** CC6.1, CC6.7 | **Status:** Operator-configured
 
-Railyard stores data in Dolt (MySQL-compatible) and optionally pgvector (PostgreSQL). Neither database encrypts data at rest by default.
+Railyard stores data in MySQL and optionally pgvector (PostgreSQL). Neither database encrypts data at rest by default.
 
 **Required action:**
 
 - Enable volume encryption on the underlying storage (AWS EBS encryption, GCP PD encryption, Azure Disk encryption)
 - For managed database services, enable the provider's encryption-at-rest feature
-- Consider Dolt's built-in backup capabilities for encrypted offsite backups
+- Consider MySQL's built-in backup capabilities for encrypted offsite backups
 
 ### 2.5 Monitoring and Alerting
 
 **SOC 2:** CC7.2, CC7.3 | **Status:** Partially implemented
 
-Railyard writes agent logs to the Dolt `agent_logs` table and emits structured audit events for configuration changes.
+Railyard writes agent logs to the `agent_logs` table and emits structured audit events for configuration changes.
 
 **Implemented:**
 
-- **Audit event logging** (`internal/audit/`): Config load/reload, track seeding, config seeding, and credential status changes are recorded to the `audit_events` Dolt table and emitted as structured JSON to stderr for SIEM ingestion.
+- **Audit event logging** (`internal/audit/`): Config load/reload, track seeding, config seeding, and credential status changes are recorded to the `audit_events` table and emitted as structured JSON to stderr for SIEM ingestion.
   - Event types: `config.loaded`, `config.seed_tracks`, `config.seed_config`, `credentials.default_detected`
   - JSON output includes `"audit": true` marker for easy filtering
   - Each event captures: event_type, actor, resource, detail, timestamp
@@ -286,7 +286,7 @@ Railyard writes agent logs to the Dolt `agent_logs` table and emits structured a
    - Engine stall detection (agent subprocess timeouts)
    - Escalation events (yardmaster escalations indicate agent failures)
    - Failed database connections (may indicate credential issues)
-3. Use Dolt's `dolt log` and `dolt diff` commands for data-layer audit trails
+3. Use standard MySQL audit logging for data-layer audit trails
 
 ### 2.6 Dashboard Bind Address
 
@@ -310,7 +310,7 @@ Gaps documented honestly with their current status. Items marked **By Design** a
 |-----|--------|------------|----------|
 | No built-in dashboard authentication | By Design | Delegate to OAuth2 Proxy sidecar or ingress-level auth | N/A — see Section 2.1 |
 | No dashboard rate limiting | Roadmap | Network-level rate limiting via ingress controller | `railyard-uqy` |
-| No audit trail for config changes | Roadmap | Dolt version history provides partial coverage | `railyard-bsk` |
+| No audit trail for config changes | Roadmap | Database audit logging provides partial coverage | `railyard-bsk` |
 | No NetworkPolicy templates | Roadmap | Operator defines custom policies | `railyard-795` |
 | Dashboard binds to 0.0.0.0 | By Design | K8s pod networking isolates; local dev uses port-forward | N/A — see Section 2.6 |
 | No encryption at rest (application layer) | By Design | Delegated to infrastructure (volume encryption) | N/A — see Section 2.4 |
@@ -344,7 +344,7 @@ Gaps documented honestly with their current status. Items marked **By Design** a
 | A05: Security Misconfiguration | Tested (misconfig regression tests, safe defaults) | Section 1.8 |
 | A06: Vulnerable Components | CI lint gates, dependency scanning (operator responsibility) | N/A |
 | A07: Identification & Auth Failures | Tested (auth boundary documentation, credential handling) | Section 1.8 |
-| A08: Software & Data Integrity Failures | Dolt version control provides data integrity guarantees | Section 1.7 |
+| A08: Software & Data Integrity Failures | Database constraints and GORM migrations provide data integrity guarantees | Section 1.7 |
 | A09: Security Logging Failures | Mitigated (complete I/O logging, log redaction tests) | Section 1.7, 1.8 |
 | A10: Server-Side Request Forgery | Low risk (no user-controlled URL fetching) | N/A |
 

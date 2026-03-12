@@ -14,7 +14,7 @@
   <a href="https://github.com/zulandar/railyard/blob/main/LICENSE"><img src="https://img.shields.io/github/license/zulandar/railyard" alt="License"></a>
 </p>
 
-Multi-agent AI orchestration for coding. Railyard coordinates multiple AI coding agents (Claude Code, Codex, Gemini, OpenCode, Copilot) across tracks (backend, frontend, infra) with per-branch isolation, a version-controlled SQL database, semantic code search, and automated supervision.
+Multi-agent AI orchestration for coding. Railyard coordinates multiple AI coding agents (Claude Code, Codex, Gemini, OpenCode, Copilot) across tracks (backend, frontend, infra) with per-branch isolation, a MySQL database, semantic code search, and automated supervision.
 
 Each developer runs their own Railyard instance against the same repo. Agents work on isolated branches (`ry/{owner}/{track}/{car-id}`), and a supervisor (Yardmaster) handles merges, stall detection, and dependency management.
 
@@ -46,7 +46,7 @@ Each developer runs their own Railyard instance against the same repo. Agents wo
               ├────────────────────┘
               │
         ┌─────▼─────┐
-  ┌─────┤   Dolt DB  ├─────┐
+  ┌─────┤  MySQL DB  ├─────┐
   │     └─────┬─────┘     │
   │           │           │
 ┌─▼───────┐ ┌─▼───────┐ ┌─▼───────┐
@@ -61,7 +61,7 @@ Each developer runs their own Railyard instance against the same repo. Agents wo
       └───────────┘
 ```
 
-- **Dolt** (version-controlled MySQL) stores all state: cars, engine status, messages, logs
+- **MySQL** stores all state: cars, engine status, messages, logs
 - **pgvector** (PostgreSQL + vector extension) stores semantic code embeddings for search
 - **tmux** manages agent sessions — each engine, Dispatch, and Yardmaster runs in its own pane
 - **Engines** poll for ready cars, spawn AI coding CLI sessions with MCP-powered code search, and handle completion/stall outcomes
@@ -70,7 +70,7 @@ Each developer runs their own Railyard instance against the same repo. Agents wo
 ## Prerequisites
 
 - **Go 1.25+**
-- **Dolt** — version-controlled SQL database ([install](https://docs.dolthub.com/introduction/installation))
+- **MySQL 8.0+** — SQL database
 - **tmux** — terminal multiplexer
 - **AI coding CLI** (at least one):
   - Claude Code (default) — `npm install -g @anthropic-ai/claude-code`
@@ -84,7 +84,7 @@ Each developer runs their own Railyard instance against the same repo. Agents wo
 
 ## Quickstart
 
-The quickstart script handles everything: installing prerequisites, building the `ry` binary, starting Dolt, initializing the database, and optionally setting up pgvector for semantic code search.
+The quickstart script handles everything: installing prerequisites, building the `ry` binary, starting MySQL, initializing the database, and optionally setting up pgvector for semantic code search.
 
 ```bash
 git clone https://github.com/zulandar/railyard.git
@@ -105,14 +105,11 @@ If you prefer to set things up step by step:
 go build -o ry ./cmd/ry/
 ```
 
-**2. Start Dolt**
+**2. Start MySQL**
 
 ```bash
-mkdir -p ~/.railyard/dolt-data
-cd ~/.railyard/dolt-data
-dolt init --name "railyard" --email "railyard@local"
-dolt sql-server --host 127.0.0.1 --port 3306 &
-cd -
+# Start MySQL server (install via your package manager if not already installed)
+# Ensure it is listening on 127.0.0.1:3306
 ```
 
 **3. Configure**
@@ -130,7 +127,7 @@ Or create a `railyard.yaml` manually in your repo root:
 owner: yourname
 repo: git@github.com:org/repo.git
 
-dolt:
+mysql:
   host: 127.0.0.1
   port: 3306
 
@@ -152,7 +149,7 @@ See [`railyard.example.yaml`](railyard.example.yaml) for a fully documented temp
 ry db init -c railyard.yaml
 ```
 
-> **After a reboot:** Dolt doesn't survive WSL/system restarts. Run `ry db start -c railyard.yaml` to restart it.
+> **After a reboot:** MySQL doesn't survive WSL/system restarts. Run `ry db start -c railyard.yaml` to restart it.
 
 **5. (Optional) Set up semantic code search**
 
@@ -179,11 +176,11 @@ tmux attach -t railyard
 ### Setup
 
 ```bash
-ry init                                 # Interactive setup: detect languages, generate config, start Dolt
+ry init                                 # Interactive setup: detect languages, generate config, start MySQL
 ry init -c railyard.yaml --yes          # Non-interactive with all defaults
-ry init --skip-db --skip-cocoindex      # Skip Dolt and CocoIndex setup
-ry init -u myuser -p 3307              # Custom Dolt host/port/user
-ry init --password secret               # Set Dolt password
+ry init --skip-db --skip-cocoindex      # Skip MySQL and CocoIndex setup
+ry init -u myuser -p 3307              # Custom MySQL host/port/user
+ry init --password secret               # Set MySQL password
 ry migrate -c railyard.yaml             # Migrate existing repo to .railyard/ directory structure
 ```
 
@@ -403,7 +400,7 @@ agent_provider: claude                  # AI CLI provider (claude, codex, gemini
 # default_acceptance: "Tests pass, code reviewed"  # Default acceptance criteria for Dispatch
 # require_pr: true                      # Create draft PRs instead of direct merge to main
 
-dolt:
+mysql:
   host: 127.0.0.1
   port: 3306
   # database: railyard_alice            # Override default railyard_{owner}
@@ -451,7 +448,7 @@ tracks:
 4. If CocoIndex is configured, each engine gets an MCP server for semantic code search — the overlay index tracks files changed on the engine's branch so search results are always current
 5. When an agent finishes, it calls `ry complete` — the engine daemon picks up the next car
 6. **Yardmaster** monitors for stalls (no stdout, repeated errors, excessive /clear cycles), runs tests on completed branches, and merges them back to main via `ry switch`
-7. All state lives in Dolt — fully auditable with `dolt diff`, `dolt log`, and time-travel queries
+7. All state lives in MySQL — fully queryable and auditable
 
 ## CI/CD
 
@@ -474,7 +471,7 @@ cmd/ry/              CLI entry point (Cobra commands)
 internal/
   car/               Car CRUD, dependencies, ready detection
   config/            YAML config loading and validation
-  db/                Dolt/GORM connection and migrations
+  db/                MySQL/GORM connection and migrations
   dispatch/          Dispatch planner agent (decomposition)
   engine/            Engine daemon: claim, spawn, stall detection, outcomes, overlay
     providers/       AI CLI provider implementations (Claude, Codex, Gemini, OpenCode, Copilot)

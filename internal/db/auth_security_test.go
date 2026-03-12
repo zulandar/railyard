@@ -21,7 +21,7 @@ func TestConnect_DefaultCredentials_ShouldWork(t *testing.T) {
 	if fn == nil {
 		t.Fatal("Connect function is nil")
 	}
-	// We can't test an actual connection without a running Dolt server,
+	// We can't test an actual connection without a running database server,
 	// but we verify the function signature accepts empty password.
 }
 

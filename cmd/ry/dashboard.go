@@ -44,7 +44,7 @@ func newDashboardCmd() *cobra.Command {
 
 func runDashboard(cmd *cobra.Command, configPath string, port int, tlsCert, tlsKey string, rateLimitEnabled bool, rateLimitRPM int) error {
 	// Retry DB connection to tolerate the database starting up (e.g. in K8s
-	// where the dashboard pod may start before Dolt is ready).
+	// where the dashboard pod may start before the database is ready).
 	var gormDB *gorm.DB
 	const maxRetries = 30
 	for i := range maxRetries {

@@ -42,7 +42,7 @@ func AcquireLock(db *gorm.DB, source, userName, threadID, channelID string, time
 		}
 
 		// Check for an existing active session on this thread/channel.
-		// FOR UPDATE serializes concurrent checks on MySQL/Dolt (gap lock
+		// FOR UPDATE serializes concurrent checks on MySQL (gap lock
 		// prevents concurrent inserts). SQLite ignores the clause — its
 		// transaction serialization provides equivalent safety.
 		var existing models.DispatchSession

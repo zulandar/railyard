@@ -30,11 +30,11 @@ spec:
           command: ["ry"]
           args: ["telegraph", "start", "-c", "/etc/railyard/railyard.yaml"]
           env:
-            - name: DOLT_PASSWORD
+            - name: DB_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ include "railyard.fullname" . }}-db
-                  key: dolt-password
+                  key: db-password
             {{- include "railyard.authExtraEnv" . | nindent 12 }}
           envFrom:
             {{- include "railyard.authEnvFrom" . | nindent 12 }}

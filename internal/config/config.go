@@ -22,7 +22,7 @@ type Config struct {
 	DefaultBranch     string              `yaml:"default_branch"`
 	DefaultAcceptance string              `yaml:"default_acceptance"`
 	RequirePR         bool                `yaml:"require_pr"`
-	Dolt              DoltConfig          `yaml:"dolt"`
+	Database          DatabaseConfig      `yaml:"database"`
 	Stall             StallConfig         `yaml:"stall"`
 	Tracks            []TrackConfig       `yaml:"tracks"`
 	Notifications     NotificationsConfig `yaml:"notifications"`
@@ -85,8 +85,8 @@ type TLSConfig struct {
 	SkipVerify bool   `yaml:"skip_verify"`
 }
 
-// DoltConfig holds connection settings for the Dolt SQL server.
-type DoltConfig struct {
+// DatabaseConfig holds connection settings for the MySQL database server.
+type DatabaseConfig struct {
 	Host     string    `yaml:"host"`
 	Port     int       `yaml:"port"`
 	Database string    `yaml:"database"`
@@ -228,6 +228,11 @@ func Load(path string) (*Config, error) {
 
 // Parse unmarshals YAML bytes into a validated Config.
 func Parse(data []byte) (*Config, error) {
+	// Detect deprecated 'dolt:' key from pre-rename configs.
+	if err := checkDeprecatedKeys(data); err != nil {
+		return nil, err
+	}
+
 	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("config: parse: %w", err)
@@ -239,6 +244,19 @@ func Parse(data []byte) (*Config, error) {
 	return &cfg, nil
 }
 
+// checkDeprecatedKeys inspects raw YAML for renamed top-level keys and
+// returns a helpful error if any are found.
+func checkDeprecatedKeys(data []byte) error {
+	var raw map[string]interface{}
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return nil // let the main unmarshal report the parse error
+	}
+	if _, ok := raw["dolt"]; ok {
+		return fmt.Errorf("config: the 'dolt' key has been renamed to 'database' — update your config file:\n\n  # Before\n  dolt:\n    host: ...\n\n  # After\n  database:\n    host: ...")
+	}
+	return nil
+}
+
 // applyDefaults fills in derived and default values.
 func (c *Config) applyDefaults() {
 	if c.BranchPrefix == "" {
@@ -248,23 +266,23 @@ func (c *Config) applyDefaults() {
 			c.BranchPrefix = "ry/" + c.Owner
 		}
 	}
-	if c.Dolt.Host == "" {
-		c.Dolt.Host = "127.0.0.1"
+	if c.Database.Host == "" {
+		c.Database.Host = "127.0.0.1"
 	}
-	if c.Dolt.Port == 0 {
-		c.Dolt.Port = 3306
+	if c.Database.Port == 0 {
+		c.Database.Port = 3306
 	}
-	if c.Dolt.Database == "" && c.Owner != "" {
-		c.Dolt.Database = "railyard_" + c.Owner
+	if c.Database.Database == "" && c.Owner != "" {
+		c.Database.Database = "railyard_" + c.Owner
 	}
-	if c.Dolt.Username == "" {
-		c.Dolt.Username = "root"
+	if c.Database.Username == "" {
+		c.Database.Username = "root"
 	}
-	c.Dolt.Username = resolveEnvVars(c.Dolt.Username)
-	c.Dolt.Password = resolveEnvVars(c.Dolt.Password)
-	c.Dolt.TLS.CACert = resolveEnvVars(c.Dolt.TLS.CACert)
-	c.Dolt.TLS.ClientCert = resolveEnvVars(c.Dolt.TLS.ClientCert)
-	c.Dolt.TLS.ClientKey = resolveEnvVars(c.Dolt.TLS.ClientKey)
+	c.Database.Username = resolveEnvVars(c.Database.Username)
+	c.Database.Password = resolveEnvVars(c.Database.Password)
+	c.Database.TLS.CACert = resolveEnvVars(c.Database.TLS.CACert)
+	c.Database.TLS.ClientCert = resolveEnvVars(c.Database.TLS.ClientCert)
+	c.Database.TLS.ClientKey = resolveEnvVars(c.Database.TLS.ClientKey)
 	if c.Stall.StdoutTimeoutSec == 0 {
 		c.Stall.StdoutTimeoutSec = 120
 	}

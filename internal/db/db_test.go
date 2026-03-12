@@ -33,10 +33,10 @@ func TestDSN(t *testing.T) {
 		},
 		{
 			name:     "production host",
-			host:     "dolt-server.vpc.internal",
+			host:     "db-server.vpc.internal",
 			port:     3306,
 			database: "railyard_carol",
-			want:     "root@tcp(dolt-server.vpc.internal:3306)/railyard_carol?parseTime=true",
+			want:     "root@tcp(db-server.vpc.internal:3306)/railyard_carol?parseTime=true",
 		},
 	}
 
@@ -86,8 +86,8 @@ func TestDSN_Format(t *testing.T) {
 	}
 }
 
-func TestConnect_RequiresDolt(t *testing.T) {
-	// Connect requires a running Dolt server; verify the function signature
+func TestConnect_RequiresDB(t *testing.T) {
+	// Connect requires a running database server; verify the function signature
 	// compiles and returns (*gorm.DB, error). Full integration tests are in
 	// the Foundation Test Suite (d88.5).
 	var fn func(string, int, string, string, string) (*gorm.DB, error) = Connect
@@ -96,14 +96,14 @@ func TestConnect_RequiresDolt(t *testing.T) {
 	}
 }
 
-func TestConnectAdmin_RequiresDolt(t *testing.T) {
+func TestConnectAdmin_RequiresDB(t *testing.T) {
 	var fn func(string, int, string, string) (*gorm.DB, error) = ConnectAdmin
 	if fn == nil {
 		t.Fatal("ConnectAdmin function is nil")
 	}
 }
 
-func TestCreateDatabase_RequiresDolt(t *testing.T) {
+func TestCreateDatabase_RequiresDB(t *testing.T) {
 	var fn func(*gorm.DB, string) error = CreateDatabase
 	if fn == nil {
 		t.Fatal("CreateDatabase function is nil")
@@ -249,7 +249,7 @@ func TestSanitizeDBError(t *testing.T) {
 }
 
 func TestDSNFromConfig_NoTLS(t *testing.T) {
-	cfg := config.DoltConfig{
+	cfg := config.DatabaseConfig{
 		Host:     "127.0.0.1",
 		Port:     3306,
 		Database: "railyard_alice",
@@ -263,7 +263,7 @@ func TestDSNFromConfig_NoTLS(t *testing.T) {
 }
 
 func TestDSNFromConfig_WithPassword(t *testing.T) {
-	cfg := config.DoltConfig{
+	cfg := config.DatabaseConfig{
 		Host:     "127.0.0.1",
 		Port:     3306,
 		Database: "mydb",
@@ -278,8 +278,8 @@ func TestDSNFromConfig_WithPassword(t *testing.T) {
 }
 
 func TestDSNFromConfig_WithTLS(t *testing.T) {
-	cfg := config.DoltConfig{
-		Host:     "dolt.k8s.internal",
+	cfg := config.DatabaseConfig{
+		Host:     "db.k8s.internal",
 		Port:     3306,
 		Database: "railyard_prod",
 		Username: "root",
@@ -297,7 +297,7 @@ func TestDSNFromConfig_WithTLS(t *testing.T) {
 }
 
 func TestDSNFromConfig_TLSDisabled_NoTLSParam(t *testing.T) {
-	cfg := config.DoltConfig{
+	cfg := config.DatabaseConfig{
 		Host:     "127.0.0.1",
 		Port:     3306,
 		Database: "mydb",
@@ -361,15 +361,15 @@ func TestRegisterTLS_BadClientCert(t *testing.T) {
 	}
 }
 
-func TestConnectWithConfig_RequiresDolt(t *testing.T) {
-	var fn func(config.DoltConfig) (*gorm.DB, error) = ConnectWithConfig
+func TestConnectWithConfig_RequiresDB(t *testing.T) {
+	var fn func(config.DatabaseConfig) (*gorm.DB, error) = ConnectWithConfig
 	if fn == nil {
 		t.Fatal("ConnectWithConfig function is nil")
 	}
 }
 
 func TestConnectWithConfig_Error(t *testing.T) {
-	cfg := config.DoltConfig{
+	cfg := config.DatabaseConfig{
 		Host:     "127.0.0.1",
 		Port:     1,
 		Database: "nonexistent",
@@ -388,7 +388,7 @@ func TestConnectWithConfig_TLSEnabled_RegistersBeforeOpen(t *testing.T) {
 	// With TLS enabled and SkipVerify, RegisterTLS should succeed.
 	// The connection will fail (no server) but the error should be a
 	// connection error, NOT "invalid value / unknown config name: custom".
-	cfg := config.DoltConfig{
+	cfg := config.DatabaseConfig{
 		Host:     "127.0.0.1",
 		Port:     1,
 		Database: "testdb",
@@ -412,7 +412,7 @@ func TestConnectWithConfig_TLSEnabled_RegistersBeforeOpen(t *testing.T) {
 }
 
 func TestConnectWithConfig_TLSBadCACert_ReturnsRegisterError(t *testing.T) {
-	cfg := config.DoltConfig{
+	cfg := config.DatabaseConfig{
 		Host:     "127.0.0.1",
 		Port:     3306,
 		Database: "testdb",

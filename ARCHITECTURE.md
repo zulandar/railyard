@@ -2,7 +2,7 @@
 
 ## Overview
 
-Railyard is a multi-agent AI orchestration system that coordinates coding agents across local machines and Kubernetes clusters. Multiple employees can each run their own Railyard instance against the **same repo**, working on separate branches. Uses Dolt (version-controlled SQL) for task state, GORM for all database access, and per-track isolation to prevent context contamination between domains.
+Railyard is a multi-agent AI orchestration system that coordinates coding agents across local machines and Kubernetes clusters. Multiple employees can each run their own Railyard instance against the **same repo**, working on separate branches. Uses MySQL for task state, GORM for all database access, and per-track isolation to prevent context contamination between domains.
 
 **Naming convention:**
 
@@ -35,25 +35,18 @@ Each railyard is fully independent (Phase 1). Phase 2 adds a shared merge queue 
 
 ## Core Components
 
-### 1. Dolt — Railyard Database
+### 1. MySQL — Railyard Database
 
-Dolt replaces Beads' git-backed JSONL with a proper SQL database that retains version control semantics. All database access goes through **GORM** (Go ORM, MySQL-compatible — native fit with Dolt).
-
-**Why Dolt over plain Postgres:**
-- `dolt diff` on any table shows exactly what changed and when — full audit trail
-- `dolt log` gives you commit history of orchestration state changes
-- `dolt revert` lets you undo bad state changes (e.g., accidental mass-close of cars)
-- Time-travel queries: `SELECT * FROM cars AS OF 'HEAD~5'` to debug what went wrong
-- Each railyard instance gets its own Dolt database — true isolation between employees
+MySQL provides the SQL database for all Railyard state. All database access goes through **GORM** (Go ORM, MySQL-compatible).
 
 **Database per railyard instance:**
-Each employee's Railyard gets its own Dolt database. In local dev, each person runs their own Dolt server. In production, a shared Dolt server hosts multiple databases.
+Each employee's Railyard gets its own MySQL database. In local dev, each person runs their own MySQL server. In production, a shared MySQL server hosts multiple databases.
 
 ```
 # Local (alice's machine, no project set)
 railyard_alice/          — alice's cars, messages, logs, config
 
-# Kubernetes (per-project namespace, each has its own Dolt)
+# Kubernetes (per-project namespace, each has its own MySQL)
 railyard_webapp/         — webapp project's railyard
 railyard_platform/       — platform project's railyard
 railyard_shared/         — shared config, merge queue (Phase 2)
@@ -82,7 +75,7 @@ This prevents branch collisions between projects and makes ownership instantly c
 
 ### 1.5. GORM — Database Access Layer
 
-All database access goes through GORM models. No raw SQL in application code (Dolt-specific queries like `dolt diff` use `db.Raw()` where needed).
+All database access goes through GORM models. No raw SQL in application code.
 
 ```go
 package models
@@ -261,12 +254,12 @@ import (
     "gorm.io/gorm"
 )
 
-// Connect opens a GORM connection to this railyard's Dolt database.
+// Connect opens a GORM connection to this railyard's MySQL database.
 func Connect(owner, host string, port int) (*gorm.DB, error) {
     dsn := fmt.Sprintf("root@tcp(%s:%d)/railyard_%s?parseTime=true", host, port, owner)
     db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
     if err != nil {
-        return nil, fmt.Errorf("dolt connect: %w", err)
+        return nil, fmt.Errorf("mysql connect: %w", err)
     }
     return db, nil
 }
@@ -289,7 +282,7 @@ func AutoMigrate(db *gorm.DB) error {
 
 ### 2. Schema
 
-Schema is defined by GORM models above (Section 1.5). GORM AutoMigrate creates all tables in Dolt. Key tables:
+Schema is defined by GORM models above (Section 1.5). GORM AutoMigrate creates all tables in MySQL. Key tables:
 
 | Table | Purpose |
 |---|---|
@@ -368,9 +361,9 @@ func ReadyCars(db *gorm.DB, track string) ([]models.Car, error) {
 
 ### Option A: Direct DB (Recommended to Start)
 
-Messages are just rows in the `messages` table. Engines poll on interval. Dolt doesn't support `LISTEN/NOTIFY` like Postgres, but polling every 5s is fine for this workload.
+Messages are just rows in the `messages` table. Engines poll on interval. MySQL doesn't support `LISTEN/NOTIFY` like Postgres, but polling every 5s is fine for this workload.
 
-**Pros:** No additional infrastructure. Full audit trail in Dolt (diffable, revertible). Works identically local and in VPC. Dead simple.
+**Pros:** No additional infrastructure. Full audit trail in MySQL. Works identically local and in VPC. Dead simple.
 
 **Cons:** Polling latency (5s). Won't scale past ~50 engines efficiently.
 
@@ -383,7 +376,7 @@ Engine loop:
 
 ### Option B: Kafka (When You Need Scale)
 
-Add Kafka when direct DB polling becomes a bottleneck. The Dolt messages table becomes the audit/persistence layer; Kafka handles real-time delivery.
+Add Kafka when direct DB polling becomes a bottleneck. The MySQL messages table becomes the audit/persistence layer; Kafka handles real-time delivery.
 
 ```
 Topic structure:
@@ -395,11 +388,11 @@ Topic structure:
   railyard.{project}.system.logs                      — centralized logging
 ```
 
-**Pattern:** Write to Kafka for real-time delivery, consumer writes to Dolt for persistence/audit. Engines consume from their owner+track topic only.
+**Pattern:** Write to Kafka for real-time delivery, consumer writes to MySQL for persistence/audit. Engines consume from their owner+track topic only.
 
 ### Recommendation
 
-Start with direct DB. It's simpler, fully auditable, and Dolt's versioning gives you things Kafka can't (time-travel debugging, diffing message state). Add Kafka later only if you hit polling latency issues with many engines.
+Start with direct DB. It's simpler, fully auditable, and sufficient for most workloads. Add Kafka later only if you hit polling latency issues with many engines.
 
 ---
 
@@ -407,19 +400,19 @@ Start with direct DB. It's simpler, fully auditable, and Dolt's versioning gives
 
 ### Local Development Mode
 
-Everything runs on your laptop. Your own Dolt instance, GORM handles schema, agents in tmux panes. `ry` is the Railyard CLI.
+Everything runs on your laptop. Your own MySQL instance, GORM handles schema, agents in tmux panes. `ry` is the Railyard CLI.
 
 ```
 ┌─ Alice's Machine ──────────────────────────────────┐
 │                                                      │
 │  tmux session: railyard                              │
 │  ┌──────────┬──────────┬───────────┬────────┐       │
-│  │ Dolt     │ Dispatch │ Yardmaster│ Engine │       │
+│  │ MySQL    │ Dispatch │ Yardmaster│ Engine │       │
 │  │ Server   │          │           │ (1..N) │       │
 │  │ :3306    │          │           │        │       │
 │  └──────────┴──────────┴───────────┴────────┘       │
 │                                                      │
-│  Dolt database: railyard_{owner}                     │
+│  MySQL database: railyard_{owner}                    │
 │  ┌──────────────────────────────────────────┐       │
 │  │ cars (track=backend | frontend | infra) │       │
 │  │ engines, messages, car_progress, ...    │       │
@@ -449,8 +442,8 @@ Everything runs on your laptop. Your own Dolt instance, GORM handles schema, age
 
 OWNER=$(yq '.owner' config.yaml)  # e.g., "alice"
 
-# 1. Start Dolt server
-dolt sql-server --host 127.0.0.1 --port 3306 &
+# 1. Start MySQL server
+# Ensure MySQL is running on 127.0.0.1:3306
 sleep 2
 
 # 2. Create database + run GORM AutoMigrate
@@ -494,7 +487,7 @@ tmux attach -t railyard
 
 ### Production Mode (Kubernetes)
 
-Shared infrastructure hosts multiple projects. Each project gets its own self-contained namespace with all components (Dolt, pgvector, engines, dispatch, yardmaster). Engines run as pods within the project namespace.
+Shared infrastructure hosts multiple projects. Each project gets its own self-contained namespace with all components (MySQL, pgvector, engines, dispatch, yardmaster). Engines run as pods within the project namespace.
 
 ```
 ┌─ Developer's Machine ──────────┐
@@ -508,7 +501,7 @@ Shared infrastructure hosts multiple projects. Each project gets its own self-co
 │  Namespace: railyard-webapp ─────────────────────────────┐   │
 │  │                                                       │   │
 │  │  ┌──────────────────────┐  ┌────────────────────┐     │   │
-│  │  │ StatefulSet: dolt    │  │ StatefulSet:       │     │   │
+│  │  │ StatefulSet: mysql   │  │ StatefulSet:       │     │   │
 │  │  │ :3306 (Service)      │  │ pgvector           │     │   │
 │  │  │                      │  │ :5432 (Service)    │     │   │
 │  │  │ DB: railyard_webapp  │  │ (per-track indexes)│     │   │
@@ -543,7 +536,7 @@ Shared infrastructure hosts multiple projects. Each project gets its own self-co
 └──────────────────────────────────────────────────────────────┘
 ```
 
-**Key difference from local:** Each project gets a self-contained Kubernetes namespace with its own Dolt, pgvector, and engine pods. Namespace is derived from the project name (`railyard-{project}`). Engines are ephemeral pods — they claim a car, do work, finish, and claim another. Scaling is handled by HPA or KEDA based on ready car counts.
+**Key difference from local:** Each project gets a self-contained Kubernetes namespace with its own MySQL, pgvector, and engine pods. Namespace is derived from the project name (`railyard-{project}`). Engines are ephemeral pods — they claim a car, do work, finish, and claim another. Scaling is handled by HPA or KEDA based on ready car counts.
 
 ---
 
@@ -555,7 +548,7 @@ The engine container image is the single deployable unit. It contains everything
 
 - AI coding CLI determined by the configured provider (Claude Code by default; see provider system below)
 - Git, configured with deploy keys (or credential helpers)
-- Dolt client (MySQL compatible)
+- MySQL client
 - Railyard CLI (`ry`)
 - Python 3.13+ and CocoIndex dependencies (for overlay builds)
 
@@ -582,8 +575,8 @@ repo: git@github.com:org/myapp.git   # shared repo
 branch_prefix: ry                    # auto-derived when project is set: branches are ry/{track}/{car_id}
 agent_provider: claude               # default provider for all tracks (claude|codex|gemini|opencode|copilot)
 
-dolt:
-  host: dolt.railyard-webapp.svc     # k8s Service DNS (per-project namespace)
+mysql:
+  host: mysql.railyard-webapp.svc     # k8s Service DNS (per-project namespace)
   port: 3306
   database: railyard_webapp           # can be auto-derived from project
 
@@ -628,7 +621,7 @@ tracks:
 
 ### Pod Lifecycle
 
-Engines are stateless pods. Each pod runs the engine daemon, which polls Dolt for work:
+Engines are stateless pods. Each pod runs the engine daemon, which polls MySQL for work:
 
 ```
 pod scheduled → init (clone repo) → running (claim → work → complete loop) → terminated
@@ -639,7 +632,7 @@ pod scheduled → init (clone repo) → running (claim → work → complete loo
 1. Clone repo (or pull from shared PVC cache)
 2. Configure git identity and credentials
 3. Write track-specific AGENTS.md
-4. Configure Dolt connection via environment variables
+4. Configure MySQL connection via environment variables
 ```
 
 **Engine container** runs the standard daemon loop:
@@ -667,7 +660,7 @@ spec:
   triggers:
     - type: mysql
       metadata:
-        host: dolt.railyard-webapp.svc
+        host: mysql.railyard-webapp.svc
         port: "3306"
         dbName: railyard_webapp
         query: >
@@ -717,8 +710,8 @@ kubectl exec -it -n railyard-webapp engine-backend-7f8d9-xk2p4 -- tmux attach -t
 # Or use the ry shorthand (wraps kubectl exec)
 ry engine attach eng-a1b2c
 
-# Port-forward to Dolt for direct queries
-kubectl port-forward -n railyard-webapp svc/dolt 3306:3306
+# Port-forward to MySQL for direct queries
+kubectl port-forward -n railyard-webapp svc/mysql 3306:3306
 
 # Force-reassign a car from a stuck engine
 ry car reassign car-a1b2c --from eng-a1b2c --reason "stuck on test failure"
@@ -765,7 +758,7 @@ Agent Session
     ├─ stdout/stderr captured by engine daemon
     │   └─ Piped to logging agent (local or pod sidecar)
     │       └─ Writes to local buffer (SQLite or file)
-    │           └─ Async ships to Dolt: agent_logs table
+    │           └─ Async ships to MySQL: agent_logs table
     │               └─ Or Kafka topic: orchestrator.system.logs
     │
     ├─ API calls intercepted by proxy (if using API directly)
@@ -780,8 +773,8 @@ Agent Session
 ```yaml
 logging:
   # dev: everything, verbose, to local terminal too
-  # staging: everything, to Dolt only
-  # prod: everything, to Dolt, with redaction of secrets
+  # staging: everything, to MySQL only
+  # prod: everything, to MySQL, with redaction of secrets
   mode: prod
   
   capture:
@@ -789,11 +782,11 @@ logging:
     agent_output: true       # full responses from model
     tool_calls: true         # MCP/tool invocations
     file_changes: true       # git diffs per commit
-    db_queries: true         # what SQL the engine ran against Dolt
+    db_queries: true         # what SQL the engine ran against MySQL
     system_events: true      # /clear, session start/stop, errors
     
   retention:
-    hot_days: 7              # in Dolt, full detail
+    hot_days: 7              # in MySQL, full detail
     warm_days: 30            # compressed, in S3/object store
     cold_days: 365           # summaries only
     
@@ -825,29 +818,20 @@ Each row captures one interaction cycle:
 }
 ```
 
-### Debugging with Dolt Time-Travel
+### Debugging with SQL Queries
 
-Because it's Dolt, you can replay exactly what happened:
+You can query MySQL to replay exactly what happened:
 
 ```sql
--- What was the car state when the engine claimed it?
-SELECT * FROM cars AS OF 'HASHOF(commit-when-claimed)' WHERE id = 'car-a1b2c';
-
 -- What messages did the engine receive during this session?
-SELECT * FROM messages 
-WHERE to_agent = 'vm-07-engine' 
+SELECT * FROM messages
+WHERE to_agent = 'vm-07-engine'
   AND created_at BETWEEN '2026-02-14 10:00:00' AND '2026-02-14 11:00:00';
-
--- Diff car state between engine claiming and completing
-SELECT * FROM dolt_diff_cars 
-WHERE to_commit = @done_commit 
-  AND from_commit = @claim_commit 
-  AND to_id = 'car-a1b2c';
 
 -- Full session replay: every log entry in order
 SELECT direction, LEFT(content, 200) as preview, token_count, latency_ms, tool_calls
-FROM agent_logs 
-WHERE session_id = 'sess-a8f3c' 
+FROM agent_logs
+WHERE session_id = 'sess-a8f3c'
 ORDER BY created_at;
 ```
 
@@ -868,7 +852,7 @@ This runs on every engine instance (tmux pane locally, pod in k8s). It's not an 
 │                                                  │
 │  Main Loop:                                      │
 │  ┌────────────────────────────────────────────┐ │
-│  │ 1. Poll Dolt for ready car (track-scoped)   │ │
+│  │ 1. Poll MySQL for ready car (track-scoped)  │ │
 │  │ 2. Claim car (atomic transaction)       │ │
 │  │ 3. Check for messages from Yardmaster      │ │
 │  │ 4. Render context payload:                 │ │
@@ -970,7 +954,7 @@ Branch: {car.branch}
 
 ### Railyard API (MCP Server or CLI Wrapper)
 
-The agent needs a way to interact with Dolt. Easiest: a small MCP server or CLI tool (`ry`) that wraps SQL calls.
+The agent needs a way to interact with MySQL. Easiest: a small MCP server or CLI tool (`ry`) that wraps SQL calls.
 
 ```
 ry claim(track)              → claims next ready car
@@ -1082,7 +1066,7 @@ Everything on one box. CPU-only embedding is fine for small repos (<50k LOC). Th
 │  Postgres + pgvector    (:5432)                  │
 │  CocoIndex server       (indexing + query)       │
 │  cocoindex-mcp server   (:8080, MCP protocol)   │
-│  Dolt server            (:3306)                  │
+│  MySQL server           (:3306)                  │
 │  Engines (tmux)                                  │
 │                                                  │
 └──────────────────────────────────────────────────┘
@@ -1099,7 +1083,7 @@ Split indexing and query. The GPU box handles the heavy embedding work. Query ca
 │  │ GPU Pod / Job       │   │ Namespace: railyard-{project}  │  │
 │  │ (e.g., GPU node)    │   │                              │  │
 │  │                     │   │  StatefulSet: pgvector(:5432) │  │
-│  │  CocoIndex Indexer  │──▶│  StatefulSet: dolt   (:3306) │  │
+│  │  CocoIndex Indexer  │──▶│  StatefulSet: mysql  (:3306) │  │
 │  │  (writes embeddings │   │  Deployment: cocoindex-mcp   │  │
 │  │   to pgvector)      │   │             (:8080)          │  │
 │  │                     │   │                              │  │
@@ -1525,7 +1509,7 @@ ry overlay cleanup --engine <id>   # Drop overlay table + metadata
 ry overlay gc                      # Clean up orphaned overlays (cross-ref with engines table)
 ```
 
-`ry overlay gc` cross-references `overlay_meta` with the engines table in Dolt. Any overlay whose `engine_id` doesn't correspond to an active engine gets cleaned up.
+`ry overlay gc` cross-references `overlay_meta` with the engines table in MySQL. Any overlay whose `engine_id` doesn't correspond to an active engine gets cleaned up.
 
 #### Implementation Phases
 
@@ -1665,8 +1649,8 @@ The same config.yaml, GORM models, and `ry` CLI work in both modes. The only dif
 
 | Aspect | Local | Kubernetes |
 |--------|-------|-----------|
-| Dolt server | localhost:3306 | dolt.railyard-{project}.svc:3306 |
-| Dolt database | `railyard_{owner}` (single) | `railyard_{project}` (per-project namespace) |
+| MySQL server | localhost:3306 | mysql.railyard-{project}.svc:3306 |
+| MySQL database | `railyard_{owner}` (single) | `railyard_{project}` (per-project namespace) |
 | Postgres+pgvector | localhost:5432 | pgvector.railyard-{project}.svc:5432 |
 | CocoIndex MCP | localhost:8080 | Sidecar or per-pod process |
 | Git repo | Local clone | Clone per pod (or shared PVC cache) |
@@ -1682,11 +1666,11 @@ Environment variable `RAILYARD_MODE=local|k8s` switches behavior.
 ```bash
 # Local
 export RAILYARD_MODE=local
-ry start  # starts dolt + postgres + tmux panes
+ry start  # starts mysql + postgres + tmux panes
 
 # Kubernetes
 export RAILYARD_MODE=k8s
-ry start  # connects to shared Dolt, creates/scales Deployments via k8s API
+ry start  # connects to shared MySQL, creates/scales Deployments via k8s API
 ```
 
 ---
@@ -1697,7 +1681,7 @@ Phase 1 (above) has each project's railyard fully independent. Multiple projects
 
 ### Shared Merge Queue
 
-A `railyard_shared` database on the shared Dolt server tracks merge ordering:
+A `railyard_shared` database on the shared MySQL server tracks merge ordering:
 
 ```go
 // Phase 2: shared across all railyards
@@ -1762,14 +1746,14 @@ The Yardmaster polls the shared database to check if cross-project blockers are 
 ┌─ Kubernetes Cluster ─────────────────────────────────────────┐
 │                                                               │
 │  Namespace: railyard-shared ────────────────────────────┐     │
-│  │  StatefulSet: dolt                                   │     │
+│  │  StatefulSet: mysql                                  │     │
 │  │    railyard_shared   (merge queue, conflict tracking)│     │
 │  └──────────────────────────────────────────────────────┘     │
 │           ▲              ▲              ▲                      │
 │           │              │              │                      │
 │  ┌────────┴───────┐ ┌───┴──────────┐ ┌┴───────────────┐      │
 │  │ ns: ry-webapp  │ │ ns: ry-plat  │ │ ns: ry-infra   │      │
-│  │ dolt (1)       │ │ dolt (1)     │ │ dolt (1)       │      │
+│  │ mysql (1)      │ │ mysql (1)    │ │ mysql (1)      │      │
 │  │ pgvector (1)   │ │ pgvector (1) │ │ pgvector (1)   │      │
 │  │ dispatch (1)   │ │ dispatch (1) │ │ dispatch (1)   │      │
 │  │ yardmaster (1) │ │ yardmaster(1)│ │ yardmaster (1) │      │
