@@ -67,6 +67,13 @@ func RunDaemon(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath,
 
 	hbErrCh := engine.StartHeartbeat(ctx, db, YardmasterID, engine.DefaultHeartbeatInterval)
 
+	hs := NewHealthServer(pollInterval)
+	go func() {
+		if err := StartHealthServer(ctx, cfg.Yardmaster.HealthPort, hs); err != nil {
+			log.Printf("yardmaster: health server: %v", err)
+		}
+	}()
+
 	fmt.Fprintf(out, "Yardmaster daemon starting (poll every %s)...\n", pollInterval)
 
 	defer func() {
@@ -91,6 +98,8 @@ func RunDaemon(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath,
 			return fmt.Errorf("yardmaster: heartbeat: %w", err)
 		default:
 		}
+
+		hs.RecordPoll()
 
 		// Phase 1: Process inbox.
 		draining, err := processInbox(ctx, db, cfg, configPath, repoDir, startedAt, &escWg, out)
