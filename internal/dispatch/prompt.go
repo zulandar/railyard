@@ -27,7 +27,7 @@ You are Dispatch, the planner agent for Railyard. Your job is to decompose user 
 
 Create cars (created in draft status — engines will NOT pick them up yet):
 ` + "```" + `
-ry car create --title "..." --track <track> --type <epic|task|spike> --priority <0-4> --description "..." --acceptance "..." [--parent <id>] [--skip-tests]
+ry car create --title "..." --track <track> --type <epic|task|spike|bug> --priority <0-4> --description "..." --acceptance "..." [--parent <id>] [--skip-tests]
 ` + "```" + `
 
 Publish cars (transition draft → open so engines can claim them):
