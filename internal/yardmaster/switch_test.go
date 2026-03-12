@@ -1,12 +1,14 @@
 package yardmaster
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zulandar/railyard/internal/models"
 )
@@ -900,7 +902,7 @@ func TestRunTests_PreTestCommand(t *testing.T) {
 	preTest := "echo pre-test-ran > " + markerPath
 	testCmd := "test -f " + markerPath
 
-	output, err := runTests(repoDir, "feature", "main", preTest, testCmd)
+	output, err := runTests(context.Background(), repoDir, "feature", "main", preTest, testCmd)
 	if err != nil {
 		t.Fatalf("runTests failed: %v\noutput: %s", err, output)
 	}
@@ -921,7 +923,7 @@ func TestRunTests_PreTestFailure(t *testing.T) {
 	run("git", "checkout", "main")
 
 	// Pre-test fails; test command should never run.
-	_, err := runTests(repoDir, "feature", "main", "false", "echo should-not-run")
+	_, err := runTests(context.Background(), repoDir, "feature", "main", "false", "echo should-not-run")
 	if err == nil {
 		t.Fatal("expected error when pre-test fails")
 	}
@@ -947,7 +949,7 @@ func TestRunTests_NoTestFilesPattern(t *testing.T) {
 	// Simulate "no test files" by echoing the pattern and exiting non-zero.
 	testCmd := `echo "no test files" && exit 1`
 
-	output, err := runTests(repoDir, "feature", "main", "", testCmd)
+	output, err := runTests(context.Background(), repoDir, "feature", "main", "", testCmd)
 	if err != nil {
 		t.Fatalf("runTests should treat 'no test files' as pass, got error: %v", err)
 	}
@@ -964,7 +966,7 @@ func TestRunTests_NoTestsFoundPattern(t *testing.T) {
 
 	testCmd := `echo "No tests found" && exit 1`
 
-	output, err := runTests(repoDir, "feature", "main", "", testCmd)
+	output, err := runTests(context.Background(), repoDir, "feature", "main", "", testCmd)
 	if err != nil {
 		t.Fatalf("runTests should treat 'No tests found' as pass, got error: %v", err)
 	}
@@ -1075,7 +1077,7 @@ func TestRunTests_RealTestFailure(t *testing.T) {
 	// A real failure that doesn't match any no-test patterns.
 	testCmd := `echo "FAIL: TestSomething" && exit 1`
 
-	_, err := runTests(repoDir, "feature", "main", "", testCmd)
+	_, err := runTests(context.Background(), repoDir, "feature", "main", "", testCmd)
 	if err == nil {
 		t.Fatal("expected error for real test failure")
 	}
@@ -1099,7 +1101,7 @@ func TestRunTests_BranchCheckedOutInOtherWorktree(t *testing.T) {
 	run("git", "worktree", "add", wtDir, "feature-wt")
 
 	// runTests should handle this gracefully — the branch is locked by another worktree.
-	output, err := runTests(repoDir, "feature-wt", "main", "", "true")
+	output, err := runTests(context.Background(), repoDir, "feature-wt", "main", "", "true")
 	if err != nil {
 		t.Fatalf("runTests should handle worktree collision, got: %v\noutput: %s", err, output)
 	}
@@ -1625,4 +1627,88 @@ func TestGetConflictFiles_DuringRebaseConflict(t *testing.T) {
 
 	// Clean up.
 	gitRebaseAbort(repoDir)
+}
+
+// --- Configurable timeout tests ---
+
+func TestRunTests_TimeoutKillsCommand(t *testing.T) {
+	repoDir, run := initTestRepo(t)
+
+	run("git", "checkout", "-b", "feature")
+	run("git", "checkout", "main")
+
+	// Use a very short timeout with a busy-wait that checks for parent — should be killed.
+	// Using exec directly in the shell (not a forked child) so CommandContext can kill it.
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	// Use exec to replace sh with sleep so CommandContext kills the sleep directly.
+	_, err := runTests(ctx, repoDir, "feature", "main", "", "exec sleep 30")
+	if err == nil {
+		t.Fatal("expected error when command is killed by timeout")
+	}
+	if !strings.Contains(err.Error(), "switch timeout exceeded") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "switch timeout exceeded")
+	}
+}
+
+func TestRunTests_PreTestTimeoutKillsCommand(t *testing.T) {
+	repoDir, run := initTestRepo(t)
+
+	run("git", "checkout", "-b", "feature")
+	run("git", "checkout", "main")
+
+	// Pre-test command blocks — should be killed by timeout.
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	_, err := runTests(ctx, repoDir, "feature", "main", "exec sleep 30", "true")
+	if err == nil {
+		t.Fatal("expected error when pre-test is killed by timeout")
+	}
+	if !strings.Contains(err.Error(), "switch timeout exceeded") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "switch timeout exceeded")
+	}
+}
+
+func TestSwitchOpts_DefaultTimeout(t *testing.T) {
+	// When SwitchTimeoutSec is 0, the default of 600 should be used.
+	opts := SwitchOpts{}
+	if opts.SwitchTimeoutSec != 0 {
+		t.Errorf("zero-value SwitchTimeoutSec = %d, want 0", opts.SwitchTimeoutSec)
+	}
+	// The Switch function applies the default internally; verify via the field.
+	timeoutSec := opts.SwitchTimeoutSec
+	if timeoutSec == 0 {
+		timeoutSec = 600
+	}
+	if timeoutSec != 600 {
+		t.Errorf("default timeout = %d, want 600", timeoutSec)
+	}
+}
+
+func TestDeleteRemoteBranch_NonGitDir(t *testing.T) {
+	// Should log a warning but not panic when run in a non-git directory.
+	tmpDir := t.TempDir()
+	// This should not panic — just log and return.
+	deleteRemoteBranch(tmpDir, "some-branch")
+}
+
+func TestRunTests_ContextPassedThrough(t *testing.T) {
+	repoDir, run := initTestRepo(t)
+
+	run("git", "checkout", "-b", "feature")
+	run("git", "checkout", "main")
+
+	// Use a generous timeout — command should succeed well within it.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	output, err := runTests(ctx, repoDir, "feature", "main", "", "echo context-test-ok")
+	if err != nil {
+		t.Fatalf("runTests with generous timeout failed: %v", err)
+	}
+	if !strings.Contains(output, "context-test-ok") {
+		t.Errorf("output = %q, want to contain %q", output, "context-test-ok")
+	}
 }

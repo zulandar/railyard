@@ -74,6 +74,7 @@ type StallConfig struct {
 	RepeatedErrorMax  int `yaml:"repeated_error_max"`  // same error N times = stall (default 3)
 	MaxClearCycles    int `yaml:"max_clear_cycles"`    // more than N cycles = stall (default 5)
 	MaxSwitchFailures int `yaml:"max_switch_failures"` // repeated switch failures before escalation (default 3)
+	SwitchTimeoutSec  int `yaml:"switch_timeout_sec"`  // max seconds for switch/runTests (default 600)
 }
 
 // TLSConfig holds TLS settings for encrypted database connections.
@@ -294,6 +295,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Stall.MaxSwitchFailures == 0 {
 		c.Stall.MaxSwitchFailures = 3
+	}
+	if c.Stall.SwitchTimeoutSec == 0 {
+		c.Stall.SwitchTimeoutSec = 600
 	}
 	if c.AgentProvider == "" {
 		c.AgentProvider = "claude"
