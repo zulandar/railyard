@@ -88,10 +88,22 @@ repo: git@github.com:org/myproject.git
 # ---------------------------------------------------------------------------
 
 # stall:
-#   stdout_timeout_sec: 120    # no stdout for N seconds = engine stall
-#   repeated_error_max: 3      # same error N times = engine stall
-#   max_clear_cycles: 5        # more than N /clear cycles = engine stall
-#   max_switch_failures: 3     # repeated switch (merge/test/push) failures before Claude escalation
+#   stdout_timeout_sec: 120          # no stdout for N seconds = engine stall
+#   repeated_error_max: 3            # same error N times = engine stall
+#   max_clear_cycles: 5              # more than N /clear cycles = engine stall
+#   max_switch_failures: 3           # repeated switch (merge/test/push) failures before escalation
+#   switch_timeout_sec: 600          # max seconds for switch/merge/test operations
+#   escalation_cooldown_sec: 600     # per-car cooldown between escalations (prevents cost spikes)
+#   max_concurrent_escalations: 3    # limit concurrent escalation goroutines
+#   stale_engine_threshold_sec: 60   # seconds before an engine is considered stale
+
+# ---------------------------------------------------------------------------
+# Yardmaster daemon settings (optional — defaults shown)
+# ---------------------------------------------------------------------------
+
+# yardmaster:
+#   health_port: 8081                # port for /healthz and /readyz k8s probes
+#   auto_merge_on_approval: false    # auto-merge APPROVED PRs via gh CLI
 
 # ---------------------------------------------------------------------------
 # Car priorities (reference)

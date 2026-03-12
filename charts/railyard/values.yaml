@@ -178,6 +178,23 @@ dispatch:
 yardmaster:
   replicas: 1
   resources: {}
+  # -- Port for /healthz and /readyz probes.
+  healthPort: 8081
+  # -- Auto-merge APPROVED PRs via gh CLI (requires require_pr mode).
+  autoMergeOnApproval: false
+
+# ---------------------------------------------------------------------------
+# Stall detection
+# ---------------------------------------------------------------------------
+stall:
+  stdoutTimeoutSec: 120
+  repeatedErrorMax: 3
+  maxClearCycles: 5
+  maxSwitchFailures: 3
+  switchTimeoutSec: 600
+  escalationCooldownSec: 600
+  maxConcurrentEscalations: 3
+  staleEngineThresholdSec: 60
 
 # ---------------------------------------------------------------------------
 # Dashboard

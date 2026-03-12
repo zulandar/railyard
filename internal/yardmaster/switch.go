@@ -1,6 +1,7 @@
 package yardmaster
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -8,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/zulandar/railyard/internal/messaging"
@@ -15,15 +17,21 @@ import (
 	"gorm.io/gorm"
 )
 
+// gitMu serialises all git operations in the switch/merge flow so that
+// concurrent daemon goroutines (e.g. escalation + merge) cannot corrupt
+// the yardmaster worktree.
+var gitMu sync.Mutex
+
 // SwitchOpts holds parameters for the switch (merge) operation.
 type SwitchOpts struct {
-	RepoDir        string // working directory (yardmaster worktree when running via daemon)
-	PrimaryRepoDir string // primary repo directory (for engine worktree detachment; empty = use RepoDir)
-	BaseBranch     string // target branch for merge (default "main"); used for worktree-safe operations
-	DryRun         bool   // run tests but don't merge
-	PreTestCommand string // command to run before tests (e.g. "go mod vendor", "npm install")
-	TestCommand    string // per-track test command (e.g. "go test ./...", "phpunit", "npm test")
-	RequirePR      bool   // create a draft PR instead of direct merge
+	RepoDir          string // working directory (yardmaster worktree when running via daemon)
+	PrimaryRepoDir   string // primary repo directory (for engine worktree detachment; empty = use RepoDir)
+	BaseBranch       string // target branch for merge (default "main"); used for worktree-safe operations
+	DryRun           bool   // run tests but don't merge
+	PreTestCommand   string // command to run before tests (e.g. "go mod vendor", "npm install")
+	TestCommand      string // per-track test command (e.g. "go test ./...", "phpunit", "npm test")
+	RequirePR        bool   // create a draft PR instead of direct merge
+	SwitchTimeoutSec int    // max seconds for runTests (default 600 if 0)
 }
 
 // SwitchFailureCategory categorizes Switch errors so the daemon can track and
@@ -72,6 +80,10 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 		return nil, fmt.Errorf("yardmaster: repoDir is required")
 	}
 
+	// Serialize git operations to prevent worktree corruption.
+	gitMu.Lock()
+	defer gitMu.Unlock()
+
 	// Load the car.
 	var car models.Car
 	if err := db.First(&car, "id = ?", carID).Error; err != nil {
@@ -114,7 +126,14 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 		result.TestsPassed = true
 		result.TestOutput = "tests skipped (skip_tests=true on car)"
 	} else {
-		testOutput, testErr := runTests(opts.RepoDir, car.Branch, baseBranch, opts.PreTestCommand, opts.TestCommand)
+		timeoutSec := opts.SwitchTimeoutSec
+		if timeoutSec == 0 {
+			timeoutSec = 600
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSec)*time.Second)
+		defer cancel()
+
+		testOutput, testErr := runTests(ctx, opts.RepoDir, car.Branch, baseBranch, opts.PreTestCommand, opts.TestCommand)
 		result.TestOutput = testOutput
 
 		if testErr != nil {
@@ -163,6 +182,7 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 	// If the branch is already an ancestor of main (e.g. a dependent car's
 	// merge already included this branch's commits), skip the merge.
 	if isAncestor(opts.RepoDir, car.Branch, baseBranch) {
+		deleteRemoteBranch(opts.RepoDir, car.Branch)
 		result.Merged = true
 		result.AlreadyMerged = true
 
@@ -278,6 +298,8 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 	// correct commit. Without this, origin/<baseBranch> remains stale and
 	// sibling merges see add/add conflicts.
 	gitFetchBranch(opts.RepoDir, baseBranch)
+
+	deleteRemoteBranch(opts.RepoDir, car.Branch)
 
 	result.Merged = true
 
@@ -441,7 +463,8 @@ func truncateOutput(output string, maxLen int) string {
 
 // runTests checks out the branch and runs the test suite.
 // baseBranch is the branch to return to after tests (e.g. "main").
-func runTests(repoDir, branch, baseBranch, preTestCommand, testCommand string) (string, error) {
+// The provided ctx controls the overall timeout for pre-test and test commands.
+func runTests(ctx context.Context, repoDir, branch, baseBranch, preTestCommand, testCommand string) (string, error) {
 	// Checkout the branch (worktree-safe: fall back to detached HEAD).
 	checkout := exec.Command("git", "checkout", branch)
 	checkout.Dir = repoDir
@@ -462,10 +485,16 @@ func runTests(repoDir, branch, baseBranch, preTestCommand, testCommand string) (
 
 	// Run pre-test command if configured (e.g. "go mod vendor", "npm install").
 	if preTestCommand != "" {
-		preCmd := exec.Command("sh", "-c", preTestCommand)
+		preCmd := exec.CommandContext(ctx, "sh", "-c", preTestCommand)
 		preCmd.Dir = repoDir
 		if out, err := preCmd.CombinedOutput(); err != nil {
 			checkoutBase(repoDir, baseBranch)
+			if ctx.Err() == context.DeadlineExceeded {
+				dl, _ := ctx.Deadline()
+				timeout := time.Until(dl) + time.Since(dl) // reconstruct original timeout
+				_ = timeout
+				return string(out), fmt.Errorf("switch timeout exceeded during pre-test command")
+			}
 			return string(out), fmt.Errorf("pre-test command failed: %w", err)
 		}
 	}
@@ -474,7 +503,7 @@ func runTests(repoDir, branch, baseBranch, preTestCommand, testCommand string) (
 	if testCommand == "" {
 		testCommand = "go test ./..."
 	}
-	testCmd := exec.Command("sh", "-c", testCommand)
+	testCmd := exec.CommandContext(ctx, "sh", "-c", testCommand)
 	testCmd.Dir = repoDir
 
 	out, err := testCmd.CombinedOutput()
@@ -484,6 +513,9 @@ func runTests(repoDir, branch, baseBranch, preTestCommand, testCommand string) (
 	checkoutBase(repoDir, baseBranch)
 
 	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return output, fmt.Errorf("switch timeout exceeded")
+		}
 		// Check for "no tests" patterns — treat as pass.
 		for _, pat := range noTestPatterns {
 			if strings.Contains(output, pat) {
@@ -494,6 +526,15 @@ func runTests(repoDir, branch, baseBranch, preTestCommand, testCommand string) (
 	}
 
 	return output, nil
+}
+
+// deleteRemoteBranch deletes a branch from the remote. Non-fatal — logs warning on failure.
+func deleteRemoteBranch(repoDir, branch string) {
+	cmd := exec.Command("git", "push", "origin", "--delete", branch)
+	cmd.Dir = repoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		log.Printf("yardmaster: delete remote branch %s: %s: %v (non-fatal)", branch, string(out), err)
+	}
 }
 
 // checkoutBase switches back to the base branch after test/merge operations.

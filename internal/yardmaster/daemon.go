@@ -7,6 +7,8 @@ import (
 	"io"
 	"log"
 	"os/exec"
+	"runtime/debug"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -67,6 +69,13 @@ func RunDaemon(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath,
 
 	hbErrCh := engine.StartHeartbeat(ctx, db, YardmasterID, engine.DefaultHeartbeatInterval)
 
+	hs := NewHealthServer(pollInterval)
+	go func() {
+		if err := StartHealthServer(ctx, cfg.Yardmaster.HealthPort, hs); err != nil {
+			log.Printf("yardmaster: health server: %v", err)
+		}
+	}()
+
 	fmt.Fprintf(out, "Yardmaster daemon starting (poll every %s)...\n", pollInterval)
 
 	defer func() {
@@ -83,6 +92,12 @@ func RunDaemon(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath,
 	var escWg sync.WaitGroup
 	defer escWg.Wait()
 
+	// Per-car escalation cooldown tracker.
+	escTracker := NewEscalationTracker(time.Duration(cfg.Stall.EscalationCooldownSec) * time.Second)
+
+	// Semaphore to limit concurrent escalation goroutines.
+	escSem := make(chan struct{}, cfg.Stall.MaxConcurrentEscalations)
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -92,52 +107,99 @@ func RunDaemon(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath,
 		default:
 		}
 
-		// Phase 1: Process inbox.
-		draining, err := processInbox(ctx, db, cfg, configPath, repoDir, startedAt, &escWg, out)
-		if err != nil {
-			log.Printf("yardmaster inbox error: %v", err)
-		}
+		// Panic recovery: catch panics in the daemon loop body, log the
+		// stack trace, and continue the loop rather than crashing.
+		draining := func() (drain bool) {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("yardmaster: PANIC recovered: %v\n%s", r, debug.Stack())
+					fmt.Fprintf(out, "PANIC recovered in daemon loop: %v (continuing)\n", r)
+				}
+			}()
+
+			hs.RecordPoll()
+
+			// timePhase logs a warning when a phase exceeds 5 seconds.
+			timePhase := func(name string, fn func()) {
+				start := time.Now()
+				fn()
+				if elapsed := time.Since(start); elapsed > 5*time.Second {
+					log.Printf("yardmaster: WARN phase %s took %s", name, elapsed)
+					fmt.Fprintf(out, "WARN: phase %s took %s\n", name, elapsed)
+				}
+			}
+
+			// Phase 1: Process inbox.
+			var shouldDrain bool
+			timePhase("inbox", func() {
+				var pErr error
+				shouldDrain, pErr = processInbox(ctx, db, cfg, configPath, repoDir, startedAt, &escWg, escTracker, escSem, out)
+				if pErr != nil {
+					log.Printf("yardmaster inbox error: %v", pErr)
+				}
+			})
+			if shouldDrain {
+				return true
+			}
+
+			// Phase 2: Handle stale engines.
+			timePhase("stale-engines", func() {
+				if err := handleStaleEngines(db, cfg, configPath, out); err != nil {
+					log.Printf("yardmaster stale engines error: %v", err)
+				}
+			})
+
+			// Phase 3: Handle completed cars.
+			timePhase("completed-cars", func() {
+				if err := handleCompletedCars(ctx, db, cfg, repoDir, ymDir, &escWg, escTracker, escSem, out); err != nil {
+					log.Printf("yardmaster completed cars error: %v", err)
+				}
+			})
+
+			// Phase 4: Handle blocked cars (safety-net sweep).
+			timePhase("blocked-cars", func() {
+				if err := handleBlockedCars(db, out); err != nil {
+					log.Printf("yardmaster blocked cars error: %v", err)
+				}
+			})
+
+			// Phase 4b: Sweep open epics whose children may all be complete.
+			timePhase("sweep-epics", func() {
+				if err := sweepOpenEpics(db, out); err != nil {
+					log.Printf("yardmaster sweep open epics error: %v", err)
+				}
+			})
+
+			// Phase 5: Reconcile stale cars whose branches are already merged.
+			timePhase("reconcile", func() {
+				if err := reconcileStaleCars(db, repoDir, out); err != nil {
+					log.Printf("yardmaster reconcile error: %v", err)
+				}
+			})
+
+			// Phase 5b: Poll pr_open cars for GitHub review feedback.
+			timePhase("pr-review", func() {
+				if cfg.RequirePR {
+					prViewer := &ghPRViewer{repoDir: repoDir}
+					if err := handlePrOpenCars(db, prViewer, cfg.Yardmaster.AutoMergeOnApproval, out); err != nil {
+						log.Printf("yardmaster pr review error: %v", err)
+					}
+				}
+			})
+
+			// Phase 6: Rebalance idle engines to busy tracks.
+			timePhase("rebalance", func() {
+				if err := rebalanceEngines(db, cfg, configPath, rbState, out); err != nil {
+					log.Printf("yardmaster rebalance error: %v", err)
+				}
+			})
+
+			return false
+		}()
+
 		if draining {
 			fmt.Fprintf(out, "Drain received, shutting down...\n")
 			return nil
-		}
-
-		// Phase 2: Handle stale engines.
-		if err := handleStaleEngines(db, cfg, configPath, out); err != nil {
-			log.Printf("yardmaster stale engines error: %v", err)
-		}
-
-		// Phase 3: Handle completed cars.
-		if err := handleCompletedCars(ctx, db, cfg, repoDir, ymDir, &escWg, out); err != nil {
-			log.Printf("yardmaster completed cars error: %v", err)
-		}
-
-		// Phase 4: Handle blocked cars (safety-net sweep).
-		if err := handleBlockedCars(db, out); err != nil {
-			log.Printf("yardmaster blocked cars error: %v", err)
-		}
-
-		// Phase 4b: Sweep open epics whose children may all be complete.
-		if err := sweepOpenEpics(db, out); err != nil {
-			log.Printf("yardmaster sweep open epics error: %v", err)
-		}
-
-		// Phase 5: Reconcile stale cars whose branches are already merged.
-		if err := reconcileStaleCars(db, repoDir, out); err != nil {
-			log.Printf("yardmaster reconcile error: %v", err)
-		}
-
-		// Phase 5b: Poll pr_open cars for GitHub review feedback.
-		if cfg.RequirePR {
-			prViewer := &ghPRViewer{repoDir: repoDir}
-			if err := handlePrOpenCars(db, prViewer, out); err != nil {
-				log.Printf("yardmaster pr review error: %v", err)
-			}
-		}
-
-		// Phase 6: Rebalance idle engines to busy tracks.
-		if err := rebalanceEngines(db, cfg, configPath, rbState, out); err != nil {
-			log.Printf("yardmaster rebalance error: %v", err)
 		}
 
 		sleepWithContext(ctx, pollInterval)
@@ -180,11 +242,27 @@ func registerYardmaster(db *gorm.DB, providerName string) error {
 // Returns true if a drain message was received (yardmaster should shut down).
 // startedAt is when this yardmaster instance started; drain messages older than
 // this are stale leftovers from a previous shutdown and are silently acked.
-func processInbox(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath, repoDir string, startedAt time.Time, escWg *sync.WaitGroup, out io.Writer) (draining bool, err error) {
+func processInbox(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath, repoDir string, startedAt time.Time, escWg *sync.WaitGroup, escTracker *EscalationTracker, escSem chan struct{}, out io.Writer) (draining bool, err error) {
 	msgs, err := messaging.Inbox(db, YardmasterID)
 	if err != nil {
 		return false, err
 	}
+
+	// Deduplicate messages by (FromAgent, Subject, CarID). Ack duplicates
+	// without processing so repeated messages don't trigger duplicate work.
+	type dedupKey struct{ From, Subject, CarID string }
+	seen := make(map[dedupKey]bool, len(msgs))
+	deduped := msgs[:0]
+	for _, msg := range msgs {
+		key := dedupKey{msg.FromAgent, strings.ToLower(msg.Subject), msg.CarID}
+		if seen[key] {
+			ackMsg(db, msg)
+			continue
+		}
+		seen[key] = true
+		deduped = append(deduped, msg)
+	}
+	msgs = deduped
 
 	for _, msg := range msgs {
 		subject := strings.ToLower(msg.Subject)
@@ -217,8 +295,15 @@ func processInbox(ctx context.Context, db *gorm.DB, cfg *config.Config, configPa
 
 		case subject == "help" || subject == "stuck":
 			fmt.Fprintf(out, "Inbox: %s from %s (car %s) — escalating to agent\n", subject, msg.FromAgent, msg.CarID)
+			if escTracker != nil && !escTracker.ShouldEscalate(msg.CarID) {
+				fmt.Fprintf(out, "Car %s escalation skipped (cooldown active)\n", msg.CarID)
+				ackMsg(db, msg)
+				continue
+			}
+			escSem <- struct{}{} // acquire semaphore
 			escWg.Add(1)
 			go func(m models.Message) {
+				defer func() { <-escSem }() // release semaphore
 				defer escWg.Done()
 				result, escErr := EscalateToAgent(ctx, EscalateOpts{
 					CarID:        m.CarID,
@@ -296,7 +381,11 @@ func ackMsg(db *gorm.DB, msg models.Message) {
 // handleStaleEngines detects engines with stale heartbeats, reassigns their cars,
 // and restarts the engines.
 func handleStaleEngines(db *gorm.DB, cfg *config.Config, configPath string, out io.Writer) error {
-	stale, err := StaleEngines(db)
+	threshold := DefaultStaleThreshold
+	if cfg.Stall.StaleEngineThresholdSec > 0 {
+		threshold = time.Duration(cfg.Stall.StaleEngineThresholdSec) * time.Second
+	}
+	stale, err := CheckEngineHealth(db, threshold)
 	if err != nil {
 		return err
 	}
@@ -337,11 +426,19 @@ func handleStaleEngines(db *gorm.DB, cfg *config.Config, configPath string, out 
 // Switch() marks cars as "merged" after successful merge, so they won't reappear.
 // ymDir is the yardmaster worktree where switch operations happen; repoDir is
 // the primary repo (used for engine worktree detachment).
-func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, repoDir, ymDir string, escWg *sync.WaitGroup, out io.Writer) error {
+func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, repoDir, ymDir string, escWg *sync.WaitGroup, escTracker *EscalationTracker, escSem chan struct{}, out io.Writer) error {
 	cars, err := car.List(db, car.ListFilters{Status: "done"})
 	if err != nil {
 		return err
 	}
+
+	// Sort by priority ASC (lower = higher priority), then CreatedAt ASC.
+	sort.Slice(cars, func(i, j int) bool {
+		if cars[i].Priority != cars[j].Priority {
+			return cars[i].Priority < cars[j].Priority
+		}
+		return cars[i].CreatedAt.Before(cars[j].CreatedAt)
+	})
 
 	for _, c := range cars {
 		// Epics are container cars — no engine ever commits to their branch.
@@ -409,12 +506,13 @@ func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, r
 		}
 
 		result, err := Switch(db, c.ID, SwitchOpts{
-			RepoDir:        ymDir,
-			PrimaryRepoDir: repoDir,
-			BaseBranch:     baseBranch,
-			PreTestCommand: preTestCommand,
-			TestCommand:    testCommand,
-			RequirePR:      cfg.RequirePR,
+			RepoDir:          ymDir,
+			PrimaryRepoDir:   repoDir,
+			BaseBranch:       baseBranch,
+			PreTestCommand:   preTestCommand,
+			TestCommand:      testCommand,
+			RequirePR:        cfg.RequirePR,
+			SwitchTimeoutSec: cfg.Stall.SwitchTimeoutSec,
 		})
 
 		// Handle any failure — write a categorized progress note and check
@@ -439,7 +537,7 @@ func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, r
 			if result != nil {
 				conflictDetails = result.ConflictDetails
 			}
-			maybeSwitchEscalate(ctx, db, cfg, c.ID, failCategory, err, conflictDetails, escWg, out)
+			maybeSwitchEscalate(ctx, db, cfg, c.ID, failCategory, err, conflictDetails, escWg, escTracker, escSem, out)
 			continue
 		}
 
@@ -450,7 +548,7 @@ func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, r
 				note += "\n" + result.ConflictDetails
 			}
 			writeProgressNote(db, c.ID, YardmasterID, note)
-			maybeSwitchEscalate(ctx, db, cfg, c.ID, failCategory, result.Error, result.ConflictDetails, escWg, out)
+			maybeSwitchEscalate(ctx, db, cfg, c.ID, failCategory, result.Error, result.ConflictDetails, escWg, escTracker, escSem, out)
 		}
 
 		if result.PRCreated {
@@ -592,7 +690,9 @@ func reconcileStaleCars(db *gorm.DB, repoDir string, out io.Writer) error {
 					"completed_at": now,
 				}).Error; err != nil {
 					log.Printf("reconcile car %s to merged: %v", c.ID, err)
+					continue
 				}
+				runPostMerge(db, c, out)
 			}
 		}
 	}
@@ -693,7 +793,7 @@ func switchFailureReason(cat SwitchFailureCategory) string {
 
 // maybeSwitchEscalate checks whether a car has exceeded the switch failure
 // threshold and, if so, escalates to Claude with the failure category.
-func maybeSwitchEscalate(ctx context.Context, db *gorm.DB, cfg *config.Config, carID string, cat SwitchFailureCategory, switchErr error, conflictDetails string, escWg *sync.WaitGroup, out io.Writer) {
+func maybeSwitchEscalate(ctx context.Context, db *gorm.DB, cfg *config.Config, carID string, cat SwitchFailureCategory, switchErr error, conflictDetails string, escWg *sync.WaitGroup, escTracker *EscalationTracker, escSem chan struct{}, out io.Writer) {
 	// Infrastructure failures escalate immediately — no threshold needed.
 	// The human message was already sent by Switch(); here we also escalate
 	// to Claude for a suggested action.
@@ -708,8 +808,10 @@ func maybeSwitchEscalate(ctx context.Context, db *gorm.DB, cfg *config.Config, c
 		}
 		fmt.Fprintf(out, "Car %s status → merge-failed\n", carID)
 
+		escSem <- struct{}{} // acquire semaphore
 		escWg.Add(1)
 		go func(carID, reason string) {
+			defer func() { <-escSem }() // release semaphore
 			defer escWg.Done()
 			res, escErr := EscalateToAgent(ctx, EscalateOpts{
 				CarID:        carID,
@@ -737,6 +839,11 @@ func maybeSwitchEscalate(ctx context.Context, db *gorm.DB, cfg *config.Config, c
 		return
 	}
 
+	if escTracker != nil && !escTracker.ShouldEscalate(carID) {
+		fmt.Fprintf(out, "Car %s escalation skipped (cooldown active)\n", carID)
+		return
+	}
+
 	reason := switchFailureReason(cat)
 	fmt.Fprintf(out, "Car %s has %d switch failures (%s) — escalating\n", carID, failures, reason)
 
@@ -747,8 +854,10 @@ func maybeSwitchEscalate(ctx context.Context, db *gorm.DB, cfg *config.Config, c
 	}
 	fmt.Fprintf(out, "Car %s status → merge-failed\n", carID)
 
+	escSem <- struct{}{} // acquire semaphore
 	escWg.Add(1)
 	go func(carID string, failCount int, reason string) {
+		defer func() { <-escSem }() // release semaphore
 		defer escWg.Done()
 		res, escErr := EscalateToAgent(ctx, EscalateOpts{
 			CarID:        carID,
@@ -789,9 +898,10 @@ type prStatus struct {
 	Reviews        []prReview
 }
 
-// PRViewer abstracts GitHub PR status lookups for testability.
+// PRViewer abstracts GitHub PR status lookups and merge operations for testability.
 type PRViewer interface {
 	ViewPR(branch string) (*prStatus, error)
+	MergePR(branch string) error
 }
 
 // ghPRViewer implements PRViewer using the gh CLI.
@@ -832,9 +942,20 @@ func (g *ghPRViewer) ViewPR(branch string) (*prStatus, error) {
 	return ps, nil
 }
 
+func (g *ghPRViewer) MergePR(branch string) error {
+	cmd := exec.Command("gh", "pr", "merge", branch, "--merge", "--delete-branch")
+	cmd.Dir = g.repoDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("gh pr merge %s: %s: %w", branch, string(out), err)
+	}
+	return nil
+}
+
 // handlePrOpenCars polls pr_open cars for GitHub review status and transitions
 // them based on the PR state: changes_requested → open, merged → merged, closed → cancelled.
-func handlePrOpenCars(db *gorm.DB, viewer PRViewer, out io.Writer) error {
+// When autoMerge is true, APPROVED PRs are automatically merged via the viewer.
+func handlePrOpenCars(db *gorm.DB, viewer PRViewer, autoMerge bool, out io.Writer) error {
 	prCars, err := car.List(db, car.ListFilters{Status: "pr_open"})
 	if err != nil {
 		return err
@@ -862,6 +983,7 @@ func handlePrOpenCars(db *gorm.DB, viewer PRViewer, out io.Writer) error {
 				continue
 			}
 			fmt.Fprintf(out, "PR merged for car %s — status → merged\n", c.ID)
+			runPostMerge(db, c, out)
 
 		case status.State == "CLOSED":
 			if err := db.Model(&models.Car{}).Where("id = ?", c.ID).Update("status", "cancelled").Error; err != nil {
@@ -869,6 +991,23 @@ func handlePrOpenCars(db *gorm.DB, viewer PRViewer, out io.Writer) error {
 				continue
 			}
 			fmt.Fprintf(out, "PR closed for car %s — status → cancelled\n", c.ID)
+
+		case autoMerge && status.ReviewDecision == "APPROVED" && status.State == "OPEN":
+			if err := viewer.MergePR(c.Branch); err != nil {
+				log.Printf("auto-merge PR for car %s: %v", c.ID, err)
+				writeProgressNote(db, c.ID, "yardmaster", fmt.Sprintf("Auto-merge failed: %v", err))
+				continue
+			}
+			now := time.Now()
+			if err := db.Model(&models.Car{}).Where("id = ?", c.ID).Updates(map[string]interface{}{
+				"status":       "merged",
+				"completed_at": now,
+			}).Error; err != nil {
+				log.Printf("update car %s to merged after auto-merge: %v", c.ID, err)
+				continue
+			}
+			fmt.Fprintf(out, "PR approved and auto-merged for car %s\n", c.ID)
+			runPostMerge(db, c, out)
 
 		case status.ReviewDecision == "CHANGES_REQUESTED":
 			if err := db.Model(&models.Car{}).Where("id = ?", c.ID).Updates(map[string]interface{}{
@@ -891,6 +1030,34 @@ func handlePrOpenCars(db *gorm.DB, viewer PRViewer, out io.Writer) error {
 	}
 
 	return nil
+}
+
+// runPostMerge performs dependency unblocking and parent epic closure after a
+// car is marked as merged. All merge paths (normal switch, auto-merge,
+// externally merged PR, reconciliation) should call this to ensure consistent
+// post-merge behavior.
+func runPostMerge(db *gorm.DB, c models.Car, out io.Writer) {
+	unblocked, ubErr := UnblockDeps(db, c.ID)
+	if ubErr != nil {
+		log.Printf("unblock deps for %s: %v", c.ID, ubErr)
+	}
+	if len(unblocked) > 0 {
+		titles := make([]string, len(unblocked))
+		for i, u := range unblocked {
+			titles[i] = u.ID
+			fmt.Fprintf(out, "Unblocked car %s (dependency %s merged)\n", u.ID, c.ID)
+			if u.Type == "epic" {
+				TryCloseEpic(db, u.ID)
+			}
+		}
+		messaging.Send(db, "yardmaster", "broadcast", "deps-unblocked",
+			fmt.Sprintf("Merged %s, unblocked: %s", c.ID, strings.Join(titles, ", ")),
+			messaging.SendOpts{CarID: c.ID},
+		)
+	}
+	if c.ParentID != nil && *c.ParentID != "" {
+		TryCloseEpic(db, *c.ParentID)
+	}
 }
 
 // sleepWithContext sleeps for duration d, returning early if ctx is cancelled.
