@@ -1,41 +1,41 @@
-{{- if .Values.dolt.internal }}
+{{- if .Values.database.internal }}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: {{ include "railyard.fullname" . }}-dolt
+  name: {{ include "railyard.fullname" . }}-mysql
   labels:
     {{- include "railyard.labels" . | nindent 4 }}
-    app.kubernetes.io/component: dolt
+    app.kubernetes.io/component: mysql
 spec:
-  serviceName: {{ include "railyard.fullname" . }}-dolt
+  serviceName: {{ include "railyard.fullname" . }}-mysql
   replicas: 1
   selector:
     matchLabels:
       {{- include "railyard.selectorLabels" . | nindent 6 }}
-      app.kubernetes.io/component: dolt
+      app.kubernetes.io/component: mysql
   template:
     metadata:
       labels:
         {{- include "railyard.selectorLabels" . | nindent 8 }}
-        app.kubernetes.io/component: dolt
+        app.kubernetes.io/component: mysql
     spec:
       {{- if .Values.imagePullSecret }}
       imagePullSecrets:
         - name: {{ .Values.imagePullSecret }}
       {{- end }}
       containers:
-        - name: dolt
-          image: dolthub/dolt-sql-server:latest
+        - name: mysql
+          image: mysql:8.0
           ports:
             - name: mysql
-              containerPort: {{ .Values.dolt.port }}
+              containerPort: {{ .Values.database.port }}
               protocol: TCP
           env:
-            - name: DOLT_ROOT_PASSWORD
+            - name: MYSQL_ROOT_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ include "railyard.fullname" . }}-db
-                  key: dolt-password
+                  key: db-password
           readinessProbe:
             tcpSocket:
               port: mysql
@@ -49,28 +49,28 @@ spec:
             periodSeconds: 30
             timeoutSeconds: 5
           volumeMounts:
-            - name: dolt-data
-              mountPath: /var/lib/dolt
-            - name: dolt-init
+            - name: mysql-data
+              mountPath: /var/lib/mysql
+            - name: mysql-init
               mountPath: /docker-entrypoint-initdb.d
               readOnly: true
-          {{- with .Values.dolt.resources }}
+          {{- with .Values.database.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
       volumes:
-        - name: dolt-init
+        - name: mysql-init
           configMap:
-            name: {{ include "railyard.fullname" . }}-dolt-init
+            name: {{ include "railyard.fullname" . }}-mysql-init
   volumeClaimTemplates:
     - metadata:
-        name: dolt-data
+        name: mysql-data
       spec:
         accessModes: ["ReadWriteOnce"]
-        {{- if .Values.dolt.storage.storageClass }}
-        storageClassName: {{ .Values.dolt.storage.storageClass | quote }}
+        {{- if .Values.database.storage.storageClass }}
+        storageClassName: {{ .Values.database.storage.storageClass | quote }}
         {{- end }}
         resources:
           requests:
-            storage: {{ .Values.dolt.storage.size }}
+            storage: {{ .Values.database.storage.size }}
 {{- end }}

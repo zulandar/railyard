@@ -272,26 +272,18 @@ func TestPromptYesNo_ExplicitYes(t *testing.T) {
 	}
 }
 
-func TestEnsureDoltDataDir(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "dolt-data")
+func TestEnsureDBDataDir(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "db-data")
 	// Directory doesn't exist yet.
-	if err := ensureDoltDataDir(dir); err != nil {
-		// dolt may not be installed — skip if so.
-		if strings.Contains(err.Error(), "executable file not found") {
-			t.Skip("dolt not installed")
-		}
-		t.Fatalf("ensureDoltDataDir: %v", err)
+	if err := ensureDBDataDir(dir); err != nil {
+		t.Fatalf("ensureDBDataDir: %v", err)
 	}
 	// Should have created the directory.
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		t.Fatal("directory was not created")
 	}
-	// Should have .dolt subdirectory.
-	if _, err := os.Stat(filepath.Join(dir, ".dolt")); os.IsNotExist(err) {
-		t.Fatal(".dolt directory was not created")
-	}
-	// Calling again should be idempotent (skips dolt init).
-	if err := ensureDoltDataDir(dir); err != nil {
+	// Calling again should be idempotent.
+	if err := ensureDBDataDir(dir); err != nil {
 		t.Fatalf("second call: %v", err)
 	}
 }
@@ -359,13 +351,13 @@ func TestGenerateTracks_Empty(t *testing.T) {
 	}
 }
 
-func TestEnsureDoltRunning_AlreadyRunning(t *testing.T) {
-	// We can't easily test the full startup without a real Dolt server,
+func TestEnsureDBRunning_AlreadyRunning(t *testing.T) {
+	// We can't easily test the full startup without a real database server,
 	// so we test the error path: connection to a dead port should return
-	// an error that mentions dolt.
+	// an error that mentions the database.
 	var out bytes.Buffer
-	err := ensureDoltRunning(&out, "127.0.0.1", 19999, "root", "")
-	// Should fail because nothing is on port 19999 and dolt data dir
+	err := ensureDBRunning(&out, "127.0.0.1", 19999, "root", "")
+	// Should fail because nothing is on port 19999 and db data dir
 	// may not exist. The exact error doesn't matter — just verify it
 	// doesn't panic and returns an error.
 	if err == nil {
@@ -374,8 +366,8 @@ func TestEnsureDoltRunning_AlreadyRunning(t *testing.T) {
 	}
 	// Error should be informative.
 	errStr := err.Error()
-	if !strings.Contains(errStr, "dolt") && !strings.Contains(errStr, "Dolt") {
-		t.Errorf("error should mention dolt: %v", err)
+	if !strings.Contains(errStr, "database") && !strings.Contains(errStr, "Database") {
+		t.Errorf("error should mention database: %v", err)
 	}
 }
 
@@ -520,8 +512,8 @@ func TestInitCmd_NonInteractive_SkipDB(t *testing.T) {
 	if len(cfg.Tracks) == 0 {
 		t.Error("should have at least one track")
 	}
-	if cfg.Dolt.Port != 3307 {
-		t.Errorf("Dolt.Port = %d, want 3307", cfg.Dolt.Port)
+	if cfg.Database.Port != 3307 {
+		t.Errorf("Database.Port = %d, want 3307", cfg.Database.Port)
 	}
 }
 
@@ -546,8 +538,8 @@ func TestInitCmd_NonInteractive_CustomHost(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse generated config: %v\n---\n%s", err, string(data))
 	}
-	if cfg.Dolt.Host != "10.0.0.5" {
-		t.Errorf("Dolt.Host = %q, want %q", cfg.Dolt.Host, "10.0.0.5")
+	if cfg.Database.Host != "10.0.0.5" {
+		t.Errorf("Database.Host = %q, want %q", cfg.Database.Host, "10.0.0.5")
 	}
 }
 
@@ -571,8 +563,8 @@ func TestInitCmd_NonInteractive_CustomUser(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse generated config: %v\n---\n%s", err, string(data))
 	}
-	if cfg.Dolt.Username != "admin" {
-		t.Errorf("Dolt.Username = %q, want %q", cfg.Dolt.Username, "admin")
+	if cfg.Database.Username != "admin" {
+		t.Errorf("Database.Username = %q, want %q", cfg.Database.Username, "admin")
 	}
 }
 
@@ -596,8 +588,8 @@ func TestInitCmd_NonInteractive_CustomPassword(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse generated config: %v\n---\n%s", err, string(data))
 	}
-	if cfg.Dolt.Password != "secret123" {
-		t.Errorf("Dolt.Password = %q, want %q", cfg.Dolt.Password, "secret123")
+	if cfg.Database.Password != "secret123" {
+		t.Errorf("Database.Password = %q, want %q", cfg.Database.Password, "secret123")
 	}
 }
 
@@ -854,8 +846,8 @@ func TestRenderConfig_CustomHost(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config.Parse: %v\n---\n%s", err, yamlStr)
 	}
-	if cfg.Dolt.Host != "10.0.0.5" {
-		t.Errorf("Dolt.Host = %q, want %q", cfg.Dolt.Host, "10.0.0.5")
+	if cfg.Database.Host != "10.0.0.5" {
+		t.Errorf("Database.Host = %q, want %q", cfg.Database.Host, "10.0.0.5")
 	}
 }
 
@@ -871,8 +863,8 @@ func TestRenderConfig_CustomUser(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config.Parse: %v\n---\n%s", err, yamlStr)
 	}
-	if cfg.Dolt.Username != "deploy" {
-		t.Errorf("Dolt.Username = %q, want %q", cfg.Dolt.Username, "deploy")
+	if cfg.Database.Username != "deploy" {
+		t.Errorf("Database.Username = %q, want %q", cfg.Database.Username, "deploy")
 	}
 }
 
@@ -888,8 +880,8 @@ func TestRenderConfig_WithPassword(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config.Parse: %v\n---\n%s", err, yamlStr)
 	}
-	if cfg.Dolt.Password != "secret" {
-		t.Errorf("Dolt.Password = %q, want %q", cfg.Dolt.Password, "secret")
+	if cfg.Database.Password != "secret" {
+		t.Errorf("Database.Password = %q, want %q", cfg.Database.Password, "secret")
 	}
 }
 

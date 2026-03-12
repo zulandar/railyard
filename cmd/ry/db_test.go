@@ -39,8 +39,8 @@ func TestDBInitCmd_Help(t *testing.T) {
 	}
 
 	out := buf.String()
-	if !strings.Contains(out, "Dolt database") {
-		t.Errorf("expected help to mention 'Dolt database', got: %s", out)
+	if !strings.Contains(out, "database") {
+		t.Errorf("expected help to mention 'database', got: %s", out)
 	}
 	if !strings.Contains(out, "--config") {
 		t.Errorf("expected help to mention '--config' flag, got: %s", out)
@@ -89,13 +89,13 @@ func TestDBInitCmd_InvalidConfig(t *testing.T) {
 	}
 }
 
-func TestDBInitCmd_NoDolt(t *testing.T) {
+func TestDBInitCmd_NoDB(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := dir + "/railyard.yaml"
 	cfg := `
 owner: testuser
 repo: git@github.com:org/app.git
-dolt:
+database:
   host: 127.0.0.1
   port: 19876
 tracks:
@@ -114,7 +114,7 @@ tracks:
 
 	err := cmd.Execute()
 	if err == nil {
-		t.Fatal("expected error when Dolt is not running")
+		t.Fatal("expected error when database is not running")
 	}
 	// Should load config successfully but fail on connection
 	output := buf.String()
@@ -219,7 +219,7 @@ func TestDBResetCmd_RequiresConfirmation(t *testing.T) {
 	cfg := `
 owner: testuser
 repo: git@github.com:org/app.git
-dolt:
+database:
   host: 127.0.0.1
   port: 19876
 tracks:

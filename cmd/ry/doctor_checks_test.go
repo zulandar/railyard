@@ -96,7 +96,7 @@ func TestBinaryLabel(t *testing.T) {
 		want  string
 	}{
 		{"go", "Go"},
-		{"dolt", "Dolt"},
+		{"mysql", "MySQL"},
 		{"tmux", "tmux"},
 		{"claude", "Claude CLI"},
 		{"unknown", "unknown"},
@@ -154,11 +154,11 @@ func TestCheckTmuxSession_NilConfig(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// checkDoltServer / checkDatabase
+// checkDBServer / checkDatabase
 // ---------------------------------------------------------------------------
 
-func TestCheckDoltServer_InvalidPort(t *testing.T) {
-	r := checkDoltServer("127.0.0.1", 1, "", "")
+func TestCheckDBServer_InvalidPort(t *testing.T) {
+	r := checkDBServer("127.0.0.1", 1, "", "")
 	if r.status != "FAIL" {
 		t.Fatalf("expected FAIL for invalid port, got %s: %s", r.status, r.detail)
 	}
@@ -185,11 +185,11 @@ func TestConnectFromConfig_MissingFile(t *testing.T) {
 	}
 }
 
-func TestConnectFromConfig_InvalidDolt(t *testing.T) {
+func TestConnectFromConfig_InvalidDB(t *testing.T) {
 	path := writeTestConfig(t)
 	_, _, err := connectFromConfig(path)
 	if err == nil {
-		t.Fatal("expected error when Dolt is not running")
+		t.Fatal("expected error when database is not running")
 	}
 }
 

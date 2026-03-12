@@ -67,10 +67,10 @@ repo: git@github.com:org/myproject.git
 # agent_provider: claude
 
 # ---------------------------------------------------------------------------
-# Dolt database connection (optional — defaults shown)
+# Database connection (optional — defaults shown)
 # ---------------------------------------------------------------------------
 
-# dolt:
+# database:
 #   host: 127.0.0.1
 #   port: 3306
 #   username: root                   # default: root

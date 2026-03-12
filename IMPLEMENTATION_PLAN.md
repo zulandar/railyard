@@ -2,7 +2,7 @@
 
 ## Scope
 
-**In scope:** Phase 1, local-first. Single developer, 1–100 engines, all three agent roles (Engine, Yardmaster, Dispatch). Go + GORM + Dolt. Direct DB messaging.
+**In scope:** Phase 1, local-first. Single developer, 1–100 engines, all three agent roles (Engine, Yardmaster, Dispatch). Go + GORM + MySQL. Direct DB messaging.
 
 **Out of scope:** Phase 2 (cross-railyard), production deployment (VPC/VMs/bastion), CocoIndex/Roundhouse, Kafka, log shipping/redaction/retention, `CarDepExternal` model.
 
@@ -14,7 +14,7 @@
 
 ## Assumptions
 
-- Dolt is installed (prerequisite, not a car)
+- MySQL is installed (prerequisite, not a car)
 - Claude Code is the primary engine agent runtime
 - `bd` CLI (beads v0.50.2) is used for issue tracking
 - `ry` CLI is the main user-facing Go binary
@@ -23,11 +23,11 @@
 
 ---
 
-## Epic 1: Foundation — Dolt Database & Project Scaffold
+## Epic 1: Foundation — MySQL Database & Project Scaffold
 
-**Goal:** `ry db init` creates a working Dolt database with all tables seeded from config.
+**Goal:** `ry db init` creates a working MySQL database with all tables seeded from config.
 
-**Context:** This is the bedrock of the entire system. Every subsequent epic depends on the Go project structure, GORM models, config loading, and Dolt connectivity established here. The directory layout follows Go conventions: `cmd/ry/` for the CLI entrypoint, `internal/` for private packages. GORM models are defined per ARCHITECTURE.md Section 1.5. Config is YAML-based per Section "VM Provisioning & Lifecycle".
+**Context:** This is the bedrock of the entire system. Every subsequent epic depends on the Go project structure, GORM models, config loading, and MySQL connectivity established here. The directory layout follows Go conventions: `cmd/ry/` for the CLI entrypoint, `internal/` for private packages. GORM models are defined per ARCHITECTURE.md Section 1.5. Config is YAML-based per Section "VM Provisioning & Lifecycle".
 
 ### Feature 1.1: Project Scaffold & Dependencies
 
@@ -39,19 +39,19 @@
   Create `go.mod` with `go mod init github.com/zulandar/railyard`. Create all directories under `cmd/` and `internal/`. Add `cmd/ry/main.go` with a minimal cobra root command that prints version. Verify `go build ./cmd/ry` produces a working binary.
 
 - **T1.1.2: Add core dependencies**
-  `go get` for: `gorm.io/gorm`, `gorm.io/driver/mysql` (Dolt is MySQL-compatible), `github.com/spf13/cobra` (CLI), `gopkg.in/yaml.v3` (config). Create `go.sum`. Verify all imports resolve.
+  `go get` for: `gorm.io/gorm`, `gorm.io/driver/mysql`, `github.com/spf13/cobra` (CLI), `gopkg.in/yaml.v3` (config). Create `go.sum`. Verify all imports resolve.
 
 ### Feature 1.2: Configuration System
 
-**Description:** Implement the YAML-based configuration loader that reads `config.yaml` and provides typed access to all settings. The config struct mirrors ARCHITECTURE.md Section "VM Provisioning & Lifecycle" — owner, repo, branch_prefix, dolt connection, tracks (name, language, file_patterns, engine_slots, conventions). The loader validates required fields and provides sensible defaults.
+**Description:** Implement the YAML-based configuration loader that reads `config.yaml` and provides typed access to all settings. The config struct mirrors ARCHITECTURE.md Section "VM Provisioning & Lifecycle" — owner, repo, branch_prefix, database connection, tracks (name, language, file_patterns, engine_slots, conventions). The loader validates required fields and provides sensible defaults.
 
 #### Tasks
 
 - **T1.2.1: Define config struct and YAML schema**
-  Create `internal/config/config.go` with `Config`, `DoltConfig`, `TrackConfig` structs. Tags for YAML unmarshalling. Include all fields from ARCHITECTURE.md config.yaml example (owner, repo, branch_prefix, dolt host/port/database, tracks with name/language/file_patterns/engine_slots/conventions). Exclude provisioner section (production mode, out of scope).
+  Create `internal/config/config.go` with `Config`, `DatabaseConfig`, `TrackConfig` structs. Tags for YAML unmarshalling. Include all fields from ARCHITECTURE.md config.yaml example (owner, repo, branch_prefix, database host/port/database, tracks with name/language/file_patterns/engine_slots/conventions). Exclude provisioner section (production mode, out of scope).
 
 - **T1.2.2: Implement config loader with validation**
-  `Load(path string) (*Config, error)` — reads YAML file, unmarshals, validates required fields (owner, repo, at least one track). Returns clear error messages for missing/invalid fields. Defaults: dolt host=127.0.0.1, port=3306, database=`railyard_{owner}`.
+  `Load(path string) (*Config, error)` — reads YAML file, unmarshals, validates required fields (owner, repo, at least one track). Returns clear error messages for missing/invalid fields. Defaults: host=127.0.0.1, port=3306, database=`railyard_{owner}`.
 
 ### Feature 1.3: GORM Data Models
 
@@ -67,22 +67,22 @@
 
 ### Feature 1.4: Database Connection & Initialization
 
-**Description:** Implement the Dolt connection layer and the `ry db init` command. The connection function uses GORM's MySQL driver to connect to Dolt (which is MySQL-compatible). AutoMigrate creates all tables. `ry db init` is the first runnable CLI command — it creates the railyard database, migrates all tables, seeds tracks from config.yaml, and writes the RailyardConfig row.
+**Description:** Implement the MySQL connection layer and the `ry db init` command. The connection function uses GORM's MySQL driver to connect to the database. AutoMigrate creates all tables. `ry db init` is the first runnable CLI command — it creates the railyard database, migrates all tables, seeds tracks from config.yaml, and writes the RailyardConfig row.
 
 #### Tasks
 
-- **T1.4.1: Implement Dolt connection function**
+- **T1.4.1: Implement MySQL connection function**
   Create `internal/db/connect.go` with `Connect(owner, host string, port int) (*gorm.DB, error)`. DSN format: `root@tcp(host:port)/railyard_{owner}?parseTime=true`. Handle connection errors with clear messages. Follows ARCHITECTURE.md Section 1.5 connection setup.
 
 - **T1.4.2: Implement AutoMigrate and track seeding**
   Create `internal/db/migrate.go` with `AutoMigrate(db *gorm.DB) error` — migrates all Phase 1 models. `SeedTracks(db *gorm.DB, tracks []config.TrackConfig) error` — upserts Track rows from config. `SeedConfig(db *gorm.DB, cfg *config.Config) error` — writes RailyardConfig row.
 
 - **T1.4.3: Implement `ry db init` CLI command**
-  Add `db init` subcommand to cobra CLI. Flow: load config → create Dolt database (via `CREATE DATABASE IF NOT EXISTS`) → connect → AutoMigrate → seed tracks → seed config → print summary (tables created, tracks seeded, config written).
+  Add `db init` subcommand to cobra CLI. Flow: load config → create database (via `CREATE DATABASE IF NOT EXISTS`) → connect → AutoMigrate → seed tracks → seed config → print summary (tables created, tracks seeded, config written).
 
 ### Feature 1.5: Foundation Test Suite
 
-**Description:** Unit and integration tests for the foundation layer. Config tests use fixture YAML files. Database tests require a running Dolt instance (integration). >90% coverage for `internal/config/` and `internal/db/`.
+**Description:** Unit and integration tests for the foundation layer. Config tests use fixture YAML files. Database tests require a running MySQL instance (integration). >90% coverage for `internal/config/` and `internal/db/`.
 
 #### Tasks
 
@@ -90,7 +90,7 @@
   Test: valid config loads correctly, missing required fields return errors, defaults are applied, invalid YAML returns parse error. Use fixture YAML files in `testdata/`.
 
 - **T1.5.2: Database initialization integration tests**
-  Test: Connect to Dolt, run AutoMigrate, verify all tables exist with correct columns. Seed tracks, verify Track rows. Seed config, verify RailyardConfig row. Requires running Dolt server (test helper starts/stops it, or uses Docker).
+  Test: Connect to MySQL, run AutoMigrate, verify all tables exist with correct columns. Seed tracks, verify Track rows. Seed config, verify RailyardConfig row. Requires running MySQL server (test helper starts/stops it, or uses Docker).
 
 ---
 
@@ -144,7 +144,7 @@
 
 ### Feature 2.4: Car Management Test Suite
 
-**Description:** Comprehensive tests for car operations. >90% coverage for `internal/car/`. Unit tests for ID generation, status validation, cycle detection. Integration tests with Dolt for CRUD, dependencies, and ready detection.
+**Description:** Comprehensive tests for car operations. >90% coverage for `internal/car/`. Unit tests for ID generation, status validation, cycle detection. Integration tests with MySQL for CRUD, dependencies, and ready detection.
 
 #### Tasks
 
@@ -160,7 +160,7 @@
 
 **Goal:** A running engine daemon that claims cars, spawns Claude Code with full context, and handles the complete lifecycle (completion, /clear cycles, stalls).
 
-**Context:** This is the heart of Railyard. The engine daemon (ARCHITECTURE.md Section "Engine Daemon — The Core Loop") runs on each engine instance. It polls Dolt for ready cars on its track, claims one atomically, renders context (ARCHITECTURE.md Section "Context Injection Template"), spawns Claude Code, monitors the subprocess, and handles exit (done, /clear, stall). The daemon is a Go binary, not an AI agent — it manages the agent lifecycle.
+**Context:** This is the heart of Railyard. The engine daemon (ARCHITECTURE.md Section "Engine Daemon — The Core Loop") runs on each engine instance. It polls the database for ready cars on its track, claims one atomically, renders context (ARCHITECTURE.md Section "Context Injection Template"), spawns Claude Code, monitors the subprocess, and handles exit (done, /clear, stall). The daemon is a Go binary, not an AI agent — it manages the agent lifecycle.
 
 ### Feature 3.1: Engine Lifecycle Management
 
@@ -214,14 +214,14 @@
 #### Tasks
 
 - **T3.4.1: Implement `ry engine start` command**
-  Cobra subcommand: `ry engine start --track backend`. Loads config, connects to Dolt, registers engine, starts heartbeat, enters main daemon loop (poll → claim → render context → spawn → monitor → handle exit → sleep 5s → repeat). Handles SIGINT/SIGTERM for clean shutdown.
+  Cobra subcommand: `ry engine start --track backend`. Loads config, connects to MySQL, registers engine, starts heartbeat, enters main daemon loop (poll → claim → render context → spawn → monitor → handle exit → sleep 5s → repeat). Handles SIGINT/SIGTERM for clean shutdown.
 
 - **T3.4.2: Implement `ry complete` and `ry progress` commands**
   `ry complete <car-id> "summary of what was done"` — marks car as done, writes final progress note. Called by the agent from within Claude Code. `ry progress <car-id> "what I did, what's next"` — writes progress note without completing. Used before `/clear` to preserve context.
 
 ### Feature 3.5: Engine Test Suite
 
-**Description:** >90% coverage for `internal/engine/`. Unit tests for context rendering and claim logic. Integration tests with Dolt and a mock Claude Code subprocess.
+**Description:** >90% coverage for `internal/engine/`. Unit tests for context rendering and claim logic. Integration tests with MySQL and a mock Claude Code subprocess.
 
 #### Tasks
 
@@ -350,7 +350,7 @@
 #### Tasks
 
 - **T5.5.1: Implement `ry yardmaster` CLI command**
-  Cobra subcommand: `ry yardmaster`. Loads config, connects to Dolt, starts yardmaster agent. Single instance per railyard (check for existing, error if running).
+  Cobra subcommand: `ry yardmaster`. Loads config, connects to MySQL, starts yardmaster agent. Single instance per railyard (check for existing, error if running).
 
 - **T5.5.2: Unit tests for yardmaster operations**
   Test: heartbeat staleness detection (stale vs healthy engines), car reassignment (status transitions, progress notes), dependency unblocking logic (cross-track deps resolved after merge).
@@ -397,7 +397,7 @@
 #### Tasks
 
 - **T6.3.1: Implement `ry dispatch` CLI command**
-  Cobra subcommand: `ry dispatch`. Loads config, connects to Dolt, starts dispatch agent. Interactive — opens Claude Code in the current terminal for direct conversation.
+  Cobra subcommand: `ry dispatch`. Loads config, connects to MySQL, starts dispatch agent. Interactive — opens Claude Code in the current terminal for direct conversation.
 
 - **T6.3.2: Integration tests for multi-track decomposition**
   Test: give a multi-track feature request (e.g., "Add user auth with JWT backend and React login page"), verify Dispatch creates: backend epic with tasks, frontend epic with tasks, cross-track dependencies (frontend blocked by backend API). Verify car fields are populated (title, description, acceptance, track, type, parent).
@@ -406,7 +406,7 @@
 
 ## Epic 7: Local Orchestration — `ry start` Full Railyard
 
-**Goal:** A single command (`ry start`) brings up the entire local railyard: Dolt, Dispatch, Yardmaster, and N engines in tmux.
+**Goal:** A single command (`ry start`) brings up the entire local railyard: MySQL, Dispatch, Yardmaster, and N engines in tmux.
 
 **Context:** ARCHITECTURE.md Section "Local Development Mode". Everything runs on one machine in a tmux session. The `ry start` command orchestrates the full startup sequence. `ry stop` gracefully shuts everything down. `ry status` provides a real-time dashboard. Engine count is user-controlled (1–100) and can be adjusted dynamically via `ry engine scale`.
 
@@ -417,10 +417,10 @@
 #### Tasks
 
 - **T7.1.1: Implement `ry start` command**
-  Cobra subcommand: `ry start [--engines N]`. Flow: validate config, check Dolt is running (or start it), run `ry db init` if needed, create tmux session "railyard", pane 0: Dispatch, pane 1: Yardmaster, panes 2..N+1: engines (track assignment from config engine_slots). Engine count from `--engines` flag or sum of engine_slots in config.
+  Cobra subcommand: `ry start [--engines N]`. Flow: validate config, check MySQL is running (or start it), run `ry db init` if needed, create tmux session "railyard", pane 0: Dispatch, pane 1: Yardmaster, panes 2..N+1: engines (track assignment from config engine_slots). Engine count from `--engines` flag or sum of engine_slots in config.
 
 - **T7.1.2: Implement `ry stop` command**
-  `ry stop [--timeout 60s]`. Flow: send "drain" broadcast message to all engines, wait for in-progress cars to complete (up to timeout), kill all engine processes, kill yardmaster, kill dispatch, kill tmux session, update all engine statuses to dead in Dolt.
+  `ry stop [--timeout 60s]`. Flow: send "drain" broadcast message to all engines, wait for in-progress cars to complete (up to timeout), kill all engine processes, kill yardmaster, kill dispatch, kill tmux session, update all engine statuses to dead in the database.
 
 - **T7.1.3: Implement `ry status` command**
   `ry status`. Dashboard output: engine table (ID, track, status, current car, last activity, uptime), car summary per track (open/ready/claimed/in_progress/done/blocked counts), message queue depth, tmux session status. Table-formatted, refreshable with `--watch`.
@@ -447,7 +447,7 @@
 #### Tasks
 
 - **T7.3.1: Integration tests for start/stop lifecycle**
-  Test: `ry start --engines 2` creates tmux session with correct pane count, engines register in Dolt, `ry status` shows them. `ry stop` kills session and updates engine statuses. Verify no orphaned processes.
+  Test: `ry start --engines 2` creates tmux session with correct pane count, engines register in the database, `ry status` shows them. `ry stop` kills session and updates engine statuses. Verify no orphaned processes.
 
 - **T7.3.2: Integration tests for engine scaling**
   Test: start with 2 engines, scale to 5, verify 3 new panes created and engines registered. Scale down to 1, verify drain messages sent and excess engines shut down.
@@ -488,7 +488,7 @@ F5.5 + F6.3 → F7.1 (Lifecycle) → F7.2 (Scaling) → F7.3 (Tests)
 | 3 | Runnable vertical slices | Compilable modules, feature-complete components | Catches integration issues early. Each slice testable end-to-end. |
 | 4 | CocoIndex deferred | Include as final slices | Engines work without semantic search. Reduces scope significantly. |
 | 5 | All three agent roles | Engine only, Engine+Yardmaster | Full orchestration from start. Dispatch avoids manual car creation. |
-| 6 | Agent logs in Dolt via GORM | Full logging arch, stdout only | Queryable debugging without shipping/redaction complexity. |
+| 6 | Agent logs in MySQL via GORM | Full logging arch, stdout only | Queryable debugging without shipping/redaction complexity. |
 | 7 | End-to-end first (Approach A) | Two-track parallel, horizontal | Natural dependency chain. Running system by Epic 3. Lowest integration risk. |
 | 8 | Direct DB messaging | Kafka | Polling 5s fine for local. Kafka is future scale optimization. |
 | 9 | Variable engine count (1-100) | Fixed count | User controls concurrency dynamically. Proportional track assignment. |

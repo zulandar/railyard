@@ -1,6 +1,6 @@
 # Kubernetes Deployment Guide
 
-This guide walks through deploying Railyard on Kubernetes using the official Helm chart. Railyard deploys five core components -- Dolt (metadata database), pgvector (vector store for CocoIndex), dispatch, yardmaster, dashboard -- plus a pool of engine pods per track.
+This guide walks through deploying Railyard on Kubernetes using the official Helm chart. Railyard deploys five core components -- MySQL (metadata database), pgvector (vector store for CocoIndex), dispatch, yardmaster, dashboard -- plus a pool of engine pods per track.
 
 ## 1. Prerequisites
 
@@ -15,11 +15,11 @@ Optional:
 
 - **cert-manager** -- required if you want automatic TLS certificates for ingress
 - **Ingress controller** (e.g. nginx-ingress, Traefik) -- required for host-based dashboard access
-- **External databases** -- if you prefer managed MySQL/Dolt or PostgreSQL instead of in-cluster StatefulSets
+- **External databases** -- if you prefer managed MySQL or PostgreSQL instead of in-cluster StatefulSets
 
 ## 2. Quick Start
 
-The fastest path is to install with internal databases (Dolt and pgvector run as StatefulSets inside the cluster).
+The fastest path is to install with internal databases (MySQL and pgvector run as StatefulSets inside the cluster).
 
 ### Add the chart (or use the local path)
 
@@ -68,7 +68,7 @@ You should see pods for each component:
 
 ```
 NAME                                    READY   STATUS    RESTARTS   AGE
-railyard-dolt-0                         1/1     Running   0          2m
+railyard-mysql-0                         1/1     Running   0          2m
 railyard-pgvector-0                     1/1     Running   0          2m
 railyard-dispatch-6b8f9c7d4-xxxxx       1/1     Running   0          2m
 railyard-yardmaster-5c4d8e9f1-xxxxx     1/1     Running   0          2m
@@ -86,14 +86,14 @@ Then open [http://localhost:8080](http://localhost:8080) in your browser.
 
 ## 3. Using Managed Databases
 
-By default the chart deploys Dolt and pgvector as internal StatefulSets. For production workloads you may prefer managed database services.
+By default the chart deploys MySQL and pgvector as internal StatefulSets. For production workloads you may prefer managed database services.
 
-### External MySQL / Dolt
+### External MySQL
 
-Set `dolt.internal: false` and provide connection details:
+Set `mysql.internal: false` and provide connection details:
 
 ```yaml
-dolt:
+mysql:
   internal: false
   host: mysql.example.com
   port: 3306
@@ -105,7 +105,7 @@ dolt:
 If your managed database requires TLS:
 
 ```yaml
-dolt:
+mysql:
   internal: false
   host: mysql.example.com
   port: 3306
@@ -114,8 +114,8 @@ dolt:
   password: secret
   tls:
     enabled: true
-    caSecret: dolt-ca-cert        # Secret containing ca.crt
-    clientSecret: dolt-client-cert # Secret containing tls.crt + tls.key
+    caSecret: mysql-ca-cert        # Secret containing ca.crt
+    clientSecret: mysql-client-cert # Secret containing tls.crt + tls.key
 ```
 
 ### External PostgreSQL for pgvector
@@ -279,7 +279,7 @@ The Helm chart sets `resources: {}` for all components by default, which means n
 
 | Component | CPU driver | Memory driver |
 |-----------|-----------|--------------|
-| **Dolt** | Query load from dispatch/yardmaster | Working set size; grows slowly with metadata volume |
+| **MySQL** | Query load from dispatch/yardmaster | Working set size; grows slowly with metadata volume |
 | **pgvector** | Vector similarity search (CocoIndex queries) | Index size; pgvector loads HNSW indexes into RAM |
 | **Engine** | Git operations, test execution, agent tool calls | Cloned repo size, test suite memory, agent context window |
 | **Dispatch** | Car assignment loop (lightweight) | Minimal -- in-memory state is small |
@@ -291,7 +291,7 @@ The Helm chart sets `resources: {}` for all components by default, which means n
 
 | Component | | Small (dev/test) | Medium (team) | Large (org-wide) |
 |-----------|---|-----------------|---------------|-----------------|
-| **Dolt** | requests | 250m / 256Mi | 500m / 512Mi | 1 CPU / 1Gi |
+| **MySQL** | requests | 250m / 256Mi | 500m / 512Mi | 1 CPU / 1Gi |
 | | limits | 500m / 512Mi | 1 CPU / 1Gi | 2 CPU / 2Gi |
 | **pgvector** | requests | 250m / 512Mi | 500m / 1Gi | 1 CPU / 2Gi |
 | | limits | 500m / 1Gi | 1 CPU / 2Gi | 2 CPU / 4Gi |
@@ -314,7 +314,7 @@ The Helm chart sets `resources: {}` for all components by default, which means n
 ### Example values.yaml for a medium deployment
 
 ```yaml
-dolt:
+mysql:
   resources:
     requests:
       cpu: "500m"
@@ -382,19 +382,19 @@ telegraph:
 
 ## 7. Storage and PVC Sizing
 
-The internal Dolt and pgvector StatefulSets each create a PersistentVolumeClaim (PVC). This section covers sizing, storage class selection, and how to resize PVCs after initial deployment.
+The internal MySQL and pgvector StatefulSets each create a PersistentVolumeClaim (PVC). This section covers sizing, storage class selection, and how to resize PVCs after initial deployment.
 
 ### Sizing guidelines
 
 | Component | What it stores | Default size | Sizing rule of thumb |
 |-----------|---------------|-------------|---------------------|
-| **Dolt** | Car/engine/track metadata + git-like version history | `10Gi` | Grows slowly. 10Gi covers most single-project deployments. Large orgs with many tracks and high car throughput may need 20-50Gi. |
+| **MySQL** | Car/engine/track metadata + git-like version history | `10Gi` | Grows slowly. 10Gi covers most single-project deployments. Large orgs with many tracks and high car throughput may need 20-50Gi. |
 | **pgvector** | CocoIndex vector embeddings of indexed source code | `10Gi` | Scales with codebase size. Estimate ~1GB per 100K lines of indexed code. A monorepo with 500K lines should start at 10Gi; 1M+ lines should use 20Gi or more. |
 
 Configure sizes in your values file:
 
 ```yaml
-dolt:
+mysql:
   storage:
     size: 10Gi
     storageClass: ""   # empty string uses the cluster default
@@ -429,8 +429,8 @@ helm upgrade railyard ./charts/railyard \
 **Step 2** -- If the StatefulSet PVC is not updated automatically, patch it directly:
 
 ```bash
-# Resize Dolt PVC
-kubectl patch pvc data-railyard-dolt-0 -n railyard \
+# Resize MySQL PVC
+kubectl patch pvc data-railyard-mysql-0 -n railyard \
   -p '{"spec":{"resources":{"requests":{"storage":"20Gi"}}}}'
 
 # Resize pgvector PVC
@@ -442,7 +442,7 @@ The underlying volume expands online for most cloud storage classes. No pod rest
 
 ### Data persistence warning
 
-> **Warning:** Deleting a PVC permanently destroys all data on the underlying volume. `helm uninstall` does **not** delete PVCs (this is intentional), but running `kubectl delete pvc` will. If you are using internal databases, back up Dolt and pgvector data before removing PVCs. There is no recovery path once the volume is deleted.
+> **Warning:** Deleting a PVC permanently destroys all data on the underlying volume. `helm uninstall` does **not** delete PVCs (this is intentional), but running `kubectl delete pvc` will. If you are using internal databases, back up MySQL and pgvector data before removing PVCs. There is no recovery path once the volume is deleted.
 
 ## 8. Telegraph (Chat Bridge)
 
@@ -515,21 +515,21 @@ The chart expects the Secret keys to match the platform (`slack-bot-token` / `sl
 
 ## 9. Service Networking and DNS
 
-All Railyard components deploy into a single namespace (e.g. `railyard` or `railyard-{project}`). Pods discover each other through Kubernetes DNS using the pattern `<service>.<namespace>.svc.cluster.local`. In practice you rarely need the full form -- the Helm-generated `railyard.yaml` configmap already uses the short service names (e.g. `railyard-dolt`), which resolve within the same namespace automatically.
+All Railyard components deploy into a single namespace (e.g. `railyard` or `railyard-{project}`). Pods discover each other through Kubernetes DNS using the pattern `<service>.<namespace>.svc.cluster.local`. In practice you rarely need the full form -- the Helm-generated `railyard.yaml` configmap already uses the short service names (e.g. `railyard-mysql`), which resolve within the same namespace automatically.
 
 ### Internal services
 
 | Service | Port | Type | Description |
 |---------|------|------|-------------|
-| `railyard-dolt` | 3306 | Headless ClusterIP | Dolt MySQL-compatible metadata database |
+| `railyard-mysql` | 3306 | Headless ClusterIP | MySQL metadata database |
 | `railyard-pgvector` | 5432 | Headless ClusterIP | pgvector PostgreSQL for CocoIndex vector storage |
 | `railyard-dashboard` | 8080 | ClusterIP | Dashboard web UI |
 
-Dispatch, yardmaster, and engine pods all read connection strings from the `railyard-config` ConfigMap. The Helm helpers (`railyard.doltHost`, `railyard.pgvectorHost`) resolve to the internal service names when `dolt.internal` and `pgvector.internal` are `true`.
+Dispatch, yardmaster, and engine pods all read connection strings from the `railyard-config` ConfigMap. The Helm helpers (`railyard.mysqlHost`, `railyard.pgvectorHost`) resolve to the internal service names when `mysql.internal` and `pgvector.internal` are `true`.
 
 ### External database mode
 
-When you set `dolt.internal: false` or `pgvector.internal: false`, the chart skips creating the corresponding Service and StatefulSet. The ConfigMap is populated with the external host you provide in values (see section 3). Internal services for the other components are unaffected.
+When you set `mysql.internal: false` or `pgvector.internal: false`, the chart skips creating the corresponding Service and StatefulSet. The ConfigMap is populated with the external host you provide in values (see section 3). Internal services for the other components are unaffected.
 
 ### Network policies
 
@@ -547,7 +547,7 @@ When enabled, the following traffic paths are permitted:
 
 | Source | Destination | Port | Purpose |
 |--------|-------------|------|---------|
-| Engine, dispatch, yardmaster, dashboard, bull | Dolt | 3306 | Database access |
+| Engine, dispatch, yardmaster, dashboard, bull | MySQL | 3306 | Database access |
 | Engine | pgvector | 5432 | Vector store access |
 | Engine | External (0.0.0.0/0) | 443 | AI provider API calls |
 | Bull | External (0.0.0.0/0) | 443 | GitHub API calls |
@@ -586,8 +586,8 @@ kubectl logs -l app.kubernetes.io/component=engine -n railyard --tail=100 -f
 # Engine logs (specific track)
 kubectl logs -l app.kubernetes.io/component=engine,railyard.dev/track=backend -n railyard --tail=100 -f
 
-# Dolt logs
-kubectl logs railyard-dolt-0 -n railyard --tail=100 -f
+# MySQL logs
+kubectl logs railyard-mysql-0 -n railyard --tail=100 -f
 ```
 
 ### Dashboard for real-time status
@@ -608,7 +608,7 @@ Access it via port-forward or ingress as described in section 4.
 
 **Common causes:**
 - Invalid or missing auth credentials. Verify your `auth.method` and credentials match your provider. See [k8s-authentication.md](k8s-authentication.md).
-- Database connection failure. Check that Dolt and pgvector pods are running and ready.
+- Database connection failure. Check that MySQL and pgvector pods are running and ready.
 
 **Diagnosis:**
 
@@ -643,15 +643,15 @@ kubectl get events -n railyard --sort-by='.lastTimestamp'
 3. If using ingress, check ingress status: `kubectl describe ingress -n railyard`
 4. If using OAuth2 Proxy, check the sidecar logs: `kubectl logs <dashboard-pod> -c oauth2-proxy -n railyard`
 
-### Dolt connection refused
+### MySQL connection refused
 
-**Symptom:** Components report "connection refused" or "dial tcp ... connect: connection refused" for the Dolt database.
+**Symptom:** Components report "connection refused" or "dial tcp ... connect: connection refused" for the MySQL database.
 
 **Check list:**
-1. Verify the Dolt StatefulSet is ready: `kubectl get statefulset railyard-dolt -n railyard`
-2. Check Dolt pod logs: `kubectl logs railyard-dolt-0 -n railyard`
+1. Verify the MySQL StatefulSet is ready: `kubectl get statefulset railyard-mysql -n railyard`
+2. Check MySQL pod logs: `kubectl logs railyard-mysql-0 -n railyard`
 3. Verify the PVC is bound: `kubectl get pvc -n railyard`
-4. If using external Dolt/MySQL, verify network connectivity from inside the cluster:
+4. If using external MySQL, verify network connectivity from inside the cluster:
 
 ```bash
 kubectl run -it --rm debug --image=busybox -n railyard -- nc -zv mysql.example.com 3306
@@ -689,7 +689,7 @@ Engine pods perform a rolling restart. In-progress cars are finished before the 
 helm uninstall railyard --namespace railyard
 ```
 
-Note: PersistentVolumeClaims for Dolt and pgvector are **not** deleted automatically. To remove all data:
+Note: PersistentVolumeClaims for MySQL and pgvector are **not** deleted automatically. To remove all data:
 
 ```bash
 kubectl delete pvc -l app.kubernetes.io/instance=railyard -n railyard

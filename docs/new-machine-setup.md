@@ -7,7 +7,7 @@ If you've cloned a repo that already has a `railyard.yaml` committed, you don't 
 Make sure you have the [prerequisites](../README.md#prerequisites) installed:
 
 - Go 1.25+
-- Dolt
+- MySQL 8.0+
 - tmux
 - At least one AI coding CLI (Claude Code, Codex, Gemini, or OpenCode)
 - Docker (optional, for CocoIndex semantic search)
@@ -27,13 +27,13 @@ Or install it to your `$GOPATH/bin`:
 go install ./cmd/ry/
 ```
 
-**2. Start Dolt**
+**2. Start MySQL**
 
 ```bash
 ry db start -c railyard.yaml
 ```
 
-If this is the first time running Dolt on this machine, it will create the data directory and start the server. If Dolt is already running, this is a no-op.
+If this is the first time running MySQL on this machine, it will create the data directory and start the server. If MySQL is already running, this is a no-op.
 
 **3. Initialize the database**
 
@@ -65,7 +65,7 @@ ry doctor -c railyard.yaml
 
 ## After a Reboot
 
-Dolt doesn't survive WSL/system restarts. Restart it before using Railyard:
+MySQL doesn't survive WSL/system restarts. Restart it before using Railyard:
 
 ```bash
 ry db start -c railyard.yaml

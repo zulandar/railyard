@@ -63,11 +63,11 @@ spec:
               value: safe.directory
             - name: GIT_CONFIG_VALUE_0
               value: /repo
-            - name: DOLT_PASSWORD
+            - name: DB_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ $fullname }}-db
-                  key: dolt-password
+                  key: db-password
             - name: PGVECTOR_PASSWORD
               valueFrom:
                 secretKeyRef:

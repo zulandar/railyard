@@ -30,11 +30,11 @@ spec:
           command: ["ry"]
           args: ["bull", "-c", "/etc/railyard/railyard.yaml"]
           env:
-            - name: DOLT_PASSWORD
+            - name: DB_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ include "railyard.fullname" . }}-db
-                  key: dolt-password
+                  key: db-password
             - name: GITHUB_TOKEN
               valueFrom:
                 secretKeyRef:

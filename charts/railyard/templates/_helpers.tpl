@@ -70,22 +70,22 @@ Container image with tag defaulting to appVersion.
 {{- end }}
 
 {{/*
-Dolt host — auto-derived when internal, otherwise from values.
+Database host — auto-derived when internal, otherwise from values.
 */}}
-{{- define "railyard.doltHost" -}}
-{{- if .Values.dolt.internal }}
-{{- printf "%s-dolt" (include "railyard.fullname" .) }}
+{{- define "railyard.dbHost" -}}
+{{- if .Values.database.internal }}
+{{- printf "%s-mysql" (include "railyard.fullname" .) }}
 {{- else }}
-{{- .Values.dolt.host }}
+{{- .Values.database.host }}
 {{- end }}
 {{- end }}
 
 {{/*
-Dolt database name — defaults to railyard_{project}.
+Database name — defaults to railyard_{project}.
 */}}
-{{- define "railyard.doltDatabase" -}}
-{{- if .Values.dolt.database }}
-{{- .Values.dolt.database }}
+{{- define "railyard.dbDatabase" -}}
+{{- if .Values.database.database }}
+{{- .Values.database.database }}
 {{- else }}
 {{- printf "railyard_%s" .Values.project }}
 {{- end }}

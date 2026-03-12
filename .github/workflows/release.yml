@@ -97,7 +97,7 @@ jobs:
 
       - name: Verify infrastructure pods
         run: |
-          kubectl rollout status statefulset/railyard-dolt -n railyard --timeout=120s
+          kubectl rollout status statefulset/railyard-mysql -n railyard --timeout=120s
           kubectl rollout status statefulset/railyard-pgvector -n railyard --timeout=120s
 
       - name: Wait for dashboard (may CrashLoopBackOff until DB is ready)
@@ -126,7 +126,7 @@ jobs:
       - name: Show pod logs on failure
         if: failure()
         run: |
-          for comp in dolt pgvector dashboard dispatch yardmaster engine bull; do
+          for comp in mysql pgvector dashboard dispatch yardmaster engine bull; do
             echo "=== $comp ==="
             kubectl logs -l app.kubernetes.io/component=$comp -n railyard --tail=50 --all-containers 2>/dev/null || true
           done

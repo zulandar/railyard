@@ -32,11 +32,11 @@ spec:
               command: ["ry"]
               args: ["overlay", "gc", "-c", "/etc/railyard/railyard.yaml"]
               env:
-                - name: DOLT_PASSWORD
+                - name: DB_PASSWORD
                   valueFrom:
                     secretKeyRef:
                       name: {{ include "railyard.fullname" . }}-db
-                      key: dolt-password
+                      key: db-password
                 - name: PGVECTOR_PASSWORD
                   valueFrom:
                     secretKeyRef:

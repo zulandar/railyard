@@ -3,7 +3,7 @@ repo: git@github.com:org/myapp.git
 branch_prefix: ry/alice
 agent_provider: claude
 
-dolt:
+database:
   host: 10.0.0.5
   port: 3307
   database: railyard_alice

@@ -13,7 +13,7 @@ repo: git@github.com:org/myapp.git
 branch_prefix: ry/alice
 agent_provider: claude
 
-dolt:
+database:
   host: 10.0.0.5
   port: 3307
   database: railyard_alice
@@ -58,14 +58,14 @@ func TestParse_FullConfig(t *testing.T) {
 	if cfg.BranchPrefix != "ry/alice" {
 		t.Errorf("BranchPrefix = %q, want %q", cfg.BranchPrefix, "ry/alice")
 	}
-	if cfg.Dolt.Host != "10.0.0.5" {
-		t.Errorf("Dolt.Host = %q, want %q", cfg.Dolt.Host, "10.0.0.5")
+	if cfg.Database.Host != "10.0.0.5" {
+		t.Errorf("Database.Host = %q, want %q", cfg.Database.Host, "10.0.0.5")
 	}
-	if cfg.Dolt.Port != 3307 {
-		t.Errorf("Dolt.Port = %d, want %d", cfg.Dolt.Port, 3307)
+	if cfg.Database.Port != 3307 {
+		t.Errorf("Database.Port = %d, want %d", cfg.Database.Port, 3307)
 	}
-	if cfg.Dolt.Database != "railyard_alice" {
-		t.Errorf("Dolt.Database = %q, want %q", cfg.Dolt.Database, "railyard_alice")
+	if cfg.Database.Database != "railyard_alice" {
+		t.Errorf("Database.Database = %q, want %q", cfg.Database.Database, "railyard_alice")
 	}
 	if len(cfg.Tracks) != 2 {
 		t.Fatalf("len(Tracks) = %d, want 2", len(cfg.Tracks))
@@ -112,31 +112,31 @@ func TestParse_MinimalConfig_AppliesDefaults(t *testing.T) {
 	if cfg.BranchPrefix != "ry/bob" {
 		t.Errorf("BranchPrefix = %q, want %q (derived from owner)", cfg.BranchPrefix, "ry/bob")
 	}
-	if cfg.Dolt.Host != "127.0.0.1" {
-		t.Errorf("Dolt.Host = %q, want %q (default)", cfg.Dolt.Host, "127.0.0.1")
+	if cfg.Database.Host != "127.0.0.1" {
+		t.Errorf("Database.Host = %q, want %q (default)", cfg.Database.Host, "127.0.0.1")
 	}
-	if cfg.Dolt.Port != 3306 {
-		t.Errorf("Dolt.Port = %d, want %d (default)", cfg.Dolt.Port, 3306)
+	if cfg.Database.Port != 3306 {
+		t.Errorf("Database.Port = %d, want %d (default)", cfg.Database.Port, 3306)
 	}
-	if cfg.Dolt.Database != "railyard_bob" {
-		t.Errorf("Dolt.Database = %q, want %q (derived from owner)", cfg.Dolt.Database, "railyard_bob")
+	if cfg.Database.Database != "railyard_bob" {
+		t.Errorf("Database.Database = %q, want %q (derived from owner)", cfg.Database.Database, "railyard_bob")
 	}
 	if cfg.Tracks[0].EngineSlots != 3 {
 		t.Errorf("Tracks[0].EngineSlots = %d, want %d (default)", cfg.Tracks[0].EngineSlots, 3)
 	}
-	if cfg.Dolt.Username != "root" {
-		t.Errorf("Dolt.Username = %q, want %q (default)", cfg.Dolt.Username, "root")
+	if cfg.Database.Username != "root" {
+		t.Errorf("Database.Username = %q, want %q (default)", cfg.Database.Username, "root")
 	}
-	if cfg.Dolt.Password != "" {
-		t.Errorf("Dolt.Password = %q, want %q (default)", cfg.Dolt.Password, "")
+	if cfg.Database.Password != "" {
+		t.Errorf("Database.Password = %q, want %q (default)", cfg.Database.Password, "")
 	}
 }
 
-func TestParse_DoltCredentials(t *testing.T) {
+func TestParse_DatabaseCredentials(t *testing.T) {
 	yaml := `
 owner: carol
 repo: git@github.com:org/app.git
-dolt:
+database:
   username: admin
   password: secret123
 tracks:
@@ -147,23 +147,23 @@ tracks:
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.Dolt.Username != "admin" {
-		t.Errorf("Dolt.Username = %q, want %q", cfg.Dolt.Username, "admin")
+	if cfg.Database.Username != "admin" {
+		t.Errorf("Database.Username = %q, want %q", cfg.Database.Username, "admin")
 	}
-	if cfg.Dolt.Password != "secret123" {
-		t.Errorf("Dolt.Password = %q, want %q", cfg.Dolt.Password, "secret123")
+	if cfg.Database.Password != "secret123" {
+		t.Errorf("Database.Password = %q, want %q", cfg.Database.Password, "secret123")
 	}
 }
 
-func TestParse_DoltCredentials_EnvVar(t *testing.T) {
-	t.Setenv("TEST_DOLT_USER", "envuser")
-	t.Setenv("TEST_DOLT_PASS", "envpass")
+func TestParse_DatabaseCredentials_EnvVar(t *testing.T) {
+	t.Setenv("TEST_DB_USER", "envuser")
+	t.Setenv("TEST_DB_PASS", "envpass")
 	yaml := `
 owner: carol
 repo: git@github.com:org/app.git
-dolt:
-  username: ${TEST_DOLT_USER}
-  password: ${TEST_DOLT_PASS}
+database:
+  username: ${TEST_DB_USER}
+  password: ${TEST_DB_PASS}
 tracks:
   - name: api
     language: go
@@ -172,11 +172,11 @@ tracks:
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.Dolt.Username != "envuser" {
-		t.Errorf("Dolt.Username = %q, want %q", cfg.Dolt.Username, "envuser")
+	if cfg.Database.Username != "envuser" {
+		t.Errorf("Database.Username = %q, want %q", cfg.Database.Username, "envuser")
 	}
-	if cfg.Dolt.Password != "envpass" {
-		t.Errorf("Dolt.Password = %q, want %q", cfg.Dolt.Password, "envpass")
+	if cfg.Database.Password != "envpass" {
+		t.Errorf("Database.Password = %q, want %q", cfg.Database.Password, "envpass")
 	}
 }
 
@@ -198,11 +198,11 @@ tracks:
 	}
 }
 
-func TestParse_ExplicitDoltDatabase_NotOverridden(t *testing.T) {
+func TestParse_ExplicitDatabase_NotOverridden(t *testing.T) {
 	yaml := `
 owner: carol
 repo: git@github.com:org/app.git
-dolt:
+database:
   database: my_custom_db
 tracks:
   - name: api
@@ -212,8 +212,8 @@ tracks:
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.Dolt.Database != "my_custom_db" {
-		t.Errorf("Dolt.Database = %q, want %q (should not be overridden)", cfg.Dolt.Database, "my_custom_db")
+	if cfg.Database.Database != "my_custom_db" {
+		t.Errorf("Database.Database = %q, want %q (should not be overridden)", cfg.Database.Database, "my_custom_db")
 	}
 }
 
@@ -361,8 +361,8 @@ func TestLoad_FullFixture(t *testing.T) {
 	if cfg.Owner != "alice" {
 		t.Errorf("Owner = %q, want %q", cfg.Owner, "alice")
 	}
-	if cfg.Dolt.Host != "10.0.0.5" {
-		t.Errorf("Dolt.Host = %q, want %q", cfg.Dolt.Host, "10.0.0.5")
+	if cfg.Database.Host != "10.0.0.5" {
+		t.Errorf("Database.Host = %q, want %q", cfg.Database.Host, "10.0.0.5")
 	}
 	if len(cfg.Tracks) != 2 {
 		t.Fatalf("len(Tracks) = %d, want 2", len(cfg.Tracks))
@@ -380,11 +380,11 @@ func TestLoad_MinimalFixture(t *testing.T) {
 	if cfg.Owner != "bob" {
 		t.Errorf("Owner = %q, want %q", cfg.Owner, "bob")
 	}
-	if cfg.Dolt.Host != "127.0.0.1" {
-		t.Errorf("Dolt.Host = %q, want default %q", cfg.Dolt.Host, "127.0.0.1")
+	if cfg.Database.Host != "127.0.0.1" {
+		t.Errorf("Database.Host = %q, want default %q", cfg.Database.Host, "127.0.0.1")
 	}
-	if cfg.Dolt.Port != 3306 {
-		t.Errorf("Dolt.Port = %d, want default %d", cfg.Dolt.Port, 3306)
+	if cfg.Database.Port != 3306 {
+		t.Errorf("Database.Port = %d, want default %d", cfg.Database.Port, 3306)
 	}
 }
 
@@ -1130,7 +1130,7 @@ func TestParse_TLSConfig_Full(t *testing.T) {
 	yaml := `
 owner: alice
 repo: git@github.com:org/app.git
-dolt:
+database:
   host: dolt.k8s.internal
   port: 3306
   tls:
@@ -1147,20 +1147,20 @@ tracks:
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !cfg.Dolt.TLS.Enabled {
-		t.Error("Dolt.TLS.Enabled = false, want true")
+	if !cfg.Database.TLS.Enabled {
+		t.Error("Database.TLS.Enabled = false, want true")
 	}
-	if cfg.Dolt.TLS.CACert != "/certs/ca.pem" {
-		t.Errorf("Dolt.TLS.CACert = %q, want /certs/ca.pem", cfg.Dolt.TLS.CACert)
+	if cfg.Database.TLS.CACert != "/certs/ca.pem" {
+		t.Errorf("Database.TLS.CACert = %q, want /certs/ca.pem", cfg.Database.TLS.CACert)
 	}
-	if cfg.Dolt.TLS.ClientCert != "/certs/client-cert.pem" {
-		t.Errorf("Dolt.TLS.ClientCert = %q", cfg.Dolt.TLS.ClientCert)
+	if cfg.Database.TLS.ClientCert != "/certs/client-cert.pem" {
+		t.Errorf("Database.TLS.ClientCert = %q", cfg.Database.TLS.ClientCert)
 	}
-	if cfg.Dolt.TLS.ClientKey != "/certs/client-key.pem" {
-		t.Errorf("Dolt.TLS.ClientKey = %q", cfg.Dolt.TLS.ClientKey)
+	if cfg.Database.TLS.ClientKey != "/certs/client-key.pem" {
+		t.Errorf("Database.TLS.ClientKey = %q", cfg.Database.TLS.ClientKey)
 	}
-	if cfg.Dolt.TLS.SkipVerify {
-		t.Error("Dolt.TLS.SkipVerify = true, want false")
+	if cfg.Database.TLS.SkipVerify {
+		t.Error("Database.TLS.SkipVerify = true, want false")
 	}
 }
 
@@ -1169,8 +1169,8 @@ func TestParse_TLSConfig_Disabled_ByDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.Dolt.TLS.Enabled {
-		t.Error("Dolt.TLS.Enabled should be false by default")
+	if cfg.Database.TLS.Enabled {
+		t.Error("Database.TLS.Enabled should be false by default")
 	}
 }
 
@@ -1178,7 +1178,7 @@ func TestParse_TLSConfig_SkipVerify(t *testing.T) {
 	yaml := `
 owner: alice
 repo: git@github.com:org/app.git
-dolt:
+database:
   tls:
     enabled: true
     skip_verify: true
@@ -1190,11 +1190,11 @@ tracks:
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !cfg.Dolt.TLS.Enabled {
-		t.Error("Dolt.TLS.Enabled = false, want true")
+	if !cfg.Database.TLS.Enabled {
+		t.Error("Database.TLS.Enabled = false, want true")
 	}
-	if !cfg.Dolt.TLS.SkipVerify {
-		t.Error("Dolt.TLS.SkipVerify = false, want true")
+	if !cfg.Database.TLS.SkipVerify {
+		t.Error("Database.TLS.SkipVerify = false, want true")
 	}
 }
 
@@ -1205,7 +1205,7 @@ func TestParse_TLSConfig_EnvVarResolution(t *testing.T) {
 	yaml := `
 owner: alice
 repo: git@github.com:org/app.git
-dolt:
+database:
   tls:
     enabled: true
     ca_cert: "${TEST_CA_PATH}"
@@ -1219,14 +1219,14 @@ tracks:
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.Dolt.TLS.CACert != "/resolved/ca.pem" {
-		t.Errorf("Dolt.TLS.CACert = %q, want /resolved/ca.pem", cfg.Dolt.TLS.CACert)
+	if cfg.Database.TLS.CACert != "/resolved/ca.pem" {
+		t.Errorf("Database.TLS.CACert = %q, want /resolved/ca.pem", cfg.Database.TLS.CACert)
 	}
-	if cfg.Dolt.TLS.ClientCert != "/resolved/cert.pem" {
-		t.Errorf("Dolt.TLS.ClientCert = %q, want /resolved/cert.pem", cfg.Dolt.TLS.ClientCert)
+	if cfg.Database.TLS.ClientCert != "/resolved/cert.pem" {
+		t.Errorf("Database.TLS.ClientCert = %q, want /resolved/cert.pem", cfg.Database.TLS.ClientCert)
 	}
-	if cfg.Dolt.TLS.ClientKey != "/resolved/key.pem" {
-		t.Errorf("Dolt.TLS.ClientKey = %q, want /resolved/key.pem", cfg.Dolt.TLS.ClientKey)
+	if cfg.Database.TLS.ClientKey != "/resolved/key.pem" {
+		t.Errorf("Database.TLS.ClientKey = %q, want /resolved/key.pem", cfg.Database.TLS.ClientKey)
 	}
 }
 

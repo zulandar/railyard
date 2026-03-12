@@ -48,9 +48,9 @@ func runStart(cmd *cobra.Command, configPath string, engines int, withTelegraph 
 		log.Printf("cocoindex scripts sync warning: %v", err)
 	}
 
-	gormDB, err := db.Connect(cfg.Dolt.Host, cfg.Dolt.Port, cfg.Dolt.Database, cfg.Dolt.Username, cfg.Dolt.Password)
+	gormDB, err := db.Connect(cfg.Database.Host, cfg.Database.Port, cfg.Database.Database, cfg.Database.Username, cfg.Database.Password)
 	if err != nil {
-		return fmt.Errorf("connect to %s: %w", cfg.Dolt.Database, err)
+		return fmt.Errorf("connect to %s: %w", cfg.Database.Database, err)
 	}
 
 	// Best-effort audit; do not fail startup if audit logging fails.

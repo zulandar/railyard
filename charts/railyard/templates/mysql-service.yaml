@@ -1,20 +1,20 @@
-{{- if .Values.dolt.internal }}
+{{- if .Values.database.internal }}
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "railyard.fullname" . }}-dolt
+  name: {{ include "railyard.fullname" . }}-mysql
   labels:
     {{- include "railyard.labels" . | nindent 4 }}
-    app.kubernetes.io/component: dolt
+    app.kubernetes.io/component: mysql
 spec:
   type: ClusterIP
   clusterIP: None
   ports:
     - name: mysql
-      port: {{ .Values.dolt.port }}
+      port: {{ .Values.database.port }}
       targetPort: mysql
       protocol: TCP
   selector:
     {{- include "railyard.selectorLabels" . | nindent 4 }}
-    app.kubernetes.io/component: dolt
+    app.kubernetes.io/component: mysql
 {{- end }}

@@ -1,6 +1,6 @@
 # Railyard Helm chart values
 #
-# This chart deploys a complete Railyard instance: Dolt, pgvector,
+# This chart deploys a complete Railyard instance: MySQL, pgvector,
 # dispatch, yardmaster, dashboard, engine pods, and optionally Telegraph.
 
 # -- Project name used for namespace derivation and resource naming.
@@ -33,10 +33,10 @@ serviceAccount:
   annotations: {}
 
 # ---------------------------------------------------------------------------
-# Dolt database
+# MySQL database
 # ---------------------------------------------------------------------------
-dolt:
-  # -- Deploy Dolt as a StatefulSet inside the cluster.
+database:
+  # -- Deploy MySQL as a StatefulSet inside the cluster.
   internal: true
   # -- Connection settings (used whether internal or external).
   host: ""       # auto-derived when internal=true
@@ -53,7 +53,7 @@ dolt:
   storage:
     size: 10Gi
     storageClass: ""
-  # -- Resource requests/limits for the internal Dolt pod.
+  # -- Resource requests/limits for the internal MySQL pod.
   resources: {}
 
 # ---------------------------------------------------------------------------

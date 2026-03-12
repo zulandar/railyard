@@ -15,7 +15,7 @@ import (
 	"gorm.io/gorm/logger"
 )
 
-// DSN builds a MySQL-compatible DSN for connecting to a Dolt database.
+// DSN builds a MySQL-compatible DSN for connecting to the database.
 func DSN(host string, port int, database, username, password string) string {
 	creds := username
 	if password != "" {
@@ -24,7 +24,7 @@ func DSN(host string, port int, database, username, password string) string {
 	return fmt.Sprintf("%s@tcp(%s:%d)/%s?parseTime=true", creds, host, port, database)
 }
 
-// Connect opens a GORM connection to a Dolt database.
+// Connect opens a GORM connection to the database.
 func Connect(host string, port int, database, username, password string) (*gorm.DB, error) {
 	dsn := DSN(host, port, database, username, password)
 	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{
@@ -36,7 +36,7 @@ func Connect(host string, port int, database, username, password string) (*gorm.
 	return db, nil
 }
 
-// ConnectAdmin opens a GORM connection to the Dolt server without selecting
+// ConnectAdmin opens a GORM connection to the database server without selecting
 // a specific database, used for CREATE DATABASE operations.
 func ConnectAdmin(host string, port int, username, password string) (*gorm.DB, error) {
 	creds := username
@@ -101,9 +101,9 @@ func RegisterTLS(cfg config.TLSConfig) error {
 	return gomysql.RegisterTLSConfig("custom", tlsCfg)
 }
 
-// DSNFromConfig builds a MySQL-compatible DSN from a DoltConfig.
+// DSNFromConfig builds a MySQL-compatible DSN from a DatabaseConfig.
 // When TLS is enabled, it appends tls=custom.
-func DSNFromConfig(cfg config.DoltConfig) string {
+func DSNFromConfig(cfg config.DatabaseConfig) string {
 	dsn := DSN(cfg.Host, cfg.Port, cfg.Database, cfg.Username, cfg.Password)
 	if cfg.TLS.Enabled {
 		dsn += "&tls=custom"
@@ -111,10 +111,10 @@ func DSNFromConfig(cfg config.DoltConfig) string {
 	return dsn
 }
 
-// ConnectWithConfig opens a GORM connection using a DoltConfig.
+// ConnectWithConfig opens a GORM connection using a DatabaseConfig.
 // When TLS is enabled, RegisterTLS is called to register the "custom" TLS
 // profile with the MySQL driver before opening the connection.
-func ConnectWithConfig(cfg config.DoltConfig) (*gorm.DB, error) {
+func ConnectWithConfig(cfg config.DatabaseConfig) (*gorm.DB, error) {
 	if err := RegisterTLS(cfg.TLS); err != nil {
 		return nil, fmt.Errorf("db: register TLS config: %w", err)
 	}

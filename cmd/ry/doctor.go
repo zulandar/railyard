@@ -50,7 +50,7 @@ func runDoctor(cmd *cobra.Command, configPath string) error {
 	results = append(results, cfgResult)
 
 	// 2. Binaries
-	for _, bin := range []string{"go", "dolt", "tmux", "claude"} {
+	for _, bin := range []string{"go", "mysql", "tmux", "claude"} {
 		results = append(results, checkBinary(bin))
 	}
 
@@ -70,19 +70,19 @@ func runDoctor(cmd *cobra.Command, configPath string) error {
 
 	// 4. Credentials
 	if cfg != nil {
-		results = append(results, checkCredentials(cfg.Dolt.Username, cfg.Dolt.Password, os.Stderr))
+		results = append(results, checkCredentials(cfg.Database.Username, cfg.Database.Password, os.Stderr))
 	}
 
-	// 4. Dolt server
+	// 4. Database server
 	if cfg != nil {
-		results = append(results, checkDoltServer(cfg.Dolt.Host, cfg.Dolt.Port, cfg.Dolt.Username, cfg.Dolt.Password))
+		results = append(results, checkDBServer(cfg.Database.Host, cfg.Database.Port, cfg.Database.Username, cfg.Database.Password))
 	} else {
-		results = append(results, checkResult{"Dolt server", "FAIL", "skipped (no config)"})
+		results = append(results, checkResult{"Database server", "FAIL", "skipped (no config)"})
 	}
 
 	// 4. Database
 	if cfg != nil {
-		results = append(results, checkDatabase(cfg.Dolt.Host, cfg.Dolt.Port, cfg.Dolt.Database, cfg.Dolt.Username, cfg.Dolt.Password))
+		results = append(results, checkDatabase(cfg.Database.Host, cfg.Database.Port, cfg.Database.Database, cfg.Database.Username, cfg.Database.Password))
 	} else {
 		results = append(results, checkResult{"Database", "FAIL", "skipped (no config)"})
 	}
@@ -159,8 +159,8 @@ func checkBinary(name string) checkResult {
 	switch name {
 	case "go":
 		versionArgs = []string{"version"}
-	case "dolt":
-		versionArgs = []string{"version"}
+	case "mysql":
+		versionArgs = []string{"--version"}
 	case "tmux":
 		versionArgs = []string{"-V"}
 	case "claude":
@@ -183,8 +183,8 @@ func binaryLabel(name string) string {
 	switch name {
 	case "go":
 		return "Go"
-	case "dolt":
-		return "Dolt"
+	case "mysql":
+		return "MySQL"
 	case "tmux":
 		return "tmux"
 	case "claude":
@@ -196,19 +196,19 @@ func binaryLabel(name string) string {
 	}
 }
 
-func checkDoltServer(host string, port int, username, password string) checkResult {
+func checkDBServer(host string, port int, username, password string) checkResult {
 	adminDB, err := db.ConnectAdmin(host, port, username, password)
 	if err != nil {
-		return checkResult{"Dolt server", "FAIL", fmt.Sprintf("%s:%d unreachable: %v", host, port, err)}
+		return checkResult{"Database server", "FAIL", fmt.Sprintf("%s:%d unreachable: %v", host, port, err)}
 	}
 	sqlDB, err := adminDB.DB()
 	if err != nil {
-		return checkResult{"Dolt server", "FAIL", fmt.Sprintf("get sql.DB: %v", err)}
+		return checkResult{"Database server", "FAIL", fmt.Sprintf("get sql.DB: %v", err)}
 	}
 	if err := sqlDB.Ping(); err != nil {
-		return checkResult{"Dolt server", "FAIL", fmt.Sprintf("%s:%d ping failed: %v", host, port, err)}
+		return checkResult{"Database server", "FAIL", fmt.Sprintf("%s:%d ping failed: %v", host, port, err)}
 	}
-	return checkResult{"Dolt server", "PASS", fmt.Sprintf("%s:%d reachable", host, port)}
+	return checkResult{"Database server", "PASS", fmt.Sprintf("%s:%d reachable", host, port)}
 }
 
 func checkDatabase(host string, port int, dbName, username, password string) checkResult {
@@ -227,7 +227,7 @@ func checkDatabase(host string, port int, dbName, username, password string) che
 }
 
 func checkSchema(cfg *config.Config) checkResult {
-	gormDB, err := db.Connect(cfg.Dolt.Host, cfg.Dolt.Port, cfg.Dolt.Database, cfg.Dolt.Username, cfg.Dolt.Password)
+	gormDB, err := db.Connect(cfg.Database.Host, cfg.Database.Port, cfg.Database.Database, cfg.Database.Username, cfg.Database.Password)
 	if err != nil {
 		return checkResult{"Schema", "FAIL", fmt.Sprintf("connect: %v", err)}
 	}
@@ -246,7 +246,7 @@ func checkSchema(cfg *config.Config) checkResult {
 }
 
 func checkTracks(cfg *config.Config) checkResult {
-	gormDB, err := db.Connect(cfg.Dolt.Host, cfg.Dolt.Port, cfg.Dolt.Database, cfg.Dolt.Username, cfg.Dolt.Password)
+	gormDB, err := db.Connect(cfg.Database.Host, cfg.Database.Port, cfg.Database.Database, cfg.Database.Username, cfg.Database.Password)
 	if err != nil {
 		return checkResult{"Tracks", "FAIL", fmt.Sprintf("connect: %v", err)}
 	}
@@ -284,11 +284,11 @@ func checkTmuxSession(cfg *config.Config) []checkResult {
 
 func checkCredentials(username, password string, auditOut io.Writer) checkResult {
 	if username == "root" && password == "" {
-		_ = audit.Log(nil, auditOut, "credentials.default_detected", "doctor", "dolt", map[string]string{
+		_ = audit.Log(nil, auditOut, "credentials.default_detected", "doctor", "database", map[string]string{
 			"username": username,
 			"warning":  "using default root with empty password",
 		})
-		return checkResult{"Credentials", "WARN", "using default root with empty password — set dolt.password in config"}
+		return checkResult{"Credentials", "WARN", "using default root with empty password — set database.password in config"}
 	}
 	return checkResult{"Credentials", "PASS", "non-default credentials configured"}
 }

@@ -43,11 +43,11 @@ spec:
               containerPort: 8080
               protocol: TCP
           env:
-            - name: DOLT_PASSWORD
+            - name: DB_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ include "railyard.fullname" . }}-db
-                  key: dolt-password
+                  key: db-password
           readinessProbe:
             httpGet:
               port: http

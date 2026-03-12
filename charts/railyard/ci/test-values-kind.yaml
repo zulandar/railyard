@@ -17,7 +17,7 @@ auth:
 engine:
   agentProvider: claude
 
-dolt:
+database:
   password: "ci-test-password"
 
 bull:

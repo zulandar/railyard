@@ -32,7 +32,7 @@ func newDBInitCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Initialize the Railyard database",
-		Long:  "Creates the Dolt database, migrates all tables, seeds tracks and configuration.",
+		Long:  "Creates the database, migrates all tables, seeds tracks and configuration.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runDBInit(cmd, configPath)
 		},
@@ -54,26 +54,26 @@ func runDBInit(cmd *cobra.Command, configPath string) error {
 
 	// Try connecting directly to the target database first (it may already
 	// exist, e.g. created by the Helm init configmap in K8s).
-	gormDB, directErr := db.Connect(cfg.Dolt.Host, cfg.Dolt.Port, cfg.Dolt.Database, cfg.Dolt.Username, cfg.Dolt.Password)
+	gormDB, directErr := db.Connect(cfg.Database.Host, cfg.Database.Port, cfg.Database.Database, cfg.Database.Username, cfg.Database.Password)
 	if directErr == nil {
-		fmt.Fprintf(out, "Connected to Dolt at %s:%d\n", cfg.Dolt.Host, cfg.Dolt.Port)
-		fmt.Fprintf(out, "Database %s already exists, skipping creation\n", cfg.Dolt.Database)
+		fmt.Fprintf(out, "Connected to database at %s:%d\n", cfg.Database.Host, cfg.Database.Port)
+		fmt.Fprintf(out, "Database %s already exists, skipping creation\n", cfg.Database.Database)
 	} else {
 		// Database doesn't exist yet — create it via admin connection.
-		adminDB, err := db.ConnectAdmin(cfg.Dolt.Host, cfg.Dolt.Port, cfg.Dolt.Username, cfg.Dolt.Password)
+		adminDB, err := db.ConnectAdmin(cfg.Database.Host, cfg.Database.Port, cfg.Database.Username, cfg.Database.Password)
 		if err != nil {
-			return fmt.Errorf("connect to Dolt at %s:%d: %w", cfg.Dolt.Host, cfg.Dolt.Port, err)
+			return fmt.Errorf("connect to database at %s:%d: %w", cfg.Database.Host, cfg.Database.Port, err)
 		}
-		fmt.Fprintf(out, "Connected to Dolt at %s:%d\n", cfg.Dolt.Host, cfg.Dolt.Port)
+		fmt.Fprintf(out, "Connected to database at %s:%d\n", cfg.Database.Host, cfg.Database.Port)
 
-		if err := db.CreateDatabase(adminDB, cfg.Dolt.Database); err != nil {
+		if err := db.CreateDatabase(adminDB, cfg.Database.Database); err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "Database %s ready\n", cfg.Dolt.Database)
+		fmt.Fprintf(out, "Database %s ready\n", cfg.Database.Database)
 
-		gormDB, err = db.Connect(cfg.Dolt.Host, cfg.Dolt.Port, cfg.Dolt.Database, cfg.Dolt.Username, cfg.Dolt.Password)
+		gormDB, err = db.Connect(cfg.Database.Host, cfg.Database.Port, cfg.Database.Database, cfg.Database.Username, cfg.Database.Password)
 		if err != nil {
-			return fmt.Errorf("connect to %s: %w", cfg.Dolt.Database, err)
+			return fmt.Errorf("connect to %s: %w", cfg.Database.Database, err)
 		}
 	}
 
@@ -154,7 +154,7 @@ func runDBReset(cmd *cobra.Command, configPath, dbName string, skipConfirm bool)
 		if err != nil {
 			return fmt.Errorf("load config: %w", err)
 		}
-		dbName = cfg.Dolt.Database
+		dbName = cfg.Database.Database
 		reinit = true
 		fmt.Fprintf(out, "Loaded config for owner %q from %s\n", cfg.Owner, configPath)
 	}
@@ -173,17 +173,17 @@ func runDBReset(cmd *cobra.Command, configPath, dbName string, skipConfirm bool)
 	username := "root"
 	password := ""
 	if cfg != nil {
-		host = cfg.Dolt.Host
-		port = cfg.Dolt.Port
-		username = cfg.Dolt.Username
-		password = cfg.Dolt.Password
+		host = cfg.Database.Host
+		port = cfg.Database.Port
+		username = cfg.Database.Username
+		password = cfg.Database.Password
 	}
 
 	adminDB, err := db.ConnectAdmin(host, port, username, password)
 	if err != nil {
-		return fmt.Errorf("connect to Dolt at %s:%d: %w", host, port, err)
+		return fmt.Errorf("connect to database at %s:%d: %w", host, port, err)
 	}
-	fmt.Fprintf(out, "Connected to Dolt at %s:%d\n", host, port)
+	fmt.Fprintf(out, "Connected to database at %s:%d\n", host, port)
 
 	// Drop the database.
 	if err := db.DropDatabase(adminDB, dbName); err != nil {
@@ -242,10 +242,10 @@ func newDBStartCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "start",
-		Short: "Start the Dolt SQL server",
-		Long: `Starts the Dolt SQL server using the host/port from your config.
-If Dolt is already running, reports success without starting another instance.
-Useful after a WSL reboot or system restart when the Dolt process has stopped.`,
+		Short: "Start the database server",
+		Long: `Starts the database server using the host/port from your config.
+If the database is already running, reports success without starting another instance.
+Useful after a WSL reboot or system restart when the database process has stopped.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runDBStart(cmd, configPath)
 		},
@@ -263,60 +263,60 @@ func runDBStart(cmd *cobra.Command, configPath string) error {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	host := cfg.Dolt.Host
-	port := cfg.Dolt.Port
-	dataDir := os.ExpandEnv("${HOME}/.railyard/dolt-data")
+	host := cfg.Database.Host
+	port := cfg.Database.Port
+	dataDir := os.ExpandEnv("${HOME}/.railyard/db-data")
 
-	// Check if Dolt is already running.
-	_, connErr := db.ConnectAdmin(host, port, cfg.Dolt.Username, cfg.Dolt.Password)
+	// Check if database is already running.
+	_, connErr := db.ConnectAdmin(host, port, cfg.Database.Username, cfg.Database.Password)
 	if connErr == nil {
-		fmt.Fprintf(out, "Dolt is already running on %s:%d\n", host, port)
+		fmt.Fprintf(out, "Database is already running on %s:%d\n", host, port)
 		return nil
 	}
 
 	// Ensure data directory exists and is initialized.
 	if _, err := os.Stat(dataDir); os.IsNotExist(err) {
-		return fmt.Errorf("Dolt data directory %s does not exist — run quickstart.sh first", dataDir)
+		return fmt.Errorf("database data directory %s does not exist — run quickstart.sh first", dataDir)
 	}
 
-	// Start Dolt in the background.
-	logFile := os.ExpandEnv("${HOME}/.railyard/dolt.log")
-	doltCmd := exec.Command("dolt", "sql-server",
-		"--host", host,
+	// Start database in the background.
+	logFile := os.ExpandEnv("${HOME}/.railyard/db.log")
+	dbCmd := exec.Command("mysqld",
+		"--bind-address", host,
 		"--port", fmt.Sprintf("%d", port),
 	)
-	doltCmd.Dir = dataDir
+	dbCmd.Dir = dataDir
 
 	lf, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		return fmt.Errorf("open log file %s: %w", logFile, err)
 	}
-	doltCmd.Stdout = lf
-	doltCmd.Stderr = lf
+	dbCmd.Stdout = lf
+	dbCmd.Stderr = lf
 
-	if err := doltCmd.Start(); err != nil {
+	if err := dbCmd.Start(); err != nil {
 		lf.Close()
-		return fmt.Errorf("start dolt: %w", err)
+		return fmt.Errorf("start database: %w", err)
 	}
 	// Detach — don't wait for process.
 	go func() {
-		doltCmd.Wait()
+		dbCmd.Wait()
 		lf.Close()
 	}()
 
-	fmt.Fprintf(out, "Starting Dolt on %s:%d (PID %d)...\n", host, port, doltCmd.Process.Pid)
+	fmt.Fprintf(out, "Starting database on %s:%d (PID %d)...\n", host, port, dbCmd.Process.Pid)
 
 	// Wait for readiness.
 	for i := range 20 {
 		time.Sleep(500 * time.Millisecond)
-		if _, err := db.ConnectAdmin(host, port, cfg.Dolt.Username, cfg.Dolt.Password); err == nil {
-			fmt.Fprintf(out, "Dolt is ready (took %dms)\n", (i+1)*500)
+		if _, err := db.ConnectAdmin(host, port, cfg.Database.Username, cfg.Database.Password); err == nil {
+			fmt.Fprintf(out, "Database is ready (took %dms)\n", (i+1)*500)
 			fmt.Fprintf(out, "Log: %s\n", logFile)
 			return nil
 		}
 	}
 
-	return fmt.Errorf("Dolt did not become ready within 10s — check %s", logFile)
+	return fmt.Errorf("database did not become ready within 10s — check %s", logFile)
 }
 
 func confirmReset(cmd *cobra.Command, dbName string) bool {

@@ -56,11 +56,11 @@ spec:
               value: safe.directory
             - name: GIT_CONFIG_VALUE_0
               value: /repo
-            - name: DOLT_PASSWORD
+            - name: DB_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ include "railyard.fullname" . }}-db
-                  key: dolt-password
+                  key: db-password
             {{- include "railyard.authExtraEnv" . | nindent 12 }}
           envFrom:
             {{- include "railyard.authEnvFrom" . | nindent 12 }}

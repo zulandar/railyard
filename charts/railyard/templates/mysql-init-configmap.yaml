@@ -1,0 +1,14 @@
+{{- if .Values.database.internal }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "railyard.fullname" . }}-mysql-init
+  labels:
+    {{- include "railyard.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mysql
+data:
+  01-create-remote-user.sql: |
+    CREATE DATABASE IF NOT EXISTS `{{ include "railyard.dbDatabase" . }}`;
+    CREATE USER IF NOT EXISTS '{{ .Values.database.username }}'@'%' IDENTIFIED BY '{{ .Values.database.password }}';
+    GRANT ALL PRIVILEGES ON `{{ include "railyard.dbDatabase" . }}`.* TO '{{ .Values.database.username }}'@'%';
+{{- end }}
