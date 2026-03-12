@@ -1733,3 +1733,34 @@ func TestLoad_BullInvalidTriageModeFixture(t *testing.T) {
 		t.Errorf("error = %q", err)
 	}
 }
+
+func TestParse_DeprecatedDoltKey(t *testing.T) {
+	oldConfig := `
+owner: alice
+repo: git@github.com:org/app.git
+dolt:
+  host: 10.0.0.5
+  port: 3307
+tracks:
+  - name: backend
+    language: go
+`
+	_, err := Parse([]byte(oldConfig))
+	if err == nil {
+		t.Fatal("expected error for deprecated 'dolt' key")
+	}
+	if !strings.Contains(err.Error(), "renamed to 'database'") {
+		t.Errorf("error should mention rename: %v", err)
+	}
+}
+
+func TestParse_DatabaseKeyWorks(t *testing.T) {
+	// Ensure the new 'database' key does not trigger the deprecation error.
+	cfg, err := Parse([]byte(fullYAML))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Database.Host != "10.0.0.5" {
+		t.Errorf("Database.Host = %q, want %q", cfg.Database.Host, "10.0.0.5")
+	}
+}

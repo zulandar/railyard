@@ -228,6 +228,11 @@ func Load(path string) (*Config, error) {
 
 // Parse unmarshals YAML bytes into a validated Config.
 func Parse(data []byte) (*Config, error) {
+	// Detect deprecated 'dolt:' key from pre-rename configs.
+	if err := checkDeprecatedKeys(data); err != nil {
+		return nil, err
+	}
+
 	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("config: parse: %w", err)
@@ -237,6 +242,19 @@ func Parse(data []byte) (*Config, error) {
 		return nil, err
 	}
 	return &cfg, nil
+}
+
+// checkDeprecatedKeys inspects raw YAML for renamed top-level keys and
+// returns a helpful error if any are found.
+func checkDeprecatedKeys(data []byte) error {
+	var raw map[string]interface{}
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return nil // let the main unmarshal report the parse error
+	}
+	if _, ok := raw["dolt"]; ok {
+		return fmt.Errorf("config: the 'dolt' key has been renamed to 'database' — update your config file:\n\n  # Before\n  dolt:\n    host: ...\n\n  # After\n  database:\n    host: ...")
+	}
+	return nil
 }
 
 // applyDefaults fills in derived and default values.
