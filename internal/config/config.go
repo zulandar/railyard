@@ -31,6 +31,12 @@ type Config struct {
 	Telegraph         TelegraphConfig     `yaml:"telegraph"`
 	Kubernetes        KubernetesConfig    `yaml:"kubernetes"`
 	AgentProvider     string              `yaml:"agent_provider"`
+	Yardmaster        YardmasterConfig    `yaml:"yardmaster"`
+}
+
+// YardmasterConfig holds settings for the yardmaster daemon.
+type YardmasterConfig struct {
+	HealthPort int `yaml:"health_port"`
 }
 
 // IsKubernetesMode returns true when the config targets a Kubernetes deployment.
@@ -294,6 +300,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Stall.MaxSwitchFailures == 0 {
 		c.Stall.MaxSwitchFailures = 3
+	}
+	if c.Yardmaster.HealthPort == 0 {
+		c.Yardmaster.HealthPort = 8081
 	}
 	if c.AgentProvider == "" {
 		c.AgentProvider = "claude"
