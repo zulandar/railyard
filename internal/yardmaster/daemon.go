@@ -181,7 +181,7 @@ func RunDaemon(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath,
 			timePhase("pr-review", func() {
 				if cfg.RequirePR {
 					prViewer := &ghPRViewer{repoDir: repoDir}
-					if err := handlePrOpenCars(db, prViewer, out); err != nil {
+					if err := handlePrOpenCars(db, prViewer, cfg.Yardmaster.AutoMergeOnApproval, out); err != nil {
 						log.Printf("yardmaster pr review error: %v", err)
 					}
 				}
@@ -895,9 +895,10 @@ type prStatus struct {
 	Reviews        []prReview
 }
 
-// PRViewer abstracts GitHub PR status lookups for testability.
+// PRViewer abstracts GitHub PR status lookups and merge operations for testability.
 type PRViewer interface {
 	ViewPR(branch string) (*prStatus, error)
+	MergePR(branch string) error
 }
 
 // ghPRViewer implements PRViewer using the gh CLI.
@@ -938,9 +939,20 @@ func (g *ghPRViewer) ViewPR(branch string) (*prStatus, error) {
 	return ps, nil
 }
 
+func (g *ghPRViewer) MergePR(branch string) error {
+	cmd := exec.Command("gh", "pr", "merge", branch, "--merge", "--delete-branch")
+	cmd.Dir = g.repoDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("gh pr merge %s: %s: %w", branch, string(out), err)
+	}
+	return nil
+}
+
 // handlePrOpenCars polls pr_open cars for GitHub review status and transitions
 // them based on the PR state: changes_requested → open, merged → merged, closed → cancelled.
-func handlePrOpenCars(db *gorm.DB, viewer PRViewer, out io.Writer) error {
+// When autoMerge is true, APPROVED PRs are automatically merged via the viewer.
+func handlePrOpenCars(db *gorm.DB, viewer PRViewer, autoMerge bool, out io.Writer) error {
 	prCars, err := car.List(db, car.ListFilters{Status: "pr_open"})
 	if err != nil {
 		return err
@@ -975,6 +987,35 @@ func handlePrOpenCars(db *gorm.DB, viewer PRViewer, out io.Writer) error {
 				continue
 			}
 			fmt.Fprintf(out, "PR closed for car %s — status → cancelled\n", c.ID)
+
+		case autoMerge && status.ReviewDecision == "APPROVED" && status.State == "OPEN":
+			if err := viewer.MergePR(c.Branch); err != nil {
+				log.Printf("auto-merge PR for car %s: %v", c.ID, err)
+				writeProgressNote(db, c.ID, "yardmaster", fmt.Sprintf("Auto-merge failed: %v", err))
+				continue
+			}
+			now := time.Now()
+			if err := db.Model(&models.Car{}).Where("id = ?", c.ID).Updates(map[string]interface{}{
+				"status":       "merged",
+				"completed_at": now,
+			}).Error; err != nil {
+				log.Printf("update car %s to merged after auto-merge: %v", c.ID, err)
+				continue
+			}
+			fmt.Fprintf(out, "PR approved and auto-merged for car %s\n", c.ID)
+
+			unblocked, ubErr := UnblockDeps(db, c.ID)
+			if ubErr != nil {
+				log.Printf("unblock deps for %s: %v", c.ID, ubErr)
+			}
+			for _, u := range unblocked {
+				if u.Type == "epic" {
+					TryCloseEpic(db, u.ID)
+				}
+			}
+			if c.ParentID != nil && *c.ParentID != "" {
+				TryCloseEpic(db, *c.ParentID)
+			}
 
 		case status.ReviewDecision == "CHANGES_REQUESTED":
 			if err := db.Model(&models.Car{}).Where("id = ?", c.ID).Updates(map[string]interface{}{

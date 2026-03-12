@@ -731,7 +731,7 @@ func TestHandlePrOpenCars_ChangesRequested(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := handlePrOpenCars(db, viewer, &buf)
+	err := handlePrOpenCars(db, viewer, false, &buf)
 	if err != nil {
 		t.Fatalf("handlePrOpenCars: %v", err)
 	}
@@ -765,7 +765,7 @@ func TestHandlePrOpenCars_Merged(t *testing.T) {
 	viewer := &mockPRViewer{state: "MERGED"}
 
 	var buf bytes.Buffer
-	err := handlePrOpenCars(db, viewer, &buf)
+	err := handlePrOpenCars(db, viewer, false, &buf)
 	if err != nil {
 		t.Fatalf("handlePrOpenCars: %v", err)
 	}
@@ -790,7 +790,7 @@ func TestHandlePrOpenCars_Closed(t *testing.T) {
 	viewer := &mockPRViewer{state: "CLOSED"}
 
 	var buf bytes.Buffer
-	err := handlePrOpenCars(db, viewer, &buf)
+	err := handlePrOpenCars(db, viewer, false, &buf)
 	if err != nil {
 		t.Fatalf("handlePrOpenCars: %v", err)
 	}
@@ -808,7 +808,7 @@ func TestHandlePrOpenCars_NoPrOpenCars(t *testing.T) {
 	viewer := &mockPRViewer{state: "OPEN"}
 
 	var buf bytes.Buffer
-	err := handlePrOpenCars(db, viewer, &buf)
+	err := handlePrOpenCars(db, viewer, false, &buf)
 	if err != nil {
 		t.Fatalf("handlePrOpenCars: %v", err)
 	}
@@ -830,7 +830,7 @@ func TestHandlePrOpenCars_ApprovedNoAction(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := handlePrOpenCars(db, viewer, &buf)
+	err := handlePrOpenCars(db, viewer, false, &buf)
 	if err != nil {
 		t.Fatalf("handlePrOpenCars: %v", err)
 	}
@@ -856,7 +856,7 @@ func TestHandlePrOpenCars_NoBranch(t *testing.T) {
 	viewer := &mockPRViewer{state: "CLOSED"}
 
 	var buf bytes.Buffer
-	err := handlePrOpenCars(db, viewer, &buf)
+	err := handlePrOpenCars(db, viewer, false, &buf)
 	if err != nil {
 		t.Fatalf("handlePrOpenCars: %v", err)
 	}
@@ -866,6 +866,156 @@ func TestHandlePrOpenCars_NoBranch(t *testing.T) {
 	db.First(&c, "id = ?", "car-pro5")
 	if c.Status != "pr_open" {
 		t.Errorf("status = %q, want %q (no branch, should be skipped)", c.Status, "pr_open")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// handlePrOpenCars auto-merge tests (mge.4.1)
+// ---------------------------------------------------------------------------
+
+func TestHandlePrOpenCars_ApprovedAutoMerge(t *testing.T) {
+	db := testDB(t)
+
+	parentID := "epic-am1"
+	db.Create(&models.Car{ID: parentID, Type: "epic", Status: "open", Track: "backend"})
+	db.Create(&models.Car{
+		ID:       "car-am1",
+		Branch:   "ry/backend/car-am1",
+		Status:   "pr_open",
+		Track:    "backend",
+		ParentID: &parentID,
+	})
+
+	viewer := &mockPRViewer{
+		reviewDecision: "APPROVED",
+		state:          "OPEN",
+	}
+
+	var buf bytes.Buffer
+	err := handlePrOpenCars(db, viewer, true, &buf)
+	if err != nil {
+		t.Fatalf("handlePrOpenCars: %v", err)
+	}
+
+	if !viewer.mergeCalled {
+		t.Error("expected MergePR to be called")
+	}
+
+	var c models.Car
+	db.First(&c, "id = ?", "car-am1")
+	if c.Status != "merged" {
+		t.Errorf("status = %q, want %q", c.Status, "merged")
+	}
+	if c.CompletedAt == nil {
+		t.Error("CompletedAt should be set")
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "auto-merged") {
+		t.Errorf("output should mention auto-merge, got: %s", output)
+	}
+}
+
+func TestHandlePrOpenCars_ApprovedNoAutoMergeWhenDisabled(t *testing.T) {
+	db := testDB(t)
+
+	db.Create(&models.Car{
+		ID:     "car-am2",
+		Branch: "ry/backend/car-am2",
+		Status: "pr_open",
+		Track:  "backend",
+	})
+
+	viewer := &mockPRViewer{
+		reviewDecision: "APPROVED",
+		state:          "OPEN",
+	}
+
+	var buf bytes.Buffer
+	err := handlePrOpenCars(db, viewer, false, &buf)
+	if err != nil {
+		t.Fatalf("handlePrOpenCars: %v", err)
+	}
+
+	if viewer.mergeCalled {
+		t.Error("MergePR should NOT be called when autoMerge is false")
+	}
+
+	var c models.Car
+	db.First(&c, "id = ?", "car-am2")
+	if c.Status != "pr_open" {
+		t.Errorf("status = %q, want %q (autoMerge disabled)", c.Status, "pr_open")
+	}
+}
+
+func TestHandlePrOpenCars_ApprovedMergeFailure(t *testing.T) {
+	db := testDB(t)
+
+	db.Create(&models.Car{
+		ID:     "car-am3",
+		Branch: "ry/backend/car-am3",
+		Status: "pr_open",
+		Track:  "backend",
+	})
+
+	viewer := &mockPRViewer{
+		reviewDecision: "APPROVED",
+		state:          "OPEN",
+		mergeErr:       fmt.Errorf("merge conflict on GitHub"),
+	}
+
+	var buf bytes.Buffer
+	err := handlePrOpenCars(db, viewer, true, &buf)
+	if err != nil {
+		t.Fatalf("handlePrOpenCars: %v", err)
+	}
+
+	// Car should stay pr_open on merge failure.
+	var c models.Car
+	db.First(&c, "id = ?", "car-am3")
+	if c.Status != "pr_open" {
+		t.Errorf("status = %q, want %q (merge failed)", c.Status, "pr_open")
+	}
+
+	// Should have written a progress note about the failure.
+	var notes []models.CarProgress
+	db.Where("car_id = ?", "car-am3").Find(&notes)
+	if len(notes) == 0 {
+		t.Error("expected progress note about merge failure")
+	}
+}
+
+func TestHandlePrOpenCars_ApprovedButNotOpen_NoMerge(t *testing.T) {
+	db := testDB(t)
+
+	db.Create(&models.Car{
+		ID:     "car-am4",
+		Branch: "ry/backend/car-am4",
+		Status: "pr_open",
+		Track:  "backend",
+	})
+
+	// State is MERGED (already merged on GitHub), not OPEN.
+	viewer := &mockPRViewer{
+		reviewDecision: "APPROVED",
+		state:          "MERGED",
+	}
+
+	var buf bytes.Buffer
+	err := handlePrOpenCars(db, viewer, true, &buf)
+	if err != nil {
+		t.Fatalf("handlePrOpenCars: %v", err)
+	}
+
+	// Should be handled by the MERGED case, not the auto-merge case.
+	if viewer.mergeCalled {
+		t.Error("MergePR should NOT be called when state is already MERGED")
+	}
+
+	var c models.Car
+	db.First(&c, "id = ?", "car-am4")
+	if c.Status != "merged" {
+		t.Errorf("status = %q, want %q", c.Status, "merged")
 	}
 }
 
@@ -1004,6 +1154,8 @@ type mockPRViewer struct {
 	state          string
 	reviews        []prReview
 	err            error
+	mergeErr       error
+	mergeCalled    bool
 }
 
 func (m *mockPRViewer) ViewPR(branch string) (*prStatus, error) {
@@ -1015,6 +1167,11 @@ func (m *mockPRViewer) ViewPR(branch string) (*prStatus, error) {
 		ReviewDecision: m.reviewDecision,
 		Reviews:        m.reviews,
 	}, nil
+}
+
+func (m *mockPRViewer) MergePR(branch string) error {
+	m.mergeCalled = true
+	return m.mergeErr
 }
 
 // ---------------------------------------------------------------------------

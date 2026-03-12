@@ -36,7 +36,8 @@ type Config struct {
 
 // YardmasterConfig holds settings for the yardmaster daemon.
 type YardmasterConfig struct {
-	HealthPort int `yaml:"health_port"`
+	HealthPort          int  `yaml:"health_port"`
+	AutoMergeOnApproval bool `yaml:"auto_merge_on_approval"`
 }
 
 // IsKubernetesMode returns true when the config targets a Kubernetes deployment.
