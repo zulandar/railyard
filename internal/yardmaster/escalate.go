@@ -4,11 +4,50 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/zulandar/railyard/internal/engine"
 	"github.com/zulandar/railyard/internal/models"
 	"gorm.io/gorm"
 )
+
+// EscalationTracker tracks the last escalation time per car to implement cooldowns.
+type EscalationTracker struct {
+	mu       sync.Mutex
+	lastEsc  map[string]time.Time // car_id -> last escalation time
+	cooldown time.Duration
+}
+
+// NewEscalationTracker creates a tracker with the given cooldown duration.
+func NewEscalationTracker(cooldown time.Duration) *EscalationTracker {
+	return &EscalationTracker{
+		lastEsc:  make(map[string]time.Time),
+		cooldown: cooldown,
+	}
+}
+
+// ShouldEscalate returns true if the car has not been escalated within the cooldown period.
+// If it returns true, it also records the current time as the last escalation time.
+func (et *EscalationTracker) ShouldEscalate(carID string) bool {
+	et.mu.Lock()
+	defer et.mu.Unlock()
+
+	if last, ok := et.lastEsc[carID]; ok {
+		if time.Since(last) < et.cooldown {
+			return false
+		}
+	}
+	et.lastEsc[carID] = time.Now()
+	return true
+}
+
+// Reset removes tracking for a car (e.g., when the car is closed).
+func (et *EscalationTracker) Reset(carID string) {
+	et.mu.Lock()
+	defer et.mu.Unlock()
+	delete(et.lastEsc, carID)
+}
 
 // EscalateAction represents a decision from Claude escalation.
 type EscalateAction string

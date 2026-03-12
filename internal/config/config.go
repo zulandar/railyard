@@ -76,11 +76,13 @@ type NotificationsConfig struct {
 
 // StallConfig holds thresholds for engine stall detection.
 type StallConfig struct {
-	StdoutTimeoutSec  int `yaml:"stdout_timeout_sec"`  // no stdout for N seconds = stall (default 120)
-	RepeatedErrorMax  int `yaml:"repeated_error_max"`  // same error N times = stall (default 3)
-	MaxClearCycles    int `yaml:"max_clear_cycles"`    // more than N cycles = stall (default 5)
-	MaxSwitchFailures int `yaml:"max_switch_failures"` // repeated switch failures before escalation (default 3)
-	SwitchTimeoutSec  int `yaml:"switch_timeout_sec"`  // max seconds for switch/runTests (default 600)
+	StdoutTimeoutSec         int `yaml:"stdout_timeout_sec"`         // no stdout for N seconds = stall (default 120)
+	RepeatedErrorMax         int `yaml:"repeated_error_max"`         // same error N times = stall (default 3)
+	MaxClearCycles           int `yaml:"max_clear_cycles"`           // more than N cycles = stall (default 5)
+	MaxSwitchFailures        int `yaml:"max_switch_failures"`        // repeated switch failures before escalation (default 3)
+	SwitchTimeoutSec         int `yaml:"switch_timeout_sec"`         // max seconds for switch/runTests (default 600)
+	EscalationCooldownSec    int `yaml:"escalation_cooldown_sec"`    // per-car cooldown between escalations (default 600)
+	MaxConcurrentEscalations int `yaml:"max_concurrent_escalations"` // limit concurrent escalation goroutines (default 3)
 }
 
 // TLSConfig holds TLS settings for encrypted database connections.
@@ -304,6 +306,12 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Stall.SwitchTimeoutSec == 0 {
 		c.Stall.SwitchTimeoutSec = 600
+	}
+	if c.Stall.EscalationCooldownSec == 0 {
+		c.Stall.EscalationCooldownSec = 600
+	}
+	if c.Stall.MaxConcurrentEscalations == 0 {
+		c.Stall.MaxConcurrentEscalations = 3
 	}
 	if c.Yardmaster.HealthPort == 0 {
 		c.Yardmaster.HealthPort = 8081

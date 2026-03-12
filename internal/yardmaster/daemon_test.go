@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -176,7 +177,7 @@ func TestProcessInbox_StaleDrainIgnored(t *testing.T) {
 
 	startedAt := time.Now()
 	var buf bytes.Buffer
-	draining, err := processInbox(context.Background(), db, nil, "", "", startedAt, &sync.WaitGroup{}, &buf)
+	draining, err := processInbox(context.Background(), db, nil, "", "", startedAt, &sync.WaitGroup{}, nil, make(chan struct{}, 3), &buf)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -204,7 +205,7 @@ func TestProcessInbox_FreshDrainHonored(t *testing.T) {
 	db.Create(&freshDrain)
 
 	var buf bytes.Buffer
-	draining, err := processInbox(context.Background(), db, nil, "", "", startedAt, &sync.WaitGroup{}, &buf)
+	draining, err := processInbox(context.Background(), db, nil, "", "", startedAt, &sync.WaitGroup{}, nil, make(chan struct{}, 3), &buf)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -218,7 +219,7 @@ func TestProcessInbox_EmptyInbox(t *testing.T) {
 
 	startedAt := time.Now()
 	var buf bytes.Buffer
-	draining, err := processInbox(context.Background(), db, nil, "", "", startedAt, &sync.WaitGroup{}, &buf)
+	draining, err := processInbox(context.Background(), db, nil, "", "", startedAt, &sync.WaitGroup{}, nil, make(chan struct{}, 3), &buf)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -496,7 +497,7 @@ func TestMaybeSwitchEscalate_BelowThreshold(t *testing.T) {
 
 	var buf bytes.Buffer
 	// This should NOT escalate (below threshold), so no "escalating" in output.
-	maybeSwitchEscalate(context.Background(), db, cfg, "car-esc1", SwitchFailMerge, nil, "", &sync.WaitGroup{}, &buf)
+	maybeSwitchEscalate(context.Background(), db, cfg, "car-esc1", SwitchFailMerge, nil, "", &sync.WaitGroup{}, nil, make(chan struct{}, 3), &buf)
 
 	if strings.Contains(buf.String(), "escalating") {
 		t.Errorf("should not escalate below threshold, got: %s", buf.String())
@@ -518,7 +519,7 @@ func TestMaybeSwitchEscalate_AtThreshold(t *testing.T) {
 	var buf bytes.Buffer
 	// Escalation will fire (at threshold). The actual Claude call will fail
 	// since there's no `claude` binary in CI, but we can verify the log output.
-	maybeSwitchEscalate(context.Background(), db, cfg, "car-esc2", SwitchFailFetch, nil, "", &sync.WaitGroup{}, &buf)
+	maybeSwitchEscalate(context.Background(), db, cfg, "car-esc2", SwitchFailFetch, nil, "", &sync.WaitGroup{}, nil, make(chan struct{}, 3), &buf)
 
 	if !strings.Contains(buf.String(), "escalating") {
 		t.Errorf("should escalate at threshold, got: %s", buf.String())
@@ -537,7 +538,7 @@ func TestMaybeSwitchEscalate_InfraEscalatesImmediately(t *testing.T) {
 	cfg.Stall.MaxSwitchFailures = 3
 
 	var buf bytes.Buffer
-	maybeSwitchEscalate(context.Background(), db, cfg, "car-infra1", SwitchFailInfra, nil, "", &sync.WaitGroup{}, &buf)
+	maybeSwitchEscalate(context.Background(), db, cfg, "car-infra1", SwitchFailInfra, nil, "", &sync.WaitGroup{}, nil, make(chan struct{}, 3), &buf)
 
 	if !strings.Contains(buf.String(), "infra failure") {
 		t.Errorf("should escalate immediately for infra, got: %s", buf.String())
@@ -560,7 +561,7 @@ func TestMaybeSwitchEscalate_SetsCarToMergeFailed(t *testing.T) {
 	cfg.Stall.MaxSwitchFailures = 3
 
 	var buf bytes.Buffer
-	maybeSwitchEscalate(context.Background(), db, cfg, "car-esc3", SwitchFailMerge, nil, "", &sync.WaitGroup{}, &buf)
+	maybeSwitchEscalate(context.Background(), db, cfg, "car-esc3", SwitchFailMerge, nil, "", &sync.WaitGroup{}, nil, make(chan struct{}, 3), &buf)
 
 	// Car status should change to "merge-failed" to break the retry loop.
 	var car models.Car
@@ -580,7 +581,7 @@ func TestMaybeSwitchEscalate_InfraSetsCarToMergeFailed(t *testing.T) {
 	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
 
 	var buf bytes.Buffer
-	maybeSwitchEscalate(context.Background(), db, cfg, "car-infra2", SwitchFailInfra, nil, "", &sync.WaitGroup{}, &buf)
+	maybeSwitchEscalate(context.Background(), db, cfg, "car-infra2", SwitchFailInfra, nil, "", &sync.WaitGroup{}, nil, make(chan struct{}, 3), &buf)
 
 	// Infra failures should also set merge-failed.
 	var car models.Car
@@ -888,7 +889,7 @@ func TestHandleCompletedCars_SkipsEpicAndMarkesMerged(t *testing.T) {
 
 	var buf bytes.Buffer
 	// repoDir and ymDir don't matter — the epic should never reach Switch().
-	err := handleCompletedCars(context.Background(), db, cfg, "/nonexistent", "/nonexistent", &sync.WaitGroup{}, &buf)
+	err := handleCompletedCars(context.Background(), db, cfg, "/nonexistent", "/nonexistent", &sync.WaitGroup{}, nil, make(chan struct{}, 3), &buf)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -933,7 +934,7 @@ func TestHandleCompletedCars_EpicCountError_LogsAndContinues(t *testing.T) {
 	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
 
 	var buf bytes.Buffer
-	err := handleCompletedCars(context.Background(), db, cfg, "/nonexistent", "/nonexistent", &sync.WaitGroup{}, &buf)
+	err := handleCompletedCars(context.Background(), db, cfg, "/nonexistent", "/nonexistent", &sync.WaitGroup{}, nil, make(chan struct{}, 3), &buf)
 	// The function should return the error from car.List (which also queries cars table).
 	if err == nil {
 		// If it doesn't error on car.List, it should at least not panic.
@@ -980,7 +981,7 @@ func TestHandleCompletedCars_EpicWithPendingChildren_StaysDone(t *testing.T) {
 	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
 
 	var buf bytes.Buffer
-	err := handleCompletedCars(context.Background(), db, cfg, "/nonexistent", "/nonexistent", &sync.WaitGroup{}, &buf)
+	err := handleCompletedCars(context.Background(), db, cfg, "/nonexistent", "/nonexistent", &sync.WaitGroup{}, nil, make(chan struct{}, 3), &buf)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1013,4 +1014,83 @@ func (m *mockPRViewer) ViewPR(branch string) (*prStatus, error) {
 		ReviewDecision: m.reviewDecision,
 		Reviews:        m.reviews,
 	}, nil
+}
+
+// ---------------------------------------------------------------------------
+// Escalation semaphore tests
+// ---------------------------------------------------------------------------
+
+func TestEscalationSemaphore_LimitsConcurrency(t *testing.T) {
+	sem := make(chan struct{}, 2)
+
+	var maxConcurrent int64
+	var current int64
+	var wg sync.WaitGroup
+
+	for i := 0; i < 10; i++ {
+		sem <- struct{}{} // acquire
+		wg.Add(1)
+		go func() {
+			defer func() { <-sem }() // release
+			defer wg.Done()
+
+			val := atomic.AddInt64(&current, 1)
+			// Record the peak.
+			for {
+				old := atomic.LoadInt64(&maxConcurrent)
+				if val <= old || atomic.CompareAndSwapInt64(&maxConcurrent, old, val) {
+					break
+				}
+			}
+			time.Sleep(5 * time.Millisecond) // simulate work
+			atomic.AddInt64(&current, -1)
+		}()
+	}
+
+	wg.Wait()
+
+	peak := atomic.LoadInt64(&maxConcurrent)
+	if peak > 2 {
+		t.Errorf("peak concurrency = %d, want <= 2", peak)
+	}
+	if peak < 1 {
+		t.Errorf("peak concurrency = %d, want >= 1", peak)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// maybeSwitchEscalate with cooldown tracker
+// ---------------------------------------------------------------------------
+
+func TestMaybeSwitchEscalate_WithCooldown(t *testing.T) {
+	db := testDB(t)
+	db.Create(&models.Car{ID: "car-cool1", Track: "backend"})
+
+	// Write enough failures to trigger escalation.
+	writeProgressNote(db, "car-cool1", "yardmaster", "switch:merge-conflict: conflict 1")
+	writeProgressNote(db, "car-cool1", "yardmaster", "switch:merge-conflict: conflict 2")
+	writeProgressNote(db, "car-cool1", "yardmaster", "switch:merge-conflict: conflict 3")
+
+	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
+	cfg.Stall.MaxSwitchFailures = 3
+
+	tracker := NewEscalationTracker(10 * time.Minute)
+	sem := make(chan struct{}, 3)
+
+	// First call: should escalate (tracker allows it).
+	var buf1 bytes.Buffer
+	maybeSwitchEscalate(context.Background(), db, cfg, "car-cool1", SwitchFailMerge, nil, "", &sync.WaitGroup{}, tracker, sem, &buf1)
+	if !strings.Contains(buf1.String(), "escalating") {
+		t.Errorf("first call should escalate, got: %s", buf1.String())
+	}
+
+	// Reset car status back to "done" so the second call can proceed to the cooldown check.
+	db.Model(&models.Car{}).Where("id = ?", "car-cool1").Update("status", "done")
+
+	// Second call: should be skipped by cooldown.
+	var buf2 bytes.Buffer
+	maybeSwitchEscalate(context.Background(), db, cfg, "car-cool1", SwitchFailMerge, nil, "", &sync.WaitGroup{}, tracker, sem, &buf2)
+	if !strings.Contains(buf2.String(), "cooldown active") {
+		t.Errorf("second call should be skipped by cooldown, got: %s", buf2.String())
+	}
 }
