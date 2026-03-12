@@ -1,6 +1,7 @@
 package db
 
 import (
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -86,27 +87,35 @@ func TestDSN_Format(t *testing.T) {
 	}
 }
 
-func TestConnect_RequiresDB(t *testing.T) {
-	// Connect requires a running database server; verify the function signature
-	// compiles and returns (*gorm.DB, error). Full integration tests are in
-	// the Foundation Test Suite (d88.5).
-	var fn func(string, int, string, string, string) (*gorm.DB, error) = Connect
-	if fn == nil {
-		t.Fatal("Connect function is nil")
+func TestConnect_WrapsOpenError(t *testing.T) {
+	orig := openDB
+	openDB = func(dsn string) (*gorm.DB, error) {
+		return nil, fmt.Errorf("dial tcp: connection refused")
+	}
+	defer func() { openDB = orig }()
+
+	_, err := Connect("10.0.0.1", 3306, "mydb", "root", "")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "db: connect to 10.0.0.1:3306/mydb") {
+		t.Errorf("error = %q, want prefix with host/port/db", err.Error())
 	}
 }
 
-func TestConnectAdmin_RequiresDB(t *testing.T) {
-	var fn func(string, int, string, string) (*gorm.DB, error) = ConnectAdmin
-	if fn == nil {
-		t.Fatal("ConnectAdmin function is nil")
+func TestConnectAdmin_WrapsOpenError(t *testing.T) {
+	orig := openDB
+	openDB = func(dsn string) (*gorm.DB, error) {
+		return nil, fmt.Errorf("dial tcp: connection refused")
 	}
-}
+	defer func() { openDB = orig }()
 
-func TestCreateDatabase_RequiresDB(t *testing.T) {
-	var fn func(*gorm.DB, string) error = CreateDatabase
-	if fn == nil {
-		t.Fatal("CreateDatabase function is nil")
+	_, err := ConnectAdmin("10.0.0.1", 3306, "root", "")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "db: admin connect to 10.0.0.1:3306") {
+		t.Errorf("error = %q, want prefix with host/port", err.Error())
 	}
 }
 
@@ -361,10 +370,29 @@ func TestRegisterTLS_BadClientCert(t *testing.T) {
 	}
 }
 
-func TestConnectWithConfig_RequiresDB(t *testing.T) {
-	var fn func(config.DatabaseConfig) (*gorm.DB, error) = ConnectWithConfig
-	if fn == nil {
-		t.Fatal("ConnectWithConfig function is nil")
+func TestConnectWithConfig_UsesExpectedDSN(t *testing.T) {
+	var captured string
+	orig := openDB
+	openDB = func(dsn string) (*gorm.DB, error) {
+		captured = dsn
+		return nil, fmt.Errorf("stub: no real db")
+	}
+	defer func() { openDB = orig }()
+
+	cfg := config.DatabaseConfig{
+		Host:     "db.example.com",
+		Port:     3307,
+		Database: "prod",
+		Username: "deploy",
+		Password: "s3cret",
+	}
+	_, err := ConnectWithConfig(cfg)
+	if err == nil {
+		t.Fatal("expected stub error")
+	}
+	want := "deploy:s3cret@tcp(db.example.com:3307)/prod?parseTime=true"
+	if captured != want {
+		t.Errorf("ConnectWithConfig DSN = %q, want %q", captured, want)
 	}
 }
 

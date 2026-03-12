@@ -26,6 +26,15 @@ var (
 	reMultipleHyphens   = regexp.MustCompile(`-{2,}`)
 )
 
+// dbProbeFn checks whether a database is reachable. Overridden in tests.
+var dbProbeFn = func(host string, port int, username, password string) error {
+	_, err := db.ConnectAdmin(host, port, username, password)
+	return err
+}
+
+// execCommandFn creates an exec.Cmd. Overridden in tests to avoid real docker calls.
+var execCommandFn = exec.Command
+
 // detectGitRoot runs `git rev-parse --show-toplevel` from dir and returns
 // the trimmed absolute path to the repository root, or an error if dir is
 // not inside a git repository.
@@ -218,7 +227,7 @@ func ensureDBRunning(out io.Writer, host string, port int, username, password st
 	}
 
 	// Local host: check if already running.
-	if _, err := db.ConnectAdmin(host, port, username, password); err == nil {
+	if err := dbProbeFn(host, port, username, password); err == nil {
 		fmt.Fprintf(out, "Database is already running on %s:%d\n", host, port)
 		return nil
 	}
@@ -231,7 +240,7 @@ func ensureDBRunning(out io.Writer, host string, port int, username, password st
 	}
 
 	// Remove any stopped container with the same name to avoid conflicts.
-	exec.Command("docker", "rm", "-f", containerName).Run()
+	execCommandFn("docker", "rm", "-f", containerName).Run()
 
 	// Start MySQL via Docker.
 	// When a password is provided, configure the container to use it;
@@ -250,7 +259,7 @@ func ensureDBRunning(out io.Writer, host string, port int, username, password st
 		"-v", dataDir + ":/var/lib/mysql",
 		"mysql:8.0",
 	}
-	dbCmd := exec.Command("docker", args...)
+	dbCmd := execCommandFn("docker", args...)
 
 	cmdOut, err := dbCmd.CombinedOutput()
 	if err != nil {
@@ -262,7 +271,7 @@ func ensureDBRunning(out io.Writer, host string, port int, username, password st
 	// Wait for readiness (MySQL in Docker can take 15-30s on first init).
 	for i := range 60 {
 		time.Sleep(500 * time.Millisecond)
-		if _, err := db.ConnectAdmin(host, port, username, password); err == nil {
+		if err := dbProbeFn(host, port, username, password); err == nil {
 			fmt.Fprintf(out, "Database is ready (took %dms)\n", (i+1)*500)
 			return nil
 		}

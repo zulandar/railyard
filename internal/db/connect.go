@@ -15,6 +15,14 @@ import (
 	"gorm.io/gorm/logger"
 )
 
+// openDB opens a GORM connection for the given DSN. It is a package-level
+// variable so tests can substitute a stub without requiring a live database.
+var openDB = func(dsn string) (*gorm.DB, error) {
+	return gorm.Open(mysql.Open(dsn), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+}
+
 // DSN builds a MySQL-compatible DSN for connecting to the database.
 func DSN(host string, port int, database, username, password string) string {
 	creds := username
@@ -27,9 +35,7 @@ func DSN(host string, port int, database, username, password string) string {
 // Connect opens a GORM connection to the database.
 func Connect(host string, port int, database, username, password string) (*gorm.DB, error) {
 	dsn := DSN(host, port, database, username, password)
-	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Silent),
-	})
+	db, err := openDB(dsn)
 	if err != nil {
 		return nil, fmt.Errorf("db: connect to %s:%d/%s: %s", host, port, database, sanitizeDBError(err.Error(), password))
 	}
@@ -44,9 +50,7 @@ func ConnectAdmin(host string, port int, username, password string) (*gorm.DB, e
 		creds = username + ":" + password
 	}
 	dsn := fmt.Sprintf("%s@tcp(%s:%d)/?parseTime=true", creds, host, port)
-	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Silent),
-	})
+	db, err := openDB(dsn)
 	if err != nil {
 		return nil, fmt.Errorf("db: admin connect to %s:%d: %s", host, port, sanitizeDBError(err.Error(), password))
 	}
@@ -119,9 +123,7 @@ func ConnectWithConfig(cfg config.DatabaseConfig) (*gorm.DB, error) {
 		return nil, fmt.Errorf("db: register TLS config: %w", err)
 	}
 	dsn := DSNFromConfig(cfg)
-	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Silent),
-	})
+	db, err := openDB(dsn)
 	if err != nil {
 		return nil, fmt.Errorf("db: connect to %s:%d/%s: %s", cfg.Host, cfg.Port, cfg.Database, sanitizeDBError(err.Error(), cfg.Password))
 	}

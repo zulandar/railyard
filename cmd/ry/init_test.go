@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -351,23 +352,114 @@ func TestGenerateTracks_Empty(t *testing.T) {
 	}
 }
 
-func TestEnsureDBRunning_AlreadyRunning(t *testing.T) {
-	// We can't easily test the full startup without a real database server,
-	// so we test the error path: connection to a dead port should return
-	// an error that mentions the database.
-	var out bytes.Buffer
-	err := ensureDBRunning(&out, "127.0.0.1", 19999, "root", "")
-	// Should fail because nothing is on port 19999 and db data dir
-	// may not exist. The exact error doesn't matter — just verify it
-	// doesn't panic and returns an error.
-	if err == nil {
-		// If it somehow succeeded (unlikely), that's fine too.
-		return
+func TestEnsureDBRunning_SkipsDockerWhenAlreadyReachable(t *testing.T) {
+	origProbe := dbProbeFn
+	origExec := execCommandFn
+	defer func() { dbProbeFn = origProbe; execCommandFn = origExec }()
+
+	dbProbeFn = func(host string, port int, username, password string) error {
+		return nil // DB is reachable
 	}
-	// Error should be informative.
-	errStr := err.Error()
-	if !strings.Contains(errStr, "database") && !strings.Contains(errStr, "Database") {
-		t.Errorf("error should mention database: %v", err)
+	dockerCalled := false
+	execCommandFn = func(name string, arg ...string) *exec.Cmd {
+		if name == "docker" {
+			dockerCalled = true
+		}
+		return exec.Command("echo") // no-op
+	}
+
+	var out bytes.Buffer
+	err := ensureDBRunning(&out, "127.0.0.1", 3306, "root", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if dockerCalled {
+		t.Error("docker should not be called when DB is already reachable")
+	}
+	if !strings.Contains(out.String(), "already running") {
+		t.Errorf("output should mention 'already running': %s", out.String())
+	}
+}
+
+func TestEnsureDBRunning_StartsDockerWhenUnreachable(t *testing.T) {
+	origProbe := dbProbeFn
+	origExec := execCommandFn
+	defer func() { dbProbeFn = origProbe; execCommandFn = origExec }()
+
+	probeCount := 0
+	dbProbeFn = func(host string, port int, username, password string) error {
+		probeCount++
+		if probeCount <= 2 {
+			return fmt.Errorf("connection refused")
+		}
+		return nil // ready on 3rd attempt
+	}
+
+	var capturedArgs []string
+	execCommandFn = func(name string, arg ...string) *exec.Cmd {
+		all := append([]string{name}, arg...)
+		capturedArgs = append(capturedArgs, strings.Join(all, " "))
+		// Return a command that succeeds
+		return exec.Command("echo", "ok")
+	}
+
+	var out bytes.Buffer
+	err := ensureDBRunning(&out, "127.0.0.1", 3307, "root", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify docker run was called with expected args.
+	found := false
+	for _, args := range capturedArgs {
+		if strings.Contains(args, "docker run -d") {
+			found = true
+			if !strings.Contains(args, "--name railyard-mysql") {
+				t.Errorf("missing --name railyard-mysql in: %s", args)
+			}
+			if !strings.Contains(args, "MYSQL_ALLOW_EMPTY_PASSWORD=yes") {
+				t.Errorf("missing MYSQL_ALLOW_EMPTY_PASSWORD=yes in: %s", args)
+			}
+			if !strings.Contains(args, "3307:3306") {
+				t.Errorf("missing port mapping 3307:3306 in: %s", args)
+			}
+			if !strings.Contains(args, "mysql:8.0") {
+				t.Errorf("missing mysql:8.0 image in: %s", args)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("docker run not found in captured commands: %v", capturedArgs)
+	}
+}
+
+func TestEnsureDBRunning_DockerRunFails_ReturnsError(t *testing.T) {
+	origProbe := dbProbeFn
+	origExec := execCommandFn
+	defer func() { dbProbeFn = origProbe; execCommandFn = origExec }()
+
+	dbProbeFn = func(host string, port int, username, password string) error {
+		return fmt.Errorf("connection refused")
+	}
+
+	callCount := 0
+	execCommandFn = func(name string, arg ...string) *exec.Cmd {
+		callCount++
+		if callCount == 1 {
+			// docker rm -f — let it succeed
+			return exec.Command("echo")
+		}
+		// docker run — make it fail
+		return exec.Command("sh", "-c", "echo 'Cannot connect to Docker daemon' >&2; exit 1")
+	}
+
+	var out bytes.Buffer
+	err := ensureDBRunning(&out, "127.0.0.1", 3306, "root", "")
+	if err == nil {
+		t.Fatal("expected error when docker run fails")
+	}
+	if !strings.Contains(err.Error(), "start database container") {
+		t.Errorf("error should mention container start failure: %v", err)
 	}
 }
 

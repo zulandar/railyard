@@ -1,6 +1,7 @@
 package db
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -13,23 +14,65 @@ import (
 // the current authentication model. They serve as a regression suite
 // to prevent accidental credential exposure.
 
-func TestConnect_DefaultCredentials_ShouldWork(t *testing.T) {
-	// Documents that default root/empty-password is accepted by Connect.
-	// This is expected for local development but should be restricted
-	// in production deployments. The ry doctor command warns about this.
-	var fn func(string, int, string, string, string) (*gorm.DB, error) = Connect
-	if fn == nil {
-		t.Fatal("Connect function is nil")
+func TestConnect_UsesExpectedDSN(t *testing.T) {
+	var captured string
+	orig := openDB
+	openDB = func(dsn string) (*gorm.DB, error) {
+		captured = dsn
+		return nil, fmt.Errorf("stub: no real db")
 	}
-	// We can't test an actual connection without a running database server,
-	// but we verify the function signature accepts empty password.
+	defer func() { openDB = orig }()
+
+	tests := []struct {
+		name     string
+		password string
+		wantDSN  string
+	}{
+		{"empty password", "", "root@tcp(127.0.0.1:3306)/testdb?parseTime=true"},
+		{"with password", "secret", "root:secret@tcp(127.0.0.1:3306)/testdb?parseTime=true"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			captured = ""
+			_, err := Connect("127.0.0.1", 3306, "testdb", "root", tt.password)
+			if err == nil {
+				t.Fatal("expected stub error")
+			}
+			if captured != tt.wantDSN {
+				t.Errorf("Connect DSN = %q, want %q", captured, tt.wantDSN)
+			}
+		})
+	}
 }
 
-func TestConnectAdmin_DefaultCredentials_ShouldWork(t *testing.T) {
-	// Same as above for admin connections.
-	var fn func(string, int, string, string) (*gorm.DB, error) = ConnectAdmin
-	if fn == nil {
-		t.Fatal("ConnectAdmin function is nil")
+func TestConnectAdmin_UsesExpectedDSN(t *testing.T) {
+	var captured string
+	orig := openDB
+	openDB = func(dsn string) (*gorm.DB, error) {
+		captured = dsn
+		return nil, fmt.Errorf("stub: no real db")
+	}
+	defer func() { openDB = orig }()
+
+	tests := []struct {
+		name     string
+		password string
+		wantDSN  string
+	}{
+		{"empty password", "", "root@tcp(127.0.0.1:3306)/?parseTime=true"},
+		{"with password", "secret", "root:secret@tcp(127.0.0.1:3306)/?parseTime=true"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			captured = ""
+			_, err := ConnectAdmin("127.0.0.1", 3306, "root", tt.password)
+			if err == nil {
+				t.Fatal("expected stub error")
+			}
+			if captured != tt.wantDSN {
+				t.Errorf("ConnectAdmin DSN = %q, want %q", captured, tt.wantDSN)
+			}
+		})
 	}
 }
 
