@@ -243,9 +243,12 @@ func newDBStartCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "start",
 		Short: "Start the database server",
-		Long: `Starts a MySQL Docker container using the host/port from your config.
+		Long: `Starts a local MySQL Docker container using the host/port from your config.
 If the database is already running, reports success without starting another instance.
-Useful after a WSL reboot or system restart when the database container has stopped.`,
+Useful after a WSL reboot or system restart when the database container has stopped.
+
+Only manages local databases (127.0.0.1/localhost). For remote database hosts,
+this command reports the connection error and exits without modifying local containers.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runDBStart(cmd, configPath)
 		},
@@ -256,6 +259,11 @@ Useful after a WSL reboot or system restart when the database container has stop
 }
 
 const dbContainerName = "railyard-mysql"
+
+// isLocalHost returns true if the host refers to the local machine.
+func isLocalHost(host string) bool {
+	return host == "127.0.0.1" || host == "localhost" || host == "::1" || host == ""
+}
 
 func runDBStart(cmd *cobra.Command, configPath string) error {
 	out := cmd.OutOrStdout()
@@ -268,9 +276,14 @@ func runDBStart(cmd *cobra.Command, configPath string) error {
 	host := cfg.Database.Host
 	port := cfg.Database.Port
 
-	// Check if database is already running.
-	_, connErr := db.ConnectAdmin(host, port, cfg.Database.Username, cfg.Database.Password)
-	if connErr == nil {
+	// Only manage local Docker containers. For remote hosts, the user is
+	// responsible for ensuring the database is running.
+	if !isLocalHost(host) {
+		return fmt.Errorf("database host %s is not local — ry db start only manages local Docker containers.\nEnsure the remote database at %s:%d is running.", host, host, port)
+	}
+
+	// Local host: check if database is already running.
+	if _, err := db.ConnectAdmin(host, port, cfg.Database.Username, cfg.Database.Password); err == nil {
 		fmt.Fprintf(out, "Database is already running on %s:%d\n", host, port)
 		return nil
 	}

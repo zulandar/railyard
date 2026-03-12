@@ -207,10 +207,17 @@ func ensureDBDataDir(dataDir string) error {
 // containerName is the Docker container name used for the Railyard MySQL instance.
 const containerName = "railyard-mysql"
 
-// ensureDBRunning checks if the database is reachable on host:port. If not, it
-// starts a MySQL 8.0 Docker container.
+// ensureDBRunning checks if the database is reachable on host:port. If not,
+// and the host is local, it starts a MySQL 8.0 Docker container. For remote
+// hosts, it returns an error without touching local containers.
 func ensureDBRunning(out io.Writer, host string, port int, username, password string) error {
-	// Check if already running.
+	// Only manage local Docker containers. For remote hosts, the user is
+	// responsible for ensuring the database is running.
+	if !isLocalHost(host) {
+		return fmt.Errorf("database host %s is not local — auto-provisioning only works for 127.0.0.1/localhost.\nEnsure the remote database at %s:%d is running, or use --skip-db", host, host, port)
+	}
+
+	// Local host: check if already running.
 	if _, err := db.ConnectAdmin(host, port, username, password); err == nil {
 		fmt.Fprintf(out, "Database is already running on %s:%d\n", host, port)
 		return nil

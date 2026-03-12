@@ -277,6 +277,27 @@ func TestDBResetCmd_DatabaseFlag(t *testing.T) {
 	}
 }
 
+func TestIsLocalHost(t *testing.T) {
+	tests := []struct {
+		host string
+		want bool
+	}{
+		{"127.0.0.1", true},
+		{"localhost", true},
+		{"::1", true},
+		{"", true},
+		{"10.0.0.5", false},
+		{"db.example.com", false},
+		{"192.168.1.100", false},
+	}
+	for _, tt := range tests {
+		got := isLocalHost(tt.host)
+		if got != tt.want {
+			t.Errorf("isLocalHost(%q) = %v, want %v", tt.host, got, tt.want)
+		}
+	}
+}
+
 func writeTestFile(path, content string) error {
 	return os.WriteFile(path, []byte(content), 0644)
 }

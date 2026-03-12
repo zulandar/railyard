@@ -371,6 +371,20 @@ func TestEnsureDBRunning_AlreadyRunning(t *testing.T) {
 	}
 }
 
+func TestEnsureDBRunning_RemoteHostSkipsDocker(t *testing.T) {
+	// When host is not local, ensureDBRunning should return immediately
+	// without attempting any network or Docker operations.
+	var out bytes.Buffer
+	err := ensureDBRunning(&out, "10.0.0.5", 3306, "root", "")
+	if err == nil {
+		t.Fatal("expected error for non-local host")
+	}
+	errStr := err.Error()
+	if !strings.Contains(errStr, "not local") {
+		t.Errorf("error should mention 'not local': %v", err)
+	}
+}
+
 func TestRenderConfig(t *testing.T) {
 	tracks := []config.TrackConfig{
 		{
