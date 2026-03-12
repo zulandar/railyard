@@ -829,11 +829,6 @@ func maybeSwitchEscalate(ctx context.Context, db *gorm.DB, cfg *config.Config, c
 		return
 	}
 
-	if escTracker != nil && !escTracker.ShouldEscalate(carID) {
-		fmt.Fprintf(out, "Car %s escalation skipped (cooldown active)\n", carID)
-		return
-	}
-
 	maxFailures := cfg.Stall.MaxSwitchFailures
 	if maxFailures <= 0 {
 		maxFailures = 3
@@ -841,6 +836,11 @@ func maybeSwitchEscalate(ctx context.Context, db *gorm.DB, cfg *config.Config, c
 
 	failures := countRecentSwitchFailures(db, carID)
 	if failures < maxFailures {
+		return
+	}
+
+	if escTracker != nil && !escTracker.ShouldEscalate(carID) {
+		fmt.Fprintf(out, "Car %s escalation skipped (cooldown active)\n", carID)
 		return
 	}
 
