@@ -29,25 +29,6 @@ func formatTokenCount(n int64) string {
 	return b.String()
 }
 
-// formatCycleDuration formats seconds as a human-readable duration (e.g. "2m 34s", "45s", "1h 5m").
-func formatCycleDuration(seconds float64) string {
-	if seconds <= 0 {
-		return "—"
-	}
-	totalSec := int(seconds)
-	if totalSec < 60 {
-		return fmt.Sprintf("%ds", totalSec)
-	}
-	min := totalSec / 60
-	sec := totalSec % 60
-	if min < 60 {
-		return fmt.Sprintf("%dm %ds", min, sec)
-	}
-	h := min / 60
-	min = min % 60
-	return fmt.Sprintf("%dh %dm", h, min)
-}
-
 // formatDuration formats seconds as a human-readable duration (e.g. "2m 34s", "45s", "1h 5m").
 // Returns "-" for zero or negative values.
 func formatDuration(seconds float64) string {

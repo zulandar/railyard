@@ -1121,10 +1121,10 @@ func TokenUsageSummary(db *gorm.DB) TokenUsageResult {
 
 // CycleUsageResult holds aggregate cycle stats for the logs/stats page.
 type CycleUsageResult struct {
-	TotalCycles    int64
-	AvgPerCar      float64
-	StalledCars    int64
-	ByEngine       []EngineCycleRow
+	TotalCycles int64
+	AvgPerCar   float64
+	StalledCars int64
+	ByEngine    []EngineCycleRow
 }
 
 // EngineCycleRow holds per-engine cycle counts.
@@ -1177,10 +1177,7 @@ func CycleUsageSummary(db *gorm.DB) CycleUsageResult {
 
 	byEngine := make([]EngineCycleRow, len(engineRows))
 	for i, r := range engineRows {
-		byEngine[i] = EngineCycleRow{
-			EngineID:    r.EngineID,
-			TotalCycles: r.TotalCycles,
-		}
+		byEngine[i] = EngineCycleRow(r)
 	}
 
 	return CycleUsageResult{
