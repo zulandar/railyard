@@ -23,7 +23,7 @@ Each developer runs their own Railyard instance against the same repo. Agents wo
 | Term | Meaning |
 |---|---|
 | **Track** | An area of concern within the repo (backend, frontend, infra) |
-| **Car** | A unit of work (task, bug, feature, epic) |
+| **Car** | A unit of work (task, bug, epic, spike) |
 | **Engine** | A worker agent (AI coding CLI session that claims and executes cars) |
 | **Yardmaster** | Supervisor agent — merges branches, monitors engines, handles stalls |
 | **Dispatch** | Planner agent — your interface, decomposes requests into cars |
@@ -200,7 +200,7 @@ ry stop -c railyard.yaml                # Graceful shutdown
 
 ### Car Management
 
-Cars use a **P0–P4 priority model**: P0=Critical, P1=High, P2=Medium, P3=Low, P4=Trivial. Type defaults: bug→P1, feature→P2, task→P2, spike→P3.
+Cars use a **P0–P4 priority model**: P0=Critical, P1=High, P2=Medium, P3=Low, P4=Trivial. Type defaults: bug→P1, task→P2, spike→P3.
 
 ```bash
 # Create work items (created in draft status — engines won't pick them up yet)

@@ -74,6 +74,23 @@ func TestValidatePlan_InvalidType(t *testing.T) {
 	}
 }
 
+func TestValidatePlan_BugTypeAccepted(t *testing.T) {
+	plan := &DecompositionPlan{
+		Cars: []CarPlan{
+			{ID: "car-001", Title: "Fix crash on login", Track: "backend", Type: "bug", Priority: 1, Acceptance: "no crash on login"},
+		},
+	}
+	errs := ValidatePlan(plan)
+	for _, e := range errs {
+		if strings.Contains(e, "invalid type") {
+			t.Errorf("bug should be a valid type, got error: %s", e)
+		}
+	}
+	if len(errs) != 0 {
+		t.Errorf("expected no errors for valid bug car, got: %v", errs)
+	}
+}
+
 func TestValidatePlan_InvalidPriority(t *testing.T) {
 	plan := &DecompositionPlan{
 		Cars: []CarPlan{

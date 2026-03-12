@@ -99,7 +99,7 @@ type Car struct {
     Description string     `gorm:"type:text"`
     Type        string     `gorm:"size:16;default:task"`   // task, epic, bug, spike
     Status      string     `gorm:"size:16;default:open;index"` // open, ready, claimed, in_progress, done, blocked, cancelled
-    Priority    int        `gorm:"default:2"`              // P0=Critical, P1=High, P2=Medium, P3=Low, P4=Trivial; type defaults: bug→P1, feature→P2, task→P2, spike→P3
+    Priority    int        `gorm:"default:2"`              // P0=Critical, P1=High, P2=Medium, P3=Low, P4=Trivial; type defaults: bug→P1, task→P2, spike→P3
     Track       string     `gorm:"size:64;index"`          // backend, frontend, infra
     Assignee    string     `gorm:"size:64"`                // engine ID
     ParentID    *string    `gorm:"size:32"`                // epic parent
@@ -1631,7 +1631,7 @@ Two modes control how issues flow through phases 3–4:
 - **Standard** (default): heuristic filter runs first. Only issues that pass heuristics go to AI triage. Lower cost, faster.
 - **Full**: all issues go directly to AI triage. More thorough, higher API cost.
 
-AI triage produces a structured decision: accept (with track, priority P0–P4, effort estimate) or reject (with reason). Accepted issues become cars with priority set per the enterprise model (P0=Critical, P1=High, P2=Medium, P3=Low, P4=Trivial; type defaults: bug→P1, feature→P2, task→P2, spike→P3); rejected issues optionally get a comment explaining why.
+AI triage produces a structured decision: accept (with track, priority P0–P4, effort estimate) or reject (with reason). Accepted issues become cars with priority set per the enterprise model (P0=Critical, P1=High, P2=Medium, P3=Low, P4=Trivial; type defaults: bug→P1, task→P2, spike→P3); rejected issues optionally get a comment explaining why.
 
 ### Label Lifecycle
 

@@ -104,13 +104,12 @@ repo: git@github.com:org/myproject.git
 # -----   --------   ----------------------------------------------------------
 # P0      Critical   Production outage or data loss — engines preempt lower work
 # P1      High       Serious bug or blocking issue — next up after P0
-# P2      Medium     Standard feature or non-critical fix — normal queue order
+# P2      Medium     Standard task or non-critical fix — normal queue order
 # P3      Low        Minor improvement, tech debt, or speculative spike
 # P4      Trivial    Cosmetic tweaks, typos, or nice-to-haves
 #
 # Type-based defaults (applied when no explicit priority is set):
 #   bug     → P1
-#   feature → P2
 #   task    → P2
 #   spike   → P3
 #

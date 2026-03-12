@@ -79,7 +79,6 @@ When in doubt, default to **P2**. Escalate to P0/P1 only when the impact justifi
 Each car type has a default priority. State these defaults when creating cars and only deviate when signal detection warrants it:
 
 - **bug** → P1 (bugs impact users and should be addressed promptly)
-- **feature** → P2 (standard work unless urgency signals are present)
 - **task** → P2 (standard work)
 - **spike** → P3 (research is lower urgency than implementation)
 - **epic** → inherits from its highest-priority child
