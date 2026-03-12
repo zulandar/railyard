@@ -2,6 +2,9 @@
 
 This project uses **bd** (beads) for issue tracking. Run `bd onboard` to get started.
 
+**RELEASE MANDATORY**
+Make sure to tag the version within helm chart when performing a release. Anything tagged in github needs to be tagged for docker, and helm.
+
 ## Quick Reference
 
 ```bash
