@@ -135,12 +135,9 @@ ok "Built ry"
 
 # ─── Step 3: Clean previous test env (if any) ────────────────────────────────
 
-if docker inspect --format '{{.State.Running}}' railyard-mysql-test 2>/dev/null | grep -q "true"; then
-    info "Stopping previous MySQL test container..."
-    docker stop railyard-mysql-test 2>/dev/null || true
-    docker rm railyard-mysql-test 2>/dev/null || true
-    sleep 2
-fi
+# Remove any previous container (running or stopped) with the same name.
+docker rm -f railyard-mysql-test 2>/dev/null || true
+sleep 2
 tmux kill-session -t railyard 2>/dev/null || true
 
 # Remove old test dirs but keep the binary we just built.

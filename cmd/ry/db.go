@@ -243,9 +243,9 @@ func newDBStartCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "start",
 		Short: "Start the database server",
-		Long: `Starts the database server using the host/port from your config.
+		Long: `Starts a MySQL Docker container using the host/port from your config.
 If the database is already running, reports success without starting another instance.
-Useful after a WSL reboot or system restart when the database process has stopped.`,
+Useful after a WSL reboot or system restart when the database container has stopped.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runDBStart(cmd, configPath)
 		},
@@ -254,6 +254,8 @@ Useful after a WSL reboot or system restart when the database process has stoppe
 	cmd.Flags().StringVarP(&configPath, "config", "c", "railyard.yaml", "path to Railyard config file")
 	return cmd
 }
+
+const dbContainerName = "railyard-mysql"
 
 func runDBStart(cmd *cobra.Command, configPath string) error {
 	out := cmd.OutOrStdout()
@@ -265,7 +267,6 @@ func runDBStart(cmd *cobra.Command, configPath string) error {
 
 	host := cfg.Database.Host
 	port := cfg.Database.Port
-	dataDir := os.ExpandEnv("${HOME}/.railyard/db-data")
 
 	// Check if database is already running.
 	_, connErr := db.ConnectAdmin(host, port, cfg.Database.Username, cfg.Database.Password)
@@ -274,49 +275,44 @@ func runDBStart(cmd *cobra.Command, configPath string) error {
 		return nil
 	}
 
-	// Ensure data directory exists and is initialized.
-	if _, err := os.Stat(dataDir); os.IsNotExist(err) {
-		return fmt.Errorf("database data directory %s does not exist — run quickstart.sh first", dataDir)
+	dataDir := os.ExpandEnv("${HOME}/.railyard/mysql-data")
+
+	// Ensure data directory exists.
+	if err := os.MkdirAll(dataDir, 0755); err != nil {
+		return fmt.Errorf("create data directory %s: %w", dataDir, err)
 	}
 
-	// Start database in the background.
-	logFile := os.ExpandEnv("${HOME}/.railyard/db.log")
-	dbCmd := exec.Command("mysqld",
-		"--bind-address", host,
-		"--port", fmt.Sprintf("%d", port),
-	)
-	dbCmd.Dir = dataDir
+	// Remove any stopped container with the same name.
+	exec.Command("docker", "rm", "-f", dbContainerName).Run()
 
-	lf, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	// Start MySQL via Docker.
+	args := []string{
+		"run", "-d",
+		"--name", dbContainerName,
+		"-e", "MYSQL_ALLOW_EMPTY_PASSWORD=yes",
+		"-p", fmt.Sprintf("%d:3306", port),
+		"-v", dataDir + ":/var/lib/mysql",
+		"mysql:8.0",
+	}
+	dbCmd := exec.Command("docker", args...)
+	cmdOut, err := dbCmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("open log file %s: %w", logFile, err)
+		return fmt.Errorf("start database container: %s: %w", strings.TrimSpace(string(cmdOut)), err)
 	}
-	dbCmd.Stdout = lf
-	dbCmd.Stderr = lf
 
-	if err := dbCmd.Start(); err != nil {
-		lf.Close()
-		return fmt.Errorf("start database: %w", err)
-	}
-	// Detach — don't wait for process.
-	go func() {
-		dbCmd.Wait()
-		lf.Close()
-	}()
-
-	fmt.Fprintf(out, "Starting database on %s:%d (PID %d)...\n", host, port, dbCmd.Process.Pid)
+	fmt.Fprintf(out, "Starting MySQL container on %s:%d...\n", host, port)
 
 	// Wait for readiness.
-	for i := range 20 {
+	for i := range 60 {
 		time.Sleep(500 * time.Millisecond)
 		if _, err := db.ConnectAdmin(host, port, cfg.Database.Username, cfg.Database.Password); err == nil {
 			fmt.Fprintf(out, "Database is ready (took %dms)\n", (i+1)*500)
-			fmt.Fprintf(out, "Log: %s\n", logFile)
+			fmt.Fprintf(out, "Container: %s (docker logs %s)\n", dbContainerName, dbContainerName)
 			return nil
 		}
 	}
 
-	return fmt.Errorf("database did not become ready within 10s — check %s", logFile)
+	return fmt.Errorf("database did not become ready within 30s — check: docker logs %s", dbContainerName)
 }
 
 func confirmReset(cmd *cobra.Command, dbName string) bool {

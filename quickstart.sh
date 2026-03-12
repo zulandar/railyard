@@ -227,6 +227,9 @@ if docker inspect --format '{{.State.Running}}' railyard-mysql 2>/dev/null | gre
 fi
 
 if ! $MYSQL_RUNNING; then
+    # Remove any stopped container with the same name.
+    docker rm -f railyard-mysql 2>/dev/null || true
+
     if check_port 3306; then
         warn "Port 3306 is in use by another process."
         warn "Switching MySQL to port 3307."

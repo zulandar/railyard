@@ -204,8 +204,11 @@ func ensureDBDataDir(dataDir string) error {
 	return nil
 }
 
+// containerName is the Docker container name used for the Railyard MySQL instance.
+const containerName = "railyard-mysql"
+
 // ensureDBRunning checks if the database is reachable on host:port. If not, it
-// starts mysqld in the background using ~/.railyard/db-data.
+// starts a MySQL 8.0 Docker container.
 func ensureDBRunning(out io.Writer, host string, port int, username, password string) error {
 	// Check if already running.
 	if _, err := db.ConnectAdmin(host, port, username, password); err == nil {
@@ -213,48 +216,43 @@ func ensureDBRunning(out io.Writer, host string, port int, username, password st
 		return nil
 	}
 
-	dataDir := os.ExpandEnv("${HOME}/.railyard/db-data")
+	dataDir := os.ExpandEnv("${HOME}/.railyard/mysql-data")
 	fmt.Fprintf(out, "Setting up database at %s...\n", dataDir)
 
 	if err := ensureDBDataDir(dataDir); err != nil {
 		return err
 	}
 
-	// Start database in the background.
-	logFile := os.ExpandEnv("${HOME}/.railyard/db.log")
-	dbCmd := exec.Command("mysqld",
-		"--bind-address", host,
-		"--port", fmt.Sprintf("%d", port),
-	)
-	dbCmd.Dir = dataDir
+	// Remove any stopped container with the same name to avoid conflicts.
+	exec.Command("docker", "rm", "-f", containerName).Run()
 
-	lf, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	// Start MySQL via Docker.
+	args := []string{
+		"run", "-d",
+		"--name", containerName,
+		"-e", "MYSQL_ALLOW_EMPTY_PASSWORD=yes",
+		"-p", fmt.Sprintf("%d:3306", port),
+		"-v", dataDir + ":/var/lib/mysql",
+		"mysql:8.0",
+	}
+	dbCmd := exec.Command("docker", args...)
+
+	cmdOut, err := dbCmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("open database log %s: %w", logFile, err)
+		return fmt.Errorf("start database container: %s: %w", strings.TrimSpace(string(cmdOut)), err)
 	}
-	dbCmd.Stdout = lf
-	dbCmd.Stderr = lf
 
-	if err := dbCmd.Start(); err != nil {
-		lf.Close()
-		return fmt.Errorf("start database: %w", err)
-	}
-	go func() {
-		dbCmd.Wait()
-		lf.Close()
-	}()
+	fmt.Fprintf(out, "Starting MySQL container on %s:%d...\n", host, port)
 
-	fmt.Fprintf(out, "Starting database on %s:%d (PID %d)...\n", host, port, dbCmd.Process.Pid)
-
-	// Wait for readiness.
-	for i := range 20 {
+	// Wait for readiness (MySQL in Docker can take 15-30s on first init).
+	for i := range 60 {
 		time.Sleep(500 * time.Millisecond)
 		if _, err := db.ConnectAdmin(host, port, username, password); err == nil {
 			fmt.Fprintf(out, "Database is ready (took %dms)\n", (i+1)*500)
 			return nil
 		}
 	}
-	return fmt.Errorf("database did not become ready within 10s — check %s", logFile)
+	return fmt.Errorf("database did not become ready within 30s — check: docker logs %s", containerName)
 }
 
 // languagePreset returns a sensible default TrackConfig for a given language.

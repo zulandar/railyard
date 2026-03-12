@@ -96,7 +96,7 @@ func TestBinaryLabel(t *testing.T) {
 		want  string
 	}{
 		{"go", "Go"},
-		{"mysql", "MySQL"},
+		{"docker", "Docker"},
 		{"tmux", "tmux"},
 		{"claude", "Claude CLI"},
 		{"unknown", "unknown"},

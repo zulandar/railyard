@@ -50,7 +50,7 @@ func runDoctor(cmd *cobra.Command, configPath string) error {
 	results = append(results, cfgResult)
 
 	// 2. Binaries
-	for _, bin := range []string{"go", "mysql", "tmux", "claude"} {
+	for _, bin := range []string{"go", "docker", "tmux", "claude"} {
 		results = append(results, checkBinary(bin))
 	}
 
@@ -159,7 +159,7 @@ func checkBinary(name string) checkResult {
 	switch name {
 	case "go":
 		versionArgs = []string{"version"}
-	case "mysql":
+	case "docker":
 		versionArgs = []string{"--version"}
 	case "tmux":
 		versionArgs = []string{"-V"}
@@ -183,8 +183,8 @@ func binaryLabel(name string) string {
 	switch name {
 	case "go":
 		return "Go"
-	case "mysql":
-		return "MySQL"
+	case "docker":
+		return "Docker"
 	case "tmux":
 		return "tmux"
 	case "claude":
