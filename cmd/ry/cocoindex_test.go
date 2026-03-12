@@ -9,26 +9,90 @@ import (
 )
 
 func TestDetectPGPort_DefaultAvailable(t *testing.T) {
-	// In test environment, default port is likely free.
+	orig := isPortInUseFn
+	defer func() { isPortInUseFn = orig }()
+
+	isPortInUseFn = func(port int) bool { return false }
+
 	port := detectPGPort()
-	if port != defaultPGPort && port != fallbackPGPort {
-		t.Errorf("detectPGPort() = %d, want %d or %d", port, defaultPGPort, fallbackPGPort)
+	if port != defaultPGPort {
+		t.Errorf("detectPGPort() = %d, want %d when default is free", port, defaultPGPort)
 	}
 }
 
-func TestIsPortInUse_UnusedPort(t *testing.T) {
-	// Port 59999 is very unlikely to be in use.
+func TestDetectPGPort_DefaultInUse_FallbackAvailable(t *testing.T) {
+	orig := isPortInUseFn
+	defer func() { isPortInUseFn = orig }()
+
+	isPortInUseFn = func(port int) bool { return port == defaultPGPort }
+
+	port := detectPGPort()
+	if port != fallbackPGPort {
+		t.Errorf("detectPGPort() = %d, want %d when default is in use", port, fallbackPGPort)
+	}
+}
+
+func TestDetectPGPort_BothInUse(t *testing.T) {
+	orig := isPortInUseFn
+	defer func() { isPortInUseFn = orig }()
+
+	isPortInUseFn = func(port int) bool { return true }
+
+	port := detectPGPort()
+	if port != defaultPGPort {
+		t.Errorf("detectPGPort() = %d, want %d when both ports are in use", port, defaultPGPort)
+	}
+}
+
+func TestIsPortInUse_PortFree(t *testing.T) {
+	orig := isPortInUseFn
+	defer func() { isPortInUseFn = orig }()
+
+	isPortInUseFn = func(port int) bool { return false }
+
 	if isPortInUse(59999) {
-		t.Skip("port 59999 unexpectedly in use")
+		t.Error("expected port 59999 to be reported as free")
 	}
 }
 
-func TestIsPGVectorRunning_NoContainer(t *testing.T) {
-	// When no container exists, should return false.
-	// This test works whether or not Docker is installed.
-	running, _ := isPGVectorRunning()
+func TestIsPortInUse_PortOccupied(t *testing.T) {
+	orig := isPortInUseFn
+	defer func() { isPortInUseFn = orig }()
+
+	isPortInUseFn = func(port int) bool { return true }
+
+	if !isPortInUse(59999) {
+		t.Error("expected port 59999 to be reported as in use")
+	}
+}
+
+func TestIsPGVectorRunning_ContainerNotRunning(t *testing.T) {
+	orig := isPGVectorRunningFn
+	defer func() { isPGVectorRunningFn = orig }()
+
+	isPGVectorRunningFn = func() (bool, int) { return false, 0 }
+
+	running, port := isPGVectorRunning()
 	if running {
-		t.Skip("railyard-pgvector container is actually running")
+		t.Error("expected container to not be running")
+	}
+	if port != 0 {
+		t.Errorf("expected port 0, got %d", port)
+	}
+}
+
+func TestIsPGVectorRunning_ContainerRunning(t *testing.T) {
+	orig := isPGVectorRunningFn
+	defer func() { isPGVectorRunningFn = orig }()
+
+	isPGVectorRunningFn = func() (bool, int) { return true, 5481 }
+
+	running, port := isPGVectorRunning()
+	if !running {
+		t.Error("expected container to be running")
+	}
+	if port != 5481 {
+		t.Errorf("expected port 5481, got %d", port)
 	}
 }
 

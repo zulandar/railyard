@@ -599,9 +599,27 @@ func bootstrapPip(venvPath string) error {
 	return nil
 }
 
+// isPortInUseFn checks if a TCP port is listening. Overridden in tests.
+var isPortInUseFn = func(port int) bool {
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 500*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
+}
+
+// isPGVectorRunningFn checks if the railyard-pgvector container is running.
+// Overridden in tests.
+var isPGVectorRunningFn = isPGVectorRunningImpl
+
 // isPGVectorRunning checks if the railyard-pgvector container is running
 // and returns its host port.
 func isPGVectorRunning() (bool, int) {
+	return isPGVectorRunningFn()
+}
+
+func isPGVectorRunningImpl() (bool, int) {
 	out, err := exec.Command("docker", "inspect", "--format",
 		"{{.State.Running}}|{{(index (index .NetworkSettings.Ports \"5432/tcp\") 0).HostPort}}",
 		"railyard-pgvector").Output()
@@ -635,12 +653,7 @@ func detectPGPort() int {
 
 // isPortInUse checks if a TCP port is listening.
 func isPortInUse(port int) bool {
-	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 500*time.Millisecond)
-	if err != nil {
-		return false
-	}
-	conn.Close()
-	return true
+	return isPortInUseFn(port)
 }
 
 // startPGVector runs docker compose up for the pgvector service.
