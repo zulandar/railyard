@@ -94,6 +94,30 @@ repo: git@github.com:org/myproject.git
 #   max_switch_failures: 3     # repeated switch (merge/test/push) failures before Claude escalation
 
 # ---------------------------------------------------------------------------
+# Car priorities (reference)
+# ---------------------------------------------------------------------------
+#
+# Each car has a priority level (P0–P4) that controls scheduling order.
+# The yardmaster picks the highest-priority ready car first.
+#
+# Level   Name       Description
+# -----   --------   ----------------------------------------------------------
+# P0      Critical   Production outage or data loss — engines preempt lower work
+# P1      High       Serious bug or blocking issue — next up after P0
+# P2      Medium     Standard task or non-critical fix — normal queue order
+# P3      Low        Minor improvement, tech debt, or speculative spike
+# P4      Trivial    Cosmetic tweaks, typos, or nice-to-haves
+#
+# Type-based defaults (applied when no explicit priority is set):
+#   bug     → P1
+#   task    → P2
+#   spike   → P3
+#
+# Dispatch uses signal detection to auto-adjust priorities at triage time.
+# For example, keywords like "outage" or "data loss" in a car's description
+# may elevate its priority above the type-based default.
+
+# ---------------------------------------------------------------------------
 # Kubernetes deployment mode (optional)
 # ---------------------------------------------------------------------------
 # When configured, engines run as Kubernetes pods instead of tmux sessions.

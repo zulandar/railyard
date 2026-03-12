@@ -133,7 +133,7 @@ func TestRenderContext_CurrentCar(t *testing.T) {
 		"## Your Current Car",
 		"Car: car-001",
 		"Title: Implement widget",
-		"Priority: 1",
+		"Priority: P1 (High)",
 		"Branch: ry/alice/backend/car-001",
 		"### Description",
 		"Build the widget feature",
@@ -361,6 +361,30 @@ func TestRenderContext_FullTemplate(t *testing.T) {
 			t.Errorf("section %q out of order", s)
 		}
 		lastIdx = idx
+	}
+}
+
+// --- priorityLabel tests ---
+
+func TestPriorityLabel(t *testing.T) {
+	tests := []struct {
+		priority int
+		want     string
+	}{
+		{0, "Critical"},
+		{1, "High"},
+		{2, "Medium"},
+		{3, "Low"},
+		{4, "Trivial"},
+		{-1, "Unknown"},
+		{5, "Unknown"},
+		{999, "Unknown"},
+	}
+	for _, tt := range tests {
+		got := priorityLabel(tt.priority)
+		if got != tt.want {
+			t.Errorf("priorityLabel(%d) = %q, want %q", tt.priority, got, tt.want)
+		}
 	}
 }
 

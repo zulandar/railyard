@@ -223,12 +223,25 @@ func TestRenderPrompt_ContainsNewSections(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	for _, want := range []string{
-		"Writing Good Car Descriptions",
+		"Required Car Description Format",
 		"Engine Capabilities",
 		"Split work",
 		"File bugs",
 		"--type bug",
 		"Spikes",
+		// Research-first workflow
+		"Research the codebase",
+		"file listing",
+		// Mandatory description structure
+		"Context",
+		"Patterns to follow",
+		"Scope boundaries",
+		// Mandatory acceptance structure
+		"Required Acceptance Criteria Format",
+		"Expected behavior",
+		"Test scenarios",
+		"Files affected",
+		"Integration points",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("prompt missing %q", want)

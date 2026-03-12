@@ -71,7 +71,7 @@ func writeCurrentCar(w *strings.Builder, car *models.Car) {
 	w.WriteString("## Your Current Car\n")
 	fmt.Fprintf(w, "Car: %s\n", car.ID)
 	fmt.Fprintf(w, "Title: %s\n", car.Title)
-	fmt.Fprintf(w, "Priority: %d\n", car.Priority)
+	fmt.Fprintf(w, "Priority: P%d (%s)\n", car.Priority, priorityLabel(car.Priority))
 	fmt.Fprintf(w, "Branch: %s\n", car.Branch)
 	w.WriteString("\n### Description\n")
 	writeUserContent(w, car.Description)
@@ -165,6 +165,24 @@ func writeInstructions(w *strings.Builder, engineID string) {
 	w.WriteString("```\n")
 	w.WriteString("**Scope rule**: Fix issues that are **inside** your car's scope directly — don't file bugs for your own work. ")
 	w.WriteString("Only file bugs for problems that belong to a different car or track.\n")
+}
+
+// priorityLabel maps a numeric priority to a human-readable label.
+func priorityLabel(p int) string {
+	switch p {
+	case 0:
+		return "Critical"
+	case 1:
+		return "High"
+	case 2:
+		return "Medium"
+	case 3:
+		return "Low"
+	case 4:
+		return "Trivial"
+	default:
+		return "Unknown"
+	}
 }
 
 // writeUserContent wraps user-supplied content in XML-style delimiters to

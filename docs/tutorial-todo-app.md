@@ -243,7 +243,7 @@ Dispatch reads your `railyard.yaml` (language, conventions, patterns) and automa
    - Individual endpoint handlers (can parallelize)
    - Main entrypoint / wiring (depends on handlers)
 3. **Sets dependencies** — endpoints blocked by model, server blocked by endpoints
-4. **Sets priorities** — foundation at P0, endpoints at P1, integration at P2
+4. **Sets priorities** using the P0–P4 enterprise model (P0=Critical, P1=High, P2=Medium, P3=Low, P4=Trivial) — foundation tasks typically get P1, endpoints get P2, integration gets P2. Type defaults: bug→P1, task→P2, spike→P3
 
 You'll see Dispatch run `ry car create` and `ry car dep add` commands in real time. It uses your language and conventions to tailor descriptions — a PHP decomposition will reference Eloquent models and Laravel routes, while a Go one will reference structs and net/http.
 

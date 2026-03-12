@@ -56,8 +56,8 @@ func ValidatePlan(plan *DecompositionPlan) []string {
 		if b.Type == "" {
 			errs = append(errs, fmt.Sprintf("cars[%d] (%s): type is required", i, b.ID))
 		}
-		if b.Type != "" && b.Type != "epic" && b.Type != "task" && b.Type != "spike" {
-			errs = append(errs, fmt.Sprintf("cars[%d] (%s): invalid type %q (must be epic, task, or spike)", i, b.ID, b.Type))
+		if b.Type != "" && b.Type != "epic" && b.Type != "task" && b.Type != "spike" && b.Type != "bug" {
+			errs = append(errs, fmt.Sprintf("cars[%d] (%s): invalid type %q (must be epic, task, spike, or bug)", i, b.ID, b.Type))
 		}
 		if b.Acceptance == "" {
 			errs = append(errs, fmt.Sprintf("cars[%d] (%s): acceptance criteria required", i, b.ID))
