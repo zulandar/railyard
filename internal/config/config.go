@@ -84,7 +84,7 @@ type StallConfig struct {
 	SwitchTimeoutSec         int `yaml:"switch_timeout_sec"`         // max seconds for switch/runTests (default 600)
 	EscalationCooldownSec    int `yaml:"escalation_cooldown_sec"`    // per-car cooldown between escalations (default 600)
 	MaxConcurrentEscalations int `yaml:"max_concurrent_escalations"` // limit concurrent escalation goroutines (default 3)
-	StaleEngineThresholdSec  int `yaml:"stale_engine_threshold_sec"`  // seconds before an engine is considered stale (default 60)
+	StaleEngineThresholdSec  int `yaml:"stale_engine_threshold_sec"` // seconds before an engine is considered stale (default 60)
 }
 
 // TLSConfig holds TLS settings for encrypted database connections.
