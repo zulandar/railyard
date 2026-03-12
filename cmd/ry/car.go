@@ -115,7 +115,6 @@ func newCarListCmd() *cobra.Command {
 		status     string
 		carType    string
 		assignee   string
-		showTokens bool
 	)
 
 	cmd := &cobra.Command{
@@ -128,7 +127,7 @@ func newCarListCmd() *cobra.Command {
 				Status:   status,
 				Type:     carType,
 				Assignee: assignee,
-			}, showTokens)
+			})
 		},
 	}
 
@@ -137,11 +136,10 @@ func newCarListCmd() *cobra.Command {
 	cmd.Flags().StringVar(&status, "status", "", "filter by status")
 	cmd.Flags().StringVar(&carType, "type", "", "filter by type")
 	cmd.Flags().StringVar(&assignee, "assignee", "", "filter by assignee")
-	cmd.Flags().BoolVar(&showTokens, "tokens", false, "show token usage column")
 	return cmd
 }
 
-func runCarList(cmd *cobra.Command, configPath string, filters car.ListFilters, showTokens bool) error {
+func runCarList(cmd *cobra.Command, configPath string, filters car.ListFilters) error {
 	_, gormDB, err := connectFromConfig(configPath)
 	if err != nil {
 		return err
@@ -158,32 +156,28 @@ func runCarList(cmd *cobra.Command, configPath string, filters car.ListFilters, 
 		return nil
 	}
 
-	// Build token map if --tokens flag is set.
-	var tokenMap map[string]car.TokenSummary
-	if showTokens {
-		ids := make([]string, len(cars))
-		for i, b := range cars {
-			ids[i] = b.ID
-		}
-		tokenMap, err = car.CarTokenMap(gormDB, ids)
-		if err != nil {
-			return err
-		}
+	// Build token and cycle maps.
+	ids := make([]string, len(cars))
+	for i, b := range cars {
+		ids[i] = b.ID
+	}
+	tokenMap, err := car.CarTokenMap(gormDB, ids)
+	if err != nil {
+		return err
+	}
+	cycleMap, err := car.CarCycleMap(gormDB, ids)
+	if err != nil {
+		return err
 	}
 
 	// Show BASE column only when cars target multiple base branches.
 	showBase := hasMultipleBaseBranches(cars)
 
 	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	switch {
-	case showTokens && showBase:
-		fmt.Fprintln(w, "ID\tTITLE\tSTATUS\tTRACK\tBASE\tPRI\tASSIGNEE\tTOKENS")
-	case showTokens:
-		fmt.Fprintln(w, "ID\tTITLE\tSTATUS\tTRACK\tPRI\tASSIGNEE\tTOKENS")
-	case showBase:
-		fmt.Fprintln(w, "ID\tTITLE\tSTATUS\tTRACK\tBASE\tPRI\tASSIGNEE")
-	default:
-		fmt.Fprintln(w, "ID\tTITLE\tSTATUS\tTRACK\tPRI\tASSIGNEE")
+	if showBase {
+		fmt.Fprintln(w, "ID\tTITLE\tSTATUS\tTRACK\tBASE\tPRI\tASSIGNEE\tTOKENS\tCYCLES")
+	} else {
+		fmt.Fprintln(w, "ID\tTITLE\tSTATUS\tTRACK\tPRI\tASSIGNEE\tTOKENS\tCYCLES")
 	}
 	for _, b := range cars {
 		a := b.Assignee
@@ -195,24 +189,19 @@ func runCarList(cmd *cobra.Command, configPath string, filters car.ListFilters, 
 			base = "main"
 		}
 		tokens := "-"
-		if showTokens {
-			if ts, ok := tokenMap[b.ID]; ok && ts.TotalTokens > 0 {
-				tokens = formatTokenCount(ts.TotalTokens)
-			}
+		if ts, ok := tokenMap[b.ID]; ok && ts.TotalTokens > 0 {
+			tokens = formatTokenCount(ts.TotalTokens)
 		}
-		switch {
-		case showTokens && showBase:
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\n",
-				b.ID, truncate(b.Title, 40), b.Status, b.Track, base, b.Priority, a, tokens)
-		case showTokens:
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\t%s\t%s\n",
-				b.ID, truncate(b.Title, 40), b.Status, b.Track, b.Priority, a, tokens)
-		case showBase:
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%d\t%s\n",
-				b.ID, truncate(b.Title, 40), b.Status, b.Track, base, b.Priority, a)
-		default:
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\t%s\n",
-				b.ID, truncate(b.Title, 40), b.Status, b.Track, b.Priority, a)
+		cycles := "-"
+		if cs, ok := cycleMap[b.ID]; ok && cs.TotalCycles > 0 {
+			cycles = fmt.Sprintf("%d", cs.TotalCycles)
+		}
+		if showBase {
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\n",
+				b.ID, truncate(b.Title, 40), b.Status, b.Track, base, b.Priority, a, tokens, cycles)
+		} else {
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\n",
+				b.ID, truncate(b.Title, 40), b.Status, b.Track, b.Priority, a, tokens, cycles)
 		}
 	}
 	w.Flush()
@@ -325,6 +314,33 @@ func runCarShow(cmd *cobra.Command, configPath, id string) error {
 			fmt.Fprintf(out, "  Model:     %s\n", tokenSummary.Model)
 			cost := estimateCost(tokenSummary.Model, tokenSummary.InputTokens, tokenSummary.OutputTokens)
 			fmt.Fprintf(out, "  Est. Cost: $%.2f\n", cost)
+		}
+	}
+
+	// Context cycle metrics.
+	cycleSummary, cycleDetails, err := car.GetCycleMetrics(gormDB, b.ID)
+	if err == nil && cycleSummary.TotalCycles > 0 {
+		fmt.Fprintln(out, "\nContext Cycles:")
+		fmt.Fprintf(out, "  Total:         %d\n", cycleSummary.TotalCycles)
+		fmt.Fprintf(out, "  Avg Duration:  %s\n", formatDuration(cycleSummary.AvgDurationSec))
+		fmt.Fprintf(out, "  Files Changed: %d\n", cycleSummary.TotalFilesChanged)
+		if cycleSummary.Stalled {
+			fmt.Fprintf(out, "  Stalled:       yes\n")
+		}
+		if len(cycleDetails) > 0 {
+			fmt.Fprintln(out, "")
+			w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+			fmt.Fprintln(w, "  CYCLE\tENGINE\tDURATION\tFILES\tNOTE\tCOMMIT")
+			for _, cd := range cycleDetails {
+				note := truncate(cd.Note, 60)
+				commit := "—"
+				if cd.CommitHash != "" {
+					commit = truncate(cd.CommitHash, 7)
+				}
+				fmt.Fprintf(w, "  %d\t%s\t%s\t%d\t%s\t%s\n",
+					cd.Cycle, cd.EngineID, formatDuration(cd.DurationSec), cd.FilesChanged, note, commit)
+			}
+			w.Flush()
 		}
 	}
 

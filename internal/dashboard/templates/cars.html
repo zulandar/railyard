@@ -48,6 +48,7 @@
             <th>Pri</th>
             <th>Assignee</th>
             <th>Tokens</th>
+            <th>Cycles</th>
             <th>Created</th>
         </tr>
     </thead>
@@ -62,10 +63,11 @@
             <td><span class="priority-{{.Priority}}">P{{.Priority}}</span></td>
             <td>{{if .Assignee}}{{.Assignee}}{{else}}—{{end}}</td>
             <td>{{if .TotalTokens}}{{commaFmt .TotalTokens}}{{else}}—{{end}}</td>
+            <td>{{if .TotalCycles}}{{.TotalCycles}}{{else}}—{{end}}</td>
             <td>{{timeAgo .CreatedAt}}</td>
         </tr>
     {{else}}
-        <tr><td colspan="9" style="color: var(--text-muted);">No cars found</td></tr>
+        <tr><td colspan="10" style="color: var(--text-muted);">No cars found</td></tr>
     {{end}}
     </tbody>
 </table>

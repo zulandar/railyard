@@ -29,6 +29,30 @@ func TestFormatTokenCount(t *testing.T) {
 	}
 }
 
+func TestFormatDuration(t *testing.T) {
+	tests := []struct {
+		input float64
+		want  string
+	}{
+		{0, "-"},
+		{-5, "-"},
+		{45, "45s"},
+		{59.9, "59s"},
+		{60, "1m 0s"},
+		{154, "2m 34s"},
+		{3600, "1h 0m"},
+		{3900, "1h 5m"},
+		{7265, "2h 1m"},
+	}
+
+	for _, tt := range tests {
+		got := formatDuration(tt.input)
+		if got != tt.want {
+			t.Errorf("formatDuration(%v) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
 func TestEstimateCost(t *testing.T) {
 	tests := []struct {
 		model  string

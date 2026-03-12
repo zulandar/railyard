@@ -114,7 +114,7 @@ func TestRunLogs_FilterBySession(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// 4. Car list with --tokens and --status filter combined
+// 4. Car list with status filter (tokens and cycles always shown)
 // ---------------------------------------------------------------------------
 
 func TestRunCarList_TokensWithStatusFilter(t *testing.T) {
@@ -128,7 +128,7 @@ func TestRunCarList_TokensWithStatusFilter(t *testing.T) {
 	gormDB.Create(&models.AgentLog{CarID: "car-open-tok", EngineID: "eng-1", Direction: "out", InputTokens: 1000, OutputTokens: 500, TokenCount: 1500, Model: "claude-3", CreatedAt: now})
 	gormDB.Create(&models.AgentLog{CarID: "car-done-tok", EngineID: "eng-1", Direction: "out", InputTokens: 2000, OutputTokens: 800, TokenCount: 2800, Model: "claude-3", CreatedAt: now})
 
-	out, err := execCmd(t, []string{"car", "list", "--status", "open", "--tokens", "--config", "test.yaml"})
+	out, err := execCmd(t, []string{"car", "list", "--status", "open", "--config", "test.yaml"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

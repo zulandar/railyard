@@ -130,6 +130,7 @@ type CarRow struct {
 	Assignee    string
 	CreatedAt   time.Time
 	TotalTokens int64
+	TotalCycles int
 }
 
 // CarListResult holds the car list plus metadata for filter dropdowns.
@@ -200,6 +201,27 @@ func CarList(db *gorm.DB, track, status, carType, parentID string) CarListResult
 		}
 	}
 
+	// Batch-fetch cycle counts per car.
+	if len(ids) > 0 {
+		type cycleRow struct {
+			CarID       string `gorm:"column:car_id"`
+			TotalCycles int    `gorm:"column:total_cycles"`
+		}
+		var cycleRows []cycleRow
+		db.Model(&models.CarProgress{}).
+			Select("car_id, COUNT(*) as total_cycles").
+			Where("car_id IN ?", ids).
+			Group("car_id").
+			Scan(&cycleRows)
+		cycleMap := make(map[string]int, len(cycleRows))
+		for _, cr := range cycleRows {
+			cycleMap[cr.CarID] = cr.TotalCycles
+		}
+		for i := range rows {
+			rows[i].TotalCycles = cycleMap[rows[i].ID]
+		}
+	}
+
 	// Distinct values for filter dropdowns.
 	var tracks []string
 	db.Model(&models.Car{}).Distinct("track").Order("track ASC").Pluck("track", &tracks)
@@ -243,6 +265,18 @@ type ProgressRow struct {
 	CreatedAt    time.Time
 }
 
+// CycleDetailRow holds a single cycle detail for template rendering.
+type CycleDetailRow struct {
+	Cycle        int
+	EngineID     string
+	Duration     string
+	DurationSec  float64
+	FilesChanged int
+	Note         string
+	CommitHash   string
+	CreatedAt    time.Time
+}
+
 // CarDetail holds full car detail data for the detail view.
 type CarDetail struct {
 	ID          string
@@ -274,6 +308,12 @@ type CarDetail struct {
 	TotalTokens  int64
 	TokenModel   string
 	EstCost      float64
+
+	TotalCycles       int
+	AvgCycleDuration  string
+	TotalFilesChanged int
+	CycleStalled      bool
+	CycleDetails      []CycleDetailRow
 }
 
 // GetCarDetail returns full car detail data for the detail page.
@@ -394,6 +434,49 @@ func GetCarDetail(db *gorm.DB, id string) (*CarDetail, error) {
 			Order("created_at DESC").First(&logEntry).Error; err == nil {
 			detail.TokenModel = logEntry.Model
 			detail.EstCost = estimateTokenCost(logEntry.Model, detail.InputTokens, detail.OutputTokens)
+		}
+	}
+
+	// Cycle metrics.
+	var progressRows []models.CarProgress
+	db.Where("car_id = ?", id).Order("cycle ASC").Find(&progressRows)
+	if len(progressRows) > 0 {
+		detail.TotalCycles = len(progressRows)
+		detail.CycleStalled = len(progressRows) > 5
+
+		// Calculate durations and file counts.
+		var totalDuration float64
+		var totalFiles int
+		engineSet := make(map[string]bool)
+		for i, p := range progressRows {
+			var dur float64
+			if i > 0 {
+				dur = p.CreatedAt.Sub(progressRows[i-1].CreatedAt).Seconds()
+				totalDuration += dur
+			}
+			fc := countJSONArray(p.FilesChanged)
+			totalFiles += fc
+			engineSet[p.EngineID] = true
+
+			durStr := "\u2014"
+			if i > 0 {
+				durStr = formatCycleDuration(dur)
+			}
+			detail.CycleDetails = append(detail.CycleDetails, CycleDetailRow{
+				Cycle:        p.Cycle,
+				EngineID:     p.EngineID,
+				Duration:     durStr,
+				DurationSec:  dur,
+				FilesChanged: fc,
+				Note:         p.Note,
+				CommitHash:   p.CommitHash,
+				CreatedAt:    p.CreatedAt,
+			})
+		}
+		detail.TotalFilesChanged = totalFiles
+		if detail.TotalCycles > 1 {
+			avg := totalDuration / float64(detail.TotalCycles-1)
+			detail.AvgCycleDuration = formatCycleDuration(avg)
 		}
 	}
 
@@ -677,6 +760,25 @@ func formatDuration(d time.Duration) string {
 		return fmt.Sprintf("%dd %dh", days, h)
 	}
 	return fmt.Sprintf("%dh %dm", h, m)
+}
+
+// formatCycleDuration formats seconds as a human-readable duration string.
+func formatCycleDuration(seconds float64) string {
+	if seconds <= 0 {
+		return "\u2014"
+	}
+	totalSec := int(seconds)
+	if totalSec < 60 {
+		return fmt.Sprintf("%ds", totalSec)
+	}
+	min := totalSec / 60
+	sec := totalSec % 60
+	if min < 60 {
+		return fmt.Sprintf("%dm %ds", min, sec)
+	}
+	h := min / 60
+	min = min % 60
+	return fmt.Sprintf("%dh %dm", h, min)
 }
 
 // Escalation holds a recent escalation message for display.
@@ -1017,6 +1119,78 @@ func TokenUsageSummary(db *gorm.DB) TokenUsageResult {
 	return result
 }
 
+// CycleUsageResult holds aggregate cycle stats for the logs/stats page.
+type CycleUsageResult struct {
+	TotalCycles    int64
+	AvgPerCar      float64
+	StalledCars    int64
+	ByEngine       []EngineCycleRow
+}
+
+// EngineCycleRow holds per-engine cycle counts.
+type EngineCycleRow struct {
+	EngineID    string
+	TotalCycles int64
+}
+
+// CycleUsageSummary returns aggregate cycle stats.
+func CycleUsageSummary(db *gorm.DB) CycleUsageResult {
+	if db == nil {
+		return CycleUsageResult{ByEngine: []EngineCycleRow{}}
+	}
+
+	var totalCycles int64
+	db.Model(&models.CarProgress{}).Count(&totalCycles)
+
+	var carCount int64
+	db.Model(&models.CarProgress{}).Distinct("car_id").Count(&carCount)
+
+	var avgPerCar float64
+	if carCount > 0 {
+		avgPerCar = float64(totalCycles) / float64(carCount)
+	}
+
+	// Count stalled cars (more than 5 cycles).
+	type stalledRow struct {
+		CarID string
+		Cnt   int64
+	}
+	var stalledRows []stalledRow
+	db.Model(&models.CarProgress{}).
+		Select("car_id, COUNT(*) as cnt").
+		Group("car_id").
+		Having("COUNT(*) > ?", 5).
+		Scan(&stalledRows)
+	stalledCars := int64(len(stalledRows))
+
+	// Per-engine breakdown.
+	type engineRow struct {
+		EngineID    string `gorm:"column:engine_id"`
+		TotalCycles int64  `gorm:"column:total_cycles"`
+	}
+	var engineRows []engineRow
+	db.Model(&models.CarProgress{}).
+		Select("engine_id, COUNT(*) as total_cycles").
+		Group("engine_id").
+		Order("total_cycles DESC").
+		Scan(&engineRows)
+
+	byEngine := make([]EngineCycleRow, len(engineRows))
+	for i, r := range engineRows {
+		byEngine[i] = EngineCycleRow{
+			EngineID:    r.EngineID,
+			TotalCycles: r.TotalCycles,
+		}
+	}
+
+	return CycleUsageResult{
+		TotalCycles: totalCycles,
+		AvgPerCar:   avgPerCar,
+		StalledCars: stalledCars,
+		ByEngine:    byEngine,
+	}
+}
+
 // SessionRow holds session data for display in the list view.
 type SessionRow struct {
 	ID               uint
@@ -1078,7 +1252,7 @@ func SessionList(db *gorm.DB, filters SessionFilters) SessionListResult {
 		} else if s.Status == "active" {
 			rows[i].Duration = formatDuration(time.Since(s.CreatedAt))
 		} else {
-			rows[i].Duration = "—"
+			rows[i].Duration = "\u2014"
 		}
 	}
 
@@ -1172,7 +1346,7 @@ func GetSessionDetail(db *gorm.DB, id string) (*SessionDetailData, error) {
 	} else if s.Status == "active" {
 		detail.Duration = formatDuration(time.Since(s.CreatedAt))
 	} else {
-		detail.Duration = "—"
+		detail.Duration = "\u2014"
 	}
 
 	detail.Conversations = make([]ConversationRow, len(s.Conversations))
