@@ -210,7 +210,7 @@ func CarList(db *gorm.DB, track, status, carType, parentID string) CarListResult
 		var cycleRows []cycleRow
 		db.Model(&models.CarProgress{}).
 			Select("car_id, COUNT(*) as total_cycles").
-			Where("car_id IN ?", ids).
+			Where("car_id IN ? AND cycle > 0", ids).
 			Group("car_id").
 			Scan(&cycleRows)
 		cycleMap := make(map[string]int, len(cycleRows))
@@ -437,9 +437,9 @@ func GetCarDetail(db *gorm.DB, id string) (*CarDetail, error) {
 		}
 	}
 
-	// Cycle metrics.
+	// Cycle metrics — only true cycle entries (cycle > 0).
 	var progressRows []models.CarProgress
-	db.Where("car_id = ?", id).Order("cycle ASC").Find(&progressRows)
+	db.Where("car_id = ? AND cycle > 0", id).Order("cycle ASC").Find(&progressRows)
 	if len(progressRows) > 0 {
 		detail.TotalCycles = len(progressRows)
 		detail.CycleStalled = len(progressRows) > 5
@@ -1140,10 +1140,10 @@ func CycleUsageSummary(db *gorm.DB) CycleUsageResult {
 	}
 
 	var totalCycles int64
-	db.Model(&models.CarProgress{}).Count(&totalCycles)
+	db.Model(&models.CarProgress{}).Where("cycle > 0").Count(&totalCycles)
 
 	var carCount int64
-	db.Model(&models.CarProgress{}).Distinct("car_id").Count(&carCount)
+	db.Model(&models.CarProgress{}).Where("cycle > 0").Distinct("car_id").Count(&carCount)
 
 	var avgPerCar float64
 	if carCount > 0 {
@@ -1158,6 +1158,7 @@ func CycleUsageSummary(db *gorm.DB) CycleUsageResult {
 	var stalledRows []stalledRow
 	db.Model(&models.CarProgress{}).
 		Select("car_id, COUNT(*) as cnt").
+		Where("cycle > 0").
 		Group("car_id").
 		Having("COUNT(*) > ?", 5).
 		Scan(&stalledRows)
@@ -1171,6 +1172,7 @@ func CycleUsageSummary(db *gorm.DB) CycleUsageResult {
 	var engineRows []engineRow
 	db.Model(&models.CarProgress{}).
 		Select("engine_id, COUNT(*) as total_cycles").
+		Where("cycle > 0").
 		Group("engine_id").
 		Order("total_cycles DESC").
 		Scan(&engineRows)

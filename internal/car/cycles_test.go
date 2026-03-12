@@ -122,6 +122,87 @@ func TestGetCycleMetrics_Stalled(t *testing.T) {
 	}
 }
 
+func TestGetCycleMetrics_ExcludesZeroCycle(t *testing.T) {
+	db := testCycleDB(t)
+
+	now := time.Now()
+	rows := []models.CarProgress{
+		{CarID: "car-z", Cycle: 0, EngineID: "eng-1", Note: "progress note", FilesChanged: `["x.go"]`, CreatedAt: now.Add(-6 * time.Minute)},
+		{CarID: "car-z", Cycle: 1, EngineID: "eng-1", Note: "First cycle", FilesChanged: `["a.go","b.go"]`, CreatedAt: now.Add(-4 * time.Minute)},
+		{CarID: "car-z", Cycle: 2, EngineID: "eng-1", Note: "Second cycle", FilesChanged: `["c.go"]`, CreatedAt: now.Add(-2 * time.Minute)},
+		{CarID: "car-z", Cycle: 0, EngineID: "eng-1", Note: "completion note", FilesChanged: `[]`, CreatedAt: now},
+	}
+	for _, r := range rows {
+		if err := db.Create(&r).Error; err != nil {
+			t.Fatalf("create progress: %v", err)
+		}
+	}
+
+	summary, details, err := GetCycleMetrics(db, "car-z")
+	if err != nil {
+		t.Fatalf("GetCycleMetrics: %v", err)
+	}
+	if summary.TotalCycles != 2 {
+		t.Errorf("TotalCycles = %d, want 2 (Cycle=0 rows excluded)", summary.TotalCycles)
+	}
+	if len(details) != 2 {
+		t.Errorf("details count = %d, want 2", len(details))
+	}
+	if summary.TotalFilesChanged != 3 {
+		t.Errorf("TotalFilesChanged = %d, want 3 (Cycle=0 files excluded)", summary.TotalFilesChanged)
+	}
+	if summary.Stalled {
+		t.Error("expected not stalled with 2 real cycles")
+	}
+	// Duration should be based only on the 2 real cycle rows.
+	if summary.AvgDurationSec < 119 || summary.AvgDurationSec > 121 {
+		t.Errorf("AvgDurationSec = %f, want ~120", summary.AvgDurationSec)
+	}
+}
+
+func TestGetCycleMetrics_StalledExcludesZeroCycle(t *testing.T) {
+	db := testCycleDB(t)
+
+	now := time.Now()
+	// 5 real cycles + 2 Cycle=0 rows = 7 total rows, but only 5 count => not stalled
+	for i := 0; i < 2; i++ {
+		db.Create(&models.CarProgress{CarID: "car-s", Cycle: 0, EngineID: "eng-1", CreatedAt: now.Add(time.Duration(i) * time.Minute)})
+	}
+	for i := 1; i <= 5; i++ {
+		db.Create(&models.CarProgress{CarID: "car-s", Cycle: i, EngineID: "eng-1", CreatedAt: now.Add(time.Duration(i+2) * time.Minute)})
+	}
+
+	summary, _, err := GetCycleMetrics(db, "car-s")
+	if err != nil {
+		t.Fatalf("GetCycleMetrics: %v", err)
+	}
+	if summary.TotalCycles != 5 {
+		t.Errorf("TotalCycles = %d, want 5", summary.TotalCycles)
+	}
+	if summary.Stalled {
+		t.Error("expected not stalled with 5 real cycles (threshold is >5)")
+	}
+}
+
+func TestCarCycleMap_ExcludesZeroCycle(t *testing.T) {
+	db := testCycleDB(t)
+
+	now := time.Now()
+	db.Create(&models.CarProgress{CarID: "car-m", Cycle: 0, EngineID: "eng-1", CreatedAt: now})
+	db.Create(&models.CarProgress{CarID: "car-m", Cycle: 1, EngineID: "eng-1", CreatedAt: now})
+	db.Create(&models.CarProgress{CarID: "car-m", Cycle: 2, EngineID: "eng-1", CreatedAt: now})
+
+	result, err := CarCycleMap(db, []string{"car-m"})
+	if err != nil {
+		t.Fatalf("CarCycleMap: %v", err)
+	}
+	if m, ok := result["car-m"]; !ok {
+		t.Error("car-m missing from result")
+	} else if m.TotalCycles != 2 {
+		t.Errorf("car-m TotalCycles = %d, want 2 (Cycle=0 excluded)", m.TotalCycles)
+	}
+}
+
 func TestCarCycleMap_MultiCar(t *testing.T) {
 	db := testCycleDB(t)
 

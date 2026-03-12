@@ -1317,3 +1317,101 @@ func TestTrackSummary_AllStatuses(t *testing.T) {
 		t.Errorf("Total = %d, want 8", tc.Total)
 	}
 }
+
+// --- CycleUsageSummary tests ---
+
+func TestCycleUsageSummary_ExcludesZeroCycle(t *testing.T) {
+	db := testDB(t)
+
+	now := time.Now()
+	// 2 real cycles + 2 zero-cycle rows for car-1.
+	db.Create(&models.CarProgress{CarID: "car-1", Cycle: 0, EngineID: "eng-1", Note: "progress", CreatedAt: now})
+	db.Create(&models.CarProgress{CarID: "car-1", Cycle: 1, EngineID: "eng-1", Note: "cycle 1", CreatedAt: now.Add(time.Minute)})
+	db.Create(&models.CarProgress{CarID: "car-1", Cycle: 2, EngineID: "eng-1", Note: "cycle 2", CreatedAt: now.Add(2 * time.Minute)})
+	db.Create(&models.CarProgress{CarID: "car-1", Cycle: 0, EngineID: "eng-1", Note: "completion", CreatedAt: now.Add(3 * time.Minute)})
+
+	result := CycleUsageSummary(db)
+	if result.TotalCycles != 2 {
+		t.Errorf("TotalCycles = %d, want 2 (Cycle=0 excluded)", result.TotalCycles)
+	}
+	if result.AvgPerCar != 2.0 {
+		t.Errorf("AvgPerCar = %f, want 2.0", result.AvgPerCar)
+	}
+	if result.StalledCars != 0 {
+		t.Errorf("StalledCars = %d, want 0", result.StalledCars)
+	}
+}
+
+func TestCycleUsageSummary_StalledExcludesZeroCycle(t *testing.T) {
+	db := testDB(t)
+
+	now := time.Now()
+	// 5 real cycles + 3 zero-cycle rows = 8 total, but only 5 real => not stalled.
+	for i := 0; i < 3; i++ {
+		db.Create(&models.CarProgress{CarID: "car-s", Cycle: 0, EngineID: "eng-1", CreatedAt: now.Add(time.Duration(i) * time.Minute)})
+	}
+	for i := 1; i <= 5; i++ {
+		db.Create(&models.CarProgress{CarID: "car-s", Cycle: i, EngineID: "eng-1", CreatedAt: now.Add(time.Duration(i+3) * time.Minute)})
+	}
+
+	result := CycleUsageSummary(db)
+	if result.TotalCycles != 5 {
+		t.Errorf("TotalCycles = %d, want 5", result.TotalCycles)
+	}
+	if result.StalledCars != 0 {
+		t.Errorf("StalledCars = %d, want 0 (5 real cycles <= threshold)", result.StalledCars)
+	}
+}
+
+func TestCarList_CycleCountExcludesZeroCycle(t *testing.T) {
+	db := testDB(t)
+
+	db.Create(&models.Car{ID: "car-c", Title: "Test", Status: "open", Type: "task", Track: "backend", Priority: 2})
+	now := time.Now()
+	db.Create(&models.CarProgress{CarID: "car-c", Cycle: 0, EngineID: "eng-1", CreatedAt: now})
+	db.Create(&models.CarProgress{CarID: "car-c", Cycle: 1, EngineID: "eng-1", CreatedAt: now.Add(time.Minute)})
+	db.Create(&models.CarProgress{CarID: "car-c", Cycle: 2, EngineID: "eng-1", CreatedAt: now.Add(2 * time.Minute)})
+
+	result := CarList(db, "", "", "", "")
+	if len(result.Cars) != 1 {
+		t.Fatalf("Cars count = %d, want 1", len(result.Cars))
+	}
+	if result.Cars[0].TotalCycles != 2 {
+		t.Errorf("TotalCycles = %d, want 2 (Cycle=0 excluded)", result.Cars[0].TotalCycles)
+	}
+}
+
+func TestGetCarDetail_CycleMetricsExcludeZeroCycle(t *testing.T) {
+	db := testDB(t)
+
+	now := time.Now()
+	db.Create(&models.Car{ID: "car-d", Title: "Detail Test", Status: "open", Type: "task", Track: "backend", Priority: 2, CreatedAt: now, UpdatedAt: now})
+	db.Create(&models.CarProgress{CarID: "car-d", Cycle: 0, EngineID: "eng-1", Note: "generic progress", FilesChanged: `["junk.go"]`, CreatedAt: now})
+	db.Create(&models.CarProgress{CarID: "car-d", Cycle: 1, EngineID: "eng-1", Note: "first cycle", FilesChanged: `["a.go"]`, CreatedAt: now.Add(time.Minute)})
+	db.Create(&models.CarProgress{CarID: "car-d", Cycle: 2, EngineID: "eng-1", Note: "second cycle", FilesChanged: `["b.go","c.go"]`, CreatedAt: now.Add(3 * time.Minute)})
+	db.Create(&models.CarProgress{CarID: "car-d", Cycle: 0, EngineID: "eng-1", Note: "completion", FilesChanged: `[]`, CreatedAt: now.Add(4 * time.Minute)})
+
+	detail, err := GetCarDetail(db, "car-d")
+	if err != nil {
+		t.Fatalf("GetCarDetail: %v", err)
+	}
+	if detail.TotalCycles != 2 {
+		t.Errorf("TotalCycles = %d, want 2 (Cycle=0 excluded)", detail.TotalCycles)
+	}
+	if detail.TotalFilesChanged != 3 {
+		t.Errorf("TotalFilesChanged = %d, want 3 (Cycle=0 files excluded)", detail.TotalFilesChanged)
+	}
+	if detail.CycleStalled {
+		t.Error("expected not stalled with 2 real cycles")
+	}
+	if len(detail.CycleDetails) != 2 {
+		t.Errorf("CycleDetails count = %d, want 2", len(detail.CycleDetails))
+	}
+	// Duration should be ~120s between cycle 1 and 2.
+	if len(detail.CycleDetails) == 2 {
+		dur := detail.CycleDetails[1].DurationSec
+		if dur < 119 || dur > 121 {
+			t.Errorf("CycleDetails[1].DurationSec = %f, want ~120", dur)
+		}
+	}
+}

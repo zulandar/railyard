@@ -38,7 +38,7 @@ func GetCycleMetrics(db *gorm.DB, carID string) (CycleSummary, []CycleDetail, er
 	var details []CycleDetail
 
 	var rows []models.CarProgress
-	if err := db.Where("car_id = ?", carID).Order("cycle ASC").Find(&rows).Error; err != nil {
+	if err := db.Where("car_id = ? AND cycle > 0", carID).Order("cycle ASC").Find(&rows).Error; err != nil {
 		return summary, details, fmt.Errorf("car: get cycle metrics for %s: %w", carID, err)
 	}
 
@@ -100,7 +100,7 @@ func CarCycleMap(db *gorm.DB, carIDs []string) (map[string]CycleSummary, error) 
 	var rows []row
 	err := db.Model(&models.CarProgress{}).
 		Select("car_id, COUNT(*) as total_cycles").
-		Where("car_id IN ?", carIDs).
+		Where("car_id IN ? AND cycle > 0", carIDs).
 		Group("car_id").
 		Scan(&rows).Error
 	if err != nil {

@@ -131,35 +131,11 @@
 
         {{if .Car.CycleDetails}}
         <div style="margin-bottom: 1rem; max-width: 600px;">
-            <canvas id="cycleDurationChart" height="200"></canvas>
+            <canvas id="cycleDurationChart" height="200"
+                data-labels="[{{range $i, $d := .Car.CycleDetails}}{{if $i}},{{end}}{{.Cycle}}{{end}}]"
+                data-values="[{{range $i, $d := .Car.CycleDetails}}{{if $i}},{{end}}{{printf "%.0f" .DurationSec}}{{end}}]"></canvas>
         </div>
-        <script>
-        (function() {
-            var ctx = document.getElementById('cycleDurationChart').getContext('2d');
-            new Chart(ctx, {
-                type: 'line',
-                data: {
-                    labels: [{{range .Car.CycleDetails}}{{.Cycle}},{{end}}],
-                    datasets: [{
-                        label: 'Duration (seconds)',
-                        data: [{{range .Car.CycleDetails}}{{printf "%.0f" .DurationSec}},{{end}}],
-                        borderColor: 'rgb(99, 132, 255)',
-                        backgroundColor: 'rgba(99, 132, 255, 0.1)',
-                        fill: true,
-                        tension: 0.3
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    scales: {
-                        x: { title: { display: true, text: 'Cycle', color: '#999' }, ticks: { color: '#999' }, grid: { color: '#333' } },
-                        y: { title: { display: true, text: 'Seconds', color: '#999' }, ticks: { color: '#999' }, grid: { color: '#333' }, beginAtZero: true }
-                    },
-                    plugins: { legend: { labels: { color: '#ccc' } } }
-                }
-            });
-        })();
-        </script>
+        <script src="/static/cycle-chart.js"></script>
         <table>
             <thead>
                 <tr>
