@@ -263,19 +263,24 @@ func handleLogs(db *gorm.DB) gin.HandlerFunc {
 		}
 		logResult := AgentLogList(db, filters)
 		tokenResult := TokenUsageSummary(db)
+		cycleResult := CycleUsageSummary(db)
 
 		c.HTML(http.StatusOK, "logs.html", gin.H{
-			"Logs":            logResult.Logs,
-			"Engines":         logResult.Engines,
-			"Cars":            logResult.Cars,
-			"Directions":      logResult.Directions,
-			"TokenByEngine":   tokenResult.ByEngine,
-			"TotalInput":      tokenResult.TotalInput,
-			"TotalOutput":     tokenResult.TotalOutput,
-			"TotalAll":        tokenResult.TotalAll,
-			"ActiveEngine":    engineID,
-			"ActiveCar":       carID,
-			"ActiveDirection": direction,
+			"Logs":             logResult.Logs,
+			"Engines":          logResult.Engines,
+			"Cars":             logResult.Cars,
+			"Directions":       logResult.Directions,
+			"TokenByEngine":    tokenResult.ByEngine,
+			"TotalInput":       tokenResult.TotalInput,
+			"TotalOutput":      tokenResult.TotalOutput,
+			"TotalAll":         tokenResult.TotalAll,
+			"CycleTotal":       cycleResult.TotalCycles,
+			"CycleAvgPerCar":   fmt.Sprintf("%.1f", cycleResult.AvgPerCar),
+			"CycleStalledCars": cycleResult.StalledCars,
+			"CycleByEngine":    cycleResult.ByEngine,
+			"ActiveEngine":     engineID,
+			"ActiveCar":        carID,
+			"ActiveDirection":  direction,
 		})
 	}
 }

@@ -1265,3 +1265,44 @@ func TestIndex_ContainsYardmasterCard(t *testing.T) {
 		}
 	}
 }
+
+func TestCarDetail_NoInlineScripts(t *testing.T) {
+	data, err := templatesFS.ReadFile("templates/car_detail.html")
+	if err != nil {
+		t.Fatalf("car_detail.html not embedded: %v", err)
+	}
+	content := string(data)
+
+	// All <script> tags must have a src attribute (CSP-compliant).
+	// Inline <script>...</script> blocks are forbidden by script-src 'self'.
+	scriptIdx := 0
+	for {
+		idx := strings.Index(content[scriptIdx:], "<script")
+		if idx == -1 {
+			break
+		}
+		scriptIdx += idx
+		closeIdx := strings.Index(content[scriptIdx:], ">")
+		if closeIdx == -1 {
+			break
+		}
+		tag := content[scriptIdx : scriptIdx+closeIdx+1]
+		if !strings.Contains(tag, "src=") {
+			t.Errorf("found inline <script> tag (CSP violation): %s", tag)
+		}
+		scriptIdx += closeIdx + 1
+	}
+}
+
+func TestCycleChartJS_Embedded(t *testing.T) {
+	data, err := assetsFS.ReadFile("assets/cycle-chart.js")
+	if err != nil {
+		t.Fatalf("cycle-chart.js not embedded: %v", err)
+	}
+	if len(data) == 0 {
+		t.Error("cycle-chart.js is empty")
+	}
+	if !strings.Contains(string(data), "cycleDurationChart") {
+		t.Error("cycle-chart.js does not reference cycleDurationChart canvas")
+	}
+}

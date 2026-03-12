@@ -21,12 +21,12 @@ func TestRunCarList_WithTokens(t *testing.T) {
 	gormDB.Create(&models.Car{ID: "car-tok", Title: "Token Car", Status: "open", Track: "backend", Priority: 2, CreatedAt: now, UpdatedAt: now})
 	gormDB.Create(&models.AgentLog{CarID: "car-tok", EngineID: "eng-1", Direction: "out", InputTokens: 1000, OutputTokens: 500, TokenCount: 1500, Model: "claude-3", CreatedAt: now})
 
-	out, err := execCmd(t, []string{"car", "list", "--tokens", "--config", "test.yaml"})
+	out, err := execCmd(t, []string{"car", "list", "--config", "test.yaml"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	for _, want := range []string{"TOKENS", "car-tok", "Token Car"} {
+	for _, want := range []string{"TOKENS", "CYCLES", "car-tok", "Token Car"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("expected output to contain %q, got:\n%s", want, out)
 		}
@@ -67,13 +67,13 @@ func TestRunCarList_WithTokensAndMultipleBases(t *testing.T) {
 	gormDB.Create(&models.Car{ID: "car-tb2", Title: "Car TB2", Status: "open", Track: "backend", BaseBranch: "develop", Priority: 2, CreatedAt: now, UpdatedAt: now})
 	gormDB.Create(&models.AgentLog{CarID: "car-tb1", EngineID: "eng-1", Direction: "out", InputTokens: 2000, OutputTokens: 800, TokenCount: 2800, Model: "claude-3", CreatedAt: now})
 
-	out, err := execCmd(t, []string{"car", "list", "--tokens", "--config", "test.yaml"})
+	out, err := execCmd(t, []string{"car", "list", "--config", "test.yaml"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Both TOKENS and BASE columns should be present.
-	for _, want := range []string{"TOKENS", "BASE", "car-tb1", "car-tb2"} {
+	// TOKENS, CYCLES, and BASE columns should be present.
+	for _, want := range []string{"TOKENS", "CYCLES", "BASE", "car-tb1", "car-tb2"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("expected output to contain %q, got:\n%s", want, out)
 		}
@@ -244,6 +244,52 @@ func TestRunCarShow_WithProgress(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("expected output to contain %q, got:\n%s", want, out)
 		}
+	}
+}
+
+func TestRunCarShow_WithCycleMetrics(t *testing.T) {
+	gormDB := mockTestDB(t)
+	cleanup := withMockDB(t, gormDB)
+	defer cleanup()
+
+	now := time.Now()
+	gormDB.Create(&models.Car{ID: "car-cyc", Title: "Cycle Car", Status: "in_progress", Track: "backend", Priority: 2, CreatedAt: now, UpdatedAt: now})
+	gormDB.Create(&models.CarProgress{CarID: "car-cyc", Note: "First cycle", EngineID: "eng-1", Cycle: 1, FilesChanged: `["a.go","b.go"]`, CreatedAt: now.Add(-2 * time.Hour)})
+	gormDB.Create(&models.CarProgress{CarID: "car-cyc", Note: "Second cycle", EngineID: "eng-1", Cycle: 2, FilesChanged: `["c.go"]`, CreatedAt: now.Add(-time.Hour)})
+	gormDB.Create(&models.CarProgress{CarID: "car-cyc", Note: "Third cycle", EngineID: "eng-2", Cycle: 3, FilesChanged: `["d.go","e.go","f.go"]`, CreatedAt: now})
+
+	out, err := execCmd(t, []string{"car", "show", "car-cyc", "--config", "test.yaml"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for _, want := range []string{"Context Cycles:", "Total:", "3", "Avg Duration:", "Files Changed:", "6"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected output to contain %q, got:\n%s", want, out)
+		}
+	}
+}
+
+func TestRunCarList_WithCycles(t *testing.T) {
+	gormDB := mockTestDB(t)
+	cleanup := withMockDB(t, gormDB)
+	defer cleanup()
+
+	now := time.Now()
+	gormDB.Create(&models.Car{ID: "car-cyc1", Title: "Car With Cycles", Status: "open", Track: "backend", Priority: 2, CreatedAt: now, UpdatedAt: now})
+	gormDB.Create(&models.CarProgress{CarID: "car-cyc1", Note: "Cycle 1", EngineID: "eng-1", Cycle: 1, CreatedAt: now})
+	gormDB.Create(&models.CarProgress{CarID: "car-cyc1", Note: "Cycle 2", EngineID: "eng-1", Cycle: 2, CreatedAt: now})
+
+	out, err := execCmd(t, []string{"car", "list", "--config", "test.yaml"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(out, "CYCLES") {
+		t.Errorf("expected CYCLES column header, got:\n%s", out)
+	}
+	if !strings.Contains(out, "2") {
+		t.Errorf("expected cycle count '2' for car-cyc1, got:\n%s", out)
 	}
 }
 

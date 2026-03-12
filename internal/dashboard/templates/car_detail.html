@@ -103,6 +103,67 @@
     </div>
 {{end}}
 
+{{if .Car.TotalCycles}}
+    <div class="card">
+        <h3>Context Cycles</h3>
+        <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); margin-bottom: 0.5rem;">
+            <div class="card stat">
+                <div class="value" style="color: var(--accent);">{{.Car.TotalCycles}}</div>
+                <div class="label">Total Cycles</div>
+            </div>
+            {{if .Car.AvgCycleDuration}}
+            <div class="card stat">
+                <div class="value" style="color: var(--green);">{{.Car.AvgCycleDuration}}</div>
+                <div class="label">Avg Duration</div>
+            </div>
+            {{end}}
+            <div class="card stat">
+                <div class="value" style="color: var(--purple);">{{.Car.TotalFilesChanged}}</div>
+                <div class="label">Files Changed</div>
+            </div>
+            {{if .Car.CycleStalled}}
+            <div class="card stat">
+                <div class="value" style="color: var(--red);">Stalled</div>
+                <div class="label">Status</div>
+            </div>
+            {{end}}
+        </div>
+
+        {{if .Car.CycleDetails}}
+        <div style="margin-bottom: 1rem; max-width: 600px;">
+            <canvas id="cycleDurationChart" height="200"
+                data-labels="[{{range $i, $d := .Car.CycleDetails}}{{if $i}},{{end}}{{.Cycle}}{{end}}]"
+                data-values="[{{range $i, $d := .Car.CycleDetails}}{{if $i}},{{end}}{{printf "%.0f" .DurationSec}}{{end}}]"></canvas>
+        </div>
+        <script src="/static/cycle-chart.js"></script>
+        <table>
+            <thead>
+                <tr>
+                    <th>Cycle</th>
+                    <th>Engine</th>
+                    <th>Duration</th>
+                    <th>Files</th>
+                    <th>Note</th>
+                    <th>Commit</th>
+                </tr>
+            </thead>
+            <tbody>
+            {{range .Car.CycleDetails}}
+                <tr>
+                    <td>{{.Cycle}}</td>
+                    <td>{{if .EngineID}}<a href="/engines/{{.EngineID}}">{{.EngineID}}</a>{{else}}—{{end}}</td>
+                    <td>{{.Duration}}</td>
+                    <td>{{.FilesChanged}}</td>
+                    <td>{{truncate .Note 60}}</td>
+                    <td>{{if .CommitHash}}<code>{{truncate .CommitHash 7}}</code>{{else}}—{{end}}</td>
+                </tr>
+            {{end}}
+            </tbody>
+        </table>
+        {{end}}
+    </div>
+{{end}}
+
 {{if .Car.Description}}
 <div class="card">
     <h3>Description</h3>

@@ -56,6 +56,43 @@
 </div>
 {{end}}
 
+<h2>Context Cycles</h2>
+<div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); margin-bottom: 1.5rem;">
+    <div class="card stat">
+        <div class="value" style="color: var(--accent);">{{.CycleTotal}}</div>
+        <div class="label">Total Cycles</div>
+    </div>
+    <div class="card stat">
+        <div class="value" style="color: var(--green);">{{.CycleAvgPerCar}}</div>
+        <div class="label">Avg/Car</div>
+    </div>
+    <div class="card stat">
+        <div class="value" style="color: var(--red);">{{.CycleStalledCars}}</div>
+        <div class="label">Stalled Cars</div>
+    </div>
+</div>
+
+{{if .CycleByEngine}}
+<div class="card">
+<table>
+    <thead>
+        <tr>
+            <th>Engine</th>
+            <th>Cycles</th>
+        </tr>
+    </thead>
+    <tbody>
+    {{range .CycleByEngine}}
+        <tr>
+            <td><a href="/engines/{{.EngineID}}">{{.EngineID}}</a></td>
+            <td>{{.TotalCycles}}</td>
+        </tr>
+    {{end}}
+    </tbody>
+</table>
+</div>
+{{end}}
+
 <h2>Log Entries</h2>
 
 <div class="filters">
