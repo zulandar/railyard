@@ -1687,6 +1687,54 @@ func TestSwitchOpts_DefaultTimeout(t *testing.T) {
 	}
 }
 
+func TestSwitch_FullMerge_DeletesRemoteBranch(t *testing.T) {
+	repoDir, bareDir, run := initTestRepoWithRemote(t)
+
+	branch := "ry/alice/backend/car-drb1"
+
+	// Create a feature branch, push it, then switch back to main.
+	run(repoDir, "git", "checkout", "-b", branch)
+	run(repoDir, "git", "commit", "--allow-empty", "-m", "feature work")
+	run(repoDir, "git", "push", "origin", branch)
+	run(repoDir, "git", "checkout", "main")
+
+	// Verify the branch exists on the remote before merge.
+	lsCmd := exec.Command("git", "branch", "-a")
+	lsCmd.Dir = bareDir
+	lsOut, _ := lsCmd.CombinedOutput()
+	if !strings.Contains(string(lsOut), "car-drb1") {
+		t.Fatalf("branch should exist on remote before merge, got: %s", lsOut)
+	}
+
+	db := testDB(t)
+	db.Create(&models.Car{
+		ID:     "car-drb1",
+		Title:  "Remote branch cleanup test",
+		Track:  "backend",
+		Branch: branch,
+		Status: "done",
+	})
+
+	result, err := Switch(db, "car-drb1", SwitchOpts{
+		RepoDir:     repoDir,
+		TestCommand: "true",
+	})
+	if err != nil {
+		t.Fatalf("Switch returned error: %v", err)
+	}
+	if !result.Merged {
+		t.Fatal("expected Merged=true")
+	}
+
+	// Verify the feature branch has been deleted from the remote.
+	lsCmd2 := exec.Command("git", "branch", "-a")
+	lsCmd2.Dir = bareDir
+	lsOut2, _ := lsCmd2.CombinedOutput()
+	if strings.Contains(string(lsOut2), "car-drb1") {
+		t.Errorf("feature branch should be deleted from remote after merge, got: %s", lsOut2)
+	}
+}
+
 func TestDeleteRemoteBranch_NonGitDir(t *testing.T) {
 	// Should log a warning but not panic when run in a non-git directory.
 	tmpDir := t.TempDir()
