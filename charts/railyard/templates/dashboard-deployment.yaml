@@ -122,4 +122,4 @@ spec:
         - name: config
           configMap:
             name: {{ include "railyard.fullname" . }}-config
-            defaultMode: 0444
+            defaultMode: 0600
