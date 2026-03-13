@@ -163,6 +163,7 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 		select {
 		case <-ctx.Done():
 			fmt.Fprintf(out, "Engine %s deregistering...\n", eng.ID)
+			pushInflightBranch(gormDB, eng, workDir)
 			if err := engine.CleanupOverlay(eng.ID, cfg); err != nil {
 				log.Printf("overlay cleanup warning: %v", err)
 			}
@@ -338,7 +339,7 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 
 		case outcomeStall:
 			fmt.Fprintf(out, "[cycle %d] Stall detected: %s\n", cycle, outcome.stallReason.Detail)
-			if err := engine.HandleStall(gormDB, eng.ID, claimed.ID, outcome.stallReason); err != nil {
+			if err := engine.HandleStall(gormDB, eng.ID, claimed.ID, outcome.stallReason, workDir, claimed.Branch); err != nil {
 				log.Printf("stall handling error: %v", err)
 			}
 			// Clear current_car so the engine doesn't re-claim the now-blocked car.
@@ -349,6 +350,7 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 
 		case outcomeCancelled:
 			fmt.Fprintf(out, "[cycle %d] Cancelled, shutting down\n", cycle)
+			pushInflightBranch(gormDB, eng, workDir)
 			if err := engine.CleanupOverlay(eng.ID, cfg); err != nil {
 				log.Printf("overlay cleanup warning: %v", err)
 			}
@@ -455,6 +457,27 @@ func loadProgress(gormDB *gorm.DB, carID string) ([]models.CarProgress, error) {
 // loadMessages retrieves unacknowledged messages for an engine.
 func loadMessages(gormDB *gorm.DB, engineID string) ([]models.Message, error) {
 	return messaging.Inbox(gormDB, engineID)
+}
+
+// pushInflightBranch attempts to push the current car's branch before shutdown.
+// Non-fatal: logs warning on failure.
+func pushInflightBranch(gormDB *gorm.DB, eng *models.Engine, repoDir string) {
+	if eng.CurrentCar == "" {
+		return
+	}
+	var c models.Car
+	if err := gormDB.Where("id = ?", eng.CurrentCar).First(&c).Error; err != nil {
+		log.Printf("engine: shutdown push: lookup car %s: %v", eng.CurrentCar, err)
+		return
+	}
+	if c.Branch == "" {
+		return
+	}
+	if err := engine.PushBranch(repoDir, c.Branch); err != nil {
+		log.Printf("engine: shutdown push warning (non-fatal): %v", err)
+	} else {
+		log.Printf("engine: shutdown push: pushed %s before cleanup", c.Branch)
+	}
 }
 
 // sleepWithContext sleeps for the given duration but returns early if ctx is cancelled.

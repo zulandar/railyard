@@ -3,6 +3,7 @@ package engine
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/zulandar/railyard/internal/models"
@@ -114,6 +115,13 @@ func HandleClearCycle(db *gorm.DB, car *models.Car, engine *models.Engine, opts 
 		CreatedAt:    time.Now(),
 	}).Error; err != nil {
 		return fmt.Errorf("engine: write clear cycle progress: %w", err)
+	}
+
+	// Push branch to remote so work survives worktree cleanup.
+	if car.Branch != "" && opts.RepoDir != "" {
+		if err := PushBranch(opts.RepoDir, car.Branch); err != nil {
+			log.Printf("engine: clear cycle push warning (non-fatal): %v", err)
+		}
 	}
 
 	// Keep car assigned — do not release to pool.

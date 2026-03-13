@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -120,7 +121,16 @@ func (sd *StallDetector) Stop() {
 
 // HandleStall processes a detected stall: updates engine status to stalled,
 // car status to blocked, and sends a message to the yardmaster.
-func HandleStall(db *gorm.DB, engineID, carID string, reason StallReason) error {
+// repoDir and branch are used to push the branch before the DB transaction
+// so work survives worktree cleanup.
+func HandleStall(db *gorm.DB, engineID, carID string, reason StallReason, repoDir, branch string) error {
+	// Push branch to remote so work survives worktree cleanup.
+	if branch != "" && repoDir != "" {
+		if err := PushBranch(repoDir, branch); err != nil {
+			log.Printf("engine: stall push warning (non-fatal): %v", err)
+		}
+	}
+
 	return db.Transaction(func(tx *gorm.DB) error {
 		// Update engine status to stalled.
 		result := tx.Model(&models.Engine{}).Where("id = ?", engineID).
