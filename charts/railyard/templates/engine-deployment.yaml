@@ -108,7 +108,7 @@ spec:
         - name: config
           configMap:
             name: {{ $fullname }}-config
-            defaultMode: 0600
+            defaultMode: 0444
         - name: repo
           emptyDir: {}
         {{- include "railyard.authVolumes" $ | nindent 8 }}
