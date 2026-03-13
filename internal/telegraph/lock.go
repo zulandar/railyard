@@ -30,10 +30,13 @@ func AcquireLock(db *gorm.DB, source, userName, threadID, channelID string, time
 	err := db.Transaction(func(tx *gorm.DB) error {
 		cutoff := time.Now().Add(-timeout)
 
-		// Expire stale active sessions on this thread/channel.
+		// Expire all stale active sessions globally (regardless of
+		// thread/channel). This handles cross-source staleness — e.g. a
+		// dispatch pod killed without releasing its lock should not
+		// permanently block Telegraph on a different thread/channel.
 		if err := tx.Model(&models.DispatchSession{}).
-			Where("status = ? AND last_heartbeat < ? AND platform_thread_id = ? AND channel_id = ?",
-				"active", cutoff, threadID, channelID).
+			Where("status = ? AND last_heartbeat < ?",
+				"active", cutoff).
 			Updates(map[string]interface{}{
 				"status":       "expired",
 				"completed_at": time.Now(),

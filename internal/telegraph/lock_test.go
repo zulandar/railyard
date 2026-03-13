@@ -131,6 +131,74 @@ func TestAcquireLock_ExpiresStale(t *testing.T) {
 	}
 }
 
+func TestAcquireLock_ExpiresStaleCrossSource(t *testing.T) {
+	db := openLockTestDB(t)
+
+	// Simulate a stale lock from the standalone dispatch pod (source "local",
+	// thread "local", channel "local") — different thread/channel than Telegraph.
+	staleTime := time.Now().Add(-2 * time.Minute)
+	staleSession := models.DispatchSession{
+		Source:           "local",
+		UserName:         "dispatch-pod",
+		PlatformThreadID: "local",
+		ChannelID:        "local",
+		Status:           "active",
+		CarsCreated:      "[]",
+		LastHeartbeat:    staleTime,
+	}
+	db.Create(&staleSession)
+
+	// Telegraph acquires on a completely different thread/channel.
+	// The global stale sweep should expire the dispatch pod's session.
+	session, err := AcquireLock(db, "telegraph", "alice", "thread-1", "C01", DefaultHeartbeatTimeout)
+	if err != nil {
+		t.Fatalf("AcquireLock should succeed after cross-source stale expiry: %v", err)
+	}
+	if session.UserName != "alice" {
+		t.Errorf("UserName = %q, want %q", session.UserName, "alice")
+	}
+
+	// Verify the stale cross-source session was expired.
+	var old models.DispatchSession
+	db.First(&old, staleSession.ID)
+	if old.Status != "expired" {
+		t.Errorf("stale cross-source session status = %q, want %q", old.Status, "expired")
+	}
+	if old.CompletedAt == nil {
+		t.Error("stale cross-source session CompletedAt should be set")
+	}
+}
+
+func TestAcquireLock_FreshCrossSourceNotExpired(t *testing.T) {
+	db := openLockTestDB(t)
+
+	// A fresh session from the dispatch pod should NOT be expired by Telegraph.
+	freshSession := models.DispatchSession{
+		Source:           "local",
+		UserName:         "dispatch-pod",
+		PlatformThreadID: "local",
+		ChannelID:        "local",
+		Status:           "active",
+		CarsCreated:      "[]",
+		LastHeartbeat:    time.Now(),
+	}
+	db.Create(&freshSession)
+
+	// Telegraph acquires on a different thread/channel — should succeed
+	// (different thread/channel means no conflict), and the fresh dispatch
+	// session should remain active.
+	_, err := AcquireLock(db, "telegraph", "alice", "thread-1", "C01", DefaultHeartbeatTimeout)
+	if err != nil {
+		t.Fatalf("AcquireLock should succeed on different thread: %v", err)
+	}
+
+	var check models.DispatchSession
+	db.First(&check, freshSession.ID)
+	if check.Status != "active" {
+		t.Errorf("fresh cross-source session status = %q, want %q (should not be expired)", check.Status, "active")
+	}
+}
+
 func TestAcquireLock_FreshHeartbeatNotExpired(t *testing.T) {
 	db := openLockTestDB(t)
 
