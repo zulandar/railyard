@@ -18,6 +18,21 @@ Multi-agent AI orchestration for coding. Railyard coordinates multiple AI coding
 
 Each developer runs their own Railyard instance against the same repo. Agents work on isolated branches (`ry/{owner}/{track}/{car-id}`), and a supervisor (Yardmaster) handles merges, stall detection, and dependency management.
 
+### Feature Highlights
+
+- **Multi-Agent Orchestration** — run N engines in parallel across your repo, each claiming and completing work independently
+- **Any AI CLI** — first-class support for Claude Code, Codex, Gemini CLI, OpenCode, and GitHub Copilot, switchable per-track
+- **Track-Based Routing** — partition your repo into tracks (backend, frontend, infra) with distinct languages, conventions, and file patterns
+- **MySQL State Store** — all cars, engines, messages, and audit logs live in a single queryable MySQL database
+- **Semantic Code Search** — CocoIndex + pgvector give every engine MCP-powered search by meaning, with per-branch overlay indexes
+- **Yardmaster Supervision** — an AI supervisor monitors engine health, detects stalls, runs tests, merges branches, and escalates failures
+- **Natural-Language Dispatch** — describe what you want in plain English; the Dispatch planner decomposes it into dependency-ordered cars
+- **Telegraph Chat Bridge** — connect Railyard to Slack or Discord for commands, event notifications, and dispatch via @mention
+- **Bull GitHub Triage** — an issue-triage daemon that polls GitHub Issues, applies AI triage, creates cars, and syncs status via labels
+- **P0–P4 Priority Model** — enterprise priority levels with type-based defaults (bug→P1, task→P2) and priority-aware engine scheduling
+- **Kubernetes-Ready** — a Helm chart deploys all components as pods with auto-scaling, TLS, RBAC, and multi-project isolation
+- **Context Cycling** — engines detect /clear cycles and stalls, preserve progress notes, and hand off context cleanly between cycles
+
 ## Terminology
 
 | Term | Meaning |
