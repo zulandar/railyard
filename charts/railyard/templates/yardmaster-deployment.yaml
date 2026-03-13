@@ -61,6 +61,11 @@ spec:
                 secretKeyRef:
                   name: {{ include "railyard.fullname" . }}-db
                   key: db-password
+            - name: PGVECTOR_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "railyard.fullname" . }}-db
+                  key: pgvector-password
             {{- include "railyard.authExtraEnv" . | nindent 12 }}
           envFrom:
             {{- include "railyard.authEnvFrom" . | nindent 12 }}

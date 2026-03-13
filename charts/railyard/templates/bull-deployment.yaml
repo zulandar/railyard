@@ -35,6 +35,11 @@ spec:
                 secretKeyRef:
                   name: {{ include "railyard.fullname" . }}-db
                   key: db-password
+            - name: PGVECTOR_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "railyard.fullname" . }}-db
+                  key: pgvector-password
             - name: GITHUB_TOKEN
               valueFrom:
                 secretKeyRef:
