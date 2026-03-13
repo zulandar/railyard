@@ -123,14 +123,24 @@ Include this in any pod spec that needs agent credentials.
 {{- end }}
 
 {{/*
-Auth volume — mounts claude.json ConfigMap when using oauth_token method.
+Auth volume — provides volumes for OAuth credentials and GCP service accounts.
+When using oauth_token, provides:
+  - claude-credentials: Secret volume (read-only source for credentials)
+  - claude-config: ConfigMap with claude.json
+  - claude-home: writable emptyDir for /home/railyard/.claude
+Claude Code requires ~/.claude/ to be writable — direct secret mounts fail silently.
 Include in pod spec volumes.
 */}}
 {{- define "railyard.authVolumes" -}}
 {{- if eq .Values.auth.method "oauth_token" }}
+- name: claude-credentials
+  secret:
+    secretName: {{ include "railyard.authSecretName" . }}
 - name: claude-config
   configMap:
     name: {{ include "railyard.fullname" . }}-claude-config
+- name: claude-home
+  emptyDir: {}
 {{- end }}
 {{- if and (eq .Values.auth.method "vertex") .Values.auth.vertex.credentialsSecret }}
 - name: gcp-credentials
@@ -140,20 +150,47 @@ Include in pod spec volumes.
 {{- end }}
 
 {{/*
-Auth volume mounts — mounts claude.json and GCP credentials into containers.
+Auth volume mounts — mounts writable claude home and GCP credentials into containers.
 Include in container volumeMounts.
 */}}
 {{- define "railyard.authVolumeMounts" -}}
 {{- if eq .Values.auth.method "oauth_token" }}
-- name: claude-config
-  mountPath: /home/railyard/.claude.json
-  subPath: claude.json
-  readOnly: true
+- name: claude-home
+  mountPath: /home/railyard/.claude
 {{- end }}
 {{- if and (eq .Values.auth.method "vertex") .Values.auth.vertex.credentialsSecret }}
 - name: gcp-credentials
   mountPath: /var/secrets/google
   readOnly: true
+{{- end }}
+{{- end }}
+
+{{/*
+Auth init containers — copies OAuth credentials into writable claude-home emptyDir.
+Claude Code silently hangs if ~/.claude/ is not writable.
+Include in pod spec initContainers.
+*/}}
+{{- define "railyard.authInitContainers" -}}
+{{- if eq .Values.auth.method "oauth_token" }}
+- name: copy-credentials
+  image: {{ include "railyard.image" . }}
+  command: ["sh", "-c"]
+  args:
+    - |
+      mkdir -p /home/railyard/.claude
+      cp /secrets/CLAUDE_CODE_OAUTH_TOKEN /home/railyard/.claude/.credentials.json 2>/dev/null || true
+      cp /claude-config/claude.json /home/railyard/.claude/.claude.json 2>/dev/null || true
+      chmod 600 /home/railyard/.claude/.credentials.json 2>/dev/null || true
+      chmod 600 /home/railyard/.claude/.claude.json 2>/dev/null || true
+  volumeMounts:
+    - name: claude-credentials
+      mountPath: /secrets
+      readOnly: true
+    - name: claude-config
+      mountPath: /claude-config
+      readOnly: true
+    - name: claude-home
+      mountPath: /home/railyard/.claude
 {{- end }}
 {{- end }}
 

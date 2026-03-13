@@ -23,18 +23,62 @@ spec:
       imagePullSecrets:
         - name: {{ .Values.imagePullSecret }}
       {{- end }}
+      initContainers:
+        - name: git-clone
+          image: {{ include "railyard.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["sh", "-c"]
+          args:
+            - |
+              git config --global --add safe.directory /repo
+              if [ -d /repo/.git ]; then
+                cd /repo && git fetch --all
+              else
+                rm -rf /repo/* /repo/.[!.]* 2>/dev/null
+                git clone {{ .Values.git.repo }} /repo
+              fi
+              cd /repo &&
+              git config user.name "railyard" &&
+              git config user.email "railyard@railyard.dev"
+              cp /etc/railyard/railyard.yaml /repo/railyard.yaml 2>/dev/null || true
+          volumeMounts:
+            - name: config
+              mountPath: /etc/railyard
+              readOnly: true
+            - name: repo
+              mountPath: /repo
+        {{- include "railyard.authInitContainers" . | nindent 8 }}
       containers:
         - name: telegraph
           image: {{ include "railyard.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["ry"]
           args: ["telegraph", "start", "-c", "/etc/railyard/railyard.yaml"]
+          workingDir: /repo
           env:
+            - name: GIT_CONFIG_COUNT
+              value: "1"
+            - name: GIT_CONFIG_KEY_0
+              value: safe.directory
+            - name: GIT_CONFIG_VALUE_0
+              value: /repo
             - name: DB_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ include "railyard.fullname" . }}-db
                   key: db-password
+            - name: PGVECTOR_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "railyard.fullname" . }}-db
+                  key: pgvector-password
+            {{- if or .Values.auth.githubToken .Values.bull.githubToken .Values.auth.existingSecret }}
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "railyard.authSecretName" . }}
+                  key: GH_TOKEN
+            {{- end }}
             {{- include "railyard.authExtraEnv" . | nindent 12 }}
           envFrom:
             {{- include "railyard.authEnvFrom" . | nindent 12 }}
@@ -42,6 +86,8 @@ spec:
             - name: config
               mountPath: /etc/railyard
               readOnly: true
+            - name: repo
+              mountPath: /repo
             {{- include "railyard.authVolumeMounts" . | nindent 12 }}
           {{- with .Values.telegraph.resources }}
           resources:
@@ -51,5 +97,8 @@ spec:
         - name: config
           configMap:
             name: {{ include "railyard.fullname" . }}-config
+            defaultMode: 0444
+        - name: repo
+          emptyDir: {}
         {{- include "railyard.authVolumes" . | nindent 8 }}
 {{- end }}

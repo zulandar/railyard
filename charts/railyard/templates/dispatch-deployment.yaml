@@ -39,9 +39,14 @@ spec:
               cd /repo &&
               git config user.name "railyard" &&
               git config user.email "railyard@railyard.dev"
+              cp /etc/railyard/railyard.yaml /repo/railyard.yaml 2>/dev/null || true
           volumeMounts:
+            - name: config
+              mountPath: /etc/railyard
+              readOnly: true
             - name: repo
               mountPath: /repo
+        {{- include "railyard.authInitContainers" . | nindent 8 }}
       containers:
         - name: dispatch
           image: {{ include "railyard.image" . }}
@@ -61,6 +66,13 @@ spec:
                 secretKeyRef:
                   name: {{ include "railyard.fullname" . }}-db
                   key: db-password
+            {{- if or .Values.auth.githubToken .Values.bull.githubToken .Values.auth.existingSecret }}
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "railyard.authSecretName" . }}
+                  key: GH_TOKEN
+            {{- end }}
             {{- include "railyard.authExtraEnv" . | nindent 12 }}
           envFrom:
             {{- include "railyard.authEnvFrom" . | nindent 12 }}
@@ -79,6 +91,7 @@ spec:
         - name: config
           configMap:
             name: {{ include "railyard.fullname" . }}-config
+            defaultMode: 0444
         - name: repo
           emptyDir: {}
         {{- include "railyard.authVolumes" . | nindent 8 }}

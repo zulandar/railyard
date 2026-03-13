@@ -87,6 +87,9 @@ jobs:
       - name: Helm lint (copilot)
         run: helm lint charts/railyard -f charts/railyard/ci/test-values-copilot.yaml
 
+      - name: Helm lint (existingSecret)
+        run: helm lint charts/railyard -f charts/railyard/ci/test-values-existing-secret.yaml
+
       - name: Helm template (default values)
         run: helm template railyard charts/railyard > /dev/null
 
@@ -98,6 +101,9 @@ jobs:
 
       - name: Helm template (copilot)
         run: helm template railyard charts/railyard -f charts/railyard/ci/test-values-copilot.yaml > /dev/null
+
+      - name: Helm template (existingSecret)
+        run: helm template railyard charts/railyard -f charts/railyard/ci/test-values-existing-secret.yaml > /dev/null
 
       - name: Verify copilot auth-secret renders both tokens separately
         run: |
@@ -128,6 +134,58 @@ jobs:
             exit 1
           fi
           echo "PASS: githubToken-only setup renders correctly"
+
+      - name: Verify GITHUB_TOKEN renders with inline githubToken
+        run: |
+          DEPLOYMENTS="bull-deployment telegraph-deployment dispatch-deployment engine-deployment"
+          for TMPL in $DEPLOYMENTS; do
+            OUTPUT=$(helm template railyard charts/railyard \
+              -f charts/railyard/ci/test-values-full.yaml \
+              -s "templates/${TMPL}.yaml")
+            echo "$OUTPUT" | grep -q 'GITHUB_TOKEN' \
+              || { echo "FAIL: ${TMPL} should have GITHUB_TOKEN when githubToken is set"; exit 1; }
+            echo "$OUTPUT" | grep -q 'name: railyard-auth' \
+              || { echo "FAIL: ${TMPL} GITHUB_TOKEN should reference railyard-auth"; exit 1; }
+          done
+          echo "PASS: GITHUB_TOKEN present in all deployments with inline githubToken"
+
+      - name: Verify GITHUB_TOKEN renders with auth.existingSecret
+        run: |
+          DEPLOYMENTS="bull-deployment telegraph-deployment dispatch-deployment engine-deployment"
+          for TMPL in $DEPLOYMENTS; do
+            OUTPUT=$(helm template railyard charts/railyard \
+              -f charts/railyard/ci/test-values-existing-secret.yaml \
+              -s "templates/${TMPL}.yaml")
+            echo "$OUTPUT" | grep -q 'GITHUB_TOKEN' \
+              || { echo "FAIL: ${TMPL} should have GITHUB_TOKEN when existingSecret is set"; exit 1; }
+            echo "$OUTPUT" | grep -q 'name: my-external-secret' \
+              || { echo "FAIL: ${TMPL} GITHUB_TOKEN should reference my-external-secret"; exit 1; }
+          done
+          echo "PASS: GITHUB_TOKEN present and references existingSecret in all deployments"
+
+      - name: Verify GITHUB_TOKEN absent when no token configured
+        run: |
+          DEPLOYMENTS="bull-deployment telegraph-deployment dispatch-deployment engine-deployment"
+          for TMPL in $DEPLOYMENTS; do
+            OUTPUT=$(helm template railyard charts/railyard \
+              -s "templates/${TMPL}.yaml" 2>/dev/null) || true
+            if echo "$OUTPUT" | grep -q 'GITHUB_TOKEN'; then
+              echo "FAIL: ${TMPL} should NOT have GITHUB_TOKEN when no token is configured"
+              exit 1
+            fi
+          done
+          echo "PASS: GITHUB_TOKEN absent from all deployments when no token configured"
+
+      - name: Verify no auth-secret created when existingSecret is set
+        run: |
+          OUTPUT=$(helm template railyard charts/railyard \
+            -f charts/railyard/ci/test-values-existing-secret.yaml \
+            -s templates/auth-secret.yaml 2>&1) || true
+          if echo "$OUTPUT" | grep -q 'kind: Secret'; then
+            echo "FAIL: auth-secret should not be created when existingSecret is set"
+            exit 1
+          fi
+          echo "PASS: auth-secret correctly skipped with existingSecret"
 
   docker-build:
     name: Docker Build Smoke Test

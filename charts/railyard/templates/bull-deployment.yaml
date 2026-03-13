@@ -35,11 +35,18 @@ spec:
                 secretKeyRef:
                   name: {{ include "railyard.fullname" . }}-db
                   key: db-password
+            - name: PGVECTOR_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "railyard.fullname" . }}-db
+                  key: pgvector-password
+            {{- if or .Values.auth.githubToken .Values.bull.githubToken .Values.auth.existingSecret }}
             - name: GITHUB_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "railyard.fullname" . }}-auth
+                  name: {{ include "railyard.authSecretName" . }}
                   key: GH_TOKEN
+            {{- end }}
             {{- include "railyard.authExtraEnv" . | nindent 12 }}
           envFrom:
             {{- include "railyard.authEnvFrom" . | nindent 12 }}
@@ -56,5 +63,6 @@ spec:
         - name: config
           configMap:
             name: {{ include "railyard.fullname" . }}-config
+            defaultMode: 0444
         {{- include "railyard.authVolumes" . | nindent 8 }}
 {{- end }}

@@ -48,6 +48,13 @@ spec:
                 secretKeyRef:
                   name: {{ include "railyard.fullname" . }}-db
                   key: db-password
+            - name: PGVECTOR_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "railyard.fullname" . }}-db
+                  key: pgvector-password
+          envFrom:
+            {{- include "railyard.authEnvFrom" . | nindent 12 }}
           readinessProbe:
             httpGet:
               port: http
@@ -115,3 +122,4 @@ spec:
         - name: config
           configMap:
             name: {{ include "railyard.fullname" . }}-config
+            defaultMode: 0444
