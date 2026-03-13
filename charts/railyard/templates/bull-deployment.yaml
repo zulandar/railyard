@@ -63,6 +63,6 @@ spec:
         - name: config
           configMap:
             name: {{ include "railyard.fullname" . }}-config
-            defaultMode: 0600
+            defaultMode: 0644
         {{- include "railyard.authVolumes" . | nindent 8 }}
 {{- end }}
