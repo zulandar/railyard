@@ -78,11 +78,13 @@ spec:
                 secretKeyRef:
                   name: {{ $fullname }}-db
                   key: pgvector-password
+            {{- if or $.Values.auth.githubToken $.Values.bull.githubToken }}
             - name: GITHUB_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: {{ $fullname }}-auth
+                  name: {{ include "railyard.authSecretName" $ }}
                   key: GH_TOKEN
+            {{- end }}
             {{- include "railyard.authExtraEnv" $ | nindent 12 }}
             {{- with $.Values.engine.extraEnv }}
             {{- toYaml . | nindent 12 }}
