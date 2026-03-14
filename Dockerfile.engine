@@ -40,16 +40,19 @@ RUN if [ "$AGENT_PROVIDER" != "opencode" ]; then \
       && rm -rf /var/lib/apt/lists/*; \
     fi
 
+# ── Go 1.26.1 (permanent runtime install for backend track tests) ──────────
+RUN curl -fsSL https://go.dev/dl/go1.26.1.linux-amd64.tar.gz | tar -C /usr/local -xzf -
+ENV PATH="/usr/local/go/bin:${PATH}"
+
 # ── AI CLI provider ─────────────────────────────────────────────────────────
 RUN case "$AGENT_PROVIDER" in \
       claude)   npm install -g @anthropic-ai/claude-code ;; \
       codex)    npm install -g @openai/codex ;; \
       gemini)   npm install -g @google/gemini-cli ;; \
       opencode) \
-        curl -fsSL https://go.dev/dl/go1.24.1.linux-amd64.tar.gz | tar -C /usr/local -xzf - \
-        && /usr/local/go/bin/go install github.com/opencode-ai/opencode@latest \
+        go install github.com/opencode-ai/opencode@latest \
         && cp /root/go/bin/opencode /usr/local/bin/opencode \
-        && rm -rf /usr/local/go /root/go ;; \
+        && rm -rf /root/go ;; \
       *) echo "Unknown AGENT_PROVIDER: $AGENT_PROVIDER" && exit 1 ;; \
     esac
 
