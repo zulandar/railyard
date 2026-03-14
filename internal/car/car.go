@@ -53,7 +53,7 @@ var ValidTransitions = map[string][]string{
 	"in_progress":  {"done", "blocked"},
 	"done":         {"merged", "merge-failed"},
 	"blocked":      {"open", "ready"},
-	"merge-failed": {"done"},
+	"merge-failed": {"done", "cancelled"},
 	"pr_open":      {"open", "merged", "cancelled"},
 }
 
