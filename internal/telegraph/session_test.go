@@ -833,6 +833,128 @@ func TestRelayOutput_IncrementalStreaming(t *testing.T) {
 	}
 }
 
+func TestRelayOutput_PreservesLeadingWhitespace(t *testing.T) {
+	db := openSessionTestDB(t)
+	adapter := NewMockAdapter()
+	adapter.Connect(context.Background())
+
+	sm, _ := NewSessionManager(SessionManagerOpts{
+		DB:                 db,
+		Spawner:            &mockSpawner{},
+		Adapter:            adapter,
+		RelayFlushInterval: 100 * time.Millisecond,
+	})
+
+	proc := newMockProcess("")
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		sm.relayOutput(context.Background(), "C01", "thread-1", 1, proc)
+	}()
+
+	// First batch: a code block with indentation.
+	proc.recvCh <- "```go"
+	proc.recvCh <- "    func main() {"
+	proc.recvCh <- "        fmt.Println(\"hello\")"
+	proc.recvCh <- "    }"
+	proc.recvCh <- "```"
+	// Wait for flush.
+	time.Sleep(250 * time.Millisecond)
+
+	// Second batch starts with indented code too.
+	proc.recvCh <- "    indented line after flush"
+	close(proc.recvCh)
+
+	<-done
+
+	// Verify leading whitespace was preserved in every chunk sent to chat.
+	sent := adapter.AllSent()
+	if len(sent) == 0 {
+		t.Fatal("expected at least 1 send")
+	}
+
+	// Reassemble chat output.
+	var chatParts []string
+	for _, msg := range sent {
+		chatParts = append(chatParts, msg.Text)
+	}
+	chatText := strings.Join(chatParts, "\n")
+
+	// The indented lines must appear in chat output.
+	if !strings.Contains(chatText, "    func main()") {
+		t.Errorf("chat output lost leading indentation: %q", chatText)
+	}
+	if !strings.Contains(chatText, "    indented line after flush") {
+		t.Errorf("chat output lost leading indentation on post-flush line: %q", chatText)
+	}
+
+	// Chat output must match DB content.
+	var conv models.TelegraphConversation
+	db.Last(&conv)
+	if chatText != conv.Content {
+		t.Errorf("chat/DB mismatch:\nchat = %q\ndb   = %q", chatText, conv.Content)
+	}
+}
+
+func TestRelayOutput_PreservesBlankLines(t *testing.T) {
+	db := openSessionTestDB(t)
+	adapter := NewMockAdapter()
+	adapter.Connect(context.Background())
+
+	sm, _ := NewSessionManager(SessionManagerOpts{
+		DB:                 db,
+		Spawner:            &mockSpawner{},
+		Adapter:            adapter,
+		RelayFlushInterval: 100 * time.Millisecond,
+	})
+
+	proc := newMockProcess("")
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		sm.relayOutput(context.Background(), "C01", "thread-1", 1, proc)
+	}()
+
+	// Send lines with a blank line (paragraph separator) near the flush boundary.
+	proc.recvCh <- "paragraph one"
+	proc.recvCh <- "" // blank line — paragraph separator
+	proc.recvCh <- "paragraph two"
+	// Wait for flush.
+	time.Sleep(250 * time.Millisecond)
+
+	// Second batch also has a blank line at the start.
+	proc.recvCh <- "" // blank line
+	proc.recvCh <- "paragraph three"
+	close(proc.recvCh)
+
+	<-done
+
+	sent := adapter.AllSent()
+	if len(sent) == 0 {
+		t.Fatal("expected at least 1 send")
+	}
+
+	var chatParts []string
+	for _, msg := range sent {
+		chatParts = append(chatParts, msg.Text)
+	}
+	chatText := strings.Join(chatParts, "\n")
+
+	// Blank lines must be preserved.
+	if !strings.Contains(chatText, "paragraph one\n\nparagraph two") {
+		t.Errorf("chat output lost blank line between paragraphs: %q", chatText)
+	}
+
+	// Chat output must match DB content.
+	var conv models.TelegraphConversation
+	db.Last(&conv)
+	if chatText != conv.Content {
+		t.Errorf("chat/DB mismatch:\nchat = %q\ndb   = %q", chatText, conv.Content)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // chunkMessage tests
 // ---------------------------------------------------------------------------

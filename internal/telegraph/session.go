@@ -408,12 +408,14 @@ const defaultRelayFlushInterval = 3 * time.Second
 func (sm *SessionManager) relayOutput(ctx context.Context, channelID, threadID string, sessionID uint, proc Process) {
 	var fullBuf strings.Builder // complete response for DB persistence
 	var pending strings.Builder // lines waiting to be flushed to chat
+	fullLines := 0              // lines written to fullBuf
+	pendingLines := 0           // lines written to pending since last flush
 
 	flush := func() {
-		text := strings.TrimSpace(pending.String())
-		if text == "" || sm.adapter == nil {
+		if pendingLines == 0 || sm.adapter == nil {
 			return
 		}
+		text := pending.String()
 		for _, chunk := range chunkMessage(text, 2000) {
 			if err := sm.adapter.Send(ctx, OutboundMessage{
 				ChannelID: channelID,
@@ -424,6 +426,7 @@ func (sm *SessionManager) relayOutput(ctx context.Context, channelID, threadID s
 			}
 		}
 		pending.Reset()
+		pendingLines = 0
 	}
 
 	ticker := time.NewTicker(sm.relayFlushInterval)
@@ -437,14 +440,16 @@ func (sm *SessionManager) relayOutput(ctx context.Context, channelID, threadID s
 				recv = nil
 				break
 			}
-			if fullBuf.Len() > 0 {
+			if fullLines > 0 {
 				fullBuf.WriteByte('\n')
 			}
 			fullBuf.WriteString(line)
-			if pending.Len() > 0 {
+			fullLines++
+			if pendingLines > 0 {
 				pending.WriteByte('\n')
 			}
 			pending.WriteString(line)
+			pendingLines++
 		case <-ticker.C:
 			flush()
 		case <-ctx.Done():
