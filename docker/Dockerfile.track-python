@@ -1,0 +1,32 @@
+# Dockerfile.track-python — Python track image for Railyard.
+#
+# Extends the base engine image with a full Python 3.12 development
+# environment. The base image already has python3 for CocoIndex, but
+# this adds pip, venv, and common dev packages for Python projects.
+#
+#   docker build -f docker/Dockerfile.track-python \
+#     --build-arg BASE_IMAGE=ghcr.io/zulandar/railyard/engine:0.8.9 \
+#     -t ghcr.io/yourorg/railyard-python:0.8.9 .
+#   docker push ghcr.io/yourorg/railyard-python:0.8.9
+#
+# values.yaml:
+#   tracks:
+#     - name: ml-service
+#       language: python
+#       image:
+#         repository: ghcr.io/yourorg/railyard-python
+#         tag: "0.8.9"
+#       testCommand: "pytest"
+
+ARG BASE_IMAGE=ghcr.io/zulandar/railyard/engine:latest
+FROM ${BASE_IMAGE}
+
+USER root
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3-pip \
+    python3-dev \
+    build-essential \
+  && rm -rf /var/lib/apt/lists/*
+
+USER railyard

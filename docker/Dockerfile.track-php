@@ -1,0 +1,39 @@
+# Dockerfile.track-php — PHP track image for Railyard.
+#
+# Extends the base engine image with PHP 8.2 and common extensions.
+# Build and push to your own registry, then reference in values.yaml:
+#
+#   docker build -f docker/Dockerfile.track-php \
+#     --build-arg BASE_IMAGE=ghcr.io/zulandar/railyard/engine:0.8.9 \
+#     -t ghcr.io/yourorg/railyard-php:0.8.9 .
+#   docker push ghcr.io/yourorg/railyard-php:0.8.9
+#
+# values.yaml:
+#   tracks:
+#     - name: api
+#       language: php
+#       image:
+#         repository: ghcr.io/yourorg/railyard-php
+#         tag: "0.8.9"
+#       testCommand: "vendor/bin/phpunit"
+
+ARG BASE_IMAGE=ghcr.io/zulandar/railyard/engine:latest
+FROM ${BASE_IMAGE}
+
+USER root
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    php8.2-cli \
+    php8.2-mbstring \
+    php8.2-xml \
+    php8.2-curl \
+    php8.2-zip \
+    php8.2-sqlite3 \
+    php8.2-mysql \
+    unzip \
+  && rm -rf /var/lib/apt/lists/*
+
+# Install Composer.
+RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
+
+USER railyard
