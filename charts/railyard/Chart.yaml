@@ -2,6 +2,6 @@ apiVersion: v2
 name: railyard
 description: AI-powered software engineering orchestration platform
 type: application
-version: 0.8.7
-appVersion: "0.8.7"
+version: 0.8.8
+appVersion: "0.8.8"
 icon: https://raw.githubusercontent.com/zulandar/railyard/main/assets/logo.svg
