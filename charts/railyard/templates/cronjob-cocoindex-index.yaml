@@ -79,8 +79,16 @@ spec:
             - name: cocoindex-index
               image: {{ include "railyard.image" . }}
               imagePullPolicy: {{ .Values.image.pullPolicy }}
-              command: ["ry"]
-              args: ["cocoindex", "index", "-c", "/etc/railyard/railyard.yaml", "--repo-path", "/repo"]
+              command: ["bash", "-c"]
+              args:
+                - |
+                  # Make scripts dir writable so ensureCocoIndexScripts can sync.
+                  # This is a no-op once the Go fix (permission-denied skip) ships.
+                  chmod -R u+w /opt/railyard/cocoindex/ 2>/dev/null || true
+                  source /opt/railyard/cocoindex/.venv/bin/activate
+                  exec ry cocoindex index -c /etc/railyard/railyard.yaml --repo-path /repo
+              securityContext:
+                runAsUser: 0
               workingDir: /repo
               env:
                 - name: PGVECTOR_PASSWORD
