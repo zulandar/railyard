@@ -855,6 +855,64 @@ func TestParse_TelegraphOmitted(t *testing.T) {
 	}
 }
 
+func TestParse_TelegraphHealthPortDefault(t *testing.T) {
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+tracks:
+  - name: backend
+    language: go
+telegraph:
+  platform: slack
+  channel: C0123456789
+  slack:
+    bot_token: xoxb-token
+    app_token: xapp-token
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Telegraph.HealthPort != 8086 {
+		t.Errorf("Telegraph.HealthPort = %d, want 8086 (default)", cfg.Telegraph.HealthPort)
+	}
+}
+
+func TestParse_TelegraphHealthPortExplicit(t *testing.T) {
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+tracks:
+  - name: backend
+    language: go
+telegraph:
+  platform: slack
+  channel: C0123456789
+  health_port: 9090
+  slack:
+    bot_token: xoxb-token
+    app_token: xapp-token
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Telegraph.HealthPort != 9090 {
+		t.Errorf("Telegraph.HealthPort = %d, want 9090", cfg.Telegraph.HealthPort)
+	}
+}
+
+func TestParse_TelegraphHealthPortAbsent(t *testing.T) {
+	cfg, err := Parse([]byte(minimalYAML))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// When telegraph section is absent, HealthPort default should not be applied.
+	if cfg.Telegraph.HealthPort != 0 {
+		t.Errorf("Telegraph.HealthPort = %d, want 0 (no platform, no default)", cfg.Telegraph.HealthPort)
+	}
+}
+
 func TestParse_TelegraphSlackMissingBotToken(t *testing.T) {
 	yaml := `
 owner: alice
