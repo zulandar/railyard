@@ -399,8 +399,8 @@ var relayFlushInterval = 3 * time.Second
 // spamming the channel. The full response is recorded in conversation
 // history after the process finishes.
 func (sm *SessionManager) relayOutput(ctx context.Context, channelID, threadID string, sessionID uint, proc Process) {
-	var fullBuf strings.Builder  // complete response for DB persistence
-	var pending strings.Builder  // lines waiting to be flushed to chat
+	var fullBuf strings.Builder // complete response for DB persistence
+	var pending strings.Builder // lines waiting to be flushed to chat
 
 	flush := func() {
 		text := strings.TrimSpace(pending.String())
