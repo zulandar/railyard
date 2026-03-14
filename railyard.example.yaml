@@ -228,6 +228,7 @@ tracks:
 # telegraph:
 #   platform: slack                    # "slack" or "discord"
 #   channel: C0123456789               # default channel ID
+#   process_timeout_sec: 900           # max seconds a dispatch subprocess may run (default: 900)
 #   allowed_channels:                  # restrict bot to these channels (omit for all)
 #     - C0123456789
 #     - C9876543210

@@ -236,6 +236,7 @@ telegraph:
   resources: {}
   platform: slack   # slack or discord
   channel: ""
+  processTimeoutSec: 900   # max seconds a dispatch subprocess may run
   slack:
     botToken: ""    # or reference a secret
     appToken: ""
