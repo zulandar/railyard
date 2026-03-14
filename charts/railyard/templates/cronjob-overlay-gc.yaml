@@ -29,7 +29,7 @@ spec:
             - name: cocoindex-migrate
               image: {{ include "railyard.image" . }}
               imagePullPolicy: {{ .Values.image.pullPolicy }}
-              command: ["python3"]
+              command: ["/opt/railyard/cocoindex/.venv/bin/python3"]
               args:
                 - /opt/railyard/cocoindex/migrate.py
                 - --database-url
