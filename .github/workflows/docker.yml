@@ -144,3 +144,37 @@ jobs:
           crane copy "${IMAGE}:${VERSION}-claude" "${IMAGE}:${VERSION}"
           crane copy "${IMAGE}:${VERSION}-claude" "${IMAGE}:${MAJOR_MINOR}"
           crane copy "${IMAGE}:${VERSION}-claude" "${IMAGE}:latest"
+
+  # Clean up old image versions — keep 0.8.10+ and untagged manifests.
+  cleanup-images:
+    name: Cleanup Old Images
+    needs: tag-default
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete pre-0.8.10 image versions
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # List all versions with their tags.
+          gh api --paginate \
+            /user/packages/container/railyard%2Fengine/versions \
+            --jq '.[] | select(.metadata.container.tags | length > 0) | {id, tags: .metadata.container.tags}' \
+          | jq -s '.' > /tmp/versions.json
+
+          # Find versions where ALL tags match pre-0.8.10 patterns.
+          # Keep: 0.8.10+, latest, any 0.9+/1.0+ tags.
+          jq -r '.[] | select(
+            .tags | all(
+              test("^0\\.8\\.[0-9]-|^0\\.8\\.[0-9]$|^sha-|^0\\.[0-7]\\.|nococoindex")
+            )
+          ) | .id' /tmp/versions.json > /tmp/to_delete.txt
+
+          COUNT=$(wc -l < /tmp/to_delete.txt)
+          echo "Found ${COUNT} old version(s) to delete"
+
+          while read -r VERSION_ID; do
+            echo "Deleting version ${VERSION_ID}..."
+            gh api --method DELETE \
+              /user/packages/container/railyard%2Fengine/versions/${VERSION_ID} \
+              || echo "  Warning: failed to delete ${VERSION_ID}"
+          done < /tmp/to_delete.txt
