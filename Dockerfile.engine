@@ -1,17 +1,22 @@
 # Dockerfile.engine — Railyard engine container image.
 # The ry binary is built in CI and placed in the build context.
 #
-# Build with a specific provider:
-#   docker build --build-arg AGENT_PROVIDER=codex -f Dockerfile.engine .
+# Build with a specific provider and cocoindex variant:
+#   docker build --build-arg AGENT_PROVIDER=claude -f Dockerfile.engine .
+#   docker build --build-arg AGENT_PROVIDER=codex --build-arg COCOINDEX_BASE=without-cocoindex -f Dockerfile.engine .
 #
-# Supported providers: claude (default), codex, gemini, opencode
+# Supported providers: claude (default), codex, gemini, opencode, copilot
 
+# Global build args — must be declared before the first FROM.
+ARG COCOINDEX_BASE=with-cocoindex
+
+# ==========================================================================
+# Stage 1: base — provider-agnostic, no cocoindex
+# ==========================================================================
 FROM ubuntu:24.04 AS base
 
 # Prevent interactive prompts during package installation.
 ENV DEBIAN_FRONTEND=noninteractive
-
-ARG AGENT_PROVIDER=claude
 
 # ── System packages ──────────────────────────────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -32,38 +37,57 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
   && apt-get update && apt-get install -y --no-install-recommends gh \
   && rm -rf /var/lib/apt/lists/*
 
+# ── Go 1.26.1 (permanent runtime install for backend track tests) ──────────
+RUN curl -fsSL https://go.dev/dl/go1.26.1.linux-amd64.tar.gz | tar -C /usr/local -xzf -
+ENV PATH="/usr/local/go/bin:${PATH}"
+
+# ── Railyard binary (pre-built in CI) ───────────────────────────────────────
+COPY ry /usr/local/bin/ry
+RUN chmod +x /usr/local/bin/ry
+
+# ==========================================================================
+# Stage 2: base + cocoindex venv (built once, cached)
+# ==========================================================================
+FROM base AS base-cocoindex
+
+COPY cocoindex/ /opt/railyard/cocoindex/
+RUN python3 -m venv /opt/railyard/cocoindex/.venv \
+  && /opt/railyard/cocoindex/.venv/bin/pip install --no-cache-dir -r /opt/railyard/cocoindex/requirements.txt
+
+# ==========================================================================
+# Stage selection — pick base with or without cocoindex
+# ==========================================================================
+FROM base-cocoindex AS with-cocoindex
+FROM base AS without-cocoindex
+
+# ==========================================================================
+# Stage 3: final — provider-specific layers
+# ==========================================================================
+# hadolint ignore=DL3006
+FROM ${COCOINDEX_BASE} AS final
+
+ARG AGENT_PROVIDER=claude
+
 # ── Node.js 22 LTS (NodeSource) ─────────────────────────────────────────────
-# Required for claude, codex, and gemini (all npm-based CLIs).
+# Required for claude, codex, gemini, and copilot (all npm-based CLIs).
 RUN if [ "$AGENT_PROVIDER" != "opencode" ]; then \
       curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
       && apt-get install -y --no-install-recommends nodejs \
       && rm -rf /var/lib/apt/lists/*; \
     fi
 
-# ── Go 1.26.1 (permanent runtime install for backend track tests) ──────────
-RUN curl -fsSL https://go.dev/dl/go1.26.1.linux-amd64.tar.gz | tar -C /usr/local -xzf -
-ENV PATH="/usr/local/go/bin:${PATH}"
-
 # ── AI CLI provider ─────────────────────────────────────────────────────────
 RUN case "$AGENT_PROVIDER" in \
       claude)   npm install -g @anthropic-ai/claude-code ;; \
       codex)    npm install -g @openai/codex ;; \
       gemini)   npm install -g @google/gemini-cli ;; \
+      copilot)  npm install -g @github/copilot ;; \
       opencode) \
         go install github.com/opencode-ai/opencode@latest \
         && cp /root/go/bin/opencode /usr/local/bin/opencode \
         && rm -rf /root/go ;; \
       *) echo "Unknown AGENT_PROVIDER: $AGENT_PROVIDER" && exit 1 ;; \
     esac
-
-# ── Railyard binary (pre-built in CI) ───────────────────────────────────────
-COPY ry /usr/local/bin/ry
-RUN chmod +x /usr/local/bin/ry
-
-# ── CocoIndex (Python semantic-search scripts) ──────────────────────────────
-COPY cocoindex/ /opt/railyard/cocoindex/
-RUN python3 -m venv /opt/railyard/cocoindex/.venv \
-  && /opt/railyard/cocoindex/.venv/bin/pip install --no-cache-dir -r /opt/railyard/cocoindex/requirements.txt
 
 # ── Non-root user ───────────────────────────────────────────────────────────
 RUN useradd -m -s /bin/bash railyard

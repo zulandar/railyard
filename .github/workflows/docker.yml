@@ -14,12 +14,9 @@ permissions:
   packages: write
 
 jobs:
-  build-and-push:
-    name: Build and Push (${{ matrix.provider }})
+  build-base:
+    name: Build Base Stages
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        provider: [claude, codex, gemini, opencode]
     steps:
       - uses: actions/checkout@v6
 
@@ -29,9 +26,6 @@ jobs:
 
       - name: Build ry binary
         run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o ry ./cmd/ry/
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -43,15 +37,68 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Build and cache the base-cocoindex stage. This is the expensive step
+      # (~20 min for sentence-transformers/PyTorch). All provider builds
+      # reuse these cached layers.
+      - name: Build and cache base-cocoindex stage
+        uses: docker/build-push-action@v6
+        with:
+          file: Dockerfile.engine
+          context: .
+          push: false
+          platforms: linux/amd64
+          target: base-cocoindex
+          cache-from: type=gha,scope=base-cocoindex
+          cache-to: type=gha,mode=max,scope=base-cocoindex
+
+  build-providers:
+    name: Build ${{ matrix.provider }}${{ matrix.cocoindex == false && '-nococoindex' || '' }}
+    needs: build-base
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        provider: [claude, codex, gemini, opencode, copilot]
+        cocoindex: [true, false]
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Build ry binary
+        run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o ry ./cmd/ry/
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Determine image suffix
+        id: suffix
+        run: |
+          if [ "${{ matrix.cocoindex }}" = "true" ]; then
+            echo "tag_suffix=-${{ matrix.provider }}" >> "$GITHUB_OUTPUT"
+            echo "cocoindex_base=with-cocoindex" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag_suffix=-${{ matrix.provider }}-nococoindex" >> "$GITHUB_OUTPUT"
+            echo "cocoindex_base=without-cocoindex" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Extract Docker metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository }}/engine
           tags: |
-            type=semver,pattern={{version}},suffix=-${{ matrix.provider }}
-            type=semver,pattern={{major}}.{{minor}},suffix=-${{ matrix.provider }}
-            type=sha,suffix=-${{ matrix.provider }}
+            type=semver,pattern={{version}},suffix=${{ steps.suffix.outputs.tag_suffix }}
+            type=semver,pattern={{major}}.{{minor}},suffix=${{ steps.suffix.outputs.tag_suffix }}
+            type=sha,suffix=${{ steps.suffix.outputs.tag_suffix }}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
@@ -60,16 +107,21 @@ jobs:
           context: .
           push: true
           platforms: linux/amd64
-          build-args: AGENT_PROVIDER=${{ matrix.provider }}
+          target: final
+          build-args: |
+            AGENT_PROVIDER=${{ matrix.provider }}
+            COCOINDEX_BASE=${{ steps.suffix.outputs.cocoindex_base }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=${{ matrix.provider }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.provider }}
+          cache-from: |
+            type=gha,scope=base-cocoindex
+            type=gha,scope=${{ matrix.provider }}-${{ matrix.cocoindex }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.provider }}-${{ matrix.cocoindex }}
 
   # Tag the claude variant as the default (latest + unqualified semver).
   tag-default:
     name: Tag Default (claude)
-    needs: build-and-push
+    needs: build-providers
     runs-on: ubuntu-latest
     steps:
       - name: Log in to GitHub Container Registry
