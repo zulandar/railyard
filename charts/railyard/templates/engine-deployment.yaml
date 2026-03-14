@@ -37,10 +37,11 @@ spec:
           args:
             - |
               git config --global --add safe.directory /repo
-              # Configure git credential helper so clone/fetch/push can authenticate.
+              {{- if or $.Values.auth.githubToken $.Values.bull.githubToken $.Values.auth.existingSecret }}
               if [ -n "${GITHUB_TOKEN:-}" ]; then
                 git config --global credential.helper '!f() { echo "username=x-access-token"; echo "password=${GITHUB_TOKEN}"; }; f'
               fi
+              {{- end }}
               if [ -d /repo/.git ]; then
                 cd /repo && git fetch --all
               else
@@ -50,10 +51,11 @@ spec:
               cd /repo &&
               git config user.name "railyard" &&
               git config user.email "railyard@railyard.dev"
-              # Write credential helper into repo-level config for the engine container.
+              {{- if or $.Values.auth.githubToken $.Values.bull.githubToken $.Values.auth.existingSecret }}
               if [ -n "${GITHUB_TOKEN:-}" ]; then
                 git config credential.helper '!f() { echo "username=x-access-token"; echo "password=${GITHUB_TOKEN}"; }; f'
               fi
+              {{- end }}
               cp /etc/railyard/railyard.yaml /repo/railyard.yaml 2>/dev/null || true
           {{- if or $.Values.auth.githubToken $.Values.bull.githubToken $.Values.auth.existingSecret }}
           env:
