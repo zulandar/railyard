@@ -465,6 +465,9 @@ func truncateOutput(output string, maxLen int) string {
 // baseBranch is the branch to return to after tests (e.g. "main").
 // The provided ctx controls the overall timeout for pre-test and test commands.
 func runTests(ctx context.Context, repoDir, branch, baseBranch, preTestCommand, testCommand string) (string, error) {
+	// Discard any uncommitted changes before switching branches.
+	gitCleanWorkingTree(repoDir)
+
 	// Checkout the branch (worktree-safe: fall back to detached HEAD).
 	checkout := exec.Command("git", "checkout", branch)
 	checkout.Dir = repoDir
@@ -557,6 +560,15 @@ func checkoutBase(repoDir, baseBranch string) {
 	}
 }
 
+// gitCleanWorkingTree discards all uncommitted changes (tracked files only).
+// This prevents stale modifications (e.g. from test runs or branch checkouts)
+// from blocking subsequent git checkout or merge operations.
+func gitCleanWorkingTree(repoDir string) {
+	cmd := exec.Command("git", "checkout", "--", ".")
+	cmd.Dir = repoDir
+	cmd.CombinedOutput() // best-effort
+}
+
 // isAncestor returns true if the given branch is already fully contained
 // in the base branch (i.e., all its commits are reachable from baseBranch).
 // This happens when a dependent car's merge already included this branch's changes.
@@ -569,6 +581,10 @@ func isAncestor(repoDir, branch, baseBranch string) bool {
 // gitMerge merges the branch into the base branch.
 // Uses checkoutBase which handles worktree mode (detached HEAD fallback).
 func gitMerge(repoDir, branch, baseBranch string) error {
+	// Discard any uncommitted changes left by tests or prior operations.
+	// The yardmaster repo should always have a clean working tree before merge.
+	gitCleanWorkingTree(repoDir)
+
 	// Checkout the base branch (worktree-safe).
 	checkoutBase(repoDir, baseBranch)
 
