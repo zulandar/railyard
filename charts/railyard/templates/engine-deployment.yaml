@@ -88,7 +88,7 @@ spec:
         {{- include "railyard.authInitContainers" $ | nindent 8 }}
       containers:
         - name: engine
-          image: {{ include "railyard.image" $ }}
+          image: {{ include "railyard.trackImage" (dict "track" . "global" $) }}
           imagePullPolicy: {{ $.Values.image.pullPolicy }}
           command: ["ry"]
           args: ["engine", "start", "--track", {{ .name | quote }}, "-c", "/etc/railyard/railyard.yaml"]

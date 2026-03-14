@@ -70,6 +70,20 @@ Container image with tag defaulting to appVersion.
 {{- end }}
 
 {{/*
+Track-level engine image. Falls back to the global railyard.image when
+the track does not specify image.repository.
+Usage: include "railyard.trackImage" (dict "track" . "global" $)
+*/}}
+{{- define "railyard.trackImage" -}}
+{{- if and .track.image .track.image.repository -}}
+  {{- $tag := default (default .global.Chart.AppVersion .global.Values.image.tag) .track.image.tag -}}
+  {{- printf "%s:%s" .track.image.repository $tag -}}
+{{- else -}}
+  {{- include "railyard.image" .global -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 Database host — auto-derived when internal, otherwise from values.
 */}}
 {{- define "railyard.dbHost" -}}

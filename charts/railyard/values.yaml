@@ -140,6 +140,18 @@ auth:
 # Tracks
 # ---------------------------------------------------------------------------
 # Each track defines an area of concern with its own engine pool.
+# Tracks may optionally override the engine container image to add
+# language-specific runtimes (PHP, Python, Ruby, etc.). Init containers
+# always use the global image. When image is omitted the global image
+# is used (Go is included in the base image).
+#
+# Example with a custom PHP track image:
+#   - name: api
+#     language: php
+#     image:
+#       repository: ghcr.io/myorg/railyard-php
+#       tag: "8.2"    # defaults to global image tag if omitted
+#     testCommand: "vendor/bin/phpunit"
 tracks:
   - name: backend
     engineSlots: 3
