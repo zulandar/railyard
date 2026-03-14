@@ -30,7 +30,7 @@ spec:
           args:
             - |
               git config --global --add safe.directory /repo
-              {{- if or .Values.auth.githubToken .Values.bull.githubToken }}
+              {{- if or .Values.auth.githubToken .Values.bull.githubToken .Values.auth.existingSecret }}
               if [ -n "${GITHUB_TOKEN:-}" ]; then
                 git config --global credential.helper '!f() { echo "username=x-access-token"; echo "password=${GITHUB_TOKEN}"; }; f'
               fi
@@ -44,18 +44,19 @@ spec:
               cd /repo &&
               git config user.name "railyard" &&
               git config user.email "railyard@railyard.dev"
-              {{- if or .Values.auth.githubToken .Values.bull.githubToken }}
+              {{- if or .Values.auth.githubToken .Values.bull.githubToken .Values.auth.existingSecret }}
               if [ -n "${GITHUB_TOKEN:-}" ]; then
                 git config credential.helper '!f() { echo "username=x-access-token"; echo "password=${GITHUB_TOKEN}"; }; f'
               fi
               {{- end }}
-          {{- if or .Values.auth.githubToken .Values.bull.githubToken }}
+          {{- if or .Values.auth.githubToken .Values.bull.githubToken .Values.auth.existingSecret }}
           env:
             - name: GITHUB_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: {{ include "railyard.authSecretName" . }}
                   key: GH_TOKEN
+                  optional: true
           {{- end }}
           volumeMounts:
             - name: repo
@@ -84,12 +85,13 @@ spec:
                 secretKeyRef:
                   name: {{ include "railyard.fullname" . }}-db
                   key: pgvector-password
-            {{- if or .Values.auth.githubToken .Values.bull.githubToken }}
+            {{- if or .Values.auth.githubToken .Values.bull.githubToken .Values.auth.existingSecret }}
             - name: GITHUB_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: {{ include "railyard.authSecretName" . }}
                   key: GH_TOKEN
+                  optional: true
             {{- end }}
             {{- include "railyard.authExtraEnv" . | nindent 12 }}
           envFrom:

@@ -94,7 +94,7 @@ data:
     {{- if .Values.bull.enabled }}
     bull:
       enabled: true
-      {{- if or .Values.auth.githubToken .Values.bull.githubToken }}
+      {{- if or .Values.auth.githubToken .Values.bull.githubToken .Values.auth.existingSecret }}
       github_token: ${GITHUB_TOKEN}
       {{- end }}
       poll_interval_sec: {{ .Values.bull.pollIntervalSec | default 60 }}

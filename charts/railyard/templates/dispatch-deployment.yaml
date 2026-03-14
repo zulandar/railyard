@@ -66,12 +66,13 @@ spec:
                 secretKeyRef:
                   name: {{ include "railyard.fullname" . }}-db
                   key: db-password
-            {{- if or .Values.auth.githubToken .Values.bull.githubToken }}
+            {{- if or .Values.auth.githubToken .Values.bull.githubToken .Values.auth.existingSecret }}
             - name: GITHUB_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: {{ include "railyard.authSecretName" . }}
                   key: GH_TOKEN
+                  optional: true
             {{- end }}
             {{- include "railyard.authExtraEnv" . | nindent 12 }}
           envFrom:
