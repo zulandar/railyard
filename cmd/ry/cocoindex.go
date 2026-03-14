@@ -285,7 +285,7 @@ func loadRailyardConfig(path string) (*ryConfigForIndex, error) {
 	}
 
 	result := &ryConfigForIndex{
-		cocoindexDatabaseURL: raw.CocoIndex.DatabaseURL,
+		cocoindexDatabaseURL: os.Expand(raw.CocoIndex.DatabaseURL, os.Getenv),
 		cocoindexVenvPath:    raw.CocoIndex.VenvPath,
 		cocoindexScriptsPath: raw.CocoIndex.ScriptsPath,
 	}
