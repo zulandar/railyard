@@ -79,6 +79,13 @@ func (d *Daemon) Run(ctx context.Context) error {
 	if err := d.adapter.Connect(ctx); err != nil {
 		return fmt.Errorf("telegraph: connect: %w", err)
 	}
+	hc := NewHealthChecker(time.Duration(d.cfg.Telegraph.Events.PollIntervalSec) * time.Second)
+	go func() {
+		if err := StartHealthServer(ctx, d.cfg.Telegraph.HealthPort, hc); err != nil {
+			log.Printf("telegraph: health server: %v", err)
+		}
+	}()
+	hc.SetConnected(true)
 
 	// Extract bot user ID if the adapter supports it.
 	var botUserID string
@@ -149,6 +156,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 		DB:             d.db,
 		StatusProvider: sp,
 		PollInterval:   pollInterval,
+		OnPoll:         func() { hc.SetLastPoll(time.Now()) },
 	})
 	if err != nil {
 		d.adapter.Close()
@@ -175,6 +183,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
+			hc.SetConnected(false)
 			fmt.Fprintf(d.out, "Telegraph shutting down...\n")
 			d.sendShutdown()
 			if err := d.adapter.Close(); err != nil {
@@ -186,6 +195,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 		case msg, ok := <-inbound:
 			if !ok {
 				// Adapter closed the channel (disconnect or external close).
+				hc.SetConnected(false)
 				fmt.Fprintf(d.out, "Telegraph inbound channel closed\n")
 				fmt.Fprintf(d.out, "Telegraph shutting down...\n")
 				d.sendShutdown() // best-effort; may fail if adapter already disconnected
