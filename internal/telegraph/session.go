@@ -37,11 +37,12 @@ type Process interface {
 // sessions by thread/channel, spawns subprocesses, routes messages, and
 // resumes dead sessions from conversation history.
 type SessionManager struct {
-	db             *gorm.DB
-	adapter        Adapter
-	spawner        ProcessSpawner
-	timeout        time.Duration
-	processTimeout time.Duration
+	db                 *gorm.DB
+	adapter            Adapter
+	spawner            ProcessSpawner
+	timeout            time.Duration
+	processTimeout     time.Duration
+	relayFlushInterval time.Duration
 
 	mu       sync.RWMutex
 	sessions map[string]*activeSession // key: "channelID:threadID"
@@ -56,11 +57,12 @@ type activeSession struct {
 
 // SessionManagerOpts holds parameters for creating a SessionManager.
 type SessionManagerOpts struct {
-	DB               *gorm.DB
-	Adapter          Adapter
-	Spawner          ProcessSpawner
-	HeartbeatTimeout time.Duration // defaults to DefaultHeartbeatTimeout
-	ProcessTimeout   time.Duration // max subprocess runtime; defaults to defaultProcessTimeout
+	DB                 *gorm.DB
+	Adapter            Adapter
+	Spawner            ProcessSpawner
+	HeartbeatTimeout   time.Duration // defaults to DefaultHeartbeatTimeout
+	ProcessTimeout     time.Duration // max subprocess runtime; defaults to defaultProcessTimeout
+	RelayFlushInterval time.Duration // relay output flush interval; defaults to defaultRelayFlushInterval
 }
 
 // NewSessionManager creates a SessionManager.
@@ -79,13 +81,18 @@ func NewSessionManager(opts SessionManagerOpts) (*SessionManager, error) {
 	if procTimeout <= 0 {
 		procTimeout = defaultProcessTimeout
 	}
+	flushInterval := opts.RelayFlushInterval
+	if flushInterval <= 0 {
+		flushInterval = defaultRelayFlushInterval
+	}
 	return &SessionManager{
-		db:             opts.DB,
-		adapter:        opts.Adapter,
-		spawner:        opts.Spawner,
-		timeout:        timeout,
-		processTimeout: procTimeout,
-		sessions:       make(map[string]*activeSession),
+		db:                 opts.DB,
+		adapter:            opts.Adapter,
+		spawner:            opts.Spawner,
+		timeout:            timeout,
+		processTimeout:     procTimeout,
+		relayFlushInterval: flushInterval,
+		sessions:           make(map[string]*activeSession),
 	}, nil
 }
 
@@ -389,9 +396,9 @@ func formatThreadHistory(msgs []ThreadMessage) string {
 	return b.String()
 }
 
-// relayFlushInterval controls how often accumulated output is flushed to
-// the chat platform. Exposed as a variable so tests can override it.
-var relayFlushInterval = 3 * time.Second
+// defaultRelayFlushInterval is how often accumulated output is flushed to
+// the chat platform.
+const defaultRelayFlushInterval = 3 * time.Second
 
 // relayOutput reads lines from a process's Recv channel and forwards them
 // to the chat platform incrementally. Lines are accumulated for up to
@@ -419,7 +426,7 @@ func (sm *SessionManager) relayOutput(ctx context.Context, channelID, threadID s
 		pending.Reset()
 	}
 
-	ticker := time.NewTicker(relayFlushInterval)
+	ticker := time.NewTicker(sm.relayFlushInterval)
 	defer ticker.Stop()
 
 	recv := proc.Recv()

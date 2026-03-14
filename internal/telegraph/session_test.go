@@ -672,15 +672,11 @@ func TestRelayOutput_SendsToAdapter(t *testing.T) {
 	adapter.Connect(context.Background())
 	spawner := &mockSpawner{}
 
-	// Use a short flush interval so lines flush quickly after channel close.
-	old := relayFlushInterval
-	relayFlushInterval = 50 * time.Millisecond
-	defer func() { relayFlushInterval = old }()
-
 	sm, _ := NewSessionManager(SessionManagerOpts{
-		DB:      db,
-		Spawner: spawner,
-		Adapter: adapter,
+		DB:                 db,
+		Spawner:            spawner,
+		Adapter:            adapter,
+		RelayFlushInterval: 50 * time.Millisecond,
 	})
 
 	proc := newMockProcess("")
@@ -730,14 +726,11 @@ func TestRelayOutput_ChunksLongMessages(t *testing.T) {
 	adapter.Connect(context.Background())
 	spawner := &mockSpawner{}
 
-	old := relayFlushInterval
-	relayFlushInterval = 50 * time.Millisecond
-	defer func() { relayFlushInterval = old }()
-
 	sm, _ := NewSessionManager(SessionManagerOpts{
-		DB:      db,
-		Spawner: spawner,
-		Adapter: adapter,
+		DB:                 db,
+		Spawner:            spawner,
+		Adapter:            adapter,
+		RelayFlushInterval: 50 * time.Millisecond,
 	})
 
 	// Create a message that's longer than 2000 chars.
@@ -766,14 +759,11 @@ func TestRelayOutput_EmptyOutput(t *testing.T) {
 	adapter.Connect(context.Background())
 	spawner := &mockSpawner{}
 
-	old := relayFlushInterval
-	relayFlushInterval = 50 * time.Millisecond
-	defer func() { relayFlushInterval = old }()
-
 	sm, _ := NewSessionManager(SessionManagerOpts{
-		DB:      db,
-		Spawner: spawner,
-		Adapter: adapter,
+		DB:                 db,
+		Spawner:            spawner,
+		Adapter:            adapter,
+		RelayFlushInterval: 50 * time.Millisecond,
 	})
 
 	proc := newMockProcess("")
@@ -792,15 +782,11 @@ func TestRelayOutput_IncrementalStreaming(t *testing.T) {
 	adapter.Connect(context.Background())
 	spawner := &mockSpawner{}
 
-	// Short flush interval so the ticker fires between sends.
-	old := relayFlushInterval
-	relayFlushInterval = 100 * time.Millisecond
-	defer func() { relayFlushInterval = old }()
-
 	sm, _ := NewSessionManager(SessionManagerOpts{
-		DB:      db,
-		Spawner: spawner,
-		Adapter: adapter,
+		DB:                 db,
+		Spawner:            spawner,
+		Adapter:            adapter,
+		RelayFlushInterval: 100 * time.Millisecond,
 	})
 
 	proc := newMockProcess("")
