@@ -167,6 +167,7 @@ type TelegraphConfig struct {
 	Channel           string              `yaml:"channel"`             // default channel ID
 	AllowedChannels   []string            `yaml:"allowed_channels"`    // channel IDs the bot may respond in; empty = all
 	ProcessTimeoutSec int                 `yaml:"process_timeout_sec"` // max seconds a dispatch subprocess may run; default 900
+	HealthPort        int                 `yaml:"health_port"`         // HTTP health check port; default 8086
 	Slack             SlackConfig         `yaml:"slack"`
 	Discord           DiscordConfig       `yaml:"discord"`
 	DispatchLock      DispatchLockConfig  `yaml:"dispatch_lock"`
@@ -427,6 +428,9 @@ func (c *Config) applyDefaults() {
 		}
 		if c.Telegraph.ProcessTimeoutSec == 0 {
 			c.Telegraph.ProcessTimeoutSec = 900
+		}
+		if c.Telegraph.HealthPort == 0 {
+			c.Telegraph.HealthPort = 8086
 		}
 		// Resolve env vars in token fields.
 		c.Telegraph.Slack.BotToken = resolveEnvVars(c.Telegraph.Slack.BotToken)
