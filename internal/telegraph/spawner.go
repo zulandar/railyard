@@ -101,8 +101,15 @@ func (s *ClaudeSpawner) Spawn(ctx context.Context, prompt string) (Process, erro
 	go func() {
 		scanner := bufio.NewScanner(stdoutPipe)
 		scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024) // 1MB buffer
+	scanLoop:
 		for scanner.Scan() {
-			recvCh <- scanner.Text()
+			select {
+			case recvCh <- scanner.Text():
+			case <-ctx.Done():
+				// Context cancelled and recvCh buffer full — stop reading
+				// so we don't block cleanup waiting on a dead consumer.
+				break scanLoop
+			}
 		}
 		close(recvCh)
 		if waitErr := cmd.Wait(); waitErr != nil {

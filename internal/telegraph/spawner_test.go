@@ -232,6 +232,58 @@ func TestClaudeSpawner_MissingBinary(t *testing.T) {
 	}
 }
 
+func TestClaudeSpawner_CancelDoesNotHangWithUndrainedOutput(t *testing.T) {
+	dir := t.TempDir()
+
+	// Script outputs 200 lines (exceeds the 64-entry recvCh buffer) with a
+	// small delay between each so the process is still running when we cancel.
+	binary := writeMockBinary(t, dir, "claude", `
+i=0
+while [ $i -lt 200 ]; do
+  echo "output line $i"
+  i=$((i + 1))
+done
+# Keep the process alive so it's still running when we cancel.
+sleep 60
+`)
+
+	spawner := &ClaudeSpawner{
+		ClaudeBinary: binary,
+		WorkDir:      dir,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	proc, err := spawner.Spawn(ctx, "test")
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	// Read a few lines to confirm output is flowing, then stop draining.
+	for i := 0; i < 5; i++ {
+		select {
+		case _, ok := <-proc.Recv():
+			if !ok {
+				t.Fatal("recvCh closed before we expected")
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for initial output")
+		}
+	}
+
+	// Cancel the context while the process is still producing output
+	// and we are NOT draining recvCh. Before the fix, the scanner
+	// goroutine would block on recvCh send, doneCh would never close,
+	// and this test would time out.
+	cancel()
+
+	select {
+	case <-proc.Done():
+		// Success — process cleaned up despite undrained output.
+	case <-time.After(15 * time.Second):
+		t.Fatal("proc.Done() did not close within 15s — scanner goroutine likely hung on full recvCh")
+	}
+}
+
 func TestLazySpawner_SpawnDelegates(t *testing.T) {
 	dir := t.TempDir()
 	binary := writeMockBinary(t, dir, "claude", `echo "lazy output"`)
