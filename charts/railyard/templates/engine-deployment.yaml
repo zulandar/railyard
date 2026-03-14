@@ -37,7 +37,7 @@ spec:
           args:
             - |
               git config --global --add safe.directory /repo
-              {{- if or $.Values.auth.githubToken $.Values.bull.githubToken $.Values.auth.existingSecret }}
+              {{- if or $.Values.auth.githubToken $.Values.bull.githubToken }}
               if [ -n "${GITHUB_TOKEN:-}" ]; then
                 git config --global credential.helper '!f() { echo "username=x-access-token"; echo "password=${GITHUB_TOKEN}"; }; f'
               fi
@@ -51,13 +51,13 @@ spec:
               cd /repo &&
               git config user.name "railyard" &&
               git config user.email "railyard@railyard.dev"
-              {{- if or $.Values.auth.githubToken $.Values.bull.githubToken $.Values.auth.existingSecret }}
+              {{- if or $.Values.auth.githubToken $.Values.bull.githubToken }}
               if [ -n "${GITHUB_TOKEN:-}" ]; then
                 git config credential.helper '!f() { echo "username=x-access-token"; echo "password=${GITHUB_TOKEN}"; }; f'
               fi
               {{- end }}
               cp /etc/railyard/railyard.yaml /repo/railyard.yaml 2>/dev/null || true
-          {{- if or $.Values.auth.githubToken $.Values.bull.githubToken $.Values.auth.existingSecret }}
+          {{- if or $.Values.auth.githubToken $.Values.bull.githubToken }}
           env:
             - name: GITHUB_TOKEN
               valueFrom:
@@ -112,7 +112,7 @@ spec:
                 secretKeyRef:
                   name: {{ $fullname }}-db
                   key: pgvector-password
-            {{- if or $.Values.auth.githubToken $.Values.bull.githubToken $.Values.auth.existingSecret }}
+            {{- if or $.Values.auth.githubToken $.Values.bull.githubToken }}
             - name: GITHUB_TOKEN
               valueFrom:
                 secretKeyRef:
