@@ -656,6 +656,11 @@ func TestRelayOutput_SendsToAdapter(t *testing.T) {
 	adapter.Connect(context.Background())
 	spawner := &mockSpawner{}
 
+	// Use a short flush interval so lines flush quickly after channel close.
+	old := relayFlushInterval
+	relayFlushInterval = 50 * time.Millisecond
+	defer func() { relayFlushInterval = old }()
+
 	sm, _ := NewSessionManager(SessionManagerOpts{
 		DB:      db,
 		Spawner: spawner,
@@ -671,18 +676,25 @@ func TestRelayOutput_SendsToAdapter(t *testing.T) {
 	sm.relayOutput(context.Background(), "C01", "thread-1", 1, proc)
 
 	sent := adapter.AllSent()
-	if len(sent) != 1 {
-		t.Fatalf("sent count = %d, want 1", len(sent))
+	if len(sent) == 0 {
+		t.Fatal("sent count = 0, want >= 1")
 	}
-	if sent[0].ChannelID != "C01" {
-		t.Errorf("ChannelID = %q, want %q", sent[0].ChannelID, "C01")
+
+	// Reconstruct the full text from all sent chunks.
+	var parts []string
+	for _, msg := range sent {
+		if msg.ChannelID != "C01" {
+			t.Errorf("ChannelID = %q, want %q", msg.ChannelID, "C01")
+		}
+		if msg.ThreadID != "thread-1" {
+			t.Errorf("ThreadID = %q, want %q", msg.ThreadID, "thread-1")
+		}
+		parts = append(parts, msg.Text)
 	}
-	if sent[0].ThreadID != "thread-1" {
-		t.Errorf("ThreadID = %q, want %q", sent[0].ThreadID, "thread-1")
-	}
+	combined := strings.Join(parts, "\n")
 	expected := "Hello from dispatch\nCreated car-001"
-	if sent[0].Text != expected {
-		t.Errorf("Text = %q, want %q", sent[0].Text, expected)
+	if combined != expected {
+		t.Errorf("combined text = %q, want %q", combined, expected)
 	}
 
 	// Verify conversation was recorded.
@@ -701,6 +713,10 @@ func TestRelayOutput_ChunksLongMessages(t *testing.T) {
 	adapter := NewMockAdapter()
 	adapter.Connect(context.Background())
 	spawner := &mockSpawner{}
+
+	old := relayFlushInterval
+	relayFlushInterval = 50 * time.Millisecond
+	defer func() { relayFlushInterval = old }()
 
 	sm, _ := NewSessionManager(SessionManagerOpts{
 		DB:      db,
@@ -734,6 +750,10 @@ func TestRelayOutput_EmptyOutput(t *testing.T) {
 	adapter.Connect(context.Background())
 	spawner := &mockSpawner{}
 
+	old := relayFlushInterval
+	relayFlushInterval = 50 * time.Millisecond
+	defer func() { relayFlushInterval = old }()
+
 	sm, _ := NewSessionManager(SessionManagerOpts{
 		DB:      db,
 		Spawner: spawner,
@@ -747,6 +767,67 @@ func TestRelayOutput_EmptyOutput(t *testing.T) {
 
 	if adapter.SentCount() != 0 {
 		t.Errorf("sent count = %d, want 0 for empty output", adapter.SentCount())
+	}
+}
+
+func TestRelayOutput_IncrementalStreaming(t *testing.T) {
+	db := openSessionTestDB(t)
+	adapter := NewMockAdapter()
+	adapter.Connect(context.Background())
+	spawner := &mockSpawner{}
+
+	// Short flush interval so the ticker fires between sends.
+	old := relayFlushInterval
+	relayFlushInterval = 100 * time.Millisecond
+	defer func() { relayFlushInterval = old }()
+
+	sm, _ := NewSessionManager(SessionManagerOpts{
+		DB:      db,
+		Spawner: spawner,
+		Adapter: adapter,
+	})
+
+	proc := newMockProcess("")
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		sm.relayOutput(context.Background(), "C01", "thread-1", 1, proc)
+	}()
+
+	// Send first batch of lines, then wait for a flush.
+	proc.recvCh <- "line 1"
+	proc.recvCh <- "line 2"
+	time.Sleep(250 * time.Millisecond)
+
+	// At least one send should have happened before the channel closes.
+	countAfterFirstFlush := adapter.SentCount()
+	if countAfterFirstFlush == 0 {
+		t.Fatal("expected at least 1 send before channel close, got 0")
+	}
+
+	// Send second batch.
+	proc.recvCh <- "line 3"
+	proc.recvCh <- "line 4"
+	close(proc.recvCh)
+
+	<-done
+
+	// Should have at least 2 sends (one per flush interval).
+	totalSent := adapter.SentCount()
+	if totalSent < 2 {
+		t.Errorf("total sends = %d, want >= 2 (incremental streaming)", totalSent)
+	}
+
+	// Verify the full response is persisted to DB.
+	var conv models.TelegraphConversation
+	db.Last(&conv)
+	if conv.Role != "assistant" {
+		t.Errorf("Role = %q, want %q", conv.Role, "assistant")
+	}
+	expected := "line 1\nline 2\nline 3\nline 4"
+	if conv.Content != expected {
+		t.Errorf("Content = %q, want %q", conv.Content, expected)
 	}
 }
 

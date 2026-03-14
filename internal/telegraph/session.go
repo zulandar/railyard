@@ -383,19 +383,65 @@ func formatThreadHistory(msgs []ThreadMessage) string {
 	return b.String()
 }
 
-// relayOutput reads all lines from a process's Recv channel, accumulates
-// them, and sends the result to the chat platform via the adapter. It also
-// records the assistant response in the conversation history.
+// relayFlushInterval controls how often accumulated output is flushed to
+// the chat platform. Exposed as a variable so tests can override it.
+var relayFlushInterval = 3 * time.Second
+
+// relayOutput reads lines from a process's Recv channel and forwards them
+// to the chat platform incrementally. Lines are accumulated for up to
+// relayFlushInterval before being flushed, so users see progress without
+// spamming the channel. The full response is recorded in conversation
+// history after the process finishes.
 func (sm *SessionManager) relayOutput(ctx context.Context, channelID, threadID string, sessionID uint, proc Process) {
-	var buf strings.Builder
-	for line := range proc.Recv() {
-		if buf.Len() > 0 {
-			buf.WriteByte('\n')
+	var fullBuf strings.Builder  // complete response for DB persistence
+	var pending strings.Builder  // lines waiting to be flushed to chat
+
+	flush := func() {
+		text := strings.TrimSpace(pending.String())
+		if text == "" || sm.adapter == nil {
+			return
 		}
-		buf.WriteString(line)
+		for _, chunk := range chunkMessage(text, 2000) {
+			if err := sm.adapter.Send(ctx, OutboundMessage{
+				ChannelID: channelID,
+				ThreadID:  threadID,
+				Text:      chunk,
+			}); err != nil {
+				log.Printf("telegraph: relay session %d: send error: %v", sessionID, err)
+			}
+		}
+		pending.Reset()
 	}
 
-	text := strings.TrimSpace(buf.String())
+	ticker := time.NewTicker(relayFlushInterval)
+	defer ticker.Stop()
+
+	recv := proc.Recv()
+	for recv != nil {
+		select {
+		case line, ok := <-recv:
+			if !ok {
+				recv = nil
+				break
+			}
+			if fullBuf.Len() > 0 {
+				fullBuf.WriteByte('\n')
+			}
+			fullBuf.WriteString(line)
+			if pending.Len() > 0 {
+				pending.WriteByte('\n')
+			}
+			pending.WriteString(line)
+		case <-ticker.C:
+			flush()
+		case <-ctx.Done():
+			recv = nil
+		}
+	}
+	// Final flush for any remaining lines.
+	flush()
+
+	text := strings.TrimSpace(fullBuf.String())
 	if text == "" {
 		log.Printf("telegraph: relay session %d: no output from process", sessionID)
 		return
@@ -415,21 +461,6 @@ func (sm *SessionManager) relayOutput(ctx context.Context, channelID, threadID s
 		Content:   text,
 	}
 	sm.db.Create(&conv)
-
-	// Send to chat platform in chunks (Discord 2000 char limit).
-	if sm.adapter == nil {
-		return
-	}
-	chunks := chunkMessage(text, 2000)
-	for _, chunk := range chunks {
-		if err := sm.adapter.Send(ctx, OutboundMessage{
-			ChannelID: channelID,
-			ThreadID:  threadID,
-			Text:      chunk,
-		}); err != nil {
-			log.Printf("telegraph: relay session %d: send error: %v", sessionID, err)
-		}
-	}
 }
 
 // chunkMessage splits text into chunks of at most maxLen characters.
