@@ -560,13 +560,19 @@ func checkoutBase(repoDir, baseBranch string) {
 	}
 }
 
-// gitCleanWorkingTree discards all uncommitted changes (tracked files only).
-// This prevents stale modifications (e.g. from test runs or branch checkouts)
-// from blocking subsequent git checkout or merge operations.
+// gitCleanWorkingTree discards all uncommitted changes and removes untracked
+// files and directories. This prevents stale modifications or generated files
+// (e.g. from test runs) from blocking subsequent git checkout or merge operations.
 func gitCleanWorkingTree(repoDir string) {
-	cmd := exec.Command("git", "checkout", "--", ".")
-	cmd.Dir = repoDir
-	cmd.CombinedOutput() // best-effort
+	// Reset tracked files to HEAD.
+	reset := exec.Command("git", "checkout", "--", ".")
+	reset.Dir = repoDir
+	reset.CombinedOutput() // best-effort
+
+	// Remove untracked files and directories.
+	clean := exec.Command("git", "clean", "-fd")
+	clean.Dir = repoDir
+	clean.CombinedOutput() // best-effort
 }
 
 // isAncestor returns true if the given branch is already fully contained

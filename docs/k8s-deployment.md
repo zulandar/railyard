@@ -264,7 +264,7 @@ docker build -t my-registry/railyard-engine-php:latest -f docker/Dockerfile.trac
 docker push my-registry/railyard-engine-php:latest
 ```
 
-**Step 2 -- Reference the custom image in `values.yaml`.** Add an `image` key to the track entry:
+**Step 2 -- Reference the custom image in `values.yaml`.** Add an `image` object to the track entry with `repository` and an optional `tag` (defaults to the chart's `appVersion`):
 
 ```yaml
 tracks:
@@ -274,10 +274,12 @@ tracks:
     maxReplicas: 3
     language: php
     testCommand: "vendor/bin/phpunit"
-    image: my-registry/railyard-engine-php:latest
+    image:
+      repository: my-registry/railyard-engine-php
+      tag: "8.2"    # optional — defaults to chart appVersion if omitted
 ```
 
-Tracks without an explicit `image` continue to use the chart-level `engine.image` (the base image).
+Tracks without an `image` block continue to use the chart-level `image` (the base image with Go).
 
 > **Note:** Init containers (e.g. the git-clone init container) always use the base engine image regardless of the track-level override. Only the main engine container is affected.
 
