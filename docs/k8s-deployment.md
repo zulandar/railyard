@@ -239,6 +239,48 @@ tracks:
 - `minReplicas` -- the minimum number of engine pods kept warm (even when idle).
 - `maxReplicas` -- the upper bound for HPA scale-out. HPA scales based on the number of ready cars waiting for engines.
 
+### Custom Language Runtimes
+
+The base engine image ships with Go pre-installed. If a track needs a different language runtime (PHP, Python, Ruby, etc.), you can build a custom image that extends the base and reference it in your track configuration.
+
+**Step 1 -- Build a custom track image.** Example Dockerfiles are provided in the repository:
+
+- `docker/Dockerfile.track-php`
+- `docker/Dockerfile.track-python`
+
+Each one uses a multi-stage build starting `FROM` the base engine image, then layers in the language toolchain. For example:
+
+```dockerfile
+# docker/Dockerfile.track-php
+FROM ghcr.io/zulandar/railyard-engine:latest
+RUN apt-get update && apt-get install -y php-cli php-mbstring composer \
+    && rm -rf /var/lib/apt/lists/*
+```
+
+Build and push to your registry:
+
+```bash
+docker build -t my-registry/railyard-engine-php:latest -f docker/Dockerfile.track-php .
+docker push my-registry/railyard-engine-php:latest
+```
+
+**Step 2 -- Reference the custom image in `values.yaml`.** Add an `image` key to the track entry:
+
+```yaml
+tracks:
+  - name: api
+    engineSlots: 3
+    minReplicas: 1
+    maxReplicas: 3
+    language: php
+    testCommand: "vendor/bin/phpunit"
+    image: my-registry/railyard-engine-php:latest
+```
+
+Tracks without an explicit `image` continue to use the chart-level `engine.image` (the base image).
+
+> **Note:** Init containers (e.g. the git-clone init container) always use the base engine image regardless of the track-level override. Only the main engine container is affected.
+
 ### Adjusting replica counts
 
 To change scaling on a running deployment, update your values and upgrade:
@@ -670,6 +712,35 @@ kubectl run -it --rm debug --image=busybox -n railyard -- nc -zv mysql.example.c
 kubectl run -it --rm debug --image=postgres:16 -n railyard -- \
   psql "host=<host> dbname=cocoindex user=cocoindex" -c "SELECT extname FROM pg_extension;"
 ```
+
+### CocoIndex migrations
+
+Engine pods and the `overlay-gc` CronJob now run CocoIndex migrations automatically via an init container. The `overlay_meta` table is created on first boot. You no longer need to run migrations manually. If you see errors related to missing CocoIndex tables in engine or overlay-gc logs, verify that the pgvector database is reachable and that the init container completed successfully:
+
+```bash
+kubectl logs <engine-pod> -c cocoindex-migrate -n railyard
+```
+
+### Git credential helper errors
+
+Engine and yardmaster pods automatically configure a git credential helper using the `GITHUB_TOKEN` environment variable. If you see errors like:
+
+```
+could not read Username for 'https://github.com': terminal prompts disabled
+```
+
+ensure that `auth.githubToken` is set in your Helm values:
+
+```yaml
+auth:
+  githubToken: "ghp_..."
+```
+
+See the [GitHub PAT for PR mode](#github-pat-for-pr-mode) section above for how to set this value.
+
+### `ry doctor` in Kubernetes
+
+`ry doctor` is now Kubernetes-aware. When it detects that it is running inside a pod (via the `KUBERNETES_SERVICE_HOST` environment variable), it automatically skips checks that do not apply in-cluster, such as verifying the Docker binary and local config file permissions. No additional flags are needed -- the behaviour is automatic.
 
 ## Upgrading
 

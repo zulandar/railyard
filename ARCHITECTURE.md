@@ -548,14 +548,15 @@ The engine container image is the single deployable unit. It contains everything
 
 - AI coding CLI determined by the configured provider (Claude Code by default; see provider system below)
 - Git, configured with deploy keys (or credential helpers)
-- MySQL client
+- MySQL client, gcc, and sqlite3-dev (for CGO support)
 - Railyard CLI (`ry`)
 - Python 3.13+ and CocoIndex dependencies (for overlay builds)
+- Tracks can override the engine image with a custom image for language-specific runtimes (PHP, Python, Ruby, etc.); see example Dockerfiles in `docker/Dockerfile.track-*`
 
 ```dockerfile
 # Dockerfile.engine
 FROM ubuntu:24.04
-RUN apt-get update && apt-get install -y git tmux python3.13 python3.13-venv
+RUN apt-get update && apt-get install -y git tmux python3.13 python3.13-venv gcc sqlite3-dev
 # Install agent runtimes — include whichever providers you need
 RUN npm install -g @anthropic-ai/claude-code
 # RUN npm install -g @openai/codex          # optional: Codex provider
@@ -606,6 +607,9 @@ tracks:
     language: typescript
     file_patterns: ["src/**", "*.ts", "*.tsx", "*.css"]
     engine_slots: 3
+    image:
+      repository: ghcr.io/org/railyard-node
+      tag: "22"
     conventions:
       framework: "Next.js 15"
       styling: "Tailwind CSS, no CSS modules"

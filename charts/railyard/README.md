@@ -86,6 +86,8 @@ helm install railyard ./charts/railyard \
 | `tracks[].language` | Programming language | (required) |
 | `tracks[].testCommand` | Test command to run | (required) |
 | `tracks[].preTestCommand` | Command to run before tests (e.g., setup, migrations) | `""` |
+| `tracks[].image.repository` | Custom container image for this track's engine pods | (global image) |
+| `tracks[].image.tag` | Image tag for the custom track image | (global tag) |
 
 ### Engine
 
