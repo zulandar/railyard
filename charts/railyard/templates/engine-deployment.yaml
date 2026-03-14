@@ -76,11 +76,12 @@ spec:
         - name: cocoindex-migrate
           image: {{ include "railyard.image" $ }}
           imagePullPolicy: {{ $.Values.image.pullPolicy }}
-          command: ["/opt/railyard/cocoindex/.venv/bin/python3"]
+          command: ["bash", "-c"]
           args:
-            - /opt/railyard/cocoindex/migrate.py
-            - --database-url
-            - "postgresql://{{ $.Values.pgvector.username }}:$(PGVECTOR_PASSWORD)@{{ include "railyard.pgvectorHost" $ }}:{{ $.Values.pgvector.port }}/{{ $.Values.pgvector.database }}?sslmode={{ $.Values.pgvector.sslmode | default "prefer" }}"
+            - |
+              source /opt/railyard/cocoindex/.venv/bin/activate
+              python3 /opt/railyard/cocoindex/migrate.py \
+                --database-url "postgresql://{{ $.Values.pgvector.username }}:${PGVECTOR_PASSWORD}@{{ include "railyard.pgvectorHost" $ }}:{{ $.Values.pgvector.port }}/{{ $.Values.pgvector.database }}?sslmode={{ $.Values.pgvector.sslmode | default "prefer" }}"
           env:
             - name: PGVECTOR_PASSWORD
               valueFrom:
