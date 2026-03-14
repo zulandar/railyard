@@ -153,6 +153,22 @@ func TestNewSessionManager_DefaultTimeout(t *testing.T) {
 	if sm.timeout != DefaultHeartbeatTimeout {
 		t.Errorf("timeout = %v, want %v", sm.timeout, DefaultHeartbeatTimeout)
 	}
+	if sm.processTimeout != defaultProcessTimeout {
+		t.Errorf("processTimeout = %v, want %v", sm.processTimeout, defaultProcessTimeout)
+	}
+}
+
+func TestNewSessionManager_CustomProcessTimeout(t *testing.T) {
+	db := openSessionTestDB(t)
+	custom := 20 * time.Minute
+	sm, _ := NewSessionManager(SessionManagerOpts{
+		DB:             db,
+		Spawner:        &mockSpawner{},
+		ProcessTimeout: custom,
+	})
+	if sm.processTimeout != custom {
+		t.Errorf("processTimeout = %v, want %v", sm.processTimeout, custom)
+	}
 }
 
 // ---------------------------------------------------------------------------

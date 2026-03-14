@@ -12,9 +12,8 @@ import (
 	"gorm.io/gorm"
 )
 
-// processTimeout is the maximum time a Claude subprocess can run before being
-// killed. This prevents hung processes from blocking sessions indefinitely.
-const processTimeout = 5 * time.Minute
+// defaultProcessTimeout is the fallback when no timeout is provided via config.
+const defaultProcessTimeout = 15 * time.Minute
 
 // ProcessSpawner abstracts subprocess creation for testability.
 type ProcessSpawner interface {
@@ -38,10 +37,11 @@ type Process interface {
 // sessions by thread/channel, spawns subprocesses, routes messages, and
 // resumes dead sessions from conversation history.
 type SessionManager struct {
-	db      *gorm.DB
-	adapter Adapter
-	spawner ProcessSpawner
-	timeout time.Duration
+	db             *gorm.DB
+	adapter        Adapter
+	spawner        ProcessSpawner
+	timeout        time.Duration
+	processTimeout time.Duration
 
 	mu       sync.RWMutex
 	sessions map[string]*activeSession // key: "channelID:threadID"
@@ -60,6 +60,7 @@ type SessionManagerOpts struct {
 	Adapter          Adapter
 	Spawner          ProcessSpawner
 	HeartbeatTimeout time.Duration // defaults to DefaultHeartbeatTimeout
+	ProcessTimeout   time.Duration // max subprocess runtime; defaults to defaultProcessTimeout
 }
 
 // NewSessionManager creates a SessionManager.
@@ -74,12 +75,17 @@ func NewSessionManager(opts SessionManagerOpts) (*SessionManager, error) {
 	if timeout <= 0 {
 		timeout = DefaultHeartbeatTimeout
 	}
+	procTimeout := opts.ProcessTimeout
+	if procTimeout <= 0 {
+		procTimeout = defaultProcessTimeout
+	}
 	return &SessionManager{
-		db:       opts.DB,
-		adapter:  opts.Adapter,
-		spawner:  opts.Spawner,
-		timeout:  timeout,
-		sessions: make(map[string]*activeSession),
+		db:             opts.DB,
+		adapter:        opts.Adapter,
+		spawner:        opts.Spawner,
+		timeout:        timeout,
+		processTimeout: procTimeout,
+		sessions:       make(map[string]*activeSession),
 	}, nil
 }
 
@@ -96,7 +102,7 @@ func (sm *SessionManager) NewSession(ctx context.Context, source, userName, thre
 		return nil, err
 	}
 
-	procCtx, cancel := context.WithTimeout(ctx, processTimeout)
+	procCtx, cancel := context.WithTimeout(ctx, sm.processTimeout)
 	proc, err := sm.spawner.Spawn(procCtx, "")
 	if err != nil {
 		cancel()
@@ -191,7 +197,7 @@ func (sm *SessionManager) Resume(ctx context.Context, channelID, threadID, userN
 		return nil, err
 	}
 
-	procCtx, cancel := context.WithTimeout(ctx, processTimeout)
+	procCtx, cancel := context.WithTimeout(ctx, sm.processTimeout)
 	proc, err := sm.spawner.Spawn(procCtx, recoveryPrompt)
 	if err != nil {
 		cancel()

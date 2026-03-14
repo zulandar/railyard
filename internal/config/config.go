@@ -163,15 +163,16 @@ type BullConfig struct {
 
 // TelegraphConfig holds settings for the Telegraph chat bridge.
 type TelegraphConfig struct {
-	Platform        string              `yaml:"platform"`         // "slack" or "discord"
-	Channel         string              `yaml:"channel"`          // default channel ID
-	AllowedChannels []string            `yaml:"allowed_channels"` // channel IDs the bot may respond in; empty = all
-	Slack           SlackConfig         `yaml:"slack"`
-	Discord         DiscordConfig       `yaml:"discord"`
-	DispatchLock    DispatchLockConfig  `yaml:"dispatch_lock"`
-	Events          EventsConfig        `yaml:"events"`
-	Digest          DigestConfig        `yaml:"digest"`
-	Conversations   ConversationsConfig `yaml:"conversations"`
+	Platform          string              `yaml:"platform"`            // "slack" or "discord"
+	Channel           string              `yaml:"channel"`             // default channel ID
+	AllowedChannels   []string            `yaml:"allowed_channels"`    // channel IDs the bot may respond in; empty = all
+	ProcessTimeoutSec int                 `yaml:"process_timeout_sec"` // max seconds a dispatch subprocess may run; default 900
+	Slack             SlackConfig         `yaml:"slack"`
+	Discord           DiscordConfig       `yaml:"discord"`
+	DispatchLock      DispatchLockConfig  `yaml:"dispatch_lock"`
+	Events            EventsConfig        `yaml:"events"`
+	Digest            DigestConfig        `yaml:"digest"`
+	Conversations     ConversationsConfig `yaml:"conversations"`
 }
 
 // SlackConfig holds Slack-specific credentials.
@@ -420,6 +421,9 @@ func (c *Config) applyDefaults() {
 		}
 		if c.Telegraph.Conversations.RecoveryLookbackDays == 0 {
 			c.Telegraph.Conversations.RecoveryLookbackDays = 7
+		}
+		if c.Telegraph.ProcessTimeoutSec == 0 {
+			c.Telegraph.ProcessTimeoutSec = 900
 		}
 		// Resolve env vars in token fields.
 		c.Telegraph.Slack.BotToken = resolveEnvVars(c.Telegraph.Slack.BotToken)

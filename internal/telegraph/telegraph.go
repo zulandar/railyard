@@ -110,11 +110,13 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 	// Build SessionManager.
 	hbTimeout := time.Duration(d.cfg.Telegraph.DispatchLock.HeartbeatTimeoutSec) * time.Second
+	procTimeout := time.Duration(d.cfg.Telegraph.ProcessTimeoutSec) * time.Second
 	sessionMgr, err := NewSessionManager(SessionManagerOpts{
 		DB:               d.db,
 		Adapter:          d.adapter,
 		Spawner:          spawner,
 		HeartbeatTimeout: hbTimeout,
+		ProcessTimeout:   procTimeout,
 	})
 	if err != nil {
 		d.adapter.Close()

@@ -705,6 +705,7 @@ tracks:
 telegraph:
   platform: slack
   channel: C0123456789
+  process_timeout_sec: 1200
   slack:
     bot_token: xoxb-test-bot-token
     app_token: xapp-test-app-token
@@ -784,6 +785,9 @@ telegraph:
 	if tg.Conversations.RecoveryLookbackDays != 14 {
 		t.Errorf("Conversations.RecoveryLookbackDays = %d, want 14", tg.Conversations.RecoveryLookbackDays)
 	}
+	if tg.ProcessTimeoutSec != 1200 {
+		t.Errorf("ProcessTimeoutSec = %d, want 1200", tg.ProcessTimeoutSec)
+	}
 }
 
 func TestParse_TelegraphDefaults(t *testing.T) {
@@ -831,6 +835,9 @@ telegraph:
 	}
 	if tg.Conversations.RecoveryLookbackDays != 7 {
 		t.Errorf("Conversations.RecoveryLookbackDays = %d, want 7 (default)", tg.Conversations.RecoveryLookbackDays)
+	}
+	if tg.ProcessTimeoutSec != 900 {
+		t.Errorf("ProcessTimeoutSec = %d, want 900 (default)", tg.ProcessTimeoutSec)
 	}
 }
 
