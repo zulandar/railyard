@@ -225,9 +225,12 @@ type ConversationsConfig struct {
 // Load reads a YAML config file from path and returns a validated Config.
 func Load(path string) (*Config, error) {
 	// Warn if the config file is world-readable (may contain credentials).
-	if info, err := os.Stat(path); err == nil {
-		if perm := info.Mode().Perm(); perm&0o077 != 0 {
-			log.Printf("config: WARNING: %s has permissive permissions %04o (recommended: 0600)", path, perm)
+	// Skip in Kubernetes — ConfigMap volumes are always mounted 0644.
+	if os.Getenv("KUBERNETES_SERVICE_HOST") == "" {
+		if info, err := os.Stat(path); err == nil {
+			if perm := info.Mode().Perm(); perm&0o077 != 0 {
+				log.Printf("config: WARNING: %s has permissive permissions %04o (recommended: 0600)", path, perm)
+			}
 		}
 	}
 

@@ -38,10 +38,18 @@ type checkResult struct {
 	detail string
 }
 
+// inKubernetes returns true when running inside a Kubernetes pod.
+func inKubernetes() bool {
+	return os.Getenv("KUBERNETES_SERVICE_HOST") != ""
+}
+
 func runDoctor(cmd *cobra.Command, configPath string) error {
 	out := cmd.OutOrStdout()
 	fmt.Fprintln(out, "Railyard Doctor")
 	fmt.Fprintln(out, "===============")
+	if inKubernetes() {
+		fmt.Fprintln(out, "(running in Kubernetes)")
+	}
 
 	var results []checkResult
 
@@ -49,8 +57,12 @@ func runDoctor(cmd *cobra.Command, configPath string) error {
 	cfg, cfgResult := checkConfig(configPath)
 	results = append(results, cfgResult)
 
-	// 2. Binaries
-	for _, bin := range []string{"go", "docker", "tmux", "claude"} {
+	// 2. Binaries — docker is not needed in K8s (containers are pods).
+	binaries := []string{"go", "docker", "tmux", "claude"}
+	if inKubernetes() {
+		binaries = []string{"go", "tmux", "claude"}
+	}
+	for _, bin := range binaries {
 		results = append(results, checkBinary(bin))
 	}
 
