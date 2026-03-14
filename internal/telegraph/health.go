@@ -17,12 +17,12 @@ type HealthChecker struct {
 }
 
 // NewHealthChecker creates a HealthChecker with the given poll interval.
-// The last poll time is initialized to now so the checker is not immediately stale.
+// The last poll time is initialized to the zero value so /readyz returns 503
+// until SetLastPoll is called after the first real watcher poll.
 func NewHealthChecker(pollInterval time.Duration) *HealthChecker {
 	hc := &HealthChecker{
 		pollInterval: pollInterval,
 	}
-	hc.lastPollNano.Store(time.Now().UnixNano())
 	return hc
 }
 
