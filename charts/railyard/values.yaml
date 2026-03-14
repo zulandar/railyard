@@ -78,6 +78,15 @@ pgvector:
   resources: {}
 
 # ---------------------------------------------------------------------------
+# CocoIndex (semantic code search)
+# ---------------------------------------------------------------------------
+cocoindex:
+  # -- Cron schedule for main index builds (default: every 5 minutes).
+  # The job clones/fetches the default branch, then runs incremental
+  # indexing. Set to "" to disable the CronJob.
+  indexSchedule: "*/5 * * * *"
+
+# ---------------------------------------------------------------------------
 # Agent authentication
 # ---------------------------------------------------------------------------
 # Configures credentials for the AI agent provider used by engines.

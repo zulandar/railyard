@@ -1,0 +1,102 @@
+{{- if or .Values.pgvector.internal .Values.pgvector.host }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "railyard.fullname" . }}-cocoindex-index
+  labels:
+    {{- include "railyard.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cocoindex-index
+spec:
+  schedule: {{ .Values.cocoindex.indexSchedule | default "*/5 * * * *" | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    metadata:
+      labels:
+        {{- include "railyard.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: cocoindex-index
+    spec:
+      template:
+        metadata:
+          labels:
+            {{- include "railyard.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: cocoindex-index
+        spec:
+          serviceAccountName: {{ include "railyard.serviceAccountName" . }}
+          {{- if .Values.imagePullSecret }}
+          imagePullSecrets:
+            - name: {{ .Values.imagePullSecret }}
+          {{- end }}
+          restartPolicy: OnFailure
+          initContainers:
+            - name: git-clone
+              image: {{ include "railyard.image" . }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              command: ["sh", "-c"]
+              args:
+                - |
+                  git config --global --add safe.directory /repo
+                  {{- if or .Values.auth.githubToken .Values.bull.githubToken .Values.auth.existingSecret }}
+                  if [ -n "${GITHUB_TOKEN:-}" ]; then
+                    git config --global credential.helper '!f() { echo "username=x-access-token"; echo "password=${GITHUB_TOKEN}"; }; f'
+                  fi
+                  {{- end }}
+                  if [ -d /repo/.git ]; then
+                    cd /repo && git fetch --all && git reset --hard origin/{{ .Values.git.defaultBranch }}
+                  else
+                    rm -rf /repo/* /repo/.[!.]* 2>/dev/null
+                    git clone --branch {{ .Values.git.defaultBranch }} {{ .Values.git.repo }} /repo
+                  fi
+              {{- if or .Values.auth.githubToken .Values.bull.githubToken .Values.auth.existingSecret }}
+              env:
+                - name: GITHUB_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "railyard.authSecretName" . }}
+                      key: GH_TOKEN
+                      optional: true
+              {{- end }}
+              volumeMounts:
+                - name: repo
+                  mountPath: /repo
+            - name: cocoindex-migrate
+              image: {{ include "railyard.image" . }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              command: ["python3"]
+              args:
+                - /opt/railyard/cocoindex/migrate.py
+                - --database-url
+                - "postgresql://{{ .Values.pgvector.username }}:$(PGVECTOR_PASSWORD)@{{ include "railyard.pgvectorHost" . }}:{{ .Values.pgvector.port }}/{{ .Values.pgvector.database }}?sslmode={{ .Values.pgvector.sslmode | default "prefer" }}"
+              env:
+                - name: PGVECTOR_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "railyard.fullname" . }}-db
+                      key: pgvector-password
+          containers:
+            - name: cocoindex-index
+              image: {{ include "railyard.image" . }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              command: ["ry"]
+              args: ["cocoindex", "index", "-c", "/etc/railyard/railyard.yaml", "--repo-path", "/repo"]
+              workingDir: /repo
+              env:
+                - name: PGVECTOR_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "railyard.fullname" . }}-db
+                      key: pgvector-password
+              volumeMounts:
+                - name: config
+                  mountPath: /etc/railyard
+                  readOnly: true
+                - name: repo
+                  mountPath: /repo
+          volumes:
+            - name: config
+              configMap:
+                name: {{ include "railyard.fullname" . }}-config
+            - name: repo
+              emptyDir: {}
+{{- end }}
