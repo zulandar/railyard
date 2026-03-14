@@ -90,6 +90,22 @@ spec:
             - name: repo
               mountPath: /repo
             {{- include "railyard.authVolumeMounts" . | nindent 12 }}
+          ports:
+            - name: health
+              containerPort: {{ .Values.telegraph.healthPort | default 8086 }}
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
           {{- with .Values.telegraph.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
