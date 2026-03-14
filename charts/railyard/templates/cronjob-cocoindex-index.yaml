@@ -82,9 +82,10 @@ spec:
               command: ["bash", "-c"]
               args:
                 - |
-                  # Make scripts dir writable so ensureCocoIndexScripts can sync.
-                  # This is a no-op once the Go fix (permission-denied skip) ships.
-                  chmod -R u+w /opt/railyard/cocoindex/ 2>/dev/null || true
+                  # Make script files writable so ensureCocoIndexScripts can sync.
+                  # Only touch .py/.sql files, skip the large .venv directory.
+                  find /opt/railyard/cocoindex -maxdepth 2 -name '*.py' -o -name '*.sql' | xargs chmod u+w 2>/dev/null || true
+                  chmod u+w /opt/railyard/cocoindex/migrations 2>/dev/null || true
                   source /opt/railyard/cocoindex/.venv/bin/activate
                   exec ry cocoindex index -c /etc/railyard/railyard.yaml --repo-path /repo
               securityContext:
