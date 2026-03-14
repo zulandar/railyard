@@ -431,14 +431,27 @@ func ensureDockerFiles(dockerDir string) error {
 
 // ensureCocoIndexScripts writes the embedded Python scripts and migration SQL
 // into scriptsDir (typically "cocoindex"). Always overwrites to keep scripts
-// in sync with the ry binary version.
+// in sync with the ry binary version. Skips writes when files are read-only
+// (e.g. baked into a Docker image).
 func ensureCocoIndexScripts(scriptsDir string) error {
 	for _, s := range embeddedScripts {
 		dest := filepath.Join(scriptsDir, s.path)
 		if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
+			// Directory may be read-only in a container image — skip if files exist.
+			if os.IsPermission(err) {
+				if _, statErr := os.Stat(dest); statErr == nil {
+					continue
+				}
+			}
 			return fmt.Errorf("create dir for %s: %w", s.path, err)
 		}
 		if err := os.WriteFile(dest, []byte(*s.content), 0644); err != nil {
+			// File may be read-only in a container image — skip if it already exists.
+			if os.IsPermission(err) {
+				if _, statErr := os.Stat(dest); statErr == nil {
+					continue
+				}
+			}
 			return fmt.Errorf("write %s: %w", s.path, err)
 		}
 	}
