@@ -87,9 +87,11 @@ spec:
                   find /opt/railyard/cocoindex -maxdepth 2 -name '*.py' -o -name '*.sql' | xargs chmod u+w 2>/dev/null || true
                   chmod u+w /opt/railyard/cocoindex/migrations 2>/dev/null || true
                   source /opt/railyard/cocoindex/.venv/bin/activate
-                  # Export resolved database URL for the CocoIndex library.
-                  export COCOINDEX_DATABASE_URL="postgresql://{{ .Values.pgvector.username }}:${PGVECTOR_PASSWORD}@{{ include "railyard.pgvectorHost" . }}:{{ .Values.pgvector.port }}/{{ .Values.pgvector.database }}?sslmode={{ .Values.pgvector.sslmode | default "prefer" }}"
-                  exec ry cocoindex index -c /etc/railyard/railyard.yaml --repo-path /repo
+                  # Resolve env var placeholders in the config before passing to ry.
+                  cp /etc/railyard/railyard.yaml /tmp/railyard.yaml
+                  sed -i "s|\${PGVECTOR_PASSWORD}|${PGVECTOR_PASSWORD}|g" /tmp/railyard.yaml
+                  sed -i "s|\${DB_PASSWORD}|${DB_PASSWORD:-}|g" /tmp/railyard.yaml
+                  exec ry cocoindex index -c /tmp/railyard.yaml --repo-path /repo
               securityContext:
                 runAsUser: 0
               workingDir: /repo
