@@ -66,13 +66,13 @@ jobs:
   helm-lint:
     name: Helm Lint
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - uses: actions/checkout@v6
 
       - name: Install Helm
         uses: azure/setup-helm@v4
-        env:
-          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
       - name: Helm lint (default values)
         run: helm lint charts/railyard

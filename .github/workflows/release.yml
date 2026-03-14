@@ -46,6 +46,8 @@ jobs:
     name: Helm Validate
     needs: [lint]
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - uses: actions/checkout@v6
 
@@ -63,8 +65,6 @@ jobs:
 
       - name: Install Helm
         uses: azure/setup-helm@v4
-        env:
-          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
       - name: Install kubeconform
         run: |
