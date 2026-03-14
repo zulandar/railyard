@@ -54,16 +54,15 @@ jobs:
           platforms: linux/amd64
           target: base-cocoindex
           cache-from: type=gha,scope=base-cocoindex
-          cache-to: type=gha,mode=max,scope=base-cocoindex
+          cache-to: type=gha,mode=min,scope=base-cocoindex
 
   build-providers:
-    name: Build ${{ matrix.provider }}${{ matrix.cocoindex == false && '-nococoindex' || '' }}
+    name: Build ${{ matrix.provider }}
     needs: build-base
     runs-on: ubuntu-latest
     strategy:
       matrix:
         provider: [claude, codex, gemini, opencode, copilot]
-        cocoindex: [true, false]
     steps:
       - uses: actions/checkout@v6
 
@@ -89,26 +88,15 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Determine image suffix
-        id: suffix
-        run: |
-          if [ "${{ matrix.cocoindex }}" = "true" ]; then
-            echo "tag_suffix=-${{ matrix.provider }}" >> "$GITHUB_OUTPUT"
-            echo "cocoindex_base=with-cocoindex" >> "$GITHUB_OUTPUT"
-          else
-            echo "tag_suffix=-${{ matrix.provider }}-nococoindex" >> "$GITHUB_OUTPUT"
-            echo "cocoindex_base=without-cocoindex" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Extract Docker metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository }}/engine
           tags: |
-            type=semver,pattern={{version}},suffix=${{ steps.suffix.outputs.tag_suffix }}
-            type=semver,pattern={{major}}.{{minor}},suffix=${{ steps.suffix.outputs.tag_suffix }}
-            type=sha,suffix=${{ steps.suffix.outputs.tag_suffix }}
+            type=semver,pattern={{version}},suffix=-${{ matrix.provider }}
+            type=semver,pattern={{major}}.{{minor}},suffix=-${{ matrix.provider }}
+            type=sha,suffix=-${{ matrix.provider }}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
@@ -120,13 +108,13 @@ jobs:
           target: final
           build-args: |
             AGENT_PROVIDER=${{ matrix.provider }}
-            COCOINDEX_BASE=${{ steps.suffix.outputs.cocoindex_base }}
+            COCOINDEX_BASE=with-cocoindex
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: |
             type=gha,scope=base-cocoindex
-            type=gha,scope=${{ matrix.provider }}-${{ matrix.cocoindex }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.provider }}-${{ matrix.cocoindex }}
+            type=gha,scope=${{ matrix.provider }}
+          cache-to: type=gha,mode=min,scope=${{ matrix.provider }}
 
   # Tag the claude variant as the default (latest + unqualified semver).
   tag-default:
