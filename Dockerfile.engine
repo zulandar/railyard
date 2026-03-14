@@ -62,6 +62,8 @@ RUN chmod +x /usr/local/bin/ry
 
 # ── CocoIndex (Python semantic-search scripts) ──────────────────────────────
 COPY cocoindex/ /opt/railyard/cocoindex/
+RUN python3 -m venv /opt/railyard/cocoindex/.venv \
+  && /opt/railyard/cocoindex/.venv/bin/pip install --no-cache-dir -r /opt/railyard/cocoindex/requirements.txt
 
 # ── Non-root user ───────────────────────────────────────────────────────────
 RUN useradd -m -s /bin/bash railyard
