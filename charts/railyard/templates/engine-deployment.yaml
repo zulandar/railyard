@@ -37,6 +37,10 @@ spec:
           args:
             - |
               git config --global --add safe.directory /repo
+              # Configure git credential helper so clone/fetch/push can authenticate.
+              if [ -n "${GITHUB_TOKEN:-}" ]; then
+                git config --global credential.helper '!f() { echo "username=x-access-token"; echo "password=${GITHUB_TOKEN}"; }; f'
+              fi
               if [ -d /repo/.git ]; then
                 cd /repo && git fetch --all
               else
@@ -46,13 +50,41 @@ spec:
               cd /repo &&
               git config user.name "railyard" &&
               git config user.email "railyard@railyard.dev"
+              # Write credential helper into repo-level config for the engine container.
+              if [ -n "${GITHUB_TOKEN:-}" ]; then
+                git config credential.helper '!f() { echo "username=x-access-token"; echo "password=${GITHUB_TOKEN}"; }; f'
+              fi
               cp /etc/railyard/railyard.yaml /repo/railyard.yaml 2>/dev/null || true
+          {{- if or $.Values.auth.githubToken $.Values.bull.githubToken $.Values.auth.existingSecret }}
+          env:
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "railyard.authSecretName" $ }}
+                  key: GH_TOKEN
+          {{- end }}
           volumeMounts:
             - name: config
               mountPath: /etc/railyard
               readOnly: true
             - name: repo
               mountPath: /repo
+        {{- if or $.Values.pgvector.internal $.Values.pgvector.host }}
+        - name: cocoindex-migrate
+          image: {{ include "railyard.image" $ }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          command: ["python3"]
+          args:
+            - /opt/railyard/cocoindex/migrate.py
+            - --database-url
+            - "postgresql://{{ $.Values.pgvector.username }}:$(PGVECTOR_PASSWORD)@{{ include "railyard.pgvectorHost" $ }}:{{ $.Values.pgvector.port }}/{{ $.Values.pgvector.database }}?sslmode={{ $.Values.pgvector.sslmode | default "prefer" }}"
+          env:
+            - name: PGVECTOR_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $fullname }}-db
+                  key: pgvector-password
+        {{- end }}
         {{- include "railyard.authInitContainers" $ | nindent 8 }}
       containers:
         - name: engine

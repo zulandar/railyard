@@ -25,6 +25,21 @@ spec:
             - name: {{ .Values.imagePullSecret }}
           {{- end }}
           restartPolicy: OnFailure
+          initContainers:
+            - name: cocoindex-migrate
+              image: {{ include "railyard.image" . }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              command: ["python3"]
+              args:
+                - /opt/railyard/cocoindex/migrate.py
+                - --database-url
+                - "postgresql://{{ .Values.pgvector.username }}:$(PGVECTOR_PASSWORD)@{{ include "railyard.pgvectorHost" . }}:{{ .Values.pgvector.port }}/{{ .Values.pgvector.database }}?sslmode={{ .Values.pgvector.sslmode | default "prefer" }}"
+              env:
+                - name: PGVECTOR_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "railyard.fullname" . }}-db
+                      key: pgvector-password
           containers:
             - name: overlay-gc
               image: {{ include "railyard.image" . }}
