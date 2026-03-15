@@ -358,19 +358,50 @@ func buildTrackBreakdown(db *gorm.DB, since, until time.Time) []TrackDigest {
 	return breakdown
 }
 
+// formatWithDelta formats an integer count with a delta indicator showing
+// change from a previous period (e.g. "12 (+4)", "8 (-4)", "5 (=)").
+func formatWithDelta(current, previous int) string {
+	delta := current - previous
+	switch {
+	case delta > 0:
+		return fmt.Sprintf("%d (+%d)", current, delta)
+	case delta < 0:
+		return fmt.Sprintf("%d (%d)", current, delta)
+	default:
+		return fmt.Sprintf("%d (=)", current)
+	}
+}
+
+// formatRateWithDelta formats a percentage rate with a delta indicator showing
+// change from a previous period (e.g. "90% (+15%)", "75% (-15%)", "88% (=)").
+// Deltas within ±0.5 are treated as equal.
+func formatRateWithDelta(current, previous float64) string {
+	delta := current - previous
+	switch {
+	case delta > 0.5:
+		return fmt.Sprintf("%.0f%% (+%.0f%%)", current, delta)
+	case delta < -0.5:
+		return fmt.Sprintf("%.0f%% (%.0f%%)", current, delta)
+	default:
+		return fmt.Sprintf("%.0f%% (=)", current)
+	}
+}
+
 // FormatDaily formats a daily digest report as a FormattedEvent.
 func FormatDaily(report *DailyReport) FormattedEvent {
 	var bodyLines []string
 	bodyLines = append(bodyLines, fmt.Sprintf("**Period**: %s – %s",
 		report.PeriodStart.Format("Jan 2 15:04"),
 		report.PeriodEnd.Format("Jan 2 15:04")))
-	bodyLines = append(bodyLines, fmt.Sprintf("**Cars**: %d created, %d completed, %d merged",
-		report.CarsCreated, report.CarsCompleted, report.CarsMerged))
+	bodyLines = append(bodyLines, fmt.Sprintf("**Cars**: %s created, %s completed, %s merged",
+		formatWithDelta(report.CarsCreated, report.PrevCarsCreated),
+		formatWithDelta(report.CarsCompleted, report.PrevCarsCompleted),
+		formatWithDelta(report.CarsMerged, report.PrevCarsMerged)))
 	if report.TotalTokens > 0 {
 		bodyLines = append(bodyLines, fmt.Sprintf("**Tokens**: %s", formatTokenCount(report.TotalTokens)))
 	}
 	if report.StallCount > 0 {
-		bodyLines = append(bodyLines, fmt.Sprintf("**Stalls**: %d", report.StallCount))
+		bodyLines = append(bodyLines, fmt.Sprintf("**Stalls**: %s", formatWithDelta(report.StallCount, report.PrevStallCount)))
 	}
 	bodyLines = append(bodyLines, fmt.Sprintf("**Engines**: %d registered", report.EngineCount))
 
@@ -388,16 +419,16 @@ func FormatDaily(report *DailyReport) FormattedEvent {
 	}
 
 	fields := []Field{
-		{Name: "Created", Value: fmt.Sprintf("%d", report.CarsCreated), Short: true},
-		{Name: "Completed", Value: fmt.Sprintf("%d", report.CarsCompleted), Short: true},
-		{Name: "Merged", Value: fmt.Sprintf("%d", report.CarsMerged), Short: true},
+		{Name: "Created", Value: formatWithDelta(report.CarsCreated, report.PrevCarsCreated), Short: true},
+		{Name: "Completed", Value: formatWithDelta(report.CarsCompleted, report.PrevCarsCompleted), Short: true},
+		{Name: "Merged", Value: formatWithDelta(report.CarsMerged, report.PrevCarsMerged), Short: true},
 		{Name: "Engines", Value: fmt.Sprintf("%d", report.EngineCount), Short: true},
 	}
 	if report.TotalTokens > 0 {
 		fields = append(fields, Field{Name: "Tokens", Value: formatTokenCount(report.TotalTokens), Short: true})
 	}
 	if report.StallCount > 0 {
-		fields = append(fields, Field{Name: "Stalls", Value: fmt.Sprintf("%d", report.StallCount), Short: true})
+		fields = append(fields, Field{Name: "Stalls", Value: formatWithDelta(report.StallCount, report.PrevStallCount), Short: true})
 	}
 
 	return FormattedEvent{
@@ -415,17 +446,19 @@ func FormatWeekly(report *WeeklyReport) FormattedEvent {
 	bodyLines = append(bodyLines, fmt.Sprintf("**Period**: %s – %s",
 		report.PeriodStart.Format("Jan 2"),
 		report.PeriodEnd.Format("Jan 2")))
-	bodyLines = append(bodyLines, fmt.Sprintf("**Cars Closed**: %d (%d merged)",
-		report.CarsClosed, report.CarsMerged))
+	bodyLines = append(bodyLines, fmt.Sprintf("**Cars Closed**: %s (%s merged)",
+		formatWithDelta(report.CarsClosed, report.PrevCarsClosed),
+		formatWithDelta(report.CarsMerged, report.PrevCarsMerged)))
 	if report.MergeAttempts > 0 {
-		bodyLines = append(bodyLines, fmt.Sprintf("**Merge Success Rate**: %.0f%% (%d/%d)",
-			report.MergeSuccessRate, report.CarsMerged, report.MergeAttempts))
+		bodyLines = append(bodyLines, fmt.Sprintf("**Merge Success Rate**: %s (%d/%d)",
+			formatRateWithDelta(report.MergeSuccessRate, report.PrevMergeSuccessRate),
+			report.CarsMerged, report.MergeAttempts))
 	}
 	if report.TotalTokens > 0 {
 		bodyLines = append(bodyLines, fmt.Sprintf("**Tokens**: %s", formatTokenCount(report.TotalTokens)))
 	}
 	if report.StallCount > 0 {
-		bodyLines = append(bodyLines, fmt.Sprintf("**Stalls**: %d", report.StallCount))
+		bodyLines = append(bodyLines, fmt.Sprintf("**Stalls**: %s", formatWithDelta(report.StallCount, report.PrevStallCount)))
 	}
 
 	// Track breakdown.
@@ -442,17 +475,17 @@ func FormatWeekly(report *WeeklyReport) FormattedEvent {
 	}
 
 	fields := []Field{
-		{Name: "Closed", Value: fmt.Sprintf("%d", report.CarsClosed), Short: true},
-		{Name: "Merged", Value: fmt.Sprintf("%d", report.CarsMerged), Short: true},
+		{Name: "Closed", Value: formatWithDelta(report.CarsClosed, report.PrevCarsClosed), Short: true},
+		{Name: "Merged", Value: formatWithDelta(report.CarsMerged, report.PrevCarsMerged), Short: true},
 	}
 	if report.MergeAttempts > 0 {
-		fields = append(fields, Field{Name: "Merge Rate", Value: fmt.Sprintf("%.0f%%", report.MergeSuccessRate), Short: true})
+		fields = append(fields, Field{Name: "Merge Rate", Value: formatRateWithDelta(report.MergeSuccessRate, report.PrevMergeSuccessRate), Short: true})
 	}
 	if report.TotalTokens > 0 {
 		fields = append(fields, Field{Name: "Tokens", Value: formatTokenCount(report.TotalTokens), Short: true})
 	}
 	if report.StallCount > 0 {
-		fields = append(fields, Field{Name: "Stalls", Value: fmt.Sprintf("%d", report.StallCount), Short: true})
+		fields = append(fields, Field{Name: "Stalls", Value: formatWithDelta(report.StallCount, report.PrevStallCount), Short: true})
 	}
 
 	return FormattedEvent{
