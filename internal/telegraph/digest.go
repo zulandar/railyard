@@ -26,6 +26,13 @@ type DailyReport struct {
 	TotalTokens    int64
 	EngineCount    int
 	TrackBreakdown []TrackDigest
+
+	// Previous-period metrics (prior 24h window).
+	PrevCarsCreated   int
+	PrevCarsCompleted int
+	PrevCarsMerged    int
+	PrevStallCount    int
+	PrevTotalTokens   int64
 }
 
 // WeeklyReport holds computed metrics for a 7-day period.
@@ -39,6 +46,13 @@ type WeeklyReport struct {
 	TotalTokens      int64
 	StallCount       int
 	TrackBreakdown   []TrackDigest
+
+	// Previous-period metrics (prior 7-day window).
+	PrevCarsClosed       int
+	PrevCarsMerged       int
+	PrevStallCount       int
+	PrevMergeSuccessRate float64
+	PrevTotalTokens      int64
 }
 
 // TrackDigest holds per-track metrics for digest reports.
@@ -157,6 +171,41 @@ func buildDailyReport(db *gorm.DB, since, until time.Time) (*DailyReport, error)
 	// Per-track breakdown.
 	report.TrackBreakdown = buildTrackBreakdown(db, since, until)
 
+	// Previous-period metrics: prior 24h window [since-24h, since].
+	prevSince := since.Add(-24 * time.Hour)
+	prevUntil := since
+
+	var prevCompletedCount int64
+	db.Model(&models.Car{}).
+		Where("status = ? AND completed_at >= ? AND completed_at < ?", "done", prevSince, prevUntil).
+		Count(&prevCompletedCount)
+	report.PrevCarsCompleted = int(prevCompletedCount)
+
+	var prevMergedCount int64
+	db.Model(&models.Car{}).
+		Where("status = ? AND completed_at >= ? AND completed_at < ?", "merged", prevSince, prevUntil).
+		Count(&prevMergedCount)
+	report.PrevCarsMerged = int(prevMergedCount)
+
+	var prevCreatedCount int64
+	db.Model(&models.Car{}).
+		Where("created_at >= ? AND created_at < ?", prevSince, prevUntil).
+		Count(&prevCreatedCount)
+	report.PrevCarsCreated = int(prevCreatedCount)
+
+	var prevStallCount int64
+	db.Model(&models.Engine{}).
+		Where("status = ? AND last_activity >= ? AND last_activity < ?", "stalled", prevSince, prevUntil).
+		Count(&prevStallCount)
+	report.PrevStallCount = int(prevStallCount)
+
+	var prevTokenSum struct{ Total int64 }
+	db.Model(&models.AgentLog{}).
+		Where("created_at >= ? AND created_at < ?", prevSince, prevUntil).
+		Select("COALESCE(SUM(token_count), 0) as total").
+		Scan(&prevTokenSum)
+	report.PrevTotalTokens = prevTokenSum.Total
+
 	return report, nil
 }
 
@@ -209,6 +258,45 @@ func buildWeeklyReport(db *gorm.DB, since, until time.Time) (*WeeklyReport, erro
 
 	// Per-track breakdown.
 	report.TrackBreakdown = buildTrackBreakdown(db, since, until)
+
+	// Previous-period metrics: prior 7-day window [since-7d, since].
+	prevSince := since.Add(-7 * 24 * time.Hour)
+	prevUntil := since
+
+	var prevClosedCount int64
+	db.Model(&models.Car{}).
+		Where("status IN ? AND completed_at >= ? AND completed_at < ?",
+			[]string{"done", "merged", "cancelled"}, prevSince, prevUntil).
+		Count(&prevClosedCount)
+	report.PrevCarsClosed = int(prevClosedCount)
+
+	var prevMergedCount int64
+	db.Model(&models.Car{}).
+		Where("status = ? AND completed_at >= ? AND completed_at < ?", "merged", prevSince, prevUntil).
+		Count(&prevMergedCount)
+	report.PrevCarsMerged = int(prevMergedCount)
+
+	var prevMergeFailedCount int64
+	db.Model(&models.Car{}).
+		Where("status = ? AND updated_at >= ? AND updated_at < ?", "merge-failed", prevSince, prevUntil).
+		Count(&prevMergeFailedCount)
+	prevMergeAttempts := int(prevMergedCount + prevMergeFailedCount)
+	if prevMergeAttempts > 0 {
+		report.PrevMergeSuccessRate = float64(report.PrevCarsMerged) / float64(prevMergeAttempts) * 100
+	}
+
+	var prevStallCount int64
+	db.Model(&models.Engine{}).
+		Where("status = ? AND last_activity >= ? AND last_activity < ?", "stalled", prevSince, prevUntil).
+		Count(&prevStallCount)
+	report.PrevStallCount = int(prevStallCount)
+
+	var prevTokenSum struct{ Total int64 }
+	db.Model(&models.AgentLog{}).
+		Where("created_at >= ? AND created_at < ?", prevSince, prevUntil).
+		Select("COALESCE(SUM(token_count), 0) as total").
+		Scan(&prevTokenSum)
+	report.PrevTotalTokens = prevTokenSum.Total
 
 	return report, nil
 }
