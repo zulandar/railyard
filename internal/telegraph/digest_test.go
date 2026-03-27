@@ -437,8 +437,8 @@ func TestFormatDaily_ContainsExpectedFields(t *testing.T) {
 		t.Errorf("color = %q, want %q", f.Color, ColorInfo)
 	}
 
-	// Body should mention key metrics.
-	for _, want := range []string{"5 created", "3 completed", "2 merged", "1.5M", "1", "4 registered", "backend"} {
+	// Body should mention key metrics (Prev* are zero so deltas show positive).
+	for _, want := range []string{"5 (+5)", "3 (+3)", "2 (+2)", "1.5M", "4 registered", "backend"} {
 		if !strings.Contains(f.Body, want) {
 			t.Errorf("body missing %q:\n%s", want, f.Body)
 		}
@@ -511,7 +511,8 @@ func TestFormatWeekly_ContainsExpectedFields(t *testing.T) {
 		t.Errorf("severity = %q, want 'info'", f.Severity)
 	}
 
-	for _, want := range []string{"10", "8 merged", "89%", "500.0K", "2", "backend", "frontend"} {
+	// Prev* are zero so deltas show positive; MergeSuccessRate=88.9%, PrevMergeSuccessRate=0 → "+89%".
+	for _, want := range []string{"10 (+10)", "8 (+8)", "89%", "500.0K", "2 (+2)", "backend", "frontend"} {
 		if !strings.Contains(f.Body, want) {
 			t.Errorf("body missing %q:\n%s", want, f.Body)
 		}
@@ -548,6 +549,194 @@ func TestFormatWeekly_NoStallsOrTokens(t *testing.T) {
 	}
 	if strings.Contains(f.Body, "Tokens") {
 		t.Error("body should not mention tokens when 0")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// formatWithDelta
+// ---------------------------------------------------------------------------
+
+func TestFormatWithDelta(t *testing.T) {
+	tests := []struct {
+		current  int
+		previous int
+		want     string
+	}{
+		{12, 8, "12 (+4)"},
+		{8, 12, "8 (-4)"},
+		{5, 5, "5 (=)"},
+		{0, 0, "0 (=)"},
+		{1, 0, "1 (+1)"},
+		{0, 3, "0 (-3)"},
+	}
+	for _, tt := range tests {
+		got := formatWithDelta(tt.current, tt.previous)
+		if got != tt.want {
+			t.Errorf("formatWithDelta(%d, %d) = %q, want %q", tt.current, tt.previous, got, tt.want)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// formatRateWithDelta
+// ---------------------------------------------------------------------------
+
+func TestFormatRateWithDelta(t *testing.T) {
+	tests := []struct {
+		current  float64
+		previous float64
+		want     string
+	}{
+		{90.0, 75.0, "90% (+15%)"},
+		{75.0, 90.0, "75% (-15%)"},
+		{88.0, 88.3, "88% (=)"},   // within ±0.5
+		{88.0, 87.6, "88% (=)"},   // exactly 0.4 delta — within ±0.5
+		{88.0, 87.4, "88% (+1%)"}, // 0.6 delta — outside ±0.5
+		{100.0, 0.0, "100% (+100%)"},
+	}
+	for _, tt := range tests {
+		got := formatRateWithDelta(tt.current, tt.previous)
+		if got != tt.want {
+			t.Errorf("formatRateWithDelta(%.1f, %.1f) = %q, want %q", tt.current, tt.previous, got, tt.want)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestBuildDailyReport_PreviousPeriod
+// ---------------------------------------------------------------------------
+
+func TestBuildDailyReport_PreviousPeriod(t *testing.T) {
+	db := openDigestTestDB(t)
+	now := time.Now()
+	since := now.Add(-24 * time.Hour)
+
+	// Current period activity (within last 24h).
+	curMid := now.Add(-6 * time.Hour)
+	db.Create(&models.Car{ID: "cur-c1", Title: "Done1", Status: "done", Track: "backend",
+		CompletedAt: ptr(curMid), CreatedAt: curMid.Add(-time.Hour)})
+	db.Create(&models.Car{ID: "cur-c2", Title: "Done2", Status: "done", Track: "backend",
+		CompletedAt: ptr(curMid.Add(time.Hour)), CreatedAt: curMid})
+	db.Create(&models.Car{ID: "cur-m1", Title: "Merged1", Status: "merged", Track: "backend",
+		CompletedAt: ptr(curMid), CreatedAt: curMid.Add(-2 * time.Hour)})
+
+	// Prior period activity (25h–49h ago).
+	prevMid := now.Add(-37 * time.Hour)
+	db.Create(&models.Car{ID: "prev-c1", Title: "PrevDone", Status: "done", Track: "backend",
+		CompletedAt: ptr(prevMid), CreatedAt: prevMid.Add(-time.Hour)})
+	db.Create(&models.Engine{ID: "prev-e1", Status: "stalled", Track: "backend",
+		LastActivity: prevMid})
+
+	report, err := buildDailyReport(db, since, now)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Current period counts.
+	if report.CarsCompleted != 2 {
+		t.Errorf("CarsCompleted = %d, want 2", report.CarsCompleted)
+	}
+	if report.CarsMerged != 1 {
+		t.Errorf("CarsMerged = %d, want 1", report.CarsMerged)
+	}
+
+	// Previous period counts.
+	if report.PrevCarsCompleted != 1 {
+		t.Errorf("PrevCarsCompleted = %d, want 1", report.PrevCarsCompleted)
+	}
+	if report.PrevStallCount != 1 {
+		t.Errorf("PrevStallCount = %d, want 1", report.PrevStallCount)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestFormatDaily_WithDeltas
+// ---------------------------------------------------------------------------
+
+func TestFormatDaily_WithDeltas(t *testing.T) {
+	report := &DailyReport{
+		PeriodStart:       time.Date(2025, 1, 15, 0, 0, 0, 0, time.UTC),
+		PeriodEnd:         time.Date(2025, 1, 16, 0, 0, 0, 0, time.UTC),
+		CarsCreated:       10,
+		CarsCompleted:     6,
+		CarsMerged:        4,
+		StallCount:        2,
+		EngineCount:       3,
+		PrevCarsCreated:   6,
+		PrevCarsCompleted: 6,
+		PrevCarsMerged:    8,
+		PrevStallCount:    2,
+	}
+
+	f := FormatDaily(report)
+
+	// Created: +4 delta.
+	if !strings.Contains(f.Body, "+4") {
+		t.Errorf("body missing '+4' for created delta:\n%s", f.Body)
+	}
+	// Completed: equal.
+	if !strings.Contains(f.Body, "6 (=)") {
+		t.Errorf("body missing '6 (=)' for completed delta:\n%s", f.Body)
+	}
+	// Merged: negative delta.
+	if !strings.Contains(f.Body, "4 (-4)") {
+		t.Errorf("body missing '4 (-4)' for merged delta:\n%s", f.Body)
+	}
+	// Stalls: equal.
+	if !strings.Contains(f.Body, "2 (=)") {
+		t.Errorf("body missing '2 (=)' for stall delta:\n%s", f.Body)
+	}
+
+	// Verify fields use formatWithDelta too.
+	fieldVals := map[string]string{}
+	for _, fld := range f.Fields {
+		fieldVals[fld.Name] = fld.Value
+	}
+	if fieldVals["Created"] != "10 (+4)" {
+		t.Errorf("Created field = %q, want '10 (+4)'", fieldVals["Created"])
+	}
+	if fieldVals["Completed"] != "6 (=)" {
+		t.Errorf("Completed field = %q, want '6 (=)'", fieldVals["Completed"])
+	}
+	if fieldVals["Merged"] != "4 (-4)" {
+		t.Errorf("Merged field = %q, want '4 (-4)'", fieldVals["Merged"])
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestFormatDaily_FirstEver
+// ---------------------------------------------------------------------------
+
+func TestFormatDaily_FirstEver(t *testing.T) {
+	// All Prev* == 0, current > 0 → positive deltas shown.
+	report := &DailyReport{
+		PeriodStart:   time.Date(2025, 1, 15, 0, 0, 0, 0, time.UTC),
+		PeriodEnd:     time.Date(2025, 1, 16, 0, 0, 0, 0, time.UTC),
+		CarsCreated:   12,
+		CarsCompleted: 8,
+		CarsMerged:    5,
+		EngineCount:   2,
+		// Prev* default to zero.
+	}
+
+	f := FormatDaily(report)
+
+	if !strings.Contains(f.Body, "12 (+12)") {
+		t.Errorf("body missing '12 (+12)' for first-ever created:\n%s", f.Body)
+	}
+	if !strings.Contains(f.Body, "8 (+8)") {
+		t.Errorf("body missing '8 (+8)' for first-ever completed:\n%s", f.Body)
+	}
+	if !strings.Contains(f.Body, "5 (+5)") {
+		t.Errorf("body missing '5 (+5)' for first-ever merged:\n%s", f.Body)
+	}
+
+	fieldVals := map[string]string{}
+	for _, fld := range f.Fields {
+		fieldVals[fld.Name] = fld.Value
+	}
+	if fieldVals["Created"] != "12 (+12)" {
+		t.Errorf("Created field = %q, want '12 (+12)'", fieldVals["Created"])
 	}
 }
 
