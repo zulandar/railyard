@@ -93,6 +93,7 @@ type Watcher struct {
 	statusProvider StatusProvider
 	pollInterval   time.Duration
 	pulseInterval  time.Duration
+	onPoll         func() // optional; called after each successful poll
 
 	mu            sync.Mutex
 	snapshot      map[string]carSnapshot // carID -> last-known state
@@ -108,6 +109,7 @@ type WatcherOpts struct {
 	StatusProvider StatusProvider // defaults to orchestration.Status()
 	PollInterval   time.Duration  // defaults to DefaultPollInterval
 	PulseInterval  time.Duration  // defaults to DefaultPulseInterval
+	OnPoll         func()         // optional; called after each successful poll
 }
 
 // NewWatcher creates a Watcher.
@@ -132,6 +134,7 @@ func NewWatcher(opts WatcherOpts) (*Watcher, error) {
 		statusProvider: sp,
 		pollInterval:   poll,
 		pulseInterval:  pulse,
+		onPoll:         opts.OnPoll,
 		snapshot:       make(map[string]carSnapshot),
 		stallSnapshot:  make(map[string]bool),
 	}, nil
@@ -195,6 +198,9 @@ func (w *Watcher) Run(ctx context.Context) <-chan DetectedEvent {
 					continue
 				}
 				emit(events)
+				if w.onPoll != nil {
+					w.onPoll()
+				}
 			case <-pulseTicker.C:
 				if pulse, err := w.BuildPulse(); err == nil && pulse != nil {
 					select {

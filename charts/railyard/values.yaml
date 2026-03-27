@@ -258,6 +258,8 @@ telegraph:
   platform: slack   # slack or discord
   channel: ""
   processTimeoutSec: 900   # max seconds a dispatch subprocess may run
+  # -- Port for /healthz and /readyz probes (must match telegraph.health_port in config).
+  healthPort: 8086
   slack:
     botToken: ""    # or reference a secret
     appToken: ""
