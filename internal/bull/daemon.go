@@ -172,6 +172,9 @@ func RunDaemon(ctx context.Context, deps interface {
 						continue
 					}
 					fmt.Fprintf(out, "Phase 4: Issue #%d → %s\n", num, outcome.Action)
+					if outcome.RawResponse != "" {
+						log.Printf("bull: triage issue #%d raw response: %s", num, outcome.RawResponse)
+					}
 				} else {
 					fmt.Fprintf(out, "Phase 4: No AI configured, skipping triage for #%d\n", num)
 				}

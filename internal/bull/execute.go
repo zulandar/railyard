@@ -62,6 +62,7 @@ type TriageOutcome struct {
 	FilterReason   string // only when Action="filtered"
 	Classification string // bug, task, question, reject
 	CarID          string // only when Action="created_car"
+	RawResponse    string // full raw AI response string
 }
 
 // ExecuteTriage runs the full AI triage pipeline for a single GitHub issue.
@@ -102,17 +103,17 @@ func ExecuteTriage(ctx context.Context, issue *github.Issue, opts TriageOpts) (*
 	// 5. Act on classification.
 	switch result.Classification {
 	case "bug", "task":
-		return handleCreateCar(ctx, issue, opts, result)
+		return handleCreateCar(ctx, issue, opts, result, response)
 	case "question":
-		return handleQuestion(ctx, issue, opts, result)
+		return handleQuestion(ctx, issue, opts, result, response)
 	case "reject":
-		return handleReject(ctx, issue, opts, result)
+		return handleReject(ctx, issue, opts, result, response)
 	default:
 		return nil, fmt.Errorf("bull: unknown classification %q", result.Classification)
 	}
 }
 
-func handleCreateCar(ctx context.Context, issue *github.Issue, opts TriageOpts, result *TriageResult) (*TriageOutcome, error) {
+func handleCreateCar(ctx context.Context, issue *github.Issue, opts TriageOpts, result *TriageResult, rawResponse string) (*TriageOutcome, error) {
 	number := issue.GetNumber()
 
 	carOpts := CarCreateOpts{
@@ -138,6 +139,7 @@ func handleCreateCar(ctx context.Context, issue *github.Issue, opts TriageOpts, 
 		CarID:           carID,
 		LastKnownStatus: "draft",
 		TriageSummary:   result.Description,
+		TriageResponse:  rawResponse,
 		TriageMode:      opts.Config.TriageMode,
 	}
 	if err := opts.Store.RecordTriagedIssue(ctx, bullIssue); err != nil {
@@ -152,10 +154,11 @@ func handleCreateCar(ctx context.Context, issue *github.Issue, opts TriageOpts, 
 		Action:         "created_car",
 		Classification: result.Classification,
 		CarID:          carID,
+		RawResponse:    rawResponse,
 	}, nil
 }
 
-func handleQuestion(ctx context.Context, issue *github.Issue, opts TriageOpts, result *TriageResult) (*TriageOutcome, error) {
+func handleQuestion(ctx context.Context, issue *github.Issue, opts TriageOpts, result *TriageResult, rawResponse string) (*TriageOutcome, error) {
 	number := issue.GetNumber()
 
 	if opts.Config.Comments.Enabled {
@@ -171,10 +174,11 @@ func handleQuestion(ctx context.Context, issue *github.Issue, opts TriageOpts, r
 	return &TriageOutcome{
 		Action:         "answered",
 		Classification: "question",
+		RawResponse:    rawResponse,
 	}, nil
 }
 
-func handleReject(ctx context.Context, issue *github.Issue, opts TriageOpts, result *TriageResult) (*TriageOutcome, error) {
+func handleReject(ctx context.Context, issue *github.Issue, opts TriageOpts, result *TriageResult, rawResponse string) (*TriageOutcome, error) {
 	number := issue.GetNumber()
 
 	if opts.Config.Comments.Enabled {
@@ -198,6 +202,7 @@ func handleReject(ctx context.Context, issue *github.Issue, opts TriageOpts, res
 	return &TriageOutcome{
 		Action:         "rejected",
 		Classification: "reject",
+		RawResponse:    rawResponse,
 	}, nil
 }
 

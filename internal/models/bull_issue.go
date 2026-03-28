@@ -9,6 +9,7 @@ type BullIssue struct {
 	CarID           string `gorm:"size:32;index"`
 	LastKnownStatus string `gorm:"size:32"`
 	TriageSummary   string `gorm:"type:text"`
+	TriageResponse  string `gorm:"type:text"`
 	TriageMode      string `gorm:"size:16"`
 	LastSyncedAt    *time.Time
 	CreatedAt       time.Time
