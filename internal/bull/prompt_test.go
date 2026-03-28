@@ -14,7 +14,7 @@ func TestBuildTriagePrompt_StandardMode(t *testing.T) {
 		Labels: []string{"bug", "frontend"},
 		Author: "alice",
 	}
-	tracks := []string{"backend", "frontend"}
+	tracks := []TrackInfo{{Name: "backend"}, {Name: "frontend"}}
 
 	prompt := BuildTriagePrompt(issue, "standard", tracks, "")
 
@@ -58,7 +58,7 @@ func TestBuildTriagePrompt_FullMode(t *testing.T) {
 		Labels: []string{"feature"},
 		Author: "bob",
 	}
-	tracks := []string{"backend", "frontend"}
+	tracks := []TrackInfo{{Name: "backend"}, {Name: "frontend"}}
 
 	prompt := BuildTriagePrompt(issue, "full", tracks, "")
 
@@ -78,7 +78,7 @@ func TestBuildTriagePrompt_IncludesIssueContext(t *testing.T) {
 		Labels: []string{"refactor", "backend"},
 		Author: "charlie",
 	}
-	tracks := []string{"backend"}
+	tracks := []TrackInfo{{Name: "backend"}}
 
 	prompt := BuildTriagePrompt(issue, "standard", tracks, "")
 
@@ -106,13 +106,13 @@ func TestBuildTriagePrompt_IncludesTracksList(t *testing.T) {
 		Body:   "Test body",
 		Author: "dev",
 	}
-	tracks := []string{"backend", "frontend", "infra"}
+	tracks := []TrackInfo{{Name: "backend"}, {Name: "frontend"}, {Name: "infra"}}
 
 	prompt := BuildTriagePrompt(issue, "standard", tracks, "")
 
 	for _, track := range tracks {
-		if !strings.Contains(prompt, track) {
-			t.Errorf("prompt should include track %q", track)
+		if !strings.Contains(prompt, track.Name) {
+			t.Errorf("prompt should include track %q", track.Name)
 		}
 	}
 }
@@ -126,7 +126,7 @@ func TestBuildTriagePrompt_IncludesCodeContext(t *testing.T) {
 	}
 	codeCtx := "func HandleLogin(w http.ResponseWriter, r *http.Request) { ... }"
 
-	prompt := BuildTriagePrompt(issue, "standard", []string{"backend"}, codeCtx)
+	prompt := BuildTriagePrompt(issue, "standard", []TrackInfo{{Name: "backend"}}, codeCtx)
 
 	if !strings.Contains(prompt, codeCtx) {
 		t.Error("prompt should include code context when provided")
@@ -141,11 +141,71 @@ func TestBuildTriagePrompt_OmitsCodeContextWhenEmpty(t *testing.T) {
 		Author: "dev",
 	}
 
-	prompt := BuildTriagePrompt(issue, "standard", []string{"backend"}, "")
+	prompt := BuildTriagePrompt(issue, "standard", []TrackInfo{{Name: "backend"}}, "")
 
 	// Should not contain a code context section header when code context is empty
 	if strings.Contains(prompt, "Code Context") || strings.Contains(prompt, "Relevant Code") {
 		t.Error("prompt should omit code context section when code context is empty")
+	}
+}
+
+func TestBuildTriagePrompt_IncludesTrackMetadata(t *testing.T) {
+	issue := IssueContext{
+		Number: 20,
+		Title:  "Fix API",
+		Body:   "The API is broken",
+		Author: "dev",
+	}
+	tracks := []TrackInfo{
+		{
+			Name:         "backend",
+			Language:     "go",
+			FilePatterns: []string{"*.go"},
+			Conventions:  []string{"use-interfaces"},
+		},
+	}
+
+	prompt := BuildTriagePrompt(issue, "standard", tracks, "")
+
+	if !strings.Contains(prompt, "### backend") {
+		t.Error("prompt should include '### backend' header")
+	}
+	if !strings.Contains(prompt, "Language") || !strings.Contains(prompt, "go") {
+		t.Error("prompt should include Language metadata")
+	}
+	if !strings.Contains(prompt, "*.go") {
+		t.Error("prompt should include file pattern '*.go'")
+	}
+	if !strings.Contains(prompt, "use-interfaces") {
+		t.Error("prompt should include convention key")
+	}
+}
+
+func TestBuildTriagePrompt_TrackWithNoMetadata(t *testing.T) {
+	issue := IssueContext{
+		Number: 21,
+		Title:  "Fix something",
+		Body:   "Something is broken",
+		Author: "dev",
+	}
+	tracks := []TrackInfo{
+		{Name: "backend"},
+	}
+
+	prompt := BuildTriagePrompt(issue, "standard", tracks, "")
+
+	if !strings.Contains(prompt, "backend") {
+		t.Error("prompt should include track name")
+	}
+	// Should not contain empty bullet lines for Language, FilePatterns, or Conventions
+	if strings.Contains(prompt, "**Language**:") {
+		t.Error("prompt should not include Language bullet when Language is empty")
+	}
+	if strings.Contains(prompt, "**File patterns**:") {
+		t.Error("prompt should not include File patterns bullet when FilePatterns is empty")
+	}
+	if strings.Contains(prompt, "**Conventions**:") {
+		t.Error("prompt should not include Conventions bullet when Conventions is empty")
 	}
 }
 

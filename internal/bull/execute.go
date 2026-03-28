@@ -49,7 +49,7 @@ type TriageOpts struct {
 	AI           TriageAI
 	Store        TriageStore
 	Config       config.BullConfig
-	Tracks       []string
+	Tracks       []TrackInfo
 	IgnoreLabel  string
 	Tracked      []ExistingIssue
 	CodeContext  string

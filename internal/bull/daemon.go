@@ -45,7 +45,7 @@ type DaemonStore interface {
 // DaemonOpts bundles all configuration for RunDaemon.
 type DaemonOpts struct {
 	Config         config.BullConfig
-	Tracks         []string
+	Tracks         []TrackInfo
 	BranchPrefix   string
 	PollInterval   time.Duration
 	Out            io.Writer

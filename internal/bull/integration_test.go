@@ -44,7 +44,7 @@ func integrationTriageOpts(
 		AI:           ai,
 		Store:        store,
 		Config:       cfg,
-		Tracks:       []string{"backend", "frontend"},
+		Tracks:       []TrackInfo{{Name: "backend"}, {Name: "frontend"}},
 		IgnoreLabel:  cfg.Labels.Ignore,
 		Tracked:      tracked,
 		CodeContext:  "",
