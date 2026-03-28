@@ -269,7 +269,11 @@ tracks:
 #
 # bull:
 #   enabled: true
-#   github_token: ${GITHUB_TOKEN}       # PAT with repo scope (or public_repo for public repos)
+#   github_token: ${GITHUB_TOKEN}       # Alternative to GitHub App auth — PAT with repo scope (or public_repo for public repos)
+#   # GitHub App authentication (recommended over PAT)
+#   # app_id: 123456
+#   # installation_id: 78901234
+#   # private_key_path: /secrets/bull-private-key.pem  # path to mounted PEM file
 #   poll_interval_sec: 60               # How often to poll GitHub for new issues (default: 60)
 #   triage_mode: standard               # "standard" (heuristic + AI) or "full" (AI for all)
 #   agent_provider: claude              # override global agent_provider for triage (default: global)

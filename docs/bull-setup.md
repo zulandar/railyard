@@ -15,13 +15,75 @@ Bull runs a six-phase polling cycle:
 
 ## Prerequisites
 
-- **GitHub Personal Access Token (PAT)** with these scopes:
-  - `repo` (for reading issues and writing labels/comments on private repos)
-  - OR `public_repo` (for public repos only)
+- GitHub repository access via **GitHub App** (recommended) or **Personal Access Token (PAT)**
 - Railyard instance with database initialized (`ry db init`)
 - At least one track configured in your `railyard.yaml`
 
-## Configuration
+## GitHub App Authentication (recommended)
+
+Using a GitHub App causes Bull's comments and labels to appear under a named bot identity (e.g. `railyard-bull[bot]`) rather than a personal user account. One GitHub App installation can cover an entire organization — all repos — so it scales easily as you add more projects.
+
+### 1. Create a GitHub App
+
+Go to your organization settings (or personal account settings for personal repos):
+
+**Organization:** `https://github.com/organizations/<org>/settings/apps/new`
+**Personal account:** `https://github.com/settings/apps/new`
+
+Fill in:
+- **App name:** e.g. `railyard-bull` or `acme-railyard`
+- **Homepage URL:** your Railyard instance URL or repo URL
+- **Webhook:** uncheck "Active" (Bull uses polling, not webhooks)
+
+Under **Permissions → Repository permissions**, set:
+- **Issues:** Read and write
+- **Metadata:** Read-only (required)
+
+Click **Create GitHub App**.
+
+### 2. Note the App ID
+
+After creation, the App ID is shown at the top of the app's settings page. Save it.
+
+### 3. Generate a private key
+
+On the app settings page, scroll to **Private keys** and click **Generate a private key**. A `.pem` file downloads automatically. Store it securely.
+
+### 4. Install the app on your repo(s)
+
+On the app settings page, click **Install App** in the left sidebar. Choose your organization (or account) and select **All repositories** (covers the whole org) or choose specific repos.
+
+After installation, look at the URL: `https://github.com/organizations/<org>/settings/installations/<installation_id>`. The number at the end is your **Installation ID**.
+
+### 5. Configure railyard.yaml
+
+```yaml
+bull:
+  enabled: true
+  app_id: 123456
+  installation_id: 78901234
+  private_key_path: /secrets/bull-private-key.pem
+  poll_interval_sec: 60
+  triage_mode: standard
+  comments:
+    enabled: true
+    answer_questions: true
+  labels:
+    under_review: "bull: under review"
+    in_progress: "bull: in progress"
+    fix_merged: "bull: fix merged"
+    ignore: "bull: ignore"
+```
+
+Mount the `.pem` file at the path specified by `private_key_path`. In Kubernetes, create a secret and mount it as a volume (see [docs/k8s-authentication.md](k8s-authentication.md)).
+
+## Alternative: Personal Access Token
+
+If you prefer to authenticate as a personal user account, you can use a PAT instead of a GitHub App.
+
+Create a GitHub Personal Access Token with these scopes:
+- `repo` (for reading issues and writing labels/comments on private repos)
+- OR `public_repo` (for public repos only)
 
 Add to your `railyard.yaml`:
 
@@ -54,7 +116,10 @@ Token fields support `${ENV_VAR}` substitution — set secrets as environment va
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `bull.enabled` | bool | `false` | Enable the Bull daemon |
-| `bull.github_token` | string | (required) | GitHub PAT with `repo` or `public_repo` scope |
+| `bull.app_id` | int | — | GitHub App ID (use with `installation_id` and `private_key_path`) |
+| `bull.installation_id` | int | — | GitHub App Installation ID |
+| `bull.private_key_path` | string | — | Path to the GitHub App private key `.pem` file |
+| `bull.github_token` | string | — | GitHub PAT with `repo` or `public_repo` scope (alternative to App auth) |
 | `bull.poll_interval_sec` | int | `60` | How often to poll GitHub for new/updated issues (seconds) |
 | `bull.triage_mode` | string | `"standard"` | Triage mode: `"standard"` or `"full"` |
 | `bull.comments.enabled` | bool | `false` | Post comments on rejected issues |
@@ -122,7 +187,7 @@ Bull runs in the foreground and polls GitHub on the configured interval. Use tmu
 
 ## Kubernetes Deployment
 
-Bull runs as an optional Deployment in the Helm chart. Enable with `bull.enabled: true` in Helm values. The Deployment needs `GITHUB_TOKEN` from the auth secret. Bull does not need a git repo volume — it only interacts with GitHub via the API and Railyard via the database.
+Bull runs as an optional Deployment in the Helm chart. Enable with `bull.enabled: true` in Helm values. When using GitHub App auth, provide `bull.appID`, `bull.installationID`, and `bull.privateKeySecret` in Helm values. When using PAT auth, provide `GITHUB_TOKEN` from the auth secret. Bull does not need a git repo volume — it only interacts with GitHub via the API and Railyard via the database.
 
 See [`charts/railyard/README.md`](../charts/railyard/README.md) for Helm values reference.
 
@@ -130,7 +195,7 @@ See [`charts/railyard/README.md`](../charts/railyard/README.md) for Helm values 
 
 ### "bull.github_token is required"
 
-The token is not set or the environment variable is not resolved. Verify that `GITHUB_TOKEN` is exported in your shell and that the config uses `${GITHUB_TOKEN}` syntax.
+Either a GitHub App (`app_id` + `installation_id` + `private_key_path`) or a PAT (`github_token`) must be configured. If using a PAT, verify that `GITHUB_TOKEN` is exported in your shell and that the config uses `${GITHUB_TOKEN}` syntax.
 
 ### Rate limiting
 
