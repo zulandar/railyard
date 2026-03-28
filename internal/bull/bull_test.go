@@ -45,19 +45,33 @@ func TestStart_BullNotEnabled(t *testing.T) {
 	}
 }
 
-// Fix #6: Start() no longer has its own auth guard — config validation
-// handles it. With valid token + nil DB, Start should fail on DB, not auth.
-func TestStart_MissingGitHubToken_PassesThroughToDBCheck(t *testing.T) {
+// Start() has an auth preflight that catches missing credentials for
+// programmatic callers that bypass config.Parse validation.
+func TestStart_MissingAuth(t *testing.T) {
 	cfg := validBullConfig()
 	cfg.Bull.GitHubToken = ""
-	cfg.Bull.AppID = 12345 // App auth present, so no auth error
+	cfg.Bull.AppID = 0
+	err := Start(context.Background(), StartOpts{Config: cfg})
+	if err == nil {
+		t.Fatal("expected error for missing auth credentials")
+	}
+	if !strings.Contains(err.Error(), "bull: authentication required") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "bull: authentication required")
+	}
+}
+
+// When App auth is set (no PAT), Start should pass auth check and fail later.
+func TestStart_AppAuthPassesPreflightCheck(t *testing.T) {
+	cfg := validBullConfig()
+	cfg.Bull.GitHubToken = ""
+	cfg.Bull.AppID = 12345
 	cfg.Bull.PrivateKeyPath = "/tmp/key.pem"
 	cfg.Bull.InstallationID = 67890
 	err := Start(context.Background(), StartOpts{Config: cfg})
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	// Should fail on DB requirement, not auth, proving the stale guard is gone.
+	// Should fail on DB requirement, not auth — proving App auth passes the guard.
 	if !strings.Contains(err.Error(), "bull: database connection is required") {
 		t.Errorf("error = %q, want to contain %q", err.Error(), "bull: database connection is required")
 	}

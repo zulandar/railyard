@@ -33,6 +33,9 @@ func Start(ctx context.Context, opts StartOpts) error {
 	if !opts.Config.Bull.Enabled {
 		return fmt.Errorf("bull: bull.enabled is not true")
 	}
+	if opts.Config.Bull.GitHubToken == "" && opts.Config.Bull.AppID == 0 {
+		return fmt.Errorf("bull: authentication required; set github_token or app_id")
+	}
 	if len(opts.Config.Tracks) == 0 {
 		return fmt.Errorf("bull: at least one track must be configured")
 	}
