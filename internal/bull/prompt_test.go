@@ -209,6 +209,33 @@ func TestBuildTriagePrompt_TrackWithNoMetadata(t *testing.T) {
 	}
 }
 
+// Fix #1: Conventions should include "key: value" pairs, not just keys.
+func TestBuildTriagePrompt_ConventionsIncludeKeyValuePairs(t *testing.T) {
+	issue := IssueContext{
+		Number: 30,
+		Title:  "Refactor handler",
+		Body:   "Needs refactoring",
+		Author: "dev",
+	}
+	tracks := []TrackInfo{
+		{
+			Name:     "backend",
+			Language: "go",
+			// Conventions now carry "key: value" strings.
+			Conventions: []string{"naming: snake_case", "errors: wrap with fmt.Errorf"},
+		},
+	}
+
+	prompt := BuildTriagePrompt(issue, "standard", tracks, "")
+
+	if !strings.Contains(prompt, "naming: snake_case") {
+		t.Error("prompt should include convention value 'naming: snake_case'")
+	}
+	if !strings.Contains(prompt, "errors: wrap with fmt.Errorf") {
+		t.Error("prompt should include convention value 'errors: wrap with fmt.Errorf'")
+	}
+}
+
 func TestParseTriageResult_ValidJSON(t *testing.T) {
 	response := `{"classification":"bug","priority":2,"track":"frontend","title":"Fix login button","description":"The login button is broken.","acceptance":"Button responds to clicks."}`
 

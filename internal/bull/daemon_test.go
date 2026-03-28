@@ -411,6 +411,92 @@ func TestRunDaemon_NilOutDefaultsToDiscard(t *testing.T) {
 	}
 }
 
+// Fix #2: Raw AI response should be truncated in log output.
+func TestRunDaemon_RawResponseTruncatedInOutput(t *testing.T) {
+	longResponse := makeAIResponse("bug", nil) + strings.Repeat("x", 500)
+	ai := &mockTriageAI{response: longResponse}
+
+	deps := &mockDaemonDeps{
+		issues: []*github.Issue{
+			makeIssue(50, "Long response test", "Testing that raw response gets truncated in output"),
+		},
+		syncTrackedIssues: []models.BullIssue{},
+		syncCarStatuses:   map[string]string{},
+		releases:          []*github.RepositoryRelease{},
+		mergedIssues:      []models.BullIssue{},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var buf bytes.Buffer
+
+	opts := DaemonOpts{
+		Config:       daemonConfig(),
+		Tracks:       []TrackInfo{{Name: "backend"}},
+		BranchPrefix: "ry/test",
+		PollInterval: time.Millisecond,
+		Out:          &buf,
+		AI:           ai,
+		OnCycleEnd: func(c int) {
+			cancel()
+		},
+	}
+
+	_ = RunDaemon(ctx, deps, opts)
+
+	// The full raw response should NOT appear in output — it should be truncated.
+	output := buf.String()
+	if strings.Contains(output, longResponse) {
+		t.Errorf("raw response should be truncated, but full response found in output")
+	}
+}
+
+// Fix #5: Retry phase should use a distinct label, not "Phase 4".
+func TestRunDaemon_RetryPhaseUsesDistinctLabel(t *testing.T) {
+	ai := &countingMockAI{
+		failTimes:       99,
+		successResponse: makeAIResponse("bug", nil),
+	}
+
+	deps := &mockDaemonDeps{
+		issues: []*github.Issue{
+			makeIssue(60, "Phase label test", "Testing that retry phase has a distinct label"),
+		},
+		syncTrackedIssues: []models.BullIssue{},
+		syncCarStatuses:   map[string]string{},
+		releases:          []*github.RepositoryRelease{},
+		mergedIssues:      []models.BullIssue{},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var buf bytes.Buffer
+
+	opts := DaemonOpts{
+		Config:       daemonConfig(),
+		Tracks:       []TrackInfo{{Name: "backend"}},
+		BranchPrefix: "ry/test",
+		PollInterval: time.Millisecond,
+		Out:          &buf,
+		AI:           ai,
+		OnCycleEnd: func(c int) {
+			if c >= 2 {
+				cancel()
+			}
+		},
+	}
+
+	_ = RunDaemon(ctx, deps, opts)
+
+	output := buf.String()
+	// Retry output should NOT say "Phase 4:" for retries.
+	if strings.Contains(output, "Phase 4: Processing") || strings.Contains(output, "Phase 4: Retrying") {
+		t.Errorf("retry phase should not use 'Phase 4' label; output:\n%s", output)
+	}
+	// Should use a distinct retry label.
+	if !strings.Contains(output, "Retry:") {
+		t.Errorf("expected retry phase to use 'Retry:' label; output:\n%s", output)
+	}
+}
+
 // TestRunDaemon_RetryQueue_IssuePersistsToNextCycle verifies that when triage
 // fails on cycle 1, the issue appears in the retry output on cycle 2.
 func TestRunDaemon_RetryQueue_IssuePersistsToNextCycle(t *testing.T) {

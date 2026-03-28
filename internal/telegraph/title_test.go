@@ -102,6 +102,73 @@ func TestGenerateThreadTitle_61CharsIsTruncated(t *testing.T) {
 	}
 }
 
+// --- AITitleGenerator tests ---
+
+// mockTitleAI implements TitleAI for testing AITitleGenerator.
+type mockTitleAI struct {
+	response string
+	err      error
+	prompt   string // last prompt received
+}
+
+func (m *mockTitleAI) RunPrompt(_ context.Context, prompt string) (string, error) {
+	m.prompt = prompt
+	return m.response, m.err
+}
+
+// Fix #7: AITitleGenerator should use any AI provider, not just Claude.
+func TestAITitleGenerator_UsesAIProvider(t *testing.T) {
+	ai := &mockTitleAI{response: "Deploy Staging Env"}
+	gen := NewAITitleGenerator(ai)
+
+	title, err := gen.GenerateTitle(context.Background(), "please deploy the staging environment")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if title != "Deploy Staging Env" {
+		t.Errorf("title = %q, want %q", title, "Deploy Staging Env")
+	}
+	// Verify prompt was sent to the AI.
+	if ai.prompt == "" {
+		t.Error("expected AI to receive a prompt")
+	}
+}
+
+func TestAITitleGenerator_PropagatesError(t *testing.T) {
+	ai := &mockTitleAI{err: errors.New("provider unavailable")}
+	gen := NewAITitleGenerator(ai)
+
+	_, err := gen.GenerateTitle(context.Background(), "test body")
+	if err == nil {
+		t.Fatal("expected error when AI returns error")
+	}
+	if !strings.Contains(err.Error(), "provider unavailable") {
+		t.Errorf("error = %q, want to contain 'provider unavailable'", err.Error())
+	}
+}
+
+func TestAITitleGenerator_TrimsWhitespace(t *testing.T) {
+	ai := &mockTitleAI{response: "  Fix Login Bug  \n"}
+	gen := NewAITitleGenerator(ai)
+
+	title, err := gen.GenerateTitle(context.Background(), "fix the login bug")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if title != "Fix Login Bug" {
+		t.Errorf("title = %q, want %q", title, "Fix Login Bug")
+	}
+}
+
+func TestAITitleGenerator_NilAIReturnsError(t *testing.T) {
+	gen := NewAITitleGenerator(nil)
+
+	_, err := gen.GenerateTitle(context.Background(), "test body")
+	if err == nil {
+		t.Fatal("expected error when AI is nil")
+	}
+}
+
 // --- fallbackTitle tests ---
 
 func TestFallbackTitle_EmptyReturnsDispatch(t *testing.T) {

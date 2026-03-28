@@ -1928,6 +1928,30 @@ bull:
 	}
 }
 
+// Fix #4: Config should reject setting both PAT and App credentials.
+func TestParse_BullAuth_BothPATAndApp(t *testing.T) {
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+tracks:
+  - name: backend
+    language: go
+bull:
+  enabled: true
+  github_token: "ghp_test123"
+  app_id: 12345
+  private_key_path: "/path/to/key.pem"
+  installation_id: 67890
+`
+	_, err := Parse([]byte(yaml))
+	if err == nil {
+		t.Fatal("expected error when both PAT and App credentials are set")
+	}
+	if !strings.Contains(err.Error(), "bull: set github_token or GitHub App credentials, not both") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "bull: set github_token or GitHub App credentials, not both")
+	}
+}
+
 func TestParse_DeprecatedDoltKey(t *testing.T) {
 	oldConfig := `
 owner: alice

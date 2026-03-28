@@ -135,13 +135,13 @@ func RunDaemon(ctx context.Context, deps interface {
 		}
 		lastPoll = pollBoundary
 
-		// Phase 4 (retry): Re-attempt triage for previously failed issues.
+		// Retry: Re-attempt triage for previously failed issues.
 		if len(retryQueue) > 0 {
-			fmt.Fprintf(out, "Phase 4: Processing %d retry entries\n", len(retryQueue))
+			fmt.Fprintf(out, "Retry: Processing %d retry entries\n", len(retryQueue))
 			var remaining []retryEntry
 			for _, entry := range retryQueue {
 				num := entry.issue.GetNumber()
-				fmt.Fprintf(out, "Phase 4: Retrying triage for issue #%d (attempt %d)\n", num, entry.attempt)
+				fmt.Fprintf(out, "Retry: Retrying triage for issue #%d (attempt %d)\n", num, entry.attempt)
 				triageOpts := TriageOpts{
 					Client:       deps,
 					AI:           opts.AI,
@@ -163,7 +163,7 @@ func RunDaemon(ctx context.Context, deps interface {
 					}
 					continue
 				}
-				fmt.Fprintf(out, "Phase 4: Issue #%d → %s (retried)\n", num, outcome.Action)
+				fmt.Fprintf(out, "Retry: Issue #%d → %s (retried)\n", num, outcome.Action)
 			}
 			retryQueue = remaining
 		}
@@ -215,7 +215,11 @@ func RunDaemon(ctx context.Context, deps interface {
 					}
 					fmt.Fprintf(out, "Phase 4: Issue #%d → %s\n", num, outcome.Action)
 					if outcome.RawResponse != "" {
-						log.Printf("bull: triage issue #%d raw response: %s", num, outcome.RawResponse)
+						resp := outcome.RawResponse
+						if len(resp) > 200 {
+							resp = resp[:200] + "...(truncated)"
+						}
+						log.Printf("bull: triage issue #%d raw response: %s", num, resp)
 					}
 				} else {
 					fmt.Fprintf(out, "Phase 4: No AI configured, skipping triage for #%d\n", num)

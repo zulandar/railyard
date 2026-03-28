@@ -34,7 +34,7 @@ func Start(ctx context.Context, opts StartOpts) error {
 		return fmt.Errorf("bull: bull.enabled is not true")
 	}
 	if opts.Config.Bull.GitHubToken == "" && opts.Config.Bull.AppID == 0 {
-		return fmt.Errorf("bull: bull.github_token is required")
+		return fmt.Errorf("bull: authentication required; set github_token or app_id")
 	}
 	if len(opts.Config.Tracks) == 0 {
 		return fmt.Errorf("bull: at least one track must be configured")
@@ -58,23 +58,7 @@ func Start(ctx context.Context, opts StartOpts) error {
 	}
 	store := NewStore(opts.DB, opts.Config.BranchPrefix)
 
-	var tracks []TrackInfo
-	for _, t := range opts.Config.Tracks {
-		ti := TrackInfo{
-			Name:         t.Name,
-			Language:     t.Language,
-			FilePatterns: t.FilePatterns,
-		}
-		if len(t.Conventions) > 0 {
-			keys := make([]string, 0, len(t.Conventions))
-			for k := range t.Conventions {
-				keys = append(keys, k)
-			}
-			sort.Strings(keys)
-			ti.Conventions = keys
-		}
-		tracks = append(tracks, ti)
-	}
+	tracks := buildTrackInfos(opts.Config.Tracks)
 
 	ai, err := NewProviderAI(opts.Config.Bull.AgentProvider)
 	if err != nil {
@@ -117,6 +101,32 @@ func parseGitHubRepo(repo string) (string, string, error) {
 		return "", "", fmt.Errorf("invalid repo URL %q: expected github.com/owner/repo", repo)
 	}
 	return parts[0], parts[1], nil
+}
+
+// buildTrackInfos converts TrackConfig entries into TrackInfo values
+// for use in prompt generation. Convention map entries are formatted as
+// "key: value" pairs, sorted by key for deterministic output.
+func buildTrackInfos(tracks []config.TrackConfig) []TrackInfo {
+	var result []TrackInfo
+	for _, t := range tracks {
+		ti := TrackInfo{
+			Name:         t.Name,
+			Language:     t.Language,
+			FilePatterns: t.FilePatterns,
+		}
+		if len(t.Conventions) > 0 {
+			keys := make([]string, 0, len(t.Conventions))
+			for k := range t.Conventions {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			for _, k := range keys {
+				ti.Conventions = append(ti.Conventions, fmt.Sprintf("%s: %v", k, t.Conventions[k]))
+			}
+		}
+		result = append(result, ti)
+	}
+	return result
 }
 
 // daemonDeps bundles a DaemonClient and DaemonStore into a single value

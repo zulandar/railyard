@@ -1,15 +1,9 @@
 package telegraph
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
-	"os"
 	"strings"
-	"time"
 	"unicode/utf8"
 )
 
@@ -56,89 +50,37 @@ func fallbackTitle(body string) string {
 	return strings.TrimSpace(body)
 }
 
-// ClaudeTitleGenerator calls the Anthropic Messages API to generate a
-// concise 5-10 word title from a user message. It reads ANTHROPIC_API_KEY
-// from the environment (or the APIKey field) and times out after 5 seconds.
-type ClaudeTitleGenerator struct {
-	APIKey string
-	client *http.Client
-}
-
-// NewClaudeTitleGenerator creates a ClaudeTitleGenerator. If apiKey is empty,
-// ANTHROPIC_API_KEY is read from the environment.
-func NewClaudeTitleGenerator(apiKey string) *ClaudeTitleGenerator {
-	if apiKey == "" {
-		apiKey = os.Getenv("ANTHROPIC_API_KEY")
-	}
-	return &ClaudeTitleGenerator{
-		APIKey: apiKey,
-		client: &http.Client{Timeout: 5 * time.Second},
-	}
-}
-
-type anthropicRequest struct {
-	Model     string             `json:"model"`
-	MaxTokens int                `json:"max_tokens"`
-	Messages  []anthropicMessage `json:"messages"`
-}
-
-type anthropicMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-type anthropicResponse struct {
-	Content []struct {
-		Text string `json:"text"`
-	} `json:"content"`
+// TitleAI abstracts an AI provider that can run a text prompt and return a
+// response. This is the same shape as bull.TriageAI but defined here to
+// avoid a cross-package dependency.
+type TitleAI interface {
+	RunPrompt(ctx context.Context, prompt string) (string, error)
 }
 
 const titlePrompt = "Generate a concise 5-10 word thread title for the following message. " +
 	"Reply with only the title, no punctuation, no quotes.\n\nMessage: %s"
 
-// GenerateTitle calls the Claude API and returns a short descriptive title.
-func (g *ClaudeTitleGenerator) GenerateTitle(ctx context.Context, body string) (string, error) {
-	if g.APIKey == "" {
-		return "", fmt.Errorf("telegraph: title: no ANTHROPIC_API_KEY configured")
-	}
+// AITitleGenerator uses any AI provider (via TitleAI) to generate a concise
+// thread title. It replaces the previous Claude-specific implementation,
+// allowing any configured agent provider to perform title generation.
+type AITitleGenerator struct {
+	ai TitleAI
+}
 
-	reqBody, err := json.Marshal(anthropicRequest{
-		Model:     "claude-haiku-4-5",
-		MaxTokens: 30,
-		Messages: []anthropicMessage{
-			{Role: "user", Content: fmt.Sprintf(titlePrompt, body)},
-		},
-	})
+// NewAITitleGenerator creates an AITitleGenerator backed by the given AI provider.
+func NewAITitleGenerator(ai TitleAI) *AITitleGenerator {
+	return &AITitleGenerator{ai: ai}
+}
+
+// GenerateTitle sends a title-generation prompt to the AI provider and returns
+// a short descriptive title.
+func (g *AITitleGenerator) GenerateTitle(ctx context.Context, body string) (string, error) {
+	if g.ai == nil {
+		return "", fmt.Errorf("telegraph: title: no AI provider configured")
+	}
+	resp, err := g.ai.RunPrompt(ctx, fmt.Sprintf(titlePrompt, body))
 	if err != nil {
-		return "", fmt.Errorf("telegraph: title: marshal request: %w", err)
+		return "", err
 	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		"https://api.anthropic.com/v1/messages", bytes.NewReader(reqBody))
-	if err != nil {
-		return "", fmt.Errorf("telegraph: title: create request: %w", err)
-	}
-	req.Header.Set("x-api-key", g.APIKey)
-	req.Header.Set("anthropic-version", "2023-06-01")
-	req.Header.Set("content-type", "application/json")
-
-	resp, err := g.client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("telegraph: title: http: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("telegraph: title: api error %d: %s", resp.StatusCode, b)
-	}
-
-	var apiResp anthropicResponse
-	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
-		return "", fmt.Errorf("telegraph: title: decode response: %w", err)
-	}
-	if len(apiResp.Content) == 0 {
-		return "", fmt.Errorf("telegraph: title: empty response from API")
-	}
-	return strings.TrimSpace(apiResp.Content[0].Text), nil
+	return strings.TrimSpace(resp), nil
 }
