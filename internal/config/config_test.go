@@ -1671,7 +1671,7 @@ func TestParse_BullOmitted(t *testing.T) {
 	}
 }
 
-func TestParse_BullValidation_TokenNotRequiredAtConfigLevel(t *testing.T) {
+func TestParse_BullValidation_MissingAuthFails(t *testing.T) {
 	yaml := `
 owner: alice
 repo: git@github.com:org/app.git
@@ -1681,12 +1681,12 @@ tracks:
 bull:
   enabled: true
 `
-	// Token validation is deferred to the bull command at runtime so that
-	// non-Bull pods (dashboard, dispatch, etc.) can load the shared config
-	// without having GITHUB_TOKEN in their environment.
 	_, err := Parse([]byte(yaml))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err == nil {
+		t.Fatal("expected error when bull is enabled with no auth credentials")
+	}
+	if !strings.Contains(err.Error(), "bull: authentication is required") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "bull: authentication is required")
 	}
 }
 
@@ -1782,10 +1782,13 @@ func TestLoad_BullMinimalFixture(t *testing.T) {
 }
 
 func TestLoad_BullNoTokenFixture(t *testing.T) {
-	// Token validation moved to bull command runtime; config load should succeed.
+	// No auth credentials: config load should fail validation.
 	_, err := Load("testdata/invalid_bull_no_token.yaml")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err == nil {
+		t.Fatal("expected error for bull config with no auth credentials")
+	}
+	if !strings.Contains(err.Error(), "bull: authentication is required") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "bull: authentication is required")
 	}
 }
 
@@ -1796,6 +1799,132 @@ func TestLoad_BullInvalidTriageModeFixture(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "bull.triage_mode") {
 		t.Errorf("error = %q", err)
+	}
+}
+
+// Bull GitHub App credential tests.
+// ---------------------------------------------------------------------------
+
+func TestParse_BullAuth_PATOnly(t *testing.T) {
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+tracks:
+  - name: backend
+    language: go
+bull:
+  enabled: true
+  github_token: "ghp_test123"
+`
+	_, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("PAT-only config should be valid, got error: %v", err)
+	}
+}
+
+func TestParse_BullAuth_AppOnly(t *testing.T) {
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+tracks:
+  - name: backend
+    language: go
+bull:
+  enabled: true
+  app_id: 12345
+  private_key_path: "/path/to/key.pem"
+  installation_id: 67890
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("App-only config with all three fields should be valid, got error: %v", err)
+	}
+	if cfg.Bull.AppID != 12345 {
+		t.Errorf("Bull.AppID = %d, want 12345", cfg.Bull.AppID)
+	}
+	if cfg.Bull.PrivateKeyPath != "/path/to/key.pem" {
+		t.Errorf("Bull.PrivateKeyPath = %q, want /path/to/key.pem", cfg.Bull.PrivateKeyPath)
+	}
+	if cfg.Bull.InstallationID != 67890 {
+		t.Errorf("Bull.InstallationID = %d, want 67890", cfg.Bull.InstallationID)
+	}
+}
+
+func TestParse_BullAuth_NoAuth(t *testing.T) {
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+tracks:
+  - name: backend
+    language: go
+bull:
+  enabled: true
+`
+	_, err := Parse([]byte(yaml))
+	if err == nil {
+		t.Fatal("expected error when bull is enabled with no auth credentials")
+	}
+	if !strings.Contains(err.Error(), "bull: authentication is required") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "bull: authentication is required")
+	}
+}
+
+func TestParse_BullAuth_PartialAppFields(t *testing.T) {
+	tests := []struct {
+		name string
+		yaml string
+	}{
+		{
+			name: "app_id only",
+			yaml: `
+owner: alice
+repo: git@github.com:org/app.git
+tracks:
+  - name: backend
+    language: go
+bull:
+  enabled: true
+  app_id: 12345
+`,
+		},
+		{
+			name: "app_id and private_key_path but no installation_id",
+			yaml: `
+owner: alice
+repo: git@github.com:org/app.git
+tracks:
+  - name: backend
+    language: go
+bull:
+  enabled: true
+  app_id: 12345
+  private_key_path: "/path/to/key.pem"
+`,
+		},
+		{
+			name: "private_key_path only",
+			yaml: `
+owner: alice
+repo: git@github.com:org/app.git
+tracks:
+  - name: backend
+    language: go
+bull:
+  enabled: true
+  private_key_path: "/path/to/key.pem"
+`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Parse([]byte(tc.yaml))
+			if err == nil {
+				t.Fatalf("expected error for partial App credentials (%s)", tc.name)
+			}
+			if !strings.Contains(err.Error(), "bull: GitHub App auth requires all three fields") {
+				t.Errorf("error = %q, want to contain %q", err.Error(), "bull: GitHub App auth requires all three fields")
+			}
+		})
 	}
 }
 
