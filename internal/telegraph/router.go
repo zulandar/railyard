@@ -32,12 +32,12 @@ type Router struct {
 
 // RouterOpts holds parameters for creating a Router.
 type RouterOpts struct {
-	SessionMgr   *SessionManager
-	CmdHandler   *CommandHandler
-	Adapter      Adapter
-	BotUserID    string         // bot's user ID for self-message filtering
-	Out          io.Writer      // defaults to os.Stdout
-	TitleGen     TitleGenerator // optional; generates thread titles from message body
+	SessionMgr *SessionManager
+	CmdHandler *CommandHandler
+	Adapter    Adapter
+	BotUserID  string         // bot's user ID for self-message filtering
+	Out        io.Writer      // defaults to os.Stdout
+	TitleGen   TitleGenerator // optional; generates thread titles from message body
 }
 
 // NewRouter creates a Router.
