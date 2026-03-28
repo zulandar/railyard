@@ -45,15 +45,21 @@ func TestStart_BullNotEnabled(t *testing.T) {
 	}
 }
 
-func TestStart_MissingGitHubToken(t *testing.T) {
+// Fix #6: Start() no longer has its own auth guard — config validation
+// handles it. With valid token + nil DB, Start should fail on DB, not auth.
+func TestStart_MissingGitHubToken_PassesThroughToDBCheck(t *testing.T) {
 	cfg := validBullConfig()
 	cfg.Bull.GitHubToken = ""
+	cfg.Bull.AppID = 12345 // App auth present, so no auth error
+	cfg.Bull.PrivateKeyPath = "/tmp/key.pem"
+	cfg.Bull.InstallationID = 67890
 	err := Start(context.Background(), StartOpts{Config: cfg})
 	if err == nil {
-		t.Fatal("expected error for missing github token")
+		t.Fatal("expected error")
 	}
-	if !strings.Contains(err.Error(), "bull: bull.github_token is required") {
-		t.Errorf("error = %q, want to contain %q", err.Error(), "bull: bull.github_token is required")
+	// Should fail on DB requirement, not auth, proving the stale guard is gone.
+	if !strings.Contains(err.Error(), "bull: database connection is required") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "bull: database connection is required")
 	}
 }
 
@@ -77,6 +83,38 @@ func TestStart_NilDB(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "bull: database connection is required") {
 		t.Errorf("error = %q, want to contain %q", err.Error(), "bull: database connection is required")
+	}
+}
+
+// Fix #1: Conventions map values should be included, not just keys.
+func TestStart_ConventionsIncludeValues(t *testing.T) {
+	cfg := validBullConfig()
+	cfg.Tracks = []config.TrackConfig{
+		{
+			Name:     "backend",
+			Language: "go",
+			Conventions: map[string]interface{}{
+				"naming": "snake_case",
+				"errors": "wrap with fmt.Errorf",
+			},
+		},
+	}
+
+	// Start() will fail later (no DB), but we can inspect the track building
+	// by calling the helper directly. We test the logic in buildTrackInfos.
+	tracks := buildTrackInfos(cfg.Tracks)
+	if len(tracks) != 1 {
+		t.Fatalf("expected 1 track, got %d", len(tracks))
+	}
+	// Conventions should be "key: value" formatted, sorted by key.
+	expected := []string{"errors: wrap with fmt.Errorf", "naming: snake_case"}
+	if len(tracks[0].Conventions) != len(expected) {
+		t.Fatalf("expected %d conventions, got %d: %v", len(expected), len(tracks[0].Conventions), tracks[0].Conventions)
+	}
+	for i, want := range expected {
+		if tracks[0].Conventions[i] != want {
+			t.Errorf("conventions[%d] = %q, want %q", i, tracks[0].Conventions[i], want)
+		}
 	}
 }
 

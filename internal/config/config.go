@@ -471,11 +471,13 @@ func (c *Config) validate() error {
 	}
 	// Bull validation (only when enabled).
 	if c.Bull.Enabled {
-		// Auth: require either a PAT (github_token) or complete GitHub App credentials.
+		// Auth: require either a PAT (github_token) or complete GitHub App credentials, not both.
 		hasPAT := c.Bull.GitHubToken != ""
 		hasApp := c.Bull.AppID != 0 && c.Bull.PrivateKeyPath != "" && c.Bull.InstallationID != 0
 		partialApp := (c.Bull.AppID != 0 || c.Bull.PrivateKeyPath != "" || c.Bull.InstallationID != 0) && !hasApp
-		if partialApp {
+		if hasPAT && hasApp {
+			errs = append(errs, "bull: set github_token or GitHub App credentials, not both")
+		} else if partialApp {
 			errs = append(errs, "bull: GitHub App auth requires all three fields: app_id, private_key_path, and installation_id")
 		} else if !hasPAT && !hasApp {
 			errs = append(errs, "bull: authentication is required; set github_token or all of app_id, private_key_path, and installation_id")
