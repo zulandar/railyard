@@ -24,9 +24,19 @@ type mockSyncClient struct {
 		number int
 		body   string
 	}
+	// removeLabelErrFn, if set, is called for each RemoveLabel invocation.
+	// Return a non-nil error to simulate a failure (e.g. 404).
+	removeLabelErrFn func(number int, label string) error
+	// addLabelErrFn, if set, is called for each AddLabel invocation.
+	addLabelErrFn func(number int, label string) error
 }
 
 func (m *mockSyncClient) AddLabel(_ context.Context, number int, label string) error {
+	if m.addLabelErrFn != nil {
+		if err := m.addLabelErrFn(number, label); err != nil {
+			return err
+		}
+	}
 	m.addedLabels = append(m.addedLabels, struct {
 		number int
 		label  string
@@ -35,6 +45,11 @@ func (m *mockSyncClient) AddLabel(_ context.Context, number int, label string) e
 }
 
 func (m *mockSyncClient) RemoveLabel(_ context.Context, number int, label string) error {
+	if m.removeLabelErrFn != nil {
+		if err := m.removeLabelErrFn(number, label); err != nil {
+			return err
+		}
+	}
 	m.removedLabels = append(m.removedLabels, struct {
 		number int
 		label  string
@@ -417,5 +432,111 @@ func TestSyncCarStatuses_InProgressStatusKeepsLabel(t *testing.T) {
 	}
 	if store.updatedIssues[0].newStatus != "in_progress" {
 		t.Errorf("expected status update to 'in_progress', got %q", store.updatedIssues[0].newStatus)
+	}
+}
+
+// TestSyncCarStatuses_RemoveLabelNotFoundContinues verifies that a 404-like
+// error from RemoveLabel on one issue does not halt processing of subsequent
+// issues — all issues must be synced even when one label remove fails.
+func TestSyncCarStatuses_RemoveLabelNotFoundContinues(t *testing.T) {
+	notFoundErr := fmt.Errorf("404 Not Found")
+	client := &mockSyncClient{
+		removeLabelErrFn: func(number int, label string) error {
+			// Simulate a 404 for issue 10 only.
+			if number == 10 {
+				return notFoundErr
+			}
+			return nil
+		},
+	}
+	store := &mockSyncStore{
+		issues: []models.BullIssue{
+			{ID: 1, IssueNumber: 10, CarID: "car-1", LastKnownStatus: "draft"},
+			{ID: 2, IssueNumber: 20, CarID: "car-2", LastKnownStatus: "draft"},
+		},
+		carStatuses: map[string]string{
+			"car-1": "open", // triggers RemoveLabel(UnderReview) which returns 404
+			"car-2": "open", // triggers RemoveLabel(UnderReview) which succeeds
+		},
+	}
+	cfg := testBullConfig(false)
+
+	err := SyncCarStatuses(context.Background(), client, store, cfg)
+	if err != nil {
+		t.Fatalf("SyncCarStatuses should not return an error on RemoveLabel 404, got: %v", err)
+	}
+
+	// Both issues must have been updated, proving the loop continued past the error.
+	if len(store.updatedIssues) != 2 {
+		t.Errorf("expected 2 UpdateIssueStatus calls, got %d", len(store.updatedIssues))
+	}
+	// Issue 20 must have had its label removed successfully.
+	if !hasLabel(client.removedLabels, 20, "bull: under review") {
+		t.Error("expected UnderReview label to be removed for issue 20")
+	}
+}
+
+// TestSyncCarStatuses_CancelledCompletesWithRemoveLabelErrors verifies that the
+// cancelled-state transition posts its comment and returns no error even when
+// every RemoveLabel call returns a 404.
+func TestSyncCarStatuses_CancelledCompletesWithRemoveLabelErrors(t *testing.T) {
+	client := &mockSyncClient{
+		removeLabelErrFn: func(number int, label string) error {
+			return fmt.Errorf("404 Not Found")
+		},
+	}
+	store := &mockSyncStore{
+		issues: []models.BullIssue{
+			{ID: 3, IssueNumber: 30, CarID: "car-3", LastKnownStatus: "open"},
+		},
+		carStatuses: map[string]string{"car-3": "cancelled"},
+	}
+	cfg := testBullConfig(true)
+
+	err := SyncCarStatuses(context.Background(), client, store, cfg)
+	if err != nil {
+		t.Fatalf("cancelled transition should succeed despite RemoveLabel 404s, got: %v", err)
+	}
+
+	// Comment must still be posted even though all label removes failed.
+	if !hasComment(client.comments, 30) {
+		t.Error("expected cancellation comment to be posted even when RemoveLabel returns 404")
+	}
+
+	// Status must still be persisted.
+	if len(store.updatedIssues) != 1 {
+		t.Fatalf("expected 1 UpdateIssueStatus call, got %d", len(store.updatedIssues))
+	}
+	if store.updatedIssues[0].newStatus != "cancelled" {
+		t.Errorf("expected status 'cancelled', got %q", store.updatedIssues[0].newStatus)
+	}
+}
+
+// TestSyncCarStatuses_AddLabelErrorIsFatal verifies that an error from AddLabel
+// in applyTransition surfaces through SyncCarStatuses — it must not be silently
+// swallowed the way RemoveLabel errors are.
+func TestSyncCarStatuses_AddLabelErrorIsFatal(t *testing.T) {
+	addErr := fmt.Errorf("github API error: forbidden")
+	client := &mockSyncClient{
+		addLabelErrFn: func(number int, label string) error {
+			return addErr
+		},
+	}
+	store := &mockSyncStore{
+		issues: []models.BullIssue{
+			{ID: 1, IssueNumber: 10, CarID: "car-1", LastKnownStatus: "draft"},
+		},
+		carStatuses: map[string]string{"car-1": "open"},
+	}
+	cfg := testBullConfig(false)
+
+	err := SyncCarStatuses(context.Background(), client, store, cfg)
+	if err == nil {
+		t.Fatal("expected an error when AddLabel fails, got nil")
+	}
+
+	// Status must NOT be updated since the transition was not applied.
+	if len(store.updatedIssues) != 0 {
+		t.Errorf("expected 0 UpdateIssueStatus calls on AddLabel error, got %d", len(store.updatedIssues))
 	}
 }

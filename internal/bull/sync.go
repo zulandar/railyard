@@ -3,6 +3,7 @@ package bull
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/google/go-github/v68/github"
@@ -139,7 +140,7 @@ func applyTransition(ctx context.Context, client SyncClient, cfg config.BullConf
 			return err
 		}
 		if err := client.RemoveLabel(ctx, issueNumber, labels.UnderReview); err != nil {
-			return err
+			log.Printf("bull: remove label %q from #%d (non-fatal): %v", labels.UnderReview, issueNumber, err)
 		}
 
 	case "merged":
@@ -147,7 +148,7 @@ func applyTransition(ctx context.Context, client SyncClient, cfg config.BullConf
 			return err
 		}
 		if err := client.RemoveLabel(ctx, issueNumber, labels.InProgress); err != nil {
-			return err
+			log.Printf("bull: remove label %q from #%d (non-fatal): %v", labels.InProgress, issueNumber, err)
 		}
 		if cfg.Comments.Enabled {
 			now := time.Now().UTC().Format(time.RFC3339)
@@ -158,10 +159,10 @@ func applyTransition(ctx context.Context, client SyncClient, cfg config.BullConf
 		}
 
 	case "cancelled":
-		// Remove all bull labels.
+		// Remove all bull labels; 404s are non-fatal (label may already be absent).
 		for _, label := range []string{labels.UnderReview, labels.InProgress, labels.FixMerged, labels.Ignore} {
 			if err := client.RemoveLabel(ctx, issueNumber, label); err != nil {
-				return err
+				log.Printf("bull: remove label %q from #%d (non-fatal): %v", label, issueNumber, err)
 			}
 		}
 		if cfg.Comments.Enabled {
