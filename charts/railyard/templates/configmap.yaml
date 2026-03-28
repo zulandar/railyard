@@ -95,7 +95,11 @@ data:
     {{- if .Values.bull.enabled }}
     bull:
       enabled: true
-      {{- if or .Values.auth.githubToken .Values.bull.githubToken .Values.auth.existingSecret }}
+      {{- if .Values.bull.appID }}
+      app_id: {{ .Values.bull.appID }}
+      private_key_path: /etc/railyard/github-app.pem
+      installation_id: {{ .Values.bull.installationID }}
+      {{- else if or .Values.auth.githubToken .Values.bull.githubToken .Values.auth.existingSecret }}
       github_token: ${GITHUB_TOKEN}
       {{- end }}
       poll_interval_sec: {{ .Values.bull.pollIntervalSec | default 60 }}
