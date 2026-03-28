@@ -2,16 +2,25 @@ package bull
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/bradleyfalzon/ghinstallation/v2"
 	"github.com/google/go-github/v68/github"
+	"github.com/zulandar/railyard/internal/config"
+	"golang.org/x/oauth2"
 )
 
 // newTestClient creates a GitHubClient backed by the given httptest.Server.
@@ -35,8 +44,12 @@ func setRateLimitHeaders(w http.ResponseWriter) {
 
 // ---------- NewClient ----------
 
-func TestNewClient(t *testing.T) {
-	gc := NewClient("owner", "repo", "fake-token")
+func TestNewClient_PAT(t *testing.T) {
+	cfg := config.BullConfig{GitHubToken: "fake-token"}
+	gc, err := NewClient("owner", "repo", cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if gc == nil {
 		t.Fatal("expected non-nil GitHubClient")
 	}
@@ -52,6 +65,73 @@ func TestNewClient(t *testing.T) {
 	if gc.client == nil {
 		t.Error("expected non-nil underlying github.Client")
 	}
+	// Verify the underlying transport is oauth2.
+	transport := gc.client.Client().Transport
+	if _, ok := transport.(*oauth2.Transport); !ok {
+		t.Errorf("expected oauth2.Transport, got %s", reflect.TypeOf(transport))
+	}
+}
+
+func TestNewClient_AppCredentials(t *testing.T) {
+	// Generate a real RSA key so ghinstallation can parse it.
+	keyFile := generateRSAKeyFile(t)
+
+	cfg := config.BullConfig{
+		AppID:          12345,
+		InstallationID: 67890,
+		PrivateKeyPath: keyFile,
+	}
+	gc, err := NewClient("owner", "repo", cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gc == nil {
+		t.Fatal("expected non-nil GitHubClient")
+	}
+	if gc.owner != "owner" {
+		t.Errorf("owner = %q, want %q", gc.owner, "owner")
+	}
+	if gc.repo != "repo" {
+		t.Errorf("repo = %q, want %q", gc.repo, "repo")
+	}
+	// Verify the underlying transport is ghinstallation.
+	transport := gc.client.Client().Transport
+	if _, ok := transport.(*ghinstallation.Transport); !ok {
+		t.Errorf("expected *ghinstallation.Transport, got %s", reflect.TypeOf(transport))
+	}
+}
+
+func TestNewClient_AppCredentials_BadKeyPath(t *testing.T) {
+	cfg := config.BullConfig{
+		AppID:          12345,
+		InstallationID: 67890,
+		PrivateKeyPath: "/nonexistent/key.pem",
+	}
+	_, err := NewClient("owner", "repo", cfg)
+	if err == nil {
+		t.Fatal("expected error for bad key path")
+	}
+	if !strings.Contains(err.Error(), "github app auth") {
+		t.Errorf("error %q should contain 'github app auth'", err.Error())
+	}
+}
+
+// generateRSAKeyFile generates a temporary RSA private key PEM file for use in tests.
+func generateRSAKeyFile(t *testing.T) string {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate RSA key: %v", err)
+	}
+	keyPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: x509.MarshalPKCS1PrivateKey(key),
+	})
+	path := t.TempDir() + "/test.pem"
+	if err := os.WriteFile(path, keyPEM, 0600); err != nil {
+		t.Fatalf("write key file: %v", err)
+	}
+	return path
 }
 
 // ---------- ListNewIssues ----------

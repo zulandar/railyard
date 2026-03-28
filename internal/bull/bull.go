@@ -33,7 +33,7 @@ func Start(ctx context.Context, opts StartOpts) error {
 	if !opts.Config.Bull.Enabled {
 		return fmt.Errorf("bull: bull.enabled is not true")
 	}
-	if opts.Config.Bull.GitHubToken == "" {
+	if opts.Config.Bull.GitHubToken == "" && opts.Config.Bull.AppID == 0 {
 		return fmt.Errorf("bull: bull.github_token is required")
 	}
 	if len(opts.Config.Tracks) == 0 {
@@ -52,7 +52,10 @@ func Start(ctx context.Context, opts StartOpts) error {
 	if err != nil {
 		return fmt.Errorf("bull: %w", err)
 	}
-	client := NewClient(ghOwner, ghRepo, opts.Config.Bull.GitHubToken)
+	client, err := NewClient(ghOwner, ghRepo, opts.Config.Bull)
+	if err != nil {
+		return fmt.Errorf("bull: %w", err)
+	}
 	store := NewStore(opts.DB, opts.Config.BranchPrefix)
 
 	var tracks []TrackInfo

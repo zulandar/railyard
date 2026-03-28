@@ -7,7 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bradleyfalzon/ghinstallation/v2"
 	"github.com/google/go-github/v68/github"
+	"github.com/zulandar/railyard/internal/config"
 	"golang.org/x/oauth2"
 )
 
@@ -19,16 +21,30 @@ type GitHubClient struct {
 	rateLimitThreshold int
 }
 
-// NewClient constructs a GitHubClient authenticated with the given oauth2 token.
-func NewClient(owner, repo, token string) *GitHubClient {
-	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
-	tc := oauth2.NewClient(context.Background(), ts)
+// NewClient constructs a GitHubClient authenticated using credentials from cfg.
+// If cfg.AppID is non-zero, it authenticates as a GitHub App installation using
+// the private key at cfg.PrivateKeyPath. Otherwise it falls back to PAT auth
+// using cfg.GitHubToken.
+func NewClient(owner, repo string, cfg config.BullConfig) (*GitHubClient, error) {
+	var tc *http.Client
+	if cfg.AppID != 0 {
+		itr, err := ghinstallation.NewKeyFromFile(
+			http.DefaultTransport, cfg.AppID, cfg.InstallationID, cfg.PrivateKeyPath,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("github app auth: %w", err)
+		}
+		tc = &http.Client{Transport: itr}
+	} else {
+		ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: cfg.GitHubToken})
+		tc = oauth2.NewClient(context.Background(), ts)
+	}
 	return &GitHubClient{
 		client:             github.NewClient(tc),
 		owner:              owner,
 		repo:               repo,
 		rateLimitThreshold: 100,
-	}
+	}, nil
 }
 
 // ListNewIssues returns open issues created or updated since the given time.
