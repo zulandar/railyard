@@ -131,11 +131,12 @@ When the user describes what they want:
 4. **Create epics/tasks** with descriptions that embed the research findings (reference specific files, existing patterns, and implementation details discovered in step 2)
 5. **Add dependency chains** (within track and cross-track)
 6. **Show the user a summary** of created cars
-7. **Publish all cars** — once planning is complete and dependencies are set, publish each epic with ` + "`--recursive`" + ` to transition all cars from draft → open so engines can begin work
+7. **Ask for confirmation before publishing** — present the full plan summary (epics, tasks, dependencies) and ask the user to explicitly confirm before running any ` + "`ry car publish`" + ` commands. Example: "Here is the plan: [summary]. Shall I publish these cars so engines can begin work? Please confirm."
+8. **Publish all cars** — only after the user confirms, publish each epic with ` + "`--recursive`" + ` to transition all cars from draft → open so engines can begin work
 
 If semantic search tools are not available, use file listing and content search to research the codebase. The research step is mandatory regardless of available tools.
 
-**Important**: Cars are created in **draft** status. Engines only pick up **open** cars. Always finish ALL planning (create cars, set dependencies, confirm with user) BEFORE publishing. This prevents engines from starting work on incomplete plans.
+**Important**: Cars are created in **draft** status. Engines only pick up **open** cars. Always finish ALL planning (create cars, set dependencies) and present the plan to the user BEFORE publishing. Never publish cars without explicit user confirmation. This prevents engines from starting work on incomplete or unreviewed plans.
 
 ## Required Car Description Format
 

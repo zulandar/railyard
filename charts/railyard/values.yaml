@@ -281,6 +281,15 @@ bull:
   triageMode: standard
   # -- GitHub token for Bull. If empty, falls back to auth.githubToken.
   githubToken: ""
+  # -- GitHub App authentication (alternative to githubToken).
+  # Set appID != 0 to enable GitHub App auth.
+  appID: 0
+  # -- Name of a Kubernetes Secret containing the GitHub App private key PEM file.
+  privateKeySecret: ""
+  # -- Key within privateKeySecret that holds the PEM data.
+  privateKeySecretKey: "private-key.pem"
+  # -- GitHub App installation ID.
+  installationID: 0
   # -- Issue commenting configuration.
   comments:
     enabled: false

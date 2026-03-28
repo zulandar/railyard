@@ -56,6 +56,12 @@ spec:
               mountPath: /etc/railyard
               readOnly: true
             {{- include "railyard.authVolumeMounts" . | nindent 12 }}
+            {{- if .Values.bull.privateKeySecret }}
+            - name: github-app-pem
+              mountPath: /etc/railyard/github-app.pem
+              subPath: {{ .Values.bull.privateKeySecretKey | default "private-key.pem" }}
+              readOnly: true
+            {{- end }}
           {{- with .Values.bull.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
@@ -66,4 +72,9 @@ spec:
             name: {{ include "railyard.fullname" . }}-config
             defaultMode: 0644
         {{- include "railyard.authVolumes" . | nindent 8 }}
+        {{- if .Values.bull.privateKeySecret }}
+        - name: github-app-pem
+          secret:
+            secretName: {{ .Values.bull.privateKeySecret }}
+        {{- end }}
 {{- end }}
