@@ -807,9 +807,12 @@ func initTestRepoWithRemote(t *testing.T) (repoDir, bareDir string, run func(dir
 func TestSwitch_FullMerge_PushesToRemote(t *testing.T) {
 	repoDir, bareDir, run := initTestRepoWithRemote(t)
 
-	// Create a feature branch with a commit.
+	// Create a feature branch with a real file change (isBranchMerged uses
+	// git diff, so --allow-empty commits would be invisible).
 	run(repoDir, "git", "checkout", "-b", "ry/alice/backend/car-fm1")
-	run(repoDir, "git", "commit", "--allow-empty", "-m", "feature work")
+	writeFile(t, repoDir, "feature-fm1.txt", "full merge feature")
+	run(repoDir, "git", "add", "feature-fm1.txt")
+	run(repoDir, "git", "commit", "-m", "feature work")
 	run(repoDir, "git", "checkout", "main")
 
 	// Set up DB with the car.
@@ -863,9 +866,11 @@ func TestSwitch_MergeRevertsOnPushFailure(t *testing.T) {
 	// Create a repo with NO remote — push will fail.
 	repoDir, run := initTestRepo(t)
 
-	// Create a feature branch with a commit.
+	// Create a feature branch with a real file change.
 	run("git", "checkout", "-b", "ry/alice/backend/car-pf1")
-	run("git", "commit", "--allow-empty", "-m", "feature work")
+	writeFile(t, repoDir, "feature-pf1.txt", "push failure feature")
+	run("git", "add", "feature-pf1.txt")
+	run("git", "commit", "-m", "feature work")
 	run("git", "checkout", "main")
 
 	// Record pre-merge HEAD.
@@ -1064,9 +1069,11 @@ func TestSwitch_InWorktree_MergePushes(t *testing.T) {
 	// while the primary repo stays on main (untouched).
 	repoDir, bareDir, run := initTestRepoWithRemote(t)
 
-	// Create a feature branch with a commit.
+	// Create a feature branch with a real file change.
 	run(repoDir, "git", "checkout", "-b", "ry/alice/backend/car-wt1")
-	run(repoDir, "git", "commit", "--allow-empty", "-m", "worktree feature")
+	writeFile(t, repoDir, "feature-wt1.txt", "worktree feature")
+	run(repoDir, "git", "add", "feature-wt1.txt")
+	run(repoDir, "git", "commit", "-m", "worktree feature")
 	run(repoDir, "git", "checkout", "main")
 
 	// Create a yardmaster worktree (simulating what RunDaemon does).
