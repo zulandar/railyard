@@ -206,8 +206,11 @@ func (a *Adapter) Send(ctx context.Context, msg telegraph.OutboundMessage) error
 }
 
 // StartThread creates a thread from an existing message by replying to it.
-// In Slack, threads are simply replies to a message — the original message's
-// timestamp serves as the thread identifier (thread_ts) for all replies.
+// In Slack, threads are simply reply chains — the original message's timestamp
+// (thread_ts) is the only identifier. Slack has no API to set a display name
+// for a thread, so the threadName parameter is accepted to satisfy the
+// telegraph.ThreadStarter interface but is a no-op here; it is silently
+// ignored. Thread "titles" are not visible to Slack users.
 // Implements telegraph.ThreadStarter.
 func (a *Adapter) StartThread(ctx context.Context, channelID, messageID, replyText, threadName string) (string, error) {
 	a.mu.Lock()

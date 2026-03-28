@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -36,7 +37,7 @@ func openRouterTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
-func setupRouter(t *testing.T, db *gorm.DB, botUserID string) (*Router, *MockAdapter, *mockSpawner) {
+func setupRouter(t *testing.T, db *gorm.DB, botUserID string, titleGen TitleGenerator) (*Router, *MockAdapter, *mockSpawner) {
 	t.Helper()
 	adapter := NewMockAdapter()
 	adapter.Connect(context.Background())
@@ -63,6 +64,7 @@ func setupRouter(t *testing.T, db *gorm.DB, botUserID string) (*Router, *MockAda
 		Adapter:    adapter,
 		BotUserID:  botUserID,
 		Out:        &out,
+		TitleGen:   titleGen,
 	})
 	if err != nil {
 		t.Fatalf("new router: %v", err)
@@ -115,7 +117,7 @@ func TestNewRouter_NilAdapter(t *testing.T) {
 
 func TestNewRouter_Success(t *testing.T) {
 	db := openRouterTestDB(t)
-	router, _, _ := setupRouter(t, db, "bot-123")
+	router, _, _ := setupRouter(t, db, "bot-123", nil)
 	if router == nil {
 		t.Fatal("expected non-nil router")
 	}
@@ -125,7 +127,7 @@ func TestNewRouter_Success(t *testing.T) {
 
 func TestHandle_IgnoresSelfMessage(t *testing.T) {
 	db := openRouterTestDB(t)
-	router, adapter, _ := setupRouter(t, db, "bot-123")
+	router, adapter, _ := setupRouter(t, db, "bot-123", nil)
 
 	router.Handle(context.Background(), InboundMessage{
 		UserID:    "bot-123",
@@ -142,7 +144,7 @@ func TestHandle_IgnoresSelfMessage(t *testing.T) {
 
 func TestHandle_EmptyBotID_NoFiltering(t *testing.T) {
 	db := openRouterTestDB(t)
-	router, adapter, _ := setupRouter(t, db, "")
+	router, adapter, _ := setupRouter(t, db, "", nil)
 
 	// With empty bot ID, messages should not be filtered.
 	router.Handle(context.Background(), InboundMessage{
@@ -162,7 +164,7 @@ func TestHandle_EmptyBotID_NoFiltering(t *testing.T) {
 
 func TestHandle_CommandRouting(t *testing.T) {
 	db := openRouterTestDB(t)
-	router, adapter, _ := setupRouter(t, db, "bot-123")
+	router, adapter, _ := setupRouter(t, db, "bot-123", nil)
 
 	router.Handle(context.Background(), InboundMessage{
 		UserID:    "user-1",
@@ -182,7 +184,7 @@ func TestHandle_CommandRouting(t *testing.T) {
 
 func TestHandle_CommandInThread(t *testing.T) {
 	db := openRouterTestDB(t)
-	router, adapter, _ := setupRouter(t, db, "bot-123")
+	router, adapter, _ := setupRouter(t, db, "bot-123", nil)
 
 	router.Handle(context.Background(), InboundMessage{
 		UserID:    "user-1",
@@ -207,7 +209,7 @@ func TestHandle_CommandInThread(t *testing.T) {
 
 func TestHandle_BareCommandPrefix(t *testing.T) {
 	db := openRouterTestDB(t)
-	router, adapter, _ := setupRouter(t, db, "bot-123")
+	router, adapter, _ := setupRouter(t, db, "bot-123", nil)
 
 	router.Handle(context.Background(), InboundMessage{
 		UserID:    "user-1",
@@ -228,7 +230,7 @@ func TestHandle_BareCommandPrefix(t *testing.T) {
 
 func TestHandle_ThreadReplyActiveSession(t *testing.T) {
 	db := openRouterTestDB(t)
-	router, _, spawner := setupRouter(t, db, "bot-123")
+	router, _, spawner := setupRouter(t, db, "bot-123", nil)
 
 	ctx := context.Background()
 
@@ -261,7 +263,7 @@ func TestHandle_ThreadReplyActiveSession(t *testing.T) {
 
 func TestHandle_ThreadReplyHistoricSession(t *testing.T) {
 	db := openRouterTestDB(t)
-	router, _, spawner := setupRouter(t, db, "bot-123")
+	router, _, spawner := setupRouter(t, db, "bot-123", nil)
 
 	ctx := context.Background()
 
@@ -296,7 +298,7 @@ func TestHandle_ThreadReplyHistoricSession(t *testing.T) {
 
 func TestHandle_MentionCreatesNewSession(t *testing.T) {
 	db := openRouterTestDB(t)
-	router, _, spawner := setupRouter(t, db, "bot-123")
+	router, _, spawner := setupRouter(t, db, "bot-123", nil)
 
 	router.Handle(context.Background(), InboundMessage{
 		UserID:    "user-1",
@@ -312,7 +314,7 @@ func TestHandle_MentionCreatesNewSession(t *testing.T) {
 
 func TestHandle_MentionInThread(t *testing.T) {
 	db := openRouterTestDB(t)
-	router, _, spawner := setupRouter(t, db, "bot-123")
+	router, _, spawner := setupRouter(t, db, "bot-123", nil)
 
 	router.Handle(context.Background(), InboundMessage{
 		UserID:    "user-1",
@@ -331,7 +333,7 @@ func TestHandle_MentionInThread(t *testing.T) {
 
 func TestHandle_FollowUpInThreadResumesSession(t *testing.T) {
 	db := openRouterTestDB(t)
-	router, adapter, spawner := setupRouter(t, db, "bot-123")
+	router, adapter, spawner := setupRouter(t, db, "bot-123", nil)
 
 	ctx := context.Background()
 
@@ -402,7 +404,7 @@ func TestHandle_FollowUpInThreadResumesSession(t *testing.T) {
 
 func TestHandle_UndetectedThread_ResumesHistoricSession(t *testing.T) {
 	db := openRouterTestDB(t)
-	router, adapter, spawner := setupRouter(t, db, "bot-123")
+	router, adapter, spawner := setupRouter(t, db, "bot-123", nil)
 
 	ctx := context.Background()
 
@@ -468,7 +470,7 @@ func TestHandle_UndetectedThread_ResumesHistoricSession(t *testing.T) {
 
 func TestHandle_UndetectedThread_RoutesToActiveSession(t *testing.T) {
 	db := openRouterTestDB(t)
-	router, _, spawner := setupRouter(t, db, "bot-123")
+	router, _, spawner := setupRouter(t, db, "bot-123", nil)
 
 	ctx := context.Background()
 
@@ -494,7 +496,7 @@ func TestHandle_UndetectedThread_RoutesToActiveSession(t *testing.T) {
 
 func TestHandle_UndetectedThread_IgnoresLegacyChannelSession(t *testing.T) {
 	db := openRouterTestDB(t)
-	router, _, spawner := setupRouter(t, db, "bot-123")
+	router, _, spawner := setupRouter(t, db, "bot-123", nil)
 
 	// Legacy session where channelID == threadID (not a real thread).
 	now := time.Now()
@@ -638,7 +640,7 @@ func TestIsMention(t *testing.T) {
 
 func TestIsSelfMessage(t *testing.T) {
 	db := openRouterTestDB(t)
-	router, _, _ := setupRouter(t, db, "bot-123")
+	router, _, _ := setupRouter(t, db, "bot-123", nil)
 
 	tests := []struct {
 		userID string
@@ -660,7 +662,7 @@ func TestIsSelfMessage(t *testing.T) {
 
 func TestHandle_DiscordMentionWithCommand(t *testing.T) {
 	db := openRouterTestDB(t)
-	router, adapter, spawner := setupRouter(t, db, "bot-123")
+	router, adapter, spawner := setupRouter(t, db, "bot-123", nil)
 
 	// Simulate Discord @mention: "<@1475033217449857074> status"
 	router.Handle(context.Background(), InboundMessage{
@@ -681,7 +683,7 @@ func TestHandle_DiscordMentionWithCommand(t *testing.T) {
 
 func TestHandle_DiscordNickMentionWithCommand(t *testing.T) {
 	db := openRouterTestDB(t)
-	router, adapter, spawner := setupRouter(t, db, "bot-123")
+	router, adapter, spawner := setupRouter(t, db, "bot-123", nil)
 
 	// Discord nickname mention format: <@!ID>
 	router.Handle(context.Background(), InboundMessage{
@@ -701,7 +703,7 @@ func TestHandle_DiscordNickMentionWithCommand(t *testing.T) {
 
 func TestHandle_SlackMentionWithCommand(t *testing.T) {
 	db := openRouterTestDB(t)
-	router, adapter, spawner := setupRouter(t, db, "bot-123")
+	router, adapter, spawner := setupRouter(t, db, "bot-123", nil)
 
 	// Simulate Slack @mention: "<@U1234ABC> status"
 	router.Handle(context.Background(), InboundMessage{
@@ -722,7 +724,7 @@ func TestHandle_SlackMentionWithCommand(t *testing.T) {
 
 func TestHandle_MentionWithNonCommand_SpawnsSession(t *testing.T) {
 	db := openRouterTestDB(t)
-	router, _, spawner := setupRouter(t, db, "bot-123")
+	router, _, spawner := setupRouter(t, db, "bot-123", nil)
 
 	// @mention with non-command text should still try to spawn a session.
 	router.Handle(context.Background(), InboundMessage{
@@ -739,7 +741,7 @@ func TestHandle_MentionWithNonCommand_SpawnsSession(t *testing.T) {
 
 func TestExtractMentionCommand(t *testing.T) {
 	db := openRouterTestDB(t)
-	router, _, _ := setupRouter(t, db, "bot-123")
+	router, _, _ := setupRouter(t, db, "bot-123", nil)
 
 	tests := []struct {
 		text string
@@ -778,7 +780,7 @@ func TestExtractMentionCommand(t *testing.T) {
 
 func TestHandle_AckOnNewSession(t *testing.T) {
 	db := openRouterTestDB(t)
-	router, adapter, _ := setupRouter(t, db, "bot-123")
+	router, adapter, _ := setupRouter(t, db, "bot-123", nil)
 
 	router.Handle(context.Background(), InboundMessage{
 		UserID:    "user-1",
@@ -810,7 +812,7 @@ func TestHandle_AckOnNewSession(t *testing.T) {
 
 func TestHandle_AckOnResumeSession(t *testing.T) {
 	db := openRouterTestDB(t)
-	router, adapter, _ := setupRouter(t, db, "bot-123")
+	router, adapter, _ := setupRouter(t, db, "bot-123", nil)
 
 	// Create a completed session in the DB.
 	now := time.Now()
@@ -854,7 +856,7 @@ func TestHandle_AckOnResumeSession(t *testing.T) {
 
 func TestHandle_AckOnActiveSession(t *testing.T) {
 	db := openRouterTestDB(t)
-	router, adapter, _ := setupRouter(t, db, "bot-123")
+	router, adapter, _ := setupRouter(t, db, "bot-123", nil)
 
 	ctx := context.Background()
 	router.sessionMgr.NewSession(ctx, "telegraph", "alice", "T1", "C1")
@@ -890,7 +892,7 @@ func TestHandle_AckOnActiveSession(t *testing.T) {
 
 func TestNextAck_CyclesThroughAllPhrases(t *testing.T) {
 	db := openRouterTestDB(t)
-	router, _, _ := setupRouter(t, db, "bot-123")
+	router, _, _ := setupRouter(t, db, "bot-123", nil)
 
 	// Draw exactly len(ackPhrases) acks — should see every phrase exactly once.
 	seen := make(map[string]int)
@@ -919,7 +921,7 @@ func TestNextAck_CyclesThroughAllPhrases(t *testing.T) {
 
 func TestHandle_TopLevelMentionCreatesThread(t *testing.T) {
 	db := openRouterTestDB(t)
-	router, adapter, spawner := setupRouter(t, db, "bot-123")
+	router, adapter, spawner := setupRouter(t, db, "bot-123", nil)
 
 	// Top-level @mention (no thread) should create a thread via StartThread.
 	router.Handle(context.Background(), InboundMessage{
@@ -953,7 +955,7 @@ func TestHandle_TopLevelMentionCreatesThread(t *testing.T) {
 
 func TestHandle_InThreadMentionDoesNotCreateNewThread(t *testing.T) {
 	db := openRouterTestDB(t)
-	router, adapter, spawner := setupRouter(t, db, "bot-123")
+	router, adapter, spawner := setupRouter(t, db, "bot-123", nil)
 
 	// @mention inside an existing thread should NOT create another thread.
 	router.Handle(context.Background(), InboundMessage{
@@ -993,7 +995,7 @@ func TestHandle_InThreadMentionDoesNotCreateNewThread(t *testing.T) {
 
 func TestHandle_NoAckOnCommand(t *testing.T) {
 	db := openRouterTestDB(t)
-	router, adapter, _ := setupRouter(t, db, "bot-123")
+	router, adapter, _ := setupRouter(t, db, "bot-123", nil)
 
 	router.Handle(context.Background(), InboundMessage{
 		UserID:    "user-1",
@@ -1018,7 +1020,7 @@ func TestHandle_NoAckOnCommand(t *testing.T) {
 
 func TestHandle_CommandTakesPriorityOverSession(t *testing.T) {
 	db := openRouterTestDB(t)
-	router, adapter, _ := setupRouter(t, db, "bot-123")
+	router, adapter, _ := setupRouter(t, db, "bot-123", nil)
 
 	ctx := context.Background()
 
@@ -1043,7 +1045,7 @@ func TestHandle_CommandTakesPriorityOverSession(t *testing.T) {
 
 func TestHandle_UnknownRyCommandDispatches(t *testing.T) {
 	db := openRouterTestDB(t)
-	router, _, spawner := setupRouter(t, db, "bot-123")
+	router, _, spawner := setupRouter(t, db, "bot-123", nil)
 
 	// "!ry what is the current status of the cars" is NOT a known command.
 	// It should be routed to dispatch (new session), not the command handler.
@@ -1061,7 +1063,7 @@ func TestHandle_UnknownRyCommandDispatches(t *testing.T) {
 
 func TestHandle_TopLevelMentionIgnoresHistoricChannelSession(t *testing.T) {
 	db := openRouterTestDB(t)
-	router, adapter, spawner := setupRouter(t, db, "bot-123")
+	router, adapter, spawner := setupRouter(t, db, "bot-123", nil)
 
 	// Create a historic session stored under the channel ID (legacy behavior).
 	now := time.Now()
@@ -1108,7 +1110,7 @@ func TestHandle_TopLevelMentionIgnoresHistoricChannelSession(t *testing.T) {
 
 func TestHandle_NewSessionError_NotifiesUser(t *testing.T) {
 	db := openRouterTestDB(t)
-	router, adapter, spawner := setupRouter(t, db, "bot-123")
+	router, adapter, spawner := setupRouter(t, db, "bot-123", nil)
 
 	// Make the spawner fail (simulates no spawner configured / sessions locked).
 	spawner.err = fmt.Errorf("dispatch sessions not available")
@@ -1136,7 +1138,7 @@ func TestHandle_NewSessionError_NotifiesUser(t *testing.T) {
 
 func TestHandle_NewSessionErrorInThread_NotifiesUser(t *testing.T) {
 	db := openRouterTestDB(t)
-	router, adapter, spawner := setupRouter(t, db, "bot-123")
+	router, adapter, spawner := setupRouter(t, db, "bot-123", nil)
 
 	spawner.err = fmt.Errorf("dispatch sessions not available")
 
@@ -1167,7 +1169,7 @@ func TestHandle_NewSessionErrorInThread_NotifiesUser(t *testing.T) {
 
 func TestHandle_ResumeError_NotifiesUser(t *testing.T) {
 	db := openRouterTestDB(t)
-	router, adapter, spawner := setupRouter(t, db, "bot-123")
+	router, adapter, spawner := setupRouter(t, db, "bot-123", nil)
 
 	// Create a completed session in the DB.
 	now := time.Now()
@@ -1222,7 +1224,7 @@ func TestHandle_LongCommandResponseIsChunked(t *testing.T) {
 		})
 	}
 
-	router, adapter, _ := setupRouter(t, db, "bot-123")
+	router, adapter, _ := setupRouter(t, db, "bot-123", nil)
 
 	router.Handle(context.Background(), InboundMessage{
 		UserID:    "user-1",
@@ -1242,5 +1244,119 @@ func TestHandle_LongCommandResponseIsChunked(t *testing.T) {
 		if msg.ChannelID != "C1" {
 			t.Errorf("chunk %d channel = %q, want C1", i, msg.ChannelID)
 		}
+	}
+}
+
+// --- Thread title generation tests ---
+
+// stubTitleGen is a minimal TitleGenerator stub for router-level tests.
+type stubTitleGen struct {
+	title string
+	err   error
+}
+
+func (s *stubTitleGen) GenerateTitle(_ context.Context, _ string) (string, error) {
+	return s.title, s.err
+}
+
+func TestHandle_TopLevelMention_UsesGeneratedTitle(t *testing.T) {
+	db := openRouterTestDB(t)
+	gen := &stubTitleGen{title: "Add Login Endpoint"}
+	router, adapter, spawner := setupRouter(t, db, "bot-123", gen)
+
+	router.Handle(context.Background(), InboundMessage{
+		UserID:    "user-1",
+		UserName:  "alice",
+		ChannelID: "C1",
+		Text:      "@railyard add a login endpoint to the API",
+	})
+
+	if len(spawner.processes) == 0 {
+		t.Fatal("expected process to be spawned")
+	}
+
+	// MockAdapter should have received the generated title, not "Dispatch".
+	got := adapter.LastThreadName()
+	if got != "Add Login Endpoint" {
+		t.Errorf("thread name = %q, want %q", got, "Add Login Endpoint")
+	}
+}
+
+func TestHandle_TopLevelMention_FallbackOnTitleError(t *testing.T) {
+	db := openRouterTestDB(t)
+	gen := &stubTitleGen{err: fmt.Errorf("api unavailable")}
+	router, adapter, spawner := setupRouter(t, db, "bot-123", gen)
+
+	body := "@railyard close out the epic"
+	router.Handle(context.Background(), InboundMessage{
+		UserID:    "user-1",
+		UserName:  "alice",
+		ChannelID: "C1",
+		Text:      body,
+	})
+
+	if len(spawner.processes) == 0 {
+		t.Fatal("expected process to be spawned")
+	}
+
+	// Thread name should be the fallback (first 60 chars of trimmed body), not "Dispatch".
+	got := adapter.LastThreadName()
+	if got == "Dispatch" {
+		t.Errorf("thread name = %q; fallback should use message body, not literal 'Dispatch'", got)
+	}
+	if got == "" {
+		t.Error("thread name must not be empty on fallback")
+	}
+}
+
+func TestHandle_TopLevelMention_FallbackOnEmptyTitle(t *testing.T) {
+	db := openRouterTestDB(t)
+	gen := &stubTitleGen{title: ""}
+	router, adapter, spawner := setupRouter(t, db, "bot-123", gen)
+
+	body := "@railyard deploy staging environment"
+	router.Handle(context.Background(), InboundMessage{
+		UserID:    "user-1",
+		UserName:  "alice",
+		ChannelID: "C1",
+		Text:      body,
+	})
+
+	if len(spawner.processes) == 0 {
+		t.Fatal("expected process to be spawned")
+	}
+
+	got := adapter.LastThreadName()
+	if got == "" {
+		t.Error("thread name must not be empty when title generator returns empty string")
+	}
+	if got == "Dispatch" {
+		t.Errorf("thread name = %q; fallback should use message body, not literal 'Dispatch'", got)
+	}
+}
+
+func TestHandle_TopLevelMention_LongBodyTitleTruncated(t *testing.T) {
+	db := openRouterTestDB(t)
+	// nil generator → always falls back to body truncation
+	router, adapter, spawner := setupRouter(t, db, "bot-123", nil)
+
+	longBody := "@railyard " + strings.Repeat("w", 200)
+	router.Handle(context.Background(), InboundMessage{
+		UserID:    "user-1",
+		UserName:  "alice",
+		ChannelID: "C1",
+		Text:      longBody,
+	})
+
+	if len(spawner.processes) == 0 {
+		t.Fatal("expected process to be spawned")
+	}
+
+	got := adapter.LastThreadName()
+	if len([]rune(got)) > 60 {
+		t.Errorf("thread name length = %d runes, want ≤ 60; got %q", len([]rune(got)), got)
+	}
+	if got == "" {
+		t.Error("thread name must not be empty")
 	}
 }
