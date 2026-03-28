@@ -440,6 +440,104 @@ func TestExecuteTriage_FullModeDesignNotes(t *testing.T) {
 	}
 }
 
+func TestExecuteTriage_TriageResponsePopulatedOnCreateCar(t *testing.T) {
+	client := &mockTriageClient{}
+	rawAIOutput := makeAIResponse("bug", nil)
+	ai := &mockTriageAI{response: rawAIOutput}
+	store := &mockTriageStore{carIDToReturn: "CAR-RAW"}
+
+	issue := makeIssue(20, "App crashes on startup", "The application crashes immediately on startup when running on Linux with the latest build")
+	opts := defaultOpts(client, ai, store)
+
+	outcome, err := ExecuteTriage(context.Background(), issue, opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.Action != "created_car" {
+		t.Fatalf("expected action 'created_car', got %q", outcome.Action)
+	}
+
+	// outcome.RawResponse should be populated
+	if outcome.RawResponse != rawAIOutput {
+		t.Errorf("expected outcome.RawResponse = %q, got %q", rawAIOutput, outcome.RawResponse)
+	}
+
+	// BullIssue.TriageResponse should match the raw AI output
+	if len(store.recordedIssues) != 1 {
+		t.Fatalf("expected 1 recorded issue, got %d", len(store.recordedIssues))
+	}
+	if store.recordedIssues[0].TriageResponse != rawAIOutput {
+		t.Errorf("expected TriageResponse = %q, got %q", rawAIOutput, store.recordedIssues[0].TriageResponse)
+	}
+}
+
+func TestExecuteTriage_TriageResponseRoundTrip(t *testing.T) {
+	// Verify that a BullIssue with a known TriageResponse is preserved by the mock store.
+	store := &mockTriageStore{carIDToReturn: "CAR-RT"}
+	knownResponse := `{"classification":"task","priority":1,"track":"backend","title":"T","description":"D","acceptance":"A"}`
+
+	issue := models.BullIssue{
+		IssueNumber:    99,
+		CarID:          "CAR-RT",
+		TriageResponse: knownResponse,
+	}
+	if err := store.RecordTriagedIssue(context.Background(), issue); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(store.recordedIssues) != 1 {
+		t.Fatalf("expected 1 recorded issue, got %d", len(store.recordedIssues))
+	}
+	if store.recordedIssues[0].TriageResponse != knownResponse {
+		t.Errorf("round-trip mismatch: got %q", store.recordedIssues[0].TriageResponse)
+	}
+}
+
+func TestExecuteTriage_RawResponsePopulatedOnQuestion(t *testing.T) {
+	client := &mockTriageClient{}
+	rawAIOutput := makeAIResponse("question", map[string]interface{}{
+		"description": "Here is the answer.",
+	})
+	ai := &mockTriageAI{response: rawAIOutput}
+	store := &mockTriageStore{}
+
+	issue := makeIssue(21, "How do I configure this?", "I cannot figure out how to configure the timeout settings for this service in production")
+	opts := defaultOpts(client, ai, store)
+
+	outcome, err := ExecuteTriage(context.Background(), issue, opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.Action != "answered" {
+		t.Fatalf("expected action 'answered', got %q", outcome.Action)
+	}
+	if outcome.RawResponse != rawAIOutput {
+		t.Errorf("expected outcome.RawResponse = %q, got %q", rawAIOutput, outcome.RawResponse)
+	}
+}
+
+func TestExecuteTriage_RawResponsePopulatedOnReject(t *testing.T) {
+	client := &mockTriageClient{}
+	rawAIOutput := makeAIResponse("reject", map[string]interface{}{
+		"reject_reason": "Not relevant.",
+	})
+	ai := &mockTriageAI{response: rawAIOutput}
+	store := &mockTriageStore{}
+
+	issue := makeIssue(22, "Spam issue about unrelated product", "Please buy our product and visit our website for amazing deals on everything you need")
+	opts := defaultOpts(client, ai, store)
+
+	outcome, err := ExecuteTriage(context.Background(), issue, opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.Action != "rejected" {
+		t.Fatalf("expected action 'rejected', got %q", outcome.Action)
+	}
+	if outcome.RawResponse != rawAIOutput {
+		t.Errorf("expected outcome.RawResponse = %q, got %q", rawAIOutput, outcome.RawResponse)
+	}
+}
+
 // Verify AI error propagation
 func TestExecuteTriage_AIError(t *testing.T) {
 	client := &mockTriageClient{}
