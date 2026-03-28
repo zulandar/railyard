@@ -15,6 +15,13 @@ import (
 
 const defaultBullPollInterval = 60 * time.Second
 
+const maxTriageRetries = 3
+
+type retryEntry struct {
+	issue   *github.Issue
+	attempt int
+}
+
 // DaemonClient combines all GitHub operations the bull daemon needs.
 type DaemonClient interface {
 	ListNewIssues(ctx context.Context, since time.Time) ([]*github.Issue, error)
@@ -83,6 +90,7 @@ func RunDaemon(ctx context.Context, deps interface {
 
 	lastPoll := time.Time{}
 	cycle := 0
+	var retryQueue []retryEntry
 
 	for {
 		select {
@@ -127,6 +135,39 @@ func RunDaemon(ctx context.Context, deps interface {
 		}
 		lastPoll = pollBoundary
 
+		// Phase 4 (retry): Re-attempt triage for previously failed issues.
+		if len(retryQueue) > 0 {
+			fmt.Fprintf(out, "Phase 4: Processing %d retry entries\n", len(retryQueue))
+			var remaining []retryEntry
+			for _, entry := range retryQueue {
+				num := entry.issue.GetNumber()
+				fmt.Fprintf(out, "Phase 4: Retrying triage for issue #%d (attempt %d)\n", num, entry.attempt)
+				triageOpts := TriageOpts{
+					Client:       deps,
+					AI:           opts.AI,
+					Store:        deps,
+					Config:       opts.Config,
+					Tracks:       opts.Tracks,
+					IgnoreLabel:  opts.Config.Labels.Ignore,
+					Tracked:      tracked,
+					CodeContext:  opts.CodeContext,
+					BranchPrefix: opts.BranchPrefix,
+				}
+				outcome, triageErr := ExecuteTriage(ctx, entry.issue, triageOpts)
+				if triageErr != nil {
+					if entry.attempt+1 < maxTriageRetries {
+						log.Printf("bull: retry triage issue #%d attempt %d error: %v", num, entry.attempt, triageErr)
+						remaining = append(remaining, retryEntry{issue: entry.issue, attempt: entry.attempt + 1})
+					} else {
+						log.Printf("bull: triage issue #%d exhausted %d attempts, dropping", num, maxTriageRetries)
+					}
+					continue
+				}
+				fmt.Fprintf(out, "Phase 4: Issue #%d → %s (retried)\n", num, outcome.Action)
+			}
+			retryQueue = remaining
+		}
+
 		// Phase 2-4: Filter and triage new issues.
 		{
 			seen := make(map[int]bool)
@@ -168,7 +209,8 @@ func RunDaemon(ctx context.Context, deps interface {
 					}
 					outcome, triageErr := ExecuteTriage(ctx, issue, triageOpts)
 					if triageErr != nil {
-						log.Printf("bull: triage issue #%d error: %v", num, triageErr)
+						log.Printf("bull: triage issue #%d error: %v, queuing for retry", num, triageErr)
+						retryQueue = append(retryQueue, retryEntry{issue: issue, attempt: 1})
 						continue
 					}
 					fmt.Fprintf(out, "Phase 4: Issue #%d → %s\n", num, outcome.Action)
