@@ -24,6 +24,7 @@ type Router struct {
 	adapter    Adapter
 	botUserID  string // the bot's own user ID (to filter self-messages)
 	out        io.Writer
+	titleGen   TitleGenerator // generates descriptive thread titles; nil → fallback
 
 	ackMu   sync.Mutex
 	ackDeck []string // shuffled phrases, popped from end
@@ -31,11 +32,12 @@ type Router struct {
 
 // RouterOpts holds parameters for creating a Router.
 type RouterOpts struct {
-	SessionMgr *SessionManager
-	CmdHandler *CommandHandler
-	Adapter    Adapter
-	BotUserID  string    // bot's user ID for self-message filtering
-	Out        io.Writer // defaults to os.Stdout
+	SessionMgr   *SessionManager
+	CmdHandler   *CommandHandler
+	Adapter      Adapter
+	BotUserID    string         // bot's user ID for self-message filtering
+	Out          io.Writer      // defaults to os.Stdout
+	TitleGen     TitleGenerator // optional; generates thread titles from message body
 }
 
 // NewRouter creates a Router.
@@ -59,6 +61,7 @@ func NewRouter(opts RouterOpts) (*Router, error) {
 		adapter:    opts.Adapter,
 		botUserID:  opts.BotUserID,
 		out:        out,
+		titleGen:   opts.TitleGen,
 	}, nil
 }
 
@@ -176,7 +179,8 @@ func (r *Router) Handle(ctx context.Context, msg InboundMessage) {
 		sessionThreadID := msg.ChannelID // fallback if thread creation unavailable
 		if ts, ok := r.adapter.(ThreadStarter); ok {
 			ack := r.nextAck()
-			newThreadID, err := ts.StartThread(ctx, msg.ChannelID, msg.MessageID, ack, "Dispatch")
+			threadTitle := generateThreadTitle(ctx, r.titleGen, text)
+			newThreadID, err := ts.StartThread(ctx, msg.ChannelID, msg.MessageID, ack, threadTitle)
 			if err != nil {
 				log.Printf("telegraph: router: create thread: %v", err)
 				r.sendAck(ctx, msg.ChannelID, "")

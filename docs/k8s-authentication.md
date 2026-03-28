@@ -153,6 +153,43 @@ helm upgrade --install railyard ./charts/railyard \
   --set auth.foundry.endpoint="https://my-resource.openai.azure.com/"
 ```
 
+## Bull GitHub App
+
+**Recommended for:** Operators who want Bull's comments and labels to appear under a named bot identity (e.g. `railyard-bull[bot]`) rather than a personal user account.
+
+### Steps
+
+1. Create a Kubernetes secret from the `.pem` file you downloaded when creating the GitHub App:
+
+```bash
+kubectl create secret generic bull-github-app-key \
+  --from-file=private-key.pem=/path/to/your/private-key.pem \
+  -n railyard
+```
+
+2. Set the relevant Helm values:
+
+```yaml
+bull:
+  appID: '123456'
+  installationID: '78901234'
+  privateKeySecret: bull-github-app-key
+```
+
+`privateKeySecret` replaces `githubToken` when using GitHub App authentication. Do not set both — configure one or the other.
+
+3. Install or upgrade:
+
+```bash
+helm upgrade --install railyard ./charts/railyard \
+  -f values.yaml \
+  --set bull.appID='123456' \
+  --set bull.installationID='78901234' \
+  --set bull.privateKeySecret=bull-github-app-key
+```
+
+**Note:** One GitHub App installation can cover an entire organization (all repos), making it easy to scale Bull to many projects without creating additional secrets.
+
 ## GitHub PAT (PR Mode)
 
 **Required when:** `require_pr: true` is set in your Railyard config.

@@ -10,14 +10,15 @@ import (
 // MockAdapter implements Adapter and ThreadStarter for testing. It records
 // sent messages and allows simulating inbound messages via SimulateInbound.
 type MockAdapter struct {
-	mu            sync.Mutex
-	connected     bool
-	closed        bool
-	inbound       chan InboundMessage
-	sent          []OutboundMessage
-	history       map[string][]ThreadMessage // key: "channelID:threadID"
-	botUserID     string
-	threadCounter int // incremented for each StartThread call
+	mu             sync.Mutex
+	connected      bool
+	closed         bool
+	inbound        chan InboundMessage
+	sent           []OutboundMessage
+	history        map[string][]ThreadMessage // key: "channelID:threadID"
+	botUserID      string
+	threadCounter  int    // incremented for each StartThread call
+	lastThreadName string // thread name from the most recent StartThread call
 }
 
 // BotUserID returns the configured bot user ID (implements BotUserIDer).
@@ -101,7 +102,8 @@ func (m *MockAdapter) Close() error {
 
 // StartThread implements ThreadStarter. It records the ack reply as sent and
 // returns the messageID as the thread ID (simulating thread creation from
-// the user's message).
+// the user's message). The threadName is recorded and accessible via
+// LastThreadName for assertion in tests.
 func (m *MockAdapter) StartThread(ctx context.Context, channelID, messageID, replyText, threadName string) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -110,12 +112,21 @@ func (m *MockAdapter) StartThread(ctx context.Context, channelID, messageID, rep
 	}
 	m.threadCounter++
 	threadID := fmt.Sprintf("thread-%d", m.threadCounter)
+	m.lastThreadName = threadName
 	m.sent = append(m.sent, OutboundMessage{
 		ChannelID: channelID,
 		ThreadID:  threadID,
 		Text:      replyText,
 	})
 	return threadID, nil
+}
+
+// LastThreadName returns the threadName argument from the most recent
+// StartThread call, or empty string if StartThread has never been called.
+func (m *MockAdapter) LastThreadName() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.lastThreadName
 }
 
 // CloseInbound closes the inbound channel without disconnecting the adapter.
