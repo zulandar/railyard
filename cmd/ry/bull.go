@@ -85,12 +85,12 @@ func runBullTriage(cmd *cobra.Command, configPath, issueArg string) error {
 	if !cfg.Bull.Enabled {
 		return fmt.Errorf("bull: bull.enabled is not true in config")
 	}
-	if cfg.Bull.GitHubToken == "" {
-		return fmt.Errorf("bull: bull.github_token is required")
-	}
 
 	out := cmd.OutOrStdout()
-	client := bull.NewClient(cfg.Owner, cfg.Repo, cfg.Bull.GitHubToken)
+	client, err := bull.NewClient(cfg.Owner, cfg.Repo, cfg.Bull)
+	if err != nil {
+		return fmt.Errorf("bull: %w", err)
+	}
 
 	ctx := context.Background()
 	issue, err := client.GetIssue(ctx, issueNumber)
