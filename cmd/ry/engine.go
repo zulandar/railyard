@@ -99,6 +99,14 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 		return fmt.Errorf("auto-migrate: %w", err)
 	}
 
+	// Seed tracks and config so fresh installs work without a separate db-init step.
+	if err := db.SeedTracks(gormDB, cfg.Tracks, os.Stderr); err != nil {
+		return fmt.Errorf("seed tracks: %w", err)
+	}
+	if err := db.SeedConfig(gormDB, cfg, os.Stderr); err != nil {
+		return fmt.Errorf("seed config: %w", err)
+	}
+
 	// Load the track model from DB for context rendering.
 	var trackModel models.Track
 	if err := gormDB.Where("name = ?", track).First(&trackModel).Error; err != nil {
