@@ -154,6 +154,9 @@ type BullLabelsConfig struct {
 type BullConfig struct {
 	Enabled         bool               `yaml:"enabled"`
 	GitHubToken     string             `yaml:"github_token"`
+	AppID           int64              `yaml:"app_id"`
+	PrivateKeyPath  string             `yaml:"private_key_path"`
+	InstallationID  int64              `yaml:"installation_id"`
 	PollIntervalSec int                `yaml:"poll_interval_sec"`
 	TriageMode      string             `yaml:"triage_mode"`
 	AgentProvider   string             `yaml:"agent_provider"`
@@ -378,6 +381,7 @@ func (c *Config) applyDefaults() {
 	// Bull defaults — only apply when bull is enabled.
 	if c.Bull.Enabled {
 		c.Bull.GitHubToken = resolveEnvVars(c.Bull.GitHubToken)
+		c.Bull.PrivateKeyPath = resolveEnvVars(c.Bull.PrivateKeyPath)
 		if c.Bull.PollIntervalSec == 0 {
 			c.Bull.PollIntervalSec = 60
 		}
@@ -466,10 +470,16 @@ func (c *Config) validate() error {
 		}
 	}
 	// Bull validation (only when enabled).
-	// Note: github_token is validated at runtime by the bull command itself,
-	// not here, because non-Bull pods share this config but don't have the
-	// GITHUB_TOKEN env var mounted.
 	if c.Bull.Enabled {
+		// Auth: require either a PAT (github_token) or complete GitHub App credentials.
+		hasPAT := c.Bull.GitHubToken != ""
+		hasApp := c.Bull.AppID != 0 && c.Bull.PrivateKeyPath != "" && c.Bull.InstallationID != 0
+		partialApp := (c.Bull.AppID != 0 || c.Bull.PrivateKeyPath != "" || c.Bull.InstallationID != 0) && !hasApp
+		if partialApp {
+			errs = append(errs, "bull: GitHub App auth requires all three fields: app_id, private_key_path, and installation_id")
+		} else if !hasPAT && !hasApp {
+			errs = append(errs, "bull: authentication is required; set github_token or all of app_id, private_key_path, and installation_id")
+		}
 		switch c.Bull.TriageMode {
 		case "standard", "full":
 			// valid
