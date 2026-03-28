@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -54,9 +55,22 @@ func Start(ctx context.Context, opts StartOpts) error {
 	client := NewClient(ghOwner, ghRepo, opts.Config.Bull.GitHubToken)
 	store := NewStore(opts.DB, opts.Config.BranchPrefix)
 
-	var tracks []string
+	var tracks []TrackInfo
 	for _, t := range opts.Config.Tracks {
-		tracks = append(tracks, t.Name)
+		ti := TrackInfo{
+			Name:         t.Name,
+			Language:     t.Language,
+			FilePatterns: t.FilePatterns,
+		}
+		if len(t.Conventions) > 0 {
+			keys := make([]string, 0, len(t.Conventions))
+			for k := range t.Conventions {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			ti.Conventions = keys
+		}
+		tracks = append(tracks, ti)
 	}
 
 	ai, err := NewProviderAI(opts.Config.Bull.AgentProvider)

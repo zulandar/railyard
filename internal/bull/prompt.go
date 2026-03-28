@@ -20,6 +20,14 @@ type TriageResult struct {
 	RejectReason   string   `json:"reject_reason,omitempty"`
 }
 
+// TrackInfo carries metadata about a track for use in prompt generation.
+type TrackInfo struct {
+	Name         string
+	Language     string
+	FilePatterns []string
+	Conventions  []string
+}
+
 // IssueContext provides the input data for building a triage prompt.
 type IssueContext struct {
 	Number int
@@ -30,9 +38,9 @@ type IssueContext struct {
 }
 
 // BuildTriagePrompt generates the AI prompt for triaging a GitHub issue.
-// mode is "standard" or "full". tracks lists the available track names.
+// mode is "standard" or "full". tracks lists the available tracks with metadata.
 // codeContext contains optional semantic search results for additional context.
-func BuildTriagePrompt(issue IssueContext, mode string, tracks []string, codeContext string) string {
+func BuildTriagePrompt(issue IssueContext, mode string, tracks []TrackInfo, codeContext string) string {
 	var b strings.Builder
 
 	b.WriteString("# Bull — Issue Triage Agent\n\n")
@@ -52,7 +60,16 @@ func BuildTriagePrompt(issue IssueContext, mode string, tracks []string, codeCon
 	// Available tracks
 	b.WriteString("## Available Tracks\n\n")
 	for _, track := range tracks {
-		b.WriteString(fmt.Sprintf("- %s\n", track))
+		b.WriteString(fmt.Sprintf("### %s\n", track.Name))
+		if track.Language != "" {
+			b.WriteString(fmt.Sprintf("- **Language**: %s\n", track.Language))
+		}
+		if len(track.FilePatterns) > 0 {
+			b.WriteString(fmt.Sprintf("- **File patterns**: %s\n", strings.Join(track.FilePatterns, ", ")))
+		}
+		if len(track.Conventions) > 0 {
+			b.WriteString(fmt.Sprintf("- **Conventions**: %s\n", strings.Join(track.Conventions, ", ")))
+		}
 	}
 	b.WriteString("\n")
 

@@ -121,7 +121,7 @@ func defaultOpts(client *mockTriageClient, ai *mockTriageAI, store *mockTriageSt
 				Ignore:      "bull:ignore",
 			},
 		},
-		Tracks:       []string{"backend", "frontend"},
+		Tracks:       []TrackInfo{{Name: "backend"}, {Name: "frontend"}},
 		IgnoreLabel:  "bull:ignore",
 		Tracked:      nil,
 		CodeContext:  "",

@@ -200,7 +200,7 @@ func TestRunDaemon_RunsAllPhasesInOrder(t *testing.T) {
 	// Run one cycle then cancel
 	opts := DaemonOpts{
 		Config:       daemonConfig(),
-		Tracks:       []string{"backend"},
+		Tracks:       []TrackInfo{{Name: "backend"}},
 		BranchPrefix: "ry/test",
 		PollInterval: time.Millisecond,
 		Out:          &buf,
@@ -237,7 +237,7 @@ func TestRunDaemon_GracefulShutdown(t *testing.T) {
 	var buf bytes.Buffer
 	opts := DaemonOpts{
 		Config:       daemonConfig(),
-		Tracks:       []string{"backend"},
+		Tracks:       []TrackInfo{{Name: "backend"}},
 		BranchPrefix: "ry/test",
 		PollInterval: time.Millisecond,
 		Out:          &buf,
@@ -270,7 +270,7 @@ func TestRunDaemon_PhaseErrorDoesNotCrashLoop(t *testing.T) {
 
 	opts := DaemonOpts{
 		Config:       daemonConfig(),
-		Tracks:       []string{"backend"},
+		Tracks:       []TrackInfo{{Name: "backend"}},
 		BranchPrefix: "ry/test",
 		PollInterval: time.Millisecond,
 		Out:          &buf,
@@ -310,7 +310,7 @@ func TestRunDaemon_BackoffOnRateLimit(t *testing.T) {
 
 	opts := DaemonOpts{
 		Config:         cfg,
-		Tracks:         []string{"backend"},
+		Tracks:         []TrackInfo{{Name: "backend"}},
 		BranchPrefix:   "ry/test",
 		PollInterval:   50 * time.Millisecond,
 		Out:            &buf,
@@ -351,7 +351,7 @@ func TestRunDaemon_FiltersDuplicateIssues(t *testing.T) {
 
 	opts := DaemonOpts{
 		Config:       daemonConfig(),
-		Tracks:       []string{"backend"},
+		Tracks:       []TrackInfo{{Name: "backend"}},
 		BranchPrefix: "ry/test",
 		PollInterval: time.Millisecond,
 		Out:          &buf,
@@ -378,7 +378,7 @@ func TestRunDaemon_NilOutDefaultsToDiscard(t *testing.T) {
 
 	opts := DaemonOpts{
 		Config:       daemonConfig(),
-		Tracks:       []string{"backend"},
+		Tracks:       []TrackInfo{{Name: "backend"}},
 		BranchPrefix: "ry/test",
 		PollInterval: time.Millisecond,
 		Out:          nil, // should not panic
