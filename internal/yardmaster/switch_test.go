@@ -595,7 +595,7 @@ func TestSwitch_FetchFailureSetsCategory(t *testing.T) {
 	}
 }
 
-// --- isAncestor tests ---
+// --- isBranchMerged tests ---
 
 // initTestRepo creates a git repo with an initial commit on main and returns
 // its path. The run helper executes git commands in that repo.
@@ -618,43 +618,104 @@ func initTestRepo(t *testing.T) (string, func(args ...string)) {
 	return repoDir, run
 }
 
-func TestIsAncestor_TrueWhenBranchBehindMain(t *testing.T) {
+func TestIsBranchMerged_FalseWhenBranchHasUniqueChanges(t *testing.T) {
 	repoDir, run := initTestRepo(t)
 
-	// Create a feature branch at the current commit.
+	// Create a feature branch with a real file change.
 	run("git", "checkout", "-b", "feature")
+	writeFile(t, repoDir, "feature.txt", "new feature")
+	run("git", "add", "feature.txt")
+	run("git", "commit", "-m", "feature work")
 	run("git", "checkout", "main")
 
-	// Advance main past the feature branch.
-	run("git", "commit", "--allow-empty", "-m", "main advance")
-
-	if !isAncestor(repoDir, "feature", "main") {
-		t.Error("isAncestor should be true when feature is behind main")
+	if isBranchMerged(repoDir, "feature", "main") {
+		t.Error("isBranchMerged should be false when feature has unique changes not in main")
 	}
 }
 
-func TestIsAncestor_FalseWhenBranchAhead(t *testing.T) {
+func TestIsBranchMerged_TrueWhenBranchChangesAlreadyInMain(t *testing.T) {
 	repoDir, run := initTestRepo(t)
 
-	// Create a feature branch with a new commit.
+	// Create a feature branch with a real file change.
 	run("git", "checkout", "-b", "feature")
-	run("git", "commit", "--allow-empty", "-m", "feature work")
+	writeFile(t, repoDir, "feature.txt", "new feature")
+	run("git", "add", "feature.txt")
+	run("git", "commit", "-m", "feature work")
 	run("git", "checkout", "main")
 
-	if isAncestor(repoDir, "feature", "main") {
-		t.Error("isAncestor should be false when feature has commits not in main")
+	// Merge feature into main (simulating a dependent car pulling it in).
+	run("git", "merge", "--no-ff", "feature", "-m", "merge feature")
+
+	if !isBranchMerged(repoDir, "feature", "main") {
+		t.Error("isBranchMerged should be true when feature's changes are already in main")
 	}
 }
 
-func TestIsAncestor_TrueWhenSameCommit(t *testing.T) {
+func TestIsBranchMerged_FalseWhenBranchCreatedFromMainNoCommits(t *testing.T) {
+	// This is the false-positive scenario: a branch created from main with
+	// no unique commits. The old isAncestor check would return true here,
+	// incorrectly auto-closing the car. isBranchMerged returns true because
+	// there is no diff — but this is correct: there is nothing to merge.
 	repoDir, run := initTestRepo(t)
 
-	// Branch at same point as main, no divergence.
+	// Create a branch at the same point as main, no changes.
 	run("git", "checkout", "-b", "feature")
 	run("git", "checkout", "main")
 
-	if !isAncestor(repoDir, "feature", "main") {
-		t.Error("isAncestor should be true when feature and main are at the same commit")
+	// Three-dot diff is empty — no unique changes on the branch.
+	if !isBranchMerged(repoDir, "feature", "main") {
+		t.Error("isBranchMerged should be true when branch has no diff vs main (nothing to merge)")
+	}
+}
+
+func TestIsBranchMerged_FalseWhenBranchBehindButHasDiff(t *testing.T) {
+	// Branch was created, got a real change, then main advanced independently.
+	// The branch tip IS an ancestor scenario depends on history, but the diff
+	// is non-empty so the branch should NOT be considered merged.
+	repoDir, run := initTestRepo(t)
+
+	// Create feature branch with a real change.
+	run("git", "checkout", "-b", "feature")
+	writeFile(t, repoDir, "feature.txt", "feature work")
+	run("git", "add", "feature.txt")
+	run("git", "commit", "-m", "feature work")
+	run("git", "checkout", "main")
+
+	// Advance main with a different change.
+	writeFile(t, repoDir, "main.txt", "main work")
+	run("git", "add", "main.txt")
+	run("git", "commit", "-m", "main advance")
+
+	if isBranchMerged(repoDir, "feature", "main") {
+		t.Error("isBranchMerged should be false when feature has changes not in main")
+	}
+}
+
+func TestIsBranchMerged_TrueWhenDependentCarMergedBranchChanges(t *testing.T) {
+	// Simulates the real workflow: car A has changes, car B (dependent) includes
+	// car A's commits and merges to main. Car A's branch now has an empty diff
+	// vs main even though car A was never explicitly merged.
+	repoDir, run := initTestRepo(t)
+
+	// Car A: create branch with a change.
+	run("git", "checkout", "-b", "car-a")
+	writeFile(t, repoDir, "a.txt", "car A feature")
+	run("git", "add", "a.txt")
+	run("git", "commit", "-m", "car A work")
+
+	// Car B: branch from car-a, add its own work.
+	run("git", "checkout", "-b", "car-b")
+	writeFile(t, repoDir, "b.txt", "car B feature")
+	run("git", "add", "b.txt")
+	run("git", "commit", "-m", "car B work")
+
+	// Merge car-b into main (this includes car-a's commits).
+	run("git", "checkout", "main")
+	run("git", "merge", "--no-ff", "car-b", "-m", "merge car-b (includes car-a)")
+
+	// Car A's changes are now in main via car-b's merge.
+	if !isBranchMerged(repoDir, "car-a", "main") {
+		t.Error("isBranchMerged should be true when car-a's changes were pulled in by car-b's merge")
 	}
 }
 

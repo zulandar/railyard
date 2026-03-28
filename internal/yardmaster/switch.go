@@ -179,9 +179,9 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 		return result, nil
 	}
 
-	// If the branch is already an ancestor of main (e.g. a dependent car's
-	// merge already included this branch's commits), skip the merge.
-	if isAncestor(opts.RepoDir, car.Branch, baseBranch) {
+	// If the branch has no unique diff vs main (e.g. a dependent car's merge
+	// already included this branch's commits), skip the merge.
+	if isBranchMerged(opts.RepoDir, car.Branch, baseBranch) {
 		deleteRemoteBranch(opts.RepoDir, car.Branch)
 		result.Merged = true
 		result.AlreadyMerged = true
@@ -575,11 +575,18 @@ func gitCleanWorkingTree(repoDir string) {
 	clean.CombinedOutput() // best-effort
 }
 
-// isAncestor returns true if the given branch is already fully contained
-// in the base branch (i.e., all its commits are reachable from baseBranch).
-// This happens when a dependent car's merge already included this branch's changes.
-func isAncestor(repoDir, branch, baseBranch string) bool {
-	cmd := exec.Command("git", "merge-base", "--is-ancestor", branch, baseBranch)
+// isBranchMerged returns true if the branch has no unique changes relative to
+// baseBranch. This replaces a plain is-ancestor check which had a false-positive:
+// a branch freshly created from main (with no commits) would satisfy is-ancestor
+// immediately and be auto-closed even though its intended changes never landed.
+//
+// The check uses "git diff <baseBranch>...<branch>" (three-dot diff) which shows
+// only the changes introduced on branch since it diverged from baseBranch. An
+// empty diff means every change on the branch is already present in baseBranch —
+// either because a dependent car's merge pulled them in, or because the branch
+// was truly merged.
+func isBranchMerged(repoDir, branch, baseBranch string) bool {
+	cmd := exec.Command("git", "diff", "--quiet", baseBranch+"..."+branch)
 	cmd.Dir = repoDir
 	return cmd.Run() == nil
 }
