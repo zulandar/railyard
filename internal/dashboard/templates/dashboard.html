@@ -102,7 +102,7 @@
     <div class="card">
         <h3><a href="/cars?track={{.Track}}">{{.Track}}</a></h3>
         <div style="display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.5rem;">
-            {{if .Open}}<a href="/cars?track={{.Track}}&status=open"><span class="badge badge-open">{{.Open}} open</span></a>{{end}}
+            {{if .Open}}<a href="/cars?track={{.Track}}&status=open,ready"><span class="badge badge-open">{{.Open}} open</span></a>{{end}}
             {{if .InProgress}}<a href="/cars?track={{.Track}}&status=in_progress"><span class="badge badge-in_progress">{{.InProgress}} active</span></a>{{end}}
             {{if .Blocked}}<a href="/cars?track={{.Track}}&status=blocked"><span class="badge badge-blocked">{{.Blocked}} blocked</span></a>{{end}}
             {{if .Done}}<a href="/cars?track={{.Track}}&status=done"><span class="badge badge-done">{{.Done}} done</span></a>{{end}}
