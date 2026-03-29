@@ -302,10 +302,12 @@ type CarDetail struct {
 	ClaimedAt   *time.Time
 	CompletedAt *time.Time
 
-	Children  []ChildRow
-	BlockedBy []DepRow
-	Blocks    []DepRow
-	Progress  []ProgressRow
+	Children      []ChildRow
+	ChildrenDone  int
+	ChildrenTotal int
+	BlockedBy     []DepRow
+	Blocks        []DepRow
+	Progress      []ProgressRow
 
 	InputTokens  int64
 	OutputTokens int64
@@ -375,7 +377,11 @@ func GetCarDetail(db *gorm.DB, id string) (*CarDetail, error) {
 				Priority: ch.Priority,
 				Assignee: ch.Assignee,
 			}
+			if ch.Status == "done" || ch.Status == "merged" || ch.Status == "cancelled" {
+				detail.ChildrenDone++
+			}
 		}
+		detail.ChildrenTotal = len(children)
 	}
 
 	// Blocked by (dependencies).

@@ -229,3 +229,8 @@ dl.meta code { background: var(--bg); padding: 0.1rem 0.4rem; border-radius: 3px
 /* HTMX loading indicator */
 .htmx-indicator { opacity: 0; transition: opacity 200ms; }
 .htmx-request .htmx-indicator { opacity: 1; }
+
+
+/* Progress bar */
+.progress-bar { background: var(--border); border-radius: 4px; height: 6px; margin-bottom: 0.75rem; }
+.progress-fill { background: var(--green); border-radius: 4px; height: 6px; }

@@ -53,7 +53,8 @@
 
     {{if .Car.Children}}
     <div class="card">
-        <h3>Children ({{len .Car.Children}})</h3>
+        <h3>Children ({{.Car.ChildrenDone}}/{{.Car.ChildrenTotal}} complete)</h3>
+        <div class="progress-bar"><div class="progress-fill" style="width:{{percent .Car.ChildrenDone .Car.ChildrenTotal}}%"></div></div>
         <table>
             <thead>
                 <tr><th>ID</th><th>Title</th><th>Status</th><th>Type</th></tr>
