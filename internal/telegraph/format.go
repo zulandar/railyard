@@ -31,6 +31,49 @@ func severityColor(severity string) string {
 	}
 }
 
+// statusEmoji returns a unicode emoji for a car status.
+func statusEmoji(status string) string {
+	switch status {
+	case "draft":
+		return "📝"
+	case "open":
+		return "📋"
+	case "in_progress":
+		return "🔧"
+	case "done":
+		return "✅"
+	case "merged":
+		return "🚀"
+	case "blocked":
+		return "⚠️"
+	case "merge-failed":
+		return "❌"
+	case "cancelled":
+		return "🚫"
+	default:
+		return ""
+	}
+}
+
+// stallEmoji returns the emoji for stall events.
+func stallEmoji() string { return "🛑" }
+
+// carLink returns a markdown link to a car if dashboardURL is set, otherwise plain text.
+func carLink(carID, dashboardURL string) string {
+	if dashboardURL == "" {
+		return carID
+	}
+	return fmt.Sprintf("[%s](%s/cars/%s)", carID, strings.TrimRight(dashboardURL, "/"), carID)
+}
+
+// engineLink returns a markdown link to an engine if dashboardURL is set, otherwise plain text.
+func engineLink(engineID, dashboardURL string) string {
+	if dashboardURL == "" {
+		return engineID
+	}
+	return fmt.Sprintf("[%s](%s/engines/%s)", engineID, strings.TrimRight(dashboardURL, "/"), engineID)
+}
+
 // carStatusVerb returns a human-friendly verb for a car status transition.
 func carStatusVerb(newStatus string) string {
 	switch newStatus {

@@ -461,3 +461,73 @@ func TestCarStatusSeverity_AllStatuses(t *testing.T) {
 		}
 	}
 }
+
+func TestStatusEmoji(t *testing.T) {
+	tests := []struct {
+		status string
+		want   string
+	}{
+		{"draft", "📝"},
+		{"open", "📋"},
+		{"in_progress", "🔧"},
+		{"done", "✅"},
+		{"merged", "🚀"},
+		{"blocked", "⚠️"},
+		{"merge-failed", "❌"},
+		{"cancelled", "🚫"},
+		{"unknown", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.status, func(t *testing.T) {
+			got := statusEmoji(tt.status)
+			if got != tt.want {
+				t.Errorf("statusEmoji(%q) = %q, want %q", tt.status, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestStallEmoji(t *testing.T) {
+	got := stallEmoji()
+	if got != "🛑" {
+		t.Errorf("stallEmoji() = %q, want %q", got, "🛑")
+	}
+}
+
+func TestCarLink_WithURL(t *testing.T) {
+	got := carLink("car-042", "https://ry.example.com")
+	want := "[car-042](https://ry.example.com/cars/car-042)"
+	if got != want {
+		t.Errorf("carLink = %q, want %q", got, want)
+	}
+}
+
+func TestCarLink_WithoutURL(t *testing.T) {
+	got := carLink("car-042", "")
+	if got != "car-042" {
+		t.Errorf("carLink = %q, want %q", got, "car-042")
+	}
+}
+
+func TestCarLink_TrailingSlash(t *testing.T) {
+	got := carLink("car-042", "https://ry.example.com/")
+	want := "[car-042](https://ry.example.com/cars/car-042)"
+	if got != want {
+		t.Errorf("carLink with trailing slash = %q, want %q", got, want)
+	}
+}
+
+func TestEngineLink_WithURL(t *testing.T) {
+	got := engineLink("eng-abc", "https://ry.example.com")
+	want := "[eng-abc](https://ry.example.com/engines/eng-abc)"
+	if got != want {
+		t.Errorf("engineLink = %q, want %q", got, want)
+	}
+}
+
+func TestEngineLink_WithoutURL(t *testing.T) {
+	got := engineLink("eng-abc", "")
+	if got != "eng-abc" {
+		t.Errorf("engineLink = %q, want %q", got, "eng-abc")
+	}
+}
