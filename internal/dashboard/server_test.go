@@ -393,17 +393,39 @@ func TestTimeAgo(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := TimeAgo(tt.when)
-			if !strings.Contains(got, strings.TrimSuffix(tt.want, " ago")) && tt.want != "—" {
+			got := string(TimeAgo(tt.when))
+			if tt.want == "—" {
+				if got != "—" {
+					t.Errorf("TimeAgo(zero) = %q, want %q", got, "—")
+				}
+				return
+			}
+			// Non-zero: result should be a <time title="...">...</time> element.
+			if !strings.HasPrefix(got, "<time title=\"") {
+				t.Errorf("TimeAgo = %q, want a <time> element", got)
+			}
+			if !strings.Contains(got, strings.TrimSuffix(tt.want, " ago")) {
 				// Allow small timing variance for seconds.
 				if tt.name != "seconds" {
 					t.Errorf("TimeAgo = %q, want to contain %q", got, tt.want)
 				}
 			}
-			if tt.want == "—" && got != "—" {
-				t.Errorf("TimeAgo(zero) = %q, want %q", got, "—")
-			}
 		})
+	}
+}
+
+func TestTimeAgo_HTMLStructure(t *testing.T) {
+	// Verify the HTML structure contains the absolute datetime as a title attribute.
+	when := time.Date(2026, 1, 15, 10, 30, 0, 0, time.UTC)
+	got := string(TimeAgo(when))
+	if !strings.Contains(got, "2026-01-15 10:30:00 UTC") {
+		t.Errorf("TimeAgo = %q, want absolute datetime in title", got)
+	}
+	if !strings.HasPrefix(got, "<time title=\"") {
+		t.Errorf("TimeAgo = %q, want <time title=...> element", got)
+	}
+	if !strings.HasSuffix(got, "</time>") {
+		t.Errorf("TimeAgo = %q, want closing </time> tag", got)
 	}
 }
 
