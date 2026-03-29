@@ -7,6 +7,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -93,11 +94,12 @@ func Start(ctx context.Context, opts StartOpts) error {
 // templateFuncs returns the FuncMap used by dashboard templates.
 func templateFuncs() template.FuncMap {
 	return template.FuncMap{
-		"timeAgo":  TimeAgo,
-		"truncate": Truncate,
-		"deref":    DerefTime,
-		"commaFmt": CommaFmt,
-		"dollars":  Dollars,
+		"timeAgo":   TimeAgo,
+		"truncate":  Truncate,
+		"deref":     DerefTime,
+		"commaFmt":  CommaFmt,
+		"dollars":   Dollars,
+		"hasPrefix": func(s, prefix string) bool { return strings.HasPrefix(s, prefix) },
 	}
 }
 

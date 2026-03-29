@@ -40,6 +40,7 @@ nav .container { display: flex; align-items: center; gap: 1.5rem; }
 nav .brand { font-weight: 600; font-size: 1.1rem; color: var(--text); }
 nav a { color: var(--text-muted); font-size: 0.9rem; }
 nav a:hover { color: var(--text); text-decoration: none; }
+nav a.active { color: var(--text); font-weight: 600; }
 
 h1, h2, h3 { margin-top: 0; }
 h1 { font-size: 1.5rem; }
