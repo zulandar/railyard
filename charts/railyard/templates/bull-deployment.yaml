@@ -58,7 +58,7 @@ spec:
             {{- include "railyard.authVolumeMounts" . | nindent 12 }}
             {{- if .Values.bull.privateKeySecret }}
             - name: github-app-pem
-              mountPath: /etc/railyard/github-app.pem
+              mountPath: /etc/railyard-keys/github-app.pem
               subPath: {{ .Values.bull.privateKeySecretKey | default "private-key.pem" }}
               readOnly: true
             {{- end }}
