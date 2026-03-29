@@ -10,10 +10,10 @@ document.addEventListener("DOMContentLoaded", function () {
     btn.addEventListener("click", function () {
         paused = !paused;
 
-        var pollingEls = document.querySelectorAll("[hx-trigger]");
+        var pollingEls = document.querySelectorAll("[hx-trigger], [data-paused-trigger]");
         pollingEls.forEach(function (el) {
             var trigger = el.getAttribute("hx-trigger");
-            if (!trigger || trigger.indexOf("every") === -1) return;
+            if (trigger && trigger.indexOf("every") === -1) return;
 
             if (paused) {
                 el.dataset.pausedTrigger = trigger;
