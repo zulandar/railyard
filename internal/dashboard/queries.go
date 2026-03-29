@@ -250,7 +250,7 @@ func ReadyCarsQuery(db *gorm.DB) ([]CarRow, error) {
 	}
 
 	var cars []models.Car
-	if err := db.Where("status = ? AND type != ?", "open", "epic").
+	if err := db.Where("status = ? AND (assignee = ? OR assignee IS NULL) AND type != ?", "open", "", "epic").
 		Where("id NOT IN (?)",
 			db.Table("car_deps").
 				Select("car_deps.car_id").
