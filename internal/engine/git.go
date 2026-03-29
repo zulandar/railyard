@@ -194,8 +194,9 @@ func ResetWorktree(wtDir, baseBranch string) error {
 	return nil
 }
 
-// CreateBranch creates a new git branch from the base branch, or checks out
-// an existing one. If baseBranch is empty, defaults to "main".
+// CreateBranch creates a new git branch from baseBranch (when non-empty), or
+// from HEAD when baseBranch is empty. Checks out an existing branch if it
+// already exists.
 // The repoDir parameter specifies the git repository working directory.
 func CreateBranch(repoDir, branchName, baseBranch string) error {
 	if branchName == "" {
@@ -204,9 +205,11 @@ func CreateBranch(repoDir, branchName, baseBranch string) error {
 	if repoDir == "" {
 		return fmt.Errorf("engine: repo directory is required")
 	}
-	// Try to create a new branch from HEAD (the worktree was already reset to
-	// origin/{baseBranch} by ResetWorktree, so HEAD is the correct branch point).
-	cmd := exec.Command("git", "checkout", "-b", branchName)
+	args := []string{"checkout", "-b", branchName}
+	if baseBranch != "" {
+		args = append(args, baseBranch)
+	}
+	cmd := exec.Command("git", args...)
 	cmd.Dir = repoDir
 	out, err := cmd.CombinedOutput()
 	if err == nil {
