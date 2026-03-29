@@ -306,8 +306,8 @@ type CarDetail struct {
 	ChildrenDone  int
 	ChildrenTotal int
 	BlockedBy     []DepRow
-	Blocks    []DepRow
-	Progress  []ProgressRow
+	Blocks        []DepRow
+	Progress      []ProgressRow
 
 	InputTokens  int64
 	OutputTokens int64

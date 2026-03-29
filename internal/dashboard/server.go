@@ -100,7 +100,12 @@ func templateFuncs() template.FuncMap {
 		"commaFmt":  CommaFmt,
 		"dollars":   Dollars,
 		"hasPrefix": func(s, prefix string) bool { return strings.HasPrefix(s, prefix) },
-		"percent":   func(done, total int) int { if total == 0 { return 0 }; return int(float64(done) / float64(total) * 100) },
+		"percent": func(done, total int) int {
+			if total == 0 {
+				return 0
+			}
+			return int(float64(done) / float64(total) * 100)
+		},
 	}
 }
 
