@@ -52,6 +52,7 @@ LANGUAGE_MAP = {
     "c": "c",
     "cpp": "cpp",
     "ruby": "ruby",
+    "php": "php",
     "swift": "swift",
     "mixed": None,  # falls back to plain text splitting
 }

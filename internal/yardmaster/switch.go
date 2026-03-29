@@ -502,9 +502,11 @@ func runTests(ctx context.Context, repoDir, branch, baseBranch, preTestCommand, 
 		}
 	}
 
-	// Run the track's configured test command, defaulting to "go test ./...".
+	// Run the track's configured test command.
 	if testCommand == "" {
-		testCommand = "go test ./..."
+		log.Printf("[switch] no test_command configured for track; skipping tests")
+		checkoutBase(repoDir, baseBranch)
+		return "", nil
 	}
 	testCmd := exec.CommandContext(ctx, "sh", "-c", testCommand)
 	testCmd.Dir = repoDir

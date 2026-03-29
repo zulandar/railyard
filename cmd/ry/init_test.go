@@ -299,6 +299,7 @@ func TestLanguagePreset(t *testing.T) {
 		{"go", "backend", "go test ./...", "**/*.go"},
 		{"typescript", "frontend", "npm test", "**/*.ts"},
 		{"python", "backend", "pytest", "**/*.py"},
+		{"php", "backend", "vendor/bin/phpunit", "**/*.php"},
 		{"rust", "backend", "cargo test", "**/*.rs"},
 		{"unknown-lang", "unknown-lang", "", ""},
 	}

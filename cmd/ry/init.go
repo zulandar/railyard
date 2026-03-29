@@ -325,6 +325,13 @@ func languagePreset(lang string) config.TrackConfig {
 			EngineSlots:  2,
 			TestCommand:  "mvn test",
 		}
+	case "php":
+		return config.TrackConfig{
+			Name: "backend", Language: "php",
+			FilePatterns: []string{"**/*.php"},
+			EngineSlots:  2,
+			TestCommand:  "vendor/bin/phpunit",
+		}
 	case "ruby":
 		return config.TrackConfig{
 			Name: "backend", Language: "ruby",

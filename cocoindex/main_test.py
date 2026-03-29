@@ -469,6 +469,9 @@ class TestConstants:
     def test_language_map_python(self):
         assert LANGUAGE_MAP["python"] == "python"
 
+    def test_language_map_php(self):
+        assert LANGUAGE_MAP["php"] == "php"
+
     def test_language_map_mixed_is_none(self):
         assert LANGUAGE_MAP["mixed"] is None
 
