@@ -266,6 +266,9 @@ telegraph:
   resources: {}
   platform: slack   # slack or discord
   channel: ""
+  # -- Channel IDs the bot may respond in. If empty, defaults to [channel] for
+  # isolation. Set to ["*"] to explicitly allow all channels.
+  allowedChannels: []
   processTimeoutSec: 900   # max seconds a dispatch subprocess may run
   # -- Port for /healthz and /readyz probes (must match telegraph.health_port in config).
   healthPort: 8086

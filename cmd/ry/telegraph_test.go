@@ -287,3 +287,47 @@ func TestTelegraphStopCmd_Help(t *testing.T) {
 		t.Errorf("expected help to mention shutdown, got: %s", out)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// resolveAllowedChannels tests
+// ---------------------------------------------------------------------------
+
+func TestResolveAllowedChannels_DefaultsToChannel(t *testing.T) {
+	// When allowed_channels is empty but channel is set, should default
+	// to the configured channel for isolation.
+	got := resolveAllowedChannels(nil, "C_DEFAULT")
+	if len(got) != 1 || got[0] != "C_DEFAULT" {
+		t.Errorf("resolveAllowedChannels(nil, C_DEFAULT) = %v, want [C_DEFAULT]", got)
+	}
+}
+
+func TestResolveAllowedChannels_EmptySliceDefaultsToChannel(t *testing.T) {
+	got := resolveAllowedChannels([]string{}, "C_DEFAULT")
+	if len(got) != 1 || got[0] != "C_DEFAULT" {
+		t.Errorf("resolveAllowedChannels([], C_DEFAULT) = %v, want [C_DEFAULT]", got)
+	}
+}
+
+func TestResolveAllowedChannels_ExplicitOverridesDefault(t *testing.T) {
+	// Explicit allowed_channels should be used as-is, never appended to.
+	explicit := []string{"C_ONE", "C_TWO"}
+	got := resolveAllowedChannels(explicit, "C_DEFAULT")
+	if len(got) != 2 || got[0] != "C_ONE" || got[1] != "C_TWO" {
+		t.Errorf("resolveAllowedChannels([C_ONE,C_TWO], C_DEFAULT) = %v, want [C_ONE C_TWO]", got)
+	}
+}
+
+func TestResolveAllowedChannels_BothEmpty(t *testing.T) {
+	// No channel and no allowed_channels should return nil (allow all).
+	got := resolveAllowedChannels(nil, "")
+	if got != nil {
+		t.Errorf("resolveAllowedChannels(nil, '') = %v, want nil", got)
+	}
+}
+
+func TestResolveAllowedChannels_EmptySliceNoChannel(t *testing.T) {
+	got := resolveAllowedChannels([]string{}, "")
+	if len(got) != 0 {
+		t.Errorf("resolveAllowedChannels([], '') = %v, want []", got)
+	}
+}

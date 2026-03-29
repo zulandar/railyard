@@ -227,21 +227,36 @@ func runTelegraphStart(cmd *cobra.Command, configPath string) error {
 	return daemon.Run(ctx)
 }
 
+// resolveAllowedChannels returns the effective allowed channel list.
+// When no explicit allowlist is configured but a default channel is set,
+// it returns a list containing just that channel for isolation. This
+// prevents cross-project data leaks when multiple Telegraph instances
+// share the same bot token (e.g. in multi-namespace k8s).
+func resolveAllowedChannels(configured []string, defaultChannel string) []string {
+	if len(configured) == 0 && defaultChannel != "" {
+		log.Printf("telegraph: allowed_channels empty, defaulting to configured channel %s", defaultChannel)
+		return []string{defaultChannel}
+	}
+	return configured
+}
+
 // createAdapter builds a platform adapter from the config.
 func createAdapter(cfg *config.Config) (telegraph.Adapter, error) {
+	allowed := resolveAllowedChannels(cfg.Telegraph.AllowedChannels, cfg.Telegraph.Channel)
+
 	switch cfg.Telegraph.Platform {
 	case "slack":
 		return slackadapter.New(slackadapter.AdapterOpts{
 			AppToken:        cfg.Telegraph.Slack.AppToken,
 			BotToken:        cfg.Telegraph.Slack.BotToken,
 			ChannelID:       cfg.Telegraph.Channel,
-			AllowedChannels: cfg.Telegraph.AllowedChannels,
+			AllowedChannels: allowed,
 		})
 	case "discord":
 		return discordadapter.New(discordadapter.AdapterOpts{
 			BotToken:        cfg.Telegraph.Discord.BotToken,
 			ChannelID:       cfg.Telegraph.Channel,
-			AllowedChannels: cfg.Telegraph.AllowedChannels,
+			AllowedChannels: allowed,
 		})
 	default:
 		return nil, fmt.Errorf("telegraph: unsupported platform %q", cfg.Telegraph.Platform)

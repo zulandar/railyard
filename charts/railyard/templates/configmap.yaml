@@ -79,6 +79,12 @@ data:
     telegraph:
       platform: {{ .Values.telegraph.platform | quote }}
       channel: {{ .Values.telegraph.channel | quote }}
+      {{- if .Values.telegraph.allowedChannels }}
+      allowed_channels:
+        {{- range .Values.telegraph.allowedChannels }}
+        - {{ . | quote }}
+        {{- end }}
+      {{- end }}
       process_timeout_sec: {{ .Values.telegraph.processTimeoutSec | default 900 }}
       health_port: {{ .Values.telegraph.healthPort | default 8086 }}
       {{- if eq .Values.telegraph.platform "slack" }}

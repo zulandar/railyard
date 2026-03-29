@@ -1,0 +1,18 @@
+project: myproject
+git:
+  owner: testuser
+  repo: git@github.com:test/repo.git
+auth:
+  method: oauth_token
+  oauthToken: test-token
+telegraph:
+  enabled: true
+  platform: discord
+  channel: "1487921215430594571"
+  allowedChannels:
+    - "1487921215430594571"
+    - "9999999999999999999"
+  discord:
+    botToken: "test-bot-token"
+    guildID: "1474984843396907112"
+    channelID: "1487921215430594571"
