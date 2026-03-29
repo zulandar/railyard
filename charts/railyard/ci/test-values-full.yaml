@@ -39,3 +39,10 @@ tracks:
     maxReplicas: 3
     language: typescript
     testCommand: "npm test"
+  - name: api
+    engineSlots: 2
+    minReplicas: 1
+    maxReplicas: 2
+    language: php
+    testCommand: "vendor/bin/phpunit"
+    preTestCommand: "composer install --no-interaction --quiet"

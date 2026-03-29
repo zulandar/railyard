@@ -982,6 +982,30 @@ func TestRunTests_PreTestCommand(t *testing.T) {
 	}
 }
 
+func TestRunTests_EmptyTestCommand(t *testing.T) {
+	repoDir, run := initTestRepo(t)
+
+	run("git", "checkout", "-b", "feature")
+	run("git", "checkout", "main")
+
+	// Empty test command should skip tests and return nil error.
+	output, err := runTests(context.Background(), repoDir, "feature", "main", "", "")
+	if err != nil {
+		t.Fatalf("runTests with empty test command should skip, got error: %v", err)
+	}
+	if output != "" {
+		t.Errorf("output should be empty when skipping tests, got: %q", output)
+	}
+
+	// Verify we're back on main.
+	cmd := exec.Command("git", "symbolic-ref", "--short", "HEAD")
+	cmd.Dir = repoDir
+	out, _ := cmd.Output()
+	if strings.TrimSpace(string(out)) != "main" {
+		t.Errorf("not on main after skipped tests, on %q", strings.TrimSpace(string(out)))
+	}
+}
+
 func TestRunTests_PreTestFailure(t *testing.T) {
 	repoDir, run := initTestRepo(t)
 

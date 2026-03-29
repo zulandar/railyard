@@ -184,6 +184,24 @@ func TestDetectLanguages_MultiLanguage(t *testing.T) {
 	}
 }
 
+// TestDetectLanguages_PHPRepo verifies that detectLanguages identifies a PHP
+// project by the presence of a composer.json file.
+func TestDetectLanguages_PHPRepo(t *testing.T) {
+	dir := t.TempDir()
+
+	if err := os.WriteFile(filepath.Join(dir, "composer.json"), []byte("{}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	languages := detectLanguages(dir)
+	if len(languages) != 1 {
+		t.Fatalf("expected 1 language, got %v", languages)
+	}
+	if languages[0] != "php" {
+		t.Errorf("expected language %q, got %q", "php", languages[0])
+	}
+}
+
 // TestDetectLanguages_Empty verifies that detectLanguages returns an empty
 // slice for a directory with no language indicator files.
 func TestDetectLanguages_Empty(t *testing.T) {
