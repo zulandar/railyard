@@ -81,7 +81,9 @@ func dashboardData(db *gorm.DB) gin.H {
 
 func handleIndex(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		c.HTML(http.StatusOK, "layout.html", dashboardData(db))
+		data := dashboardData(db)
+		data["NavPath"] = c.Request.URL.Path
+		c.HTML(http.StatusOK, "layout.html", data)
 	}
 }
 
@@ -137,6 +139,7 @@ func handleCarList(db *gorm.DB) gin.HandlerFunc {
 			"ActiveTrack":  track,
 			"ActiveStatus": status,
 			"ActiveType":   carType,
+			"NavPath":      c.Request.URL.Path,
 		})
 	}
 }
@@ -147,15 +150,17 @@ func handleCarDetail(db *gorm.DB) gin.HandlerFunc {
 		detail, err := GetCarDetail(db, id)
 		if err != nil {
 			c.HTML(http.StatusNotFound, "layout.html", gin.H{
-				"Error": fmt.Sprintf("Car not found: %s", id),
+				"Error":   fmt.Sprintf("Car not found: %s", id),
+				"NavPath": c.Request.URL.Path,
 			})
 			return
 		}
 
 		graph := DependencyGraph(db, id)
 		c.HTML(http.StatusOK, "car_detail.html", gin.H{
-			"Car":   detail,
-			"Graph": graph,
+			"Car":     detail,
+			"Graph":   graph,
+			"NavPath": c.Request.URL.Path,
 		})
 	}
 }
@@ -166,7 +171,8 @@ func handleEngineDetail(db *gorm.DB) gin.HandlerFunc {
 		engine, err := GetEngineDetail(db, id)
 		if err != nil {
 			c.HTML(http.StatusNotFound, "layout.html", gin.H{
-				"Error": fmt.Sprintf("Engine not found: %s", id),
+				"Error":   fmt.Sprintf("Engine not found: %s", id),
+				"NavPath": c.Request.URL.Path,
 			})
 			return
 		}
@@ -176,6 +182,7 @@ func handleEngineDetail(db *gorm.DB) gin.HandlerFunc {
 		c.HTML(http.StatusOK, "engine_detail.html", gin.H{
 			"Engine":   engine,
 			"Activity": activity,
+			"NavPath":  c.Request.URL.Path,
 		})
 	}
 }
@@ -204,6 +211,7 @@ func handleMessages(db *gorm.DB) gin.HandlerFunc {
 			"ActiveAgent":    agent,
 			"ActivePriority": priority,
 			"ActiveUnacked":  unacked,
+			"NavPath":        c.Request.URL.Path,
 		})
 	}
 }
@@ -229,6 +237,7 @@ func handleSessionList(db *gorm.DB) gin.HandlerFunc {
 			"ActiveSource": source,
 			"ActiveStatus": status,
 			"ActiveUser":   user,
+			"NavPath":      c.Request.URL.Path,
 		})
 	}
 }
@@ -239,13 +248,15 @@ func handleSessionDetail(db *gorm.DB) gin.HandlerFunc {
 		detail, err := GetSessionDetail(db, id)
 		if err != nil {
 			c.HTML(http.StatusNotFound, "layout.html", gin.H{
-				"Error": fmt.Sprintf("Session not found: %s", id),
+				"Error":   fmt.Sprintf("Session not found: %s", id),
+				"NavPath": c.Request.URL.Path,
 			})
 			return
 		}
 
 		c.HTML(http.StatusOK, "session_detail.html", gin.H{
 			"Session": detail,
+			"NavPath": c.Request.URL.Path,
 		})
 	}
 }
@@ -281,6 +292,7 @@ func handleLogs(db *gorm.DB) gin.HandlerFunc {
 			"ActiveEngine":     engineID,
 			"ActiveCar":        carID,
 			"ActiveDirection":  direction,
+			"NavPath":          c.Request.URL.Path,
 		})
 	}
 }
