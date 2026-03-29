@@ -204,10 +204,6 @@ func CreateBranch(repoDir, branchName, baseBranch string) error {
 	if repoDir == "" {
 		return fmt.Errorf("engine: repo directory is required")
 	}
-	if baseBranch == "" {
-		baseBranch = "main"
-	}
-
 	// Try to create a new branch from HEAD (the worktree was already reset to
 	// origin/{baseBranch} by ResetWorktree, so HEAD is the correct branch point).
 	cmd := exec.Command("git", "checkout", "-b", branchName)
