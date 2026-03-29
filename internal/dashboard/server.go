@@ -177,20 +177,24 @@ func Dollars(f float64) string {
 	return fmt.Sprintf("$%.2f", f)
 }
 
-// TimeAgo formats a time as a human-readable relative duration.
-func TimeAgo(t time.Time) string {
+// TimeAgo formats a time as a human-readable relative duration wrapped in a
+// <time> element with the absolute datetime as a title tooltip.
+func TimeAgo(t time.Time) template.HTML {
 	if t.IsZero() {
 		return "—"
 	}
 	d := time.Since(t)
+	var relative string
 	switch {
 	case d < time.Minute:
-		return fmt.Sprintf("%ds ago", int(math.Round(d.Seconds())))
+		relative = fmt.Sprintf("%ds ago", int(math.Round(d.Seconds())))
 	case d < time.Hour:
-		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+		relative = fmt.Sprintf("%dm ago", int(d.Minutes()))
 	case d < 24*time.Hour:
-		return fmt.Sprintf("%dh ago", int(d.Hours()))
+		relative = fmt.Sprintf("%dh ago", int(d.Hours()))
 	default:
-		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+		relative = fmt.Sprintf("%dd ago", int(d.Hours()/24))
 	}
+	absoluteStr := t.Format("2006-01-02 15:04:05 MST")
+	return template.HTML(fmt.Sprintf("<time title=\"%s\">%s</time>", absoluteStr, relative))
 }
