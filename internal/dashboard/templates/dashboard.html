@@ -24,9 +24,12 @@
     {{template "tracks_fragment" .}}
 </div>
 
-<p style="color: var(--text-muted); font-size: 0.8rem; margin-top: 2rem;">
-    Messages in queue: {{.QueueDepth}} | Auto-refreshing every 3s
-</p>
+<div style="display: flex; align-items: center; gap: 1rem; margin-top: 2rem;">
+    <p style="color: var(--text-muted); font-size: 0.8rem; margin: 0;">
+        Messages in queue: {{.QueueDepth}} | Auto-refreshing every 3s
+    </p>
+    <button id="refresh-toggle">Pause</button>
+</div>
 {{end}}
 
 {{define "alerts_fragment"}}
