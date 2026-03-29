@@ -100,14 +100,14 @@
 <div class="grid">
 {{range .Tracks}}
     <div class="card">
-        <h3>{{.Track}}</h3>
+        <h3><a href="/cars?track={{.Track}}">{{.Track}}</a></h3>
         <div style="display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.5rem;">
-            {{if .Open}}<span class="badge badge-open">{{.Open}} open</span>{{end}}
-            {{if .InProgress}}<span class="badge badge-in_progress">{{.InProgress}} active</span>{{end}}
-            {{if .Blocked}}<span class="badge badge-blocked">{{.Blocked}} blocked</span>{{end}}
-            {{if .Done}}<span class="badge badge-done">{{.Done}} done</span>{{end}}
-            {{if .Merged}}<span class="badge badge-done">{{.Merged}} merged</span>{{end}}
-            {{if .Draft}}<span class="badge badge-draft">{{.Draft}} draft</span>{{end}}
+            {{if .Open}}<a href="/cars?track={{.Track}}&status=open"><span class="badge badge-open">{{.Open}} open</span></a>{{end}}
+            {{if .InProgress}}<a href="/cars?track={{.Track}}&status=in_progress"><span class="badge badge-in_progress">{{.InProgress}} active</span></a>{{end}}
+            {{if .Blocked}}<a href="/cars?track={{.Track}}&status=blocked"><span class="badge badge-blocked">{{.Blocked}} blocked</span></a>{{end}}
+            {{if .Done}}<a href="/cars?track={{.Track}}&status=done"><span class="badge badge-done">{{.Done}} done</span></a>{{end}}
+            {{if .Merged}}<a href="/cars?track={{.Track}}&status=merged"><span class="badge badge-done">{{.Merged}} merged</span></a>{{end}}
+            {{if .Draft}}<a href="/cars?track={{.Track}}&status=draft"><span class="badge badge-draft">{{.Draft}} draft</span></a>{{end}}
         </div>
         <p style="color: var(--text-muted); font-size: 0.8rem; margin-top: 0.5rem;">{{.Total}} total cars</p>
     </div>
