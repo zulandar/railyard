@@ -132,6 +132,9 @@ telegraph:
   platform: slack                    # Required: "slack" or "discord"
   channel: C0123456789               # Required: default channel ID for posting
 
+  process_timeout_sec: 900           # Max seconds a dispatch subprocess may run (default: 900)
+  health_port: 8086                  # HTTP health check port (default: 8086)
+
   # --- Channel allowlist (optional) ---
   # Restrict the bot to only respond in these channels. Messages from
   # other channels are silently dropped. Threads inside allowed channels
@@ -200,7 +203,7 @@ ry tg stop
 ry tg sessions -c railyard.yaml
 ```
 
-Telegraph runs in a dedicated tmux session (`railyard-telegraph`). You can attach directly:
+`ry telegraph start` runs in the foreground. When launched via `ry start --telegraph`, Telegraph runs in a dedicated tmux session (`railyard-telegraph`). You can attach directly:
 
 ```bash
 tmux attach -t railyard-telegraph

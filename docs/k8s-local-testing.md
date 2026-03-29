@@ -10,7 +10,7 @@ Install the following before you begin:
 - **kubectl** — [kubernetes.io/docs/tasks/tools](https://kubernetes.io/docs/tasks/tools/)
 - **Helm 3.x** — [helm.sh/docs/intro/install](https://helm.sh/docs/intro/install/)
 - **Docker** — minikube's default driver ([docs.docker.com/get-docker](https://docs.docker.com/get-docker/))
-- **Go 1.23+** — needed to build the `ry` binary
+- **Go 1.26+** — needed to build the `ry` binary
 
 You also need an Anthropic API key (or another supported provider — see [k8s-authentication.md](k8s-authentication.md)).
 

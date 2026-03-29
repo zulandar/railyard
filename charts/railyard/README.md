@@ -25,9 +25,27 @@ helm install railyard ./charts/railyard \
 | Value | Description | Default |
 |-------|-------------|---------|
 | `project` | Project name for namespace derivation and resource naming | `""` |
+| `requirePR` | Create draft PRs instead of merging directly (requires `auth.githubToken`) | `false` |
 | `git.owner` | Git repository owner | `""` |
 | `git.repo` | Git repository URL | `""` |
 | `git.defaultBranch` | Default branch name | `main` |
+
+### Image
+
+| Value | Description | Default |
+|-------|-------------|---------|
+| `image.repository` | Container image repository | `ghcr.io/zulandar/railyard/engine` |
+| `image.tag` | Image tag (defaults to `.Chart.AppVersion`) | `""` |
+| `image.pullPolicy` | Image pull policy | `IfNotPresent` |
+| `imagePullSecret` | Name of an existing image pull secret | `""` |
+
+### Service Account
+
+| Value | Description | Default |
+|-------|-------------|---------|
+| `serviceAccount.create` | Create a service account | `true` |
+| `serviceAccount.name` | Service account name | `""` |
+| `serviceAccount.annotations` | Annotations to add to the service account | `{}` |
 
 ### Authentication
 
@@ -45,6 +63,7 @@ helm install railyard ./charts/railyard \
 | `auth.vertex.credentialsSecret` | Secret with service account JSON | `""` |
 | `auth.foundry.apiKey` | Azure API key (for `foundry` method) | `""` |
 | `auth.foundry.endpoint` | Azure endpoint | `""` |
+| `auth.githubToken` | GitHub PAT for PR operations (requires `requirePR`). Sets `GH_TOKEN` env var | `""` |
 | `auth.copilot.token` | GitHub PAT for Copilot CLI (overrides `githubToken` for Copilot) | `""` |
 | `auth.apiKeyHelper` | Command for dynamic key rotation | `""` |
 
@@ -58,8 +77,13 @@ helm install railyard ./charts/railyard \
 | `database.database` | Database name (defaults to `railyard_{project}`) | `""` |
 | `database.username` | Database username | `root` |
 | `database.password` | Database password | `""` |
+| `database.tls.enabled` | Enable TLS for database connections | `false` |
+| `database.tls.caSecret` | Secret name containing `ca.crt` | `""` |
+| `database.tls.clientSecret` | Secret name containing `tls.crt` + `tls.key` | `""` |
+| `database.tls.skipVerify` | Skip TLS certificate verification | `false` |
 | `database.storage.size` | PVC size for internal MySQL | `10Gi` |
 | `database.storage.storageClass` | Storage class for internal MySQL | `""` |
+| `database.resources` | Resource requests/limits for the internal MySQL pod | `{}` |
 
 ### pgvector (PostgreSQL)
 
@@ -71,8 +95,10 @@ helm install railyard ./charts/railyard \
 | `pgvector.database` | Database name | `cocoindex` |
 | `pgvector.username` | Database username | `cocoindex` |
 | `pgvector.password` | Database password | `cocoindex` |
+| `pgvector.sslmode` | PostgreSQL sslmode for client connections | `prefer` |
 | `pgvector.storage.size` | PVC size for internal pgvector | `10Gi` |
 | `pgvector.storage.storageClass` | Storage class for internal pgvector | `""` |
+| `pgvector.resources` | Resource requests/limits for the internal pgvector pod | `{}` |
 
 ### Tracks
 
@@ -100,16 +126,35 @@ helm install railyard ./charts/railyard \
 | `engine.affinity` | Affinity rules for engine pods | `{}` |
 | `engine.extraEnv` | Extra environment variables for engine pods | `[]` |
 
+### Dispatch
+
+| Value | Description | Default |
+|-------|-------------|---------|
+| `dispatch.replicas` | Number of dispatch replicas | `1` |
+| `dispatch.resources` | Resource requests/limits for dispatch pods | `{}` |
+
+### Yardmaster
+
+| Value | Description | Default |
+|-------|-------------|---------|
+| `yardmaster.replicas` | Number of yardmaster replicas | `1` |
+| `yardmaster.resources` | Resource requests/limits for yardmaster pods | `{}` |
+| `yardmaster.healthPort` | Port for `/healthz` and `/readyz` probes | `8081` |
+| `yardmaster.autoMergeOnApproval` | Auto-merge approved PRs via gh CLI (requires `requirePR`) | `false` |
+
 ### Dashboard
 
 | Value | Description | Default |
 |-------|-------------|---------|
 | `dashboard.replicas` | Number of dashboard replicas | `1` |
+| `dashboard.resources` | Resource requests/limits for dashboard pods | `{}` |
 | `dashboard.service.type` | Service type | `ClusterIP` |
 | `dashboard.service.port` | Service port | `8080` |
 | `dashboard.ingress.enabled` | Enable ingress for the dashboard | `false` |
 | `dashboard.ingress.className` | Ingress class name | `""` |
 | `dashboard.ingress.host` | Ingress hostname | `""` |
+| `dashboard.rateLimit.enabled` | Enable per-IP rate limiting for dashboard routes | `false` |
+| `dashboard.rateLimit.requestsPerMinute` | Maximum requests per minute per IP | `120` |
 | `dashboard.oauth2proxy.enabled` | Enable OAuth2 Proxy sidecar | `false` |
 | `dashboard.oauth2proxy.clientID` | OAuth2 client ID | `""` |
 | `dashboard.oauth2proxy.clientSecret` | OAuth2 client secret | `""` |
@@ -120,13 +165,45 @@ helm install railyard ./charts/railyard \
 | Value | Description | Default |
 |-------|-------------|---------|
 | `telegraph.enabled` | Enable the Telegraph chat bridge | `false` |
+| `telegraph.replicas` | Number of Telegraph replicas | `1` |
+| `telegraph.resources` | Resource requests/limits for Telegraph pods | `{}` |
 | `telegraph.platform` | Platform: `slack` or `discord` | `slack` |
 | `telegraph.channel` | Channel name or ID | `""` |
+| `telegraph.processTimeoutSec` | Max seconds a dispatch subprocess may run | `900` |
+| `telegraph.healthPort` | Port for `/healthz` and `/readyz` probes | `8086` |
 | `telegraph.slack.botToken` | Slack bot token | `""` |
 | `telegraph.slack.appToken` | Slack app token | `""` |
 | `telegraph.discord.botToken` | Discord bot token | `""` |
 | `telegraph.discord.guildID` | Discord guild ID | `""` |
 | `telegraph.discord.channelID` | Discord channel ID | `""` |
+
+### Bull (Issue Triage)
+
+| Value | Description | Default |
+|-------|-------------|---------|
+| `bull.enabled` | Enable the Bull GitHub issue triage daemon | `false` |
+| `bull.replicas` | Number of Bull replicas | `1` |
+| `bull.resources` | Resource requests/limits for Bull pods | `{}` |
+| `bull.pollIntervalSec` | Poll interval in seconds for checking new GitHub issues | `60` |
+| `bull.triageMode` | Triage mode: `standard` (heuristic + AI) or `full` (AI for all issues) | `standard` |
+| `bull.githubToken` | GitHub token for Bull (falls back to `auth.githubToken` if empty) | `""` |
+| `bull.appID` | GitHub App ID (set non-zero to enable GitHub App auth) | `0` |
+| `bull.privateKeySecret` | Kubernetes Secret containing the GitHub App private key PEM | `""` |
+| `bull.privateKeySecretKey` | Key within `privateKeySecret` that holds the PEM data | `private-key.pem` |
+| `bull.installationID` | GitHub App installation ID | `0` |
+| `bull.comments.enabled` | Enable issue commenting | `false` |
+| `bull.comments.answerQuestions` | Answer questions in issue comments | `false` |
+| `bull.labels.underReview` | Label for issues under review | `bull: under review` |
+| `bull.labels.inProgress` | Label for issues in progress | `bull: in progress` |
+| `bull.labels.fixMerged` | Label for issues with a merged fix | `bull: fix merged` |
+| `bull.labels.ignore` | Label to exclude issues from triage | `bull: ignore` |
+
+### Network Policy
+
+| Value | Description | Default |
+|-------|-------------|---------|
+| `networkPolicy.enabled` | Enable NetworkPolicy resources restricting inter-pod traffic | `false` |
+| `networkPolicy.dashboard.ingressCIDR` | CIDRs allowed to reach the dashboard (empty allows same namespace only) | `[]` |
 
 ### CI Test Values
 
@@ -138,6 +215,9 @@ The `ci/` directory contains example values files for chart validation:
 | `ci/test-values-external-db.yaml` | External databases with `database.internal=false` and `pgvector.internal=false`. |
 | `ci/test-values-full.yaml` | Full configuration — ingress, OAuth2 proxy, multiple tracks, Telegraph. |
 | `ci/test-values-copilot.yaml` | Copilot provider with dedicated auth token. Validates copilot token precedence. |
+| `ci/test-values-existing-secret.yaml` | Existing secret with `auth.existingSecret`. Enables Bull and Telegraph. |
+| `ci/test-values-kind.yaml` | Kind cluster setup with local image, Bull enabled, and dummy credentials. |
+| `ci/test-values-networkpolicy.yaml` | NetworkPolicy enabled with dashboard ingress CIDR. Enables Telegraph and Bull. |
 
 Use these to validate chart rendering:
 

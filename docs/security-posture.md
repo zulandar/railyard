@@ -158,7 +158,7 @@ The database provides a persistent audit trail of all agent interactions.
 |----------------|-------------|----------|
 | A03: Injection | `engine/injection_security_test.go`, `messaging/injection_security_test.go`, `cocoindex/injection_security_test.py` | SQL injection via parameterized queries and identifier quoting |
 | A05: Security Misconfiguration | `engine/misconfig_security_test.go`, `dispatch/misconfig_security_test.go` | Default config validation, safe defaults |
-| A07: Identification & Auth Failures | `db/auth_security_test.go`, `dashboard/auth_security_test.go` | Credential handling, auth boundary documentation |
+| A07: Identification & Auth Failures | `db/auth_security_test.go`, `dashboard/auth_security_test.go`, `cocoindex/auth_security_test.py` | Credential handling, auth boundary documentation |
 | A09: Security Logging & Monitoring Failures | `engine/log_sanitization_security_test.go`, `db/secrets_security_test.go` | Log redaction, credential scrubbing |
 
 ### 1.9 Authentication Methods
@@ -309,9 +309,9 @@ Gaps documented honestly with their current status. Items marked **By Design** a
 | Gap | Status | Mitigation | Tracking |
 |-----|--------|------------|----------|
 | No built-in dashboard authentication | By Design | Delegate to OAuth2 Proxy sidecar or ingress-level auth | N/A — see Section 2.1 |
-| No dashboard rate limiting | Roadmap | Network-level rate limiting via ingress controller | `railyard-uqy` |
-| No audit trail for config changes | Roadmap | Database audit logging provides partial coverage | `railyard-bsk` |
-| No NetworkPolicy templates | Roadmap | Operator defines custom policies | `railyard-795` |
+| ~~No dashboard rate limiting~~ | Implemented | `internal/dashboard/ratelimit.go`; configurable via `dashboard.rateLimit` in Helm values | `railyard-uqy` |
+| ~~No audit trail for config changes~~ | Implemented | `internal/audit/` package; see Section 2.5 | `railyard-bsk` |
+| ~~No NetworkPolicy templates~~ | Implemented | `charts/railyard/templates/networkpolicy.yaml`; see Section 2.2 | `railyard-795` |
 | Dashboard binds to 0.0.0.0 | By Design | K8s pod networking isolates; local dev uses port-forward | N/A — see Section 2.6 |
 | No encryption at rest (application layer) | By Design | Delegated to infrastructure (volume encryption) | N/A — see Section 2.4 |
 

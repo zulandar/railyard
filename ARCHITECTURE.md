@@ -91,14 +91,18 @@ type Car struct {
     Title       string     `gorm:"not null"`
     Description string     `gorm:"type:text"`
     Type        string     `gorm:"size:16;default:task"`   // task, epic, bug, spike
-    Status      string     `gorm:"size:16;default:open;index"` // open, ready, claimed, in_progress, done, blocked, cancelled
+    Status      string     `gorm:"size:16;default:draft;index"` // draft, open, ready, claimed, in_progress, done, blocked, cancelled, merged
     Priority    int        `gorm:"default:2"`              // P0=Critical, P1=High, P2=Medium, P3=Low, P4=Trivial; type defaults: bug→P1, task→P2, spike→P3
     Track       string     `gorm:"size:64;index"`          // backend, frontend, infra
     Assignee    string     `gorm:"size:64"`                // engine ID
     ParentID    *string    `gorm:"size:32"`                // epic parent
     Branch      string     `gorm:"size:128"`               // git branch: ry/backend/car-001 (or ry/alice/backend/car-001 without project)
+    BaseBranch  string     `gorm:"size:64"`                // target branch for merge (default: main)
     DesignNotes string     `gorm:"type:text"`
     Acceptance  string     `gorm:"type:text"`
+    SkipTests   bool       `gorm:"default:false"`          // skip test runs for this car
+    RequestedBy string     `gorm:"size:64"`                // who requested the work
+    SourceIssue int                                        // GitHub issue number (0 if none)
     CreatedAt   time.Time
     UpdatedAt   time.Time
     ClaimedAt   *time.Time
@@ -121,7 +125,9 @@ type CarDep struct {
     Blocker Car `gorm:"foreignKey:BlockedBy"`
 }
 
-// CarDepExternal tracks cross-project dependencies (Phase 2).
+// CarDepExternal tracks cross-project dependencies.
+// NOTE: Phase 2 — not yet implemented. This model is aspirational and does not
+// exist in the current codebase or migration list.
 type CarDepExternal struct {
     CarID          string `gorm:"primaryKey;size:32"`
     BlockedByOwner  string `gorm:"primaryKey;size:64"`  // foreign railyard owner
@@ -162,6 +168,8 @@ type Engine struct {
     Status       string    `gorm:"size:16;index"`        // idle, working, clearing, stalled, dead
     CurrentCar  string    `gorm:"size:32"`
     SessionID    string    `gorm:"size:64"`
+    Provider     string    `gorm:"size:32"`              // agent provider name (e.g., "claude", "codex")
+    OverlayTable string    `gorm:"size:128"`             // pgvector overlay table name (e.g., ovl_eng_a1b2c3d4)
     StartedAt    time.Time
     LastActivity time.Time `gorm:"index"`
 }
@@ -189,6 +197,8 @@ type AgentLog struct {
     Direction  string    `gorm:"size:4"`                 // 'in' or 'out'
     Content    string    `gorm:"type:mediumtext"`
     TokenCount int
+    InputTokens  int
+    OutputTokens int
     Model      string    `gorm:"size:64"`
     LatencyMs  int
     CreatedAt  time.Time
@@ -255,11 +265,11 @@ import (
 )
 
 // Connect opens a GORM connection to this railyard's MySQL database.
-func Connect(owner, host string, port int) (*gorm.DB, error) {
-    dsn := fmt.Sprintf("root@tcp(%s:%d)/railyard_%s?parseTime=true", host, port, owner)
-    db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+func Connect(host string, port int, database, username, password string) (*gorm.DB, error) {
+    dsn := DSN(host, port, database, username, password)
+    db, err := openDB(dsn)
     if err != nil {
-        return nil, fmt.Errorf("mysql connect: %w", err)
+        return nil, fmt.Errorf("db: connect to %s:%d/%s: %w", host, port, database, err)
     }
     return db, nil
 }
@@ -269,13 +279,18 @@ func AutoMigrate(db *gorm.DB) error {
     return db.AutoMigrate(
         &models.Car{},
         &models.CarDep{},
-        &models.CarDepExternal{},
         &models.CarProgress{},
         &models.Track{},
         &models.Engine{},
         &models.Message{},
+        &models.BroadcastAck{},
         &models.AgentLog{},
         &models.RailyardConfig{},
+        &models.DispatchSession{},
+        &models.TelegraphConversation{},
+        &models.BullIssue{},
+        &models.BullMeta{},
+        &audit.AuditEvent{},
     )
 }
 ```
@@ -288,13 +303,19 @@ Schema is defined by GORM models above (Section 1.5). GORM AutoMigrate creates a
 |---|---|
 | `cars` | Work items — the core unit. Has `track` column for filtering. |
 | `car_deps` | Blocking relationships between cars (same railyard) |
-| `car_deps_external` | Cross-project dependencies (Phase 2) |
+| `car_deps_external` | Cross-project dependencies (Phase 2 — not yet implemented) |
 | `car_progress` | Work log across /clear cycles |
 | `tracks` | Track definitions (backend, frontend, infra) |
 | `engines` | Worker agent state and health |
 | `messages` | Agent-to-agent communication |
+| `broadcast_acks` | Tracks which agents have acknowledged a broadcast message |
 | `agent_logs` | Complete I/O capture for debugging |
 | `railyard_config` | Instance-level settings |
+| `dispatch_sessions` | Active/completed dispatch sessions (telegraph or local CLI) |
+| `telegraph_conversations` | Message history for dispatch session recovery |
+| `bull_issues` | GitHub issues tracked by the Bull triage daemon |
+| `bull_meta` | Bull daemon metadata and state |
+| `audit_events` | Audit trail for configuration and administrative actions |
 
 **Key GORM operations:**
 
@@ -347,7 +368,7 @@ func ReadyCars(db *gorm.DB, track string) ([]models.Car, error) {
             db.Table("car_deps").
                 Select("car_id").
                 Joins("JOIN cars blocker ON car_deps.blocked_by = blocker.id").
-                Where("blocker.status NOT IN ?", []string{"done", "cancelled"}),
+                Where("blocker.status NOT IN ?", []string{"cancelled", "merged"}),
         ).
         Order("priority ASC, created_at ASC").
         Find(&cars).Error
@@ -576,7 +597,7 @@ repo: git@github.com:org/myapp.git   # shared repo
 branch_prefix: ry                    # auto-derived when project is set: branches are ry/{track}/{car_id}
 agent_provider: claude               # default provider for all tracks (claude|codex|gemini|opencode|copilot)
 
-mysql:
+database:
   host: mysql.railyard-webapp.svc     # k8s Service DNS (per-project namespace)
   port: 3306
   database: railyard_webapp           # can be auto-derived from project
@@ -588,9 +609,9 @@ kubernetes:
   service_account: railyard-engine    # optional
   scaling:
     min_engines: 1
-    max_engines: 20
-    scale_up_threshold: 5             # ready cars per engine triggers scale-up
-    scale_down_idle_minutes: 15
+    max_engines: 10
+    scale_up_threshold: 3             # ready cars per engine triggers scale-up
+    scale_down_idle_minutes: 10
 
 tracks:
   - name: backend
@@ -607,8 +628,8 @@ tracks:
     language: typescript
     file_patterns: ["src/**", "*.ts", "*.tsx", "*.css"]
     engine_slots: 3
-    image:
-      repository: ghcr.io/org/railyard-node
+    image:                              # PLANNED — per-track image override is not yet in TrackConfig;
+      repository: ghcr.io/org/railyard-node   # image is currently a Kubernetes-level setting only
       tag: "22"
     conventions:
       framework: "Next.js 15"
@@ -773,6 +794,8 @@ Agent Session
 ```
 
 ### Log Levels / Modes
+
+> **NOTE:** The `logging:` configuration section below is **planned/future**. No Logging field exists in the current Config struct.
 
 ```yaml
 logging:
@@ -1214,6 +1237,8 @@ The Roundhouse knows which track the requesting engine belongs to (passed in con
 ### Model Selection Per Track
 
 Different languages benefit from different embedding models. Configure in track config:
+
+> **NOTE:** The per-track `roundhouse:` configuration below is **planned/future**. TrackConfig does not currently have a Roundhouse field. These settings illustrate the intended design.
 
 ```yaml
 tracks:

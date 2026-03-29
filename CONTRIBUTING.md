@@ -4,7 +4,7 @@ Thanks for your interest in contributing to Railyard! This guide covers everythi
 
 ## Prerequisites
 
-- **Go 1.25+**
+- **Go 1.26+**
 - **MySQL 8.0+** — SQL database
 - **tmux** — terminal multiplexer
 - **AI coding CLI** (at least one) — Claude Code (default): `npm install -g @anthropic-ai/claude-code`; alternatives: Codex, Gemini, OpenCode, Copilot (see README for install commands)
@@ -45,6 +45,7 @@ go test ./... -count=1 -timeout 300s -race
 ```
 cmd/ry/              CLI entry point (Cobra commands)
 internal/
+  bull/              GitHub issue triage daemon
   car/               Car CRUD, dependencies, ready detection
   config/            YAML config loading and validation
   db/                MySQL/GORM connection and migrations
@@ -79,13 +80,14 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for a deep dive into the system design.
 Before every commit, run these checks. CI will reject code that fails any of them.
 
 ```bash
-# Format (MUST pass — CI rejects unformatted code)
-gofmt -l .
-# If any files listed, fix with:
-gofmt -w .
+# Lint (includes gofmt enforcement — CI rejects unformatted code)
+golangci-lint run
 
 # Vet
 go vet ./...
+
+# Vulnerability check
+govulncheck ./...
 
 # Build
 go build ./...
@@ -97,7 +99,7 @@ go test ./... -count=1 -timeout 300s -race
 ### Code Style
 
 - **Go**: stdlib-first, no frameworks (except Gin for HTTP and Cobra for CLI). Table-driven tests using the standard `testing` package.
-- **Formatting**: `gofmt` is the law. No exceptions.
+- **Formatting**: `gofmt` is the law (enforced via `golangci-lint`). No exceptions.
 - **Imports**: stdlib first, then third-party, then internal packages.
 - **Error handling**: Return errors, don't panic. Wrap errors with context using `fmt.Errorf("doing X: %w", err)`.
 - **Naming**: Follow standard Go conventions. Exported names get doc comments.
@@ -162,7 +164,7 @@ go test ./... -race
 
 ## Submitting Changes
 
-1. Ensure all checks pass (`gofmt`, `go vet`, `go test ./... -race`).
+1. Ensure all checks pass (`golangci-lint run`, `go vet`, `govulncheck ./...`, `go test ./... -race`).
 2. Push your branch and open a pull request against `main`.
 3. Fill out the PR description with:
    - What the change does and why

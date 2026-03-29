@@ -32,7 +32,7 @@ The following are in scope:
 - Agent subprocess management
 
 The following are out of scope:
-- Third-party AI provider APIs (Claude, Codex, Gemini, OpenCode)
+- Third-party AI provider APIs (Claude, Codex, Gemini, OpenCode, Copilot)
 - Kubernetes cluster security (unless caused by Railyard's RBAC/config)
 - Vulnerabilities in dependencies (please report these upstream)
 

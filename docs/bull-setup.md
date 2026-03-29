@@ -122,6 +122,7 @@ Token fields support `${ENV_VAR}` substitution — set secrets as environment va
 | `bull.github_token` | string | — | GitHub PAT with `repo` or `public_repo` scope (alternative to App auth) |
 | `bull.poll_interval_sec` | int | `60` | How often to poll GitHub for new/updated issues (seconds) |
 | `bull.triage_mode` | string | `"standard"` | Triage mode: `"standard"` or `"full"` |
+| `bull.agent_provider` | string | (inherits `agent_provider`) | AI provider for triage (e.g. `"claude"`, `"gemini"`) |
 | `bull.comments.enabled` | bool | `false` | Post comments on rejected issues |
 | `bull.comments.reject_template` | string | `""` | Custom template for rejection comments |
 | `bull.comments.answer_questions` | bool | `false` | Answer questions detected in issues |
@@ -161,7 +162,7 @@ bull:
 ## One-Shot Triage
 
 ```bash
-ry bull triage -c railyard.yaml --issue 42
+ry bull triage 42 -c railyard.yaml
 ```
 
 Triages a single issue without starting the daemon. Useful for testing your configuration or manually processing a specific issue. The issue goes through the same triage pipeline (heuristic + AI or AI-only depending on `triage_mode`), and labels/comments are applied as configured.
@@ -180,7 +181,7 @@ bull:
 ## Running Bull
 
 ```bash
-ry bull start -c railyard.yaml   # Start the Bull daemon
+ry bull -c railyard.yaml   # Start the Bull daemon
 ```
 
 Bull runs in the foreground and polls GitHub on the configured interval. Use tmux or a process manager to keep it running in the background.

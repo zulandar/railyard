@@ -84,7 +84,7 @@ Each developer runs their own Railyard instance against the same repo. Agents wo
 
 ## Prerequisites
 
-- **Go 1.25+**
+- **Go 1.26+**
 - **MySQL 8.0+** — SQL database
 - **tmux** — terminal multiplexer
 - **AI coding CLI** (at least one):
@@ -142,7 +142,7 @@ Or create a `railyard.yaml` manually in your repo root:
 owner: yourname
 repo: git@github.com:org/repo.git
 
-mysql:
+database:
   host: 127.0.0.1
   port: 3306
 
@@ -150,9 +150,9 @@ tracks:
   - name: backend
     language: go
     file_patterns: ["cmd/**", "internal/**", "pkg/**", "*.go"]
-    engine_slots: 2
+    engine_slots: 3
     conventions:
-      go_version: "1.25"
+      go_version: "1.26"
       style: "stdlib-first, no frameworks"
 ```
 
@@ -194,7 +194,7 @@ tmux attach -t railyard
 ry init                                 # Interactive setup: detect languages, generate config, start MySQL
 ry init -c railyard.yaml --yes          # Non-interactive with all defaults
 ry init --skip-db --skip-cocoindex      # Skip MySQL and CocoIndex setup
-ry init -u myuser -p 3307              # Custom MySQL host/port/user
+ry init -u myuser -p 3307              # Custom port/user
 ry init --password secret               # Set MySQL password
 ry migrate -c railyard.yaml             # Migrate existing repo to .railyard/ directory structure
 ```
@@ -202,7 +202,8 @@ ry migrate -c railyard.yaml             # Migrate existing repo to .railyard/ di
 ### Orchestration
 
 ```bash
-ry start -c railyard.yaml --engines 2   # Start Dispatch + Yardmaster + N engines
+ry start -c railyard.yaml --engines 2   # Start Yardmaster + N engines (run `ry dispatch` separately)
+ry start -c railyard.yaml --telegraph   # Include Telegraph chat bridge pane
 ry status -c railyard.yaml              # Dashboard: engines, cars, messages
 ry status -c railyard.yaml --watch      # Auto-refresh every 5s
 ry dashboard -c railyard.yaml           # Web UI at http://localhost:8080
@@ -279,8 +280,8 @@ See [Telegraph Setup Guide](docs/telegraph-setup.md) for platform setup and conf
 Bull connects Railyard to GitHub Issues, automatically triaging new issues with AI, creating cars from accepted issues, and syncing statuses back via labels.
 
 ```bash
-ry bull start -c railyard.yaml        # Start triage daemon
-ry bull triage -c railyard.yaml --issue 42  # One-shot triage
+ry bull -c railyard.yaml              # Start triage daemon
+ry bull triage 42 -c railyard.yaml    # One-shot triage
 ```
 
 See [Bull Setup Guide](docs/bull-setup.md) for configuration and label scheme.
@@ -315,8 +316,8 @@ ry switch <car-id> --dry-run           # Run tests only, don't merge
 ### Messaging
 
 ```bash
-ry message send --to <engine-id> --subject "..." --body "..."
-ry inbox                                # Check messages for current engine
+ry message send --from <agent-id> --to <engine-id> --subject "..." --body "..."
+ry inbox --agent <agent-id>             # Check messages for an agent
 ```
 
 ### Monitoring and Diagnostics
@@ -415,7 +416,7 @@ agent_provider: claude                  # AI CLI provider (claude, codex, gemini
 # default_acceptance: "Tests pass, code reviewed"  # Default acceptance criteria for Dispatch
 # require_pr: true                      # Create draft PRs instead of direct merge to main
 
-mysql:
+database:
   host: 127.0.0.1
   port: 3306
   # database: railyard_alice            # Override default railyard_{owner}
@@ -424,6 +425,11 @@ stall:
   stdout_timeout_sec: 120               # No stdout for 120s = stall
   repeated_error_max: 3                 # Same error 3x = stall
   max_clear_cycles: 5                   # More than 5 /clear cycles = stall
+  max_switch_failures: 3                # Repeated switch failures before escalation
+  switch_timeout_sec: 600               # Max seconds for switch/runTests
+  escalation_cooldown_sec: 600          # Per-car cooldown between escalations
+  max_concurrent_escalations: 3         # Limit concurrent escalation goroutines
+  stale_engine_threshold_sec: 60        # Seconds before engine is considered stale
 
 # Optional: CocoIndex semantic search (requires Docker + Python 3.13+)
 # cocoindex:
@@ -437,17 +443,17 @@ tracks:
   - name: backend
     language: go
     file_patterns: ["cmd/**", "internal/**", "pkg/**", "*.go"]
-    engine_slots: 2                     # Max concurrent engines on this track
+    engine_slots: 3                     # Max concurrent engines on this track
     test_command: "go test ./..."       # Command to validate before merge (default: go test ./...)
     conventions:
-      go_version: "1.25"
+      go_version: "1.26"
       style: "stdlib-first, no frameworks"
       test_framework: "stdlib table-driven"
 
   - name: frontend
     language: typescript
     file_patterns: ["src/**", "*.ts", "*.tsx", "*.css"]
-    engine_slots: 2
+    engine_slots: 3
     agent_provider: codex               # Per-track override (inherits global if omitted)
     test_command: "npm test"            # Any shell command works
     conventions:

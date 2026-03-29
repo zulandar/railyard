@@ -90,10 +90,10 @@ By default the chart deploys MySQL and pgvector as internal StatefulSets. For pr
 
 ### External MySQL
 
-Set `mysql.internal: false` and provide connection details:
+Set `database.internal: false` and provide connection details:
 
 ```yaml
-mysql:
+database:
   internal: false
   host: mysql.example.com
   port: 3306
@@ -105,7 +105,7 @@ mysql:
 If your managed database requires TLS:
 
 ```yaml
-mysql:
+database:
   internal: false
   host: mysql.example.com
   port: 3306
@@ -358,7 +358,7 @@ The Helm chart sets `resources: {}` for all components by default, which means n
 ### Example values.yaml for a medium deployment
 
 ```yaml
-mysql:
+database:
   resources:
     requests:
       cpu: "500m"
@@ -438,7 +438,7 @@ The internal MySQL and pgvector StatefulSets each create a PersistentVolumeClaim
 Configure sizes in your values file:
 
 ```yaml
-mysql:
+database:
   storage:
     size: 10Gi
     storageClass: ""   # empty string uses the cluster default
@@ -534,9 +534,11 @@ telegraph:
       memory: "256Mi"
 ```
 
-### Using an existing Secret for tokens
+### Using an existing Secret for tokens (not yet implemented)
 
-Storing bot tokens directly in values files is fine for development but should be avoided in production. Create a Secret containing your tokens and reference it with `existingSecret`:
+> **Note:** `telegraph.existingSecret` is not yet supported in the Helm chart. This section describes planned functionality. For now, provide tokens directly in your values file or inject them via `--set` flags at install time.
+
+Storing bot tokens directly in values files is fine for development but should be avoided in production. Once implemented, you will be able to create a Secret containing your tokens and reference it with `existingSecret`:
 
 ```bash
 kubectl create secret generic telegraph-tokens \
@@ -552,10 +554,10 @@ telegraph:
   enabled: true
   platform: slack
   channel: "#railyard-notifications"
-  existingSecret: telegraph-tokens
+  existingSecret: telegraph-tokens   # NOT YET IMPLEMENTED
 ```
 
-The chart expects the Secret keys to match the platform (`slack-bot-token` / `slack-app-token` for Slack, `discord-bot-token` for Discord).
+The chart will expect the Secret keys to match the platform (`slack-bot-token` / `slack-app-token` for Slack, `discord-bot-token` for Discord).
 
 ## 9. Service Networking and DNS
 
@@ -569,11 +571,11 @@ All Railyard components deploy into a single namespace (e.g. `railyard` or `rail
 | `railyard-pgvector` | 5432 | Headless ClusterIP | pgvector PostgreSQL for CocoIndex vector storage |
 | `railyard-dashboard` | 8080 | ClusterIP | Dashboard web UI |
 
-Dispatch, yardmaster, and engine pods all read connection strings from the `railyard-config` ConfigMap. The Helm helpers (`railyard.mysqlHost`, `railyard.pgvectorHost`) resolve to the internal service names when `mysql.internal` and `pgvector.internal` are `true`.
+Dispatch, yardmaster, and engine pods all read connection strings from the `railyard-config` ConfigMap. The Helm helpers (`railyard.dbHost`, `railyard.pgvectorHost`) resolve to the internal service names when `database.internal` and `pgvector.internal` are `true`.
 
 ### External database mode
 
-When you set `mysql.internal: false` or `pgvector.internal: false`, the chart skips creating the corresponding Service and StatefulSet. The ConfigMap is populated with the external host you provide in values (see section 3). Internal services for the other components are unaffected.
+When you set `database.internal: false` or `pgvector.internal: false`, the chart skips creating the corresponding Service and StatefulSet. The ConfigMap is populated with the external host you provide in values (see section 3). Internal services for the other components are unaffected.
 
 ### Network policies
 

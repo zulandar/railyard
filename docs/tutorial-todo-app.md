@@ -203,24 +203,21 @@ When configured, each engine automatically gets an MCP server that provides sema
 
 ## Step 4: Start Railyard and Plan with Dispatch
 
-Instead of manually creating cars, we'll use **Dispatch** — Railyard's planning agent. Start the full orchestration:
+Instead of manually creating cars, we'll use **Dispatch** — Railyard's planning agent. Start the orchestration:
 
 ```bash
 ry start -c railyard.yaml --engines 2
 ```
 
-This launches a tmux session with four panes:
-- **Dispatch** — the planning agent (you talk to this one)
-- **Yardmaster** — the supervisor (monitors, tests, merges)
-- **Engine 0 & Engine 1** — worker agents (claim and execute cars)
-
-### Attach and talk to Dispatch
+This creates separate tmux sessions for Yardmaster and each engine. Dispatch is **not** included -- start it separately:
 
 ```bash
-tmux attach -t railyard
+ry dispatch -c railyard.yaml
 ```
 
-Navigate to the **Dispatch pane** (use `Ctrl-b` then arrow keys). You'll see an interactive Claude Code session. Tell it what you want to build:
+### Interact with Dispatch
+
+Dispatch runs in the foreground as an interactive Claude Code session. Tell it what you want to build:
 
 ```
 Build a Todo List API with these endpoints:
@@ -318,7 +315,11 @@ ry logs -c railyard.yaml --follow
 ry watch -c railyard.yaml
 ```
 
-Or watch the tmux panes directly — you'll see agents writing code in real time.
+Or attach to individual tmux sessions directly — you'll see agents writing code in real time:
+
+```bash
+tmux attach -t <session-name>
+```
 
 ---
 
