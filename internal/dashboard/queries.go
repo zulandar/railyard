@@ -377,7 +377,7 @@ func GetCarDetail(db *gorm.DB, id string) (*CarDetail, error) {
 				Priority: ch.Priority,
 				Assignee: ch.Assignee,
 			}
-			if ch.Status == "done" || ch.Status == "merged" {
+			if ch.Status == "done" || ch.Status == "merged" || ch.Status == "cancelled" {
 				detail.ChildrenDone++
 			}
 		}
