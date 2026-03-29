@@ -32,6 +32,7 @@ func registerRoutes(router *gin.Engine, db *gorm.DB) {
 	router.GET("/partials/alerts", handlePartialsAlerts(db))
 	router.GET("/partials/stats", handlePartialsStats(db))
 	router.GET("/partials/yardmaster", handlePartialsYardmaster(db))
+	router.GET("/partials/ready-cars", handlePartialsReadyCars(db))
 
 	// SSE endpoint for real-time escalation alerts.
 	router.GET("/api/events", handleSSE(db))
@@ -47,6 +48,7 @@ func dashboardData(db *gorm.DB) gin.H {
 			"QueueDepth":  int64(0),
 			"Stats":       DashboardStats{},
 			"Yardmaster":  (*YardmasterInfo)(nil),
+			"ReadyCars":   []CarRow{},
 		}
 	}
 
@@ -69,6 +71,11 @@ func dashboardData(db *gorm.DB) gin.H {
 
 	stats := ComputeStats(engines, tracks, db)
 
+	readyCars, err := ReadyCarsQuery(db)
+	if err != nil {
+		log.Printf("dashboard: ready cars query: %v", err)
+	}
+
 	return gin.H{
 		"Engines":     engines,
 		"Tracks":      tracks,
@@ -76,6 +83,7 @@ func dashboardData(db *gorm.DB) gin.H {
 		"QueueDepth":  queueDepth,
 		"Stats":       stats,
 		"Yardmaster":  YardmasterStatus(db),
+		"ReadyCars":   readyCars,
 	}
 }
 
@@ -119,6 +127,13 @@ func handlePartialsYardmaster(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		data := dashboardData(db)
 		c.HTML(http.StatusOK, "yardmaster_fragment", data)
+	}
+}
+
+func handlePartialsReadyCars(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		data := dashboardData(db)
+		c.HTML(http.StatusOK, "ready_cars_fragment", data)
 	}
 }
 

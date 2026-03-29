@@ -242,6 +242,43 @@ func CarList(db *gorm.DB, track, status, carType, parentID string) CarListResult
 	}
 }
 
+// ReadyCarsQuery returns up to 10 open cars with no unresolved blockers,
+// ordered by priority then creation time.
+func ReadyCarsQuery(db *gorm.DB) ([]CarRow, error) {
+	if db == nil {
+		return []CarRow{}, nil
+	}
+
+	var cars []models.Car
+	if err := db.Where("status = ? AND (assignee = ? OR assignee IS NULL) AND type != ?", "open", "", "epic").
+		Where("id NOT IN (?)",
+			db.Table("car_deps").
+				Select("car_deps.car_id").
+				Joins("JOIN cars blocker ON car_deps.blocked_by = blocker.id").
+				Where("blocker.status NOT IN ?", models.ResolvedBlockerStatuses),
+		).
+		Order("priority ASC, created_at ASC").
+		Limit(10).
+		Find(&cars).Error; err != nil {
+		return nil, fmt.Errorf("dashboard: ready cars: %w", err)
+	}
+
+	rows := make([]CarRow, len(cars))
+	for i, c := range cars {
+		rows[i] = CarRow{
+			ID:        c.ID,
+			Title:     c.Title,
+			Status:    c.Status,
+			Type:      c.Type,
+			Track:     c.Track,
+			Priority:  c.Priority,
+			Assignee:  c.Assignee,
+			CreatedAt: c.CreatedAt,
+		}
+	}
+	return rows, nil
+}
+
 // DepRow holds a dependency link for display.
 type DepRow struct {
 	CarID  string

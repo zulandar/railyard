@@ -14,6 +14,11 @@
     {{template "yardmaster_fragment" .}}
 </div>
 
+<h2>Ready Cars</h2>
+<div class="card" id="ready-cars-table" hx-get="/partials/ready-cars" hx-trigger="every 3s" hx-swap="innerHTML">
+    {{template "ready_cars_fragment" .}}
+</div>
+
 <h2>Engines</h2>
 <div class="card" id="engines-table" hx-get="/partials/engines" hx-trigger="every 3s" hx-swap="innerHTML">
     {{template "engines_fragment" .}}
@@ -115,6 +120,33 @@
     <p style="color: var(--text-muted);">No tracks configured</p>
 {{end}}
 </div>
+{{end}}
+
+{{define "ready_cars_fragment"}}
+<table>
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>Title</th>
+            <th>Track</th>
+            <th>Priority</th>
+            <th>Waiting</th>
+        </tr>
+    </thead>
+    <tbody>
+    {{range .ReadyCars}}
+        <tr>
+            <td><a href="/cars/{{.ID}}">{{.ID}}</a></td>
+            <td>{{.Title}}</td>
+            <td>{{.Track}}</td>
+            <td>{{.Priority}}</td>
+            <td>{{timeAgo .CreatedAt}}</td>
+        </tr>
+    {{else}}
+        <tr><td colspan="5" style="color: var(--text-muted);">No ready cars</td></tr>
+    {{end}}
+    </tbody>
+</table>
 {{end}}
 
 {{define "yardmaster_fragment"}}
