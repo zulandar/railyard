@@ -27,7 +27,7 @@ spec:
         - name: bull
           image: {{ include "railyard.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command: ["ry"]
+          command: ["tini", "--", "ry"]
           args: ["bull", "-c", "/etc/railyard/railyard.yaml"]
           env:
             - name: DB_PASSWORD

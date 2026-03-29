@@ -80,7 +80,7 @@ func (w *Watcher) BuildDailyDigest() (*DetectedEvent, error) {
 		return nil, nil
 	}
 
-	formatted := FormatDaily(report)
+	formatted := FormatDaily(report, w.dashboardURL)
 	return &DetectedEvent{
 		Type:      EventDailyDigest,
 		Timestamp: now,
@@ -106,7 +106,7 @@ func (w *Watcher) BuildWeeklyDigest() (*DetectedEvent, error) {
 		return nil, nil
 	}
 
-	formatted := FormatWeekly(report)
+	formatted := FormatWeekly(report, w.dashboardURL)
 	return &DetectedEvent{
 		Type:      EventWeeklyDigest,
 		Timestamp: now,
@@ -359,36 +359,36 @@ func buildTrackBreakdown(db *gorm.DB, since, until time.Time) []TrackDigest {
 }
 
 // formatWithDelta formats an integer count with a delta indicator showing
-// change from a previous period (e.g. "12 (+4)", "8 (-4)", "5 (=)").
+// change from a previous period (e.g. "12 (▲4)", "8 (▼4)", "5 (=)").
 func formatWithDelta(current, previous int) string {
 	delta := current - previous
 	switch {
 	case delta > 0:
-		return fmt.Sprintf("%d (+%d)", current, delta)
+		return fmt.Sprintf("%d (▲%d)", current, delta)
 	case delta < 0:
-		return fmt.Sprintf("%d (%d)", current, delta)
+		return fmt.Sprintf("%d (▼%d)", current, -delta)
 	default:
 		return fmt.Sprintf("%d (=)", current)
 	}
 }
 
 // formatRateWithDelta formats a percentage rate with a delta indicator showing
-// change from a previous period (e.g. "90% (+15%)", "75% (-15%)", "88% (=)").
+// change from a previous period (e.g. "90% (▲15%)", "75% (▼15%)", "88% (=)").
 // Deltas within ±0.5 are treated as equal.
 func formatRateWithDelta(current, previous float64) string {
 	delta := current - previous
 	switch {
 	case delta > 0.5:
-		return fmt.Sprintf("%.0f%% (+%.0f%%)", current, delta)
+		return fmt.Sprintf("%.0f%% (▲%.0f%%)", current, delta)
 	case delta < -0.5:
-		return fmt.Sprintf("%.0f%% (%.0f%%)", current, delta)
+		return fmt.Sprintf("%.0f%% (▼%.0f%%)", current, -delta)
 	default:
 		return fmt.Sprintf("%.0f%% (=)", current)
 	}
 }
 
 // FormatDaily formats a daily digest report as a FormattedEvent.
-func FormatDaily(report *DailyReport) FormattedEvent {
+func FormatDaily(report *DailyReport, dashboardURL string) FormattedEvent {
 	var bodyLines []string
 	bodyLines = append(bodyLines, fmt.Sprintf("**Period**: %s – %s",
 		report.PeriodStart.Format("Jan 2 15:04"),
@@ -405,19 +405,6 @@ func FormatDaily(report *DailyReport) FormattedEvent {
 	}
 	bodyLines = append(bodyLines, fmt.Sprintf("**Engines**: %d registered", report.EngineCount))
 
-	// Track breakdown.
-	if len(report.TrackBreakdown) > 0 {
-		bodyLines = append(bodyLines, "")
-		bodyLines = append(bodyLines, "**Per Track**:")
-		for _, td := range report.TrackBreakdown {
-			line := fmt.Sprintf("  %s: %d completed, %d open", td.Track, td.Completed, td.Open)
-			if td.AvgCompletion > 0 {
-				line += fmt.Sprintf(" (avg %s)", formatDuration(td.AvgCompletion))
-			}
-			bodyLines = append(bodyLines, line)
-		}
-	}
-
 	fields := []Field{
 		{Name: "Created", Value: formatWithDelta(report.CarsCreated, report.PrevCarsCreated), Short: true},
 		{Name: "Completed", Value: formatWithDelta(report.CarsCompleted, report.PrevCarsCompleted), Short: true},
@@ -431,8 +418,17 @@ func FormatDaily(report *DailyReport) FormattedEvent {
 		fields = append(fields, Field{Name: "Stalls", Value: formatWithDelta(report.StallCount, report.PrevStallCount), Short: true})
 	}
 
+	// Track breakdown as fields.
+	for _, td := range report.TrackBreakdown {
+		val := fmt.Sprintf("%d completed, %d open", td.Completed, td.Open)
+		if td.AvgCompletion > 0 {
+			val += fmt.Sprintf(" (avg %s)", formatDuration(td.AvgCompletion))
+		}
+		fields = append(fields, Field{Name: td.Track, Value: val, Short: true})
+	}
+
 	return FormattedEvent{
-		Title:    "Daily Digest",
+		Title:    "📊 Daily Digest",
 		Body:     strings.Join(bodyLines, "\n"),
 		Severity: "info",
 		Color:    ColorInfo,
@@ -441,7 +437,7 @@ func FormatDaily(report *DailyReport) FormattedEvent {
 }
 
 // FormatWeekly formats a weekly digest report as a FormattedEvent.
-func FormatWeekly(report *WeeklyReport) FormattedEvent {
+func FormatWeekly(report *WeeklyReport, dashboardURL string) FormattedEvent {
 	var bodyLines []string
 	bodyLines = append(bodyLines, fmt.Sprintf("**Period**: %s – %s",
 		report.PeriodStart.Format("Jan 2"),
@@ -461,19 +457,6 @@ func FormatWeekly(report *WeeklyReport) FormattedEvent {
 		bodyLines = append(bodyLines, fmt.Sprintf("**Stalls**: %s", formatWithDelta(report.StallCount, report.PrevStallCount)))
 	}
 
-	// Track breakdown.
-	if len(report.TrackBreakdown) > 0 {
-		bodyLines = append(bodyLines, "")
-		bodyLines = append(bodyLines, "**Per Track**:")
-		for _, td := range report.TrackBreakdown {
-			line := fmt.Sprintf("  %s: %d completed, %d open", td.Track, td.Completed, td.Open)
-			if td.AvgCompletion > 0 {
-				line += fmt.Sprintf(" (avg %s)", formatDuration(td.AvgCompletion))
-			}
-			bodyLines = append(bodyLines, line)
-		}
-	}
-
 	fields := []Field{
 		{Name: "Closed", Value: formatWithDelta(report.CarsClosed, report.PrevCarsClosed), Short: true},
 		{Name: "Merged", Value: formatWithDelta(report.CarsMerged, report.PrevCarsMerged), Short: true},
@@ -488,8 +471,17 @@ func FormatWeekly(report *WeeklyReport) FormattedEvent {
 		fields = append(fields, Field{Name: "Stalls", Value: formatWithDelta(report.StallCount, report.PrevStallCount), Short: true})
 	}
 
+	// Track breakdown as fields.
+	for _, td := range report.TrackBreakdown {
+		val := fmt.Sprintf("%d completed, %d open", td.Completed, td.Open)
+		if td.AvgCompletion > 0 {
+			val += fmt.Sprintf(" (avg %s)", formatDuration(td.AvgCompletion))
+		}
+		fields = append(fields, Field{Name: td.Track, Value: val, Short: true})
+	}
+
 	return FormattedEvent{
-		Title:    "Weekly Digest",
+		Title:    "📈 Weekly Digest",
 		Body:     strings.Join(bodyLines, "\n"),
 		Severity: "info",
 		Color:    ColorInfo,

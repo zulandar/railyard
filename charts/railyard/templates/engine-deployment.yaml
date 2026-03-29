@@ -94,7 +94,7 @@ spec:
         - name: engine
           image: {{ include "railyard.trackImage" (dict "track" . "global" $) }}
           imagePullPolicy: {{ $.Values.image.pullPolicy }}
-          command: ["ry"]
+          command: ["tini", "--", "ry"]
           args: ["engine", "start", "--track", {{ .name | quote }}, "-c", "/etc/railyard/railyard.yaml"]
           workingDir: /repo
           env:

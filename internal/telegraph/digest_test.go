@@ -75,8 +75,8 @@ func TestBuildDailyDigest_WithActivity(t *testing.T) {
 	if evt.Type != EventDailyDigest {
 		t.Errorf("type = %v, want %v", evt.Type, EventDailyDigest)
 	}
-	if evt.Title != "Daily Digest" {
-		t.Errorf("title = %q, want 'Daily Digest'", evt.Title)
+	if !strings.Contains(evt.Title, "Daily Digest") {
+		t.Errorf("title = %q, want to contain 'Daily Digest'", evt.Title)
 	}
 	if evt.Body == "" {
 		t.Error("expected non-empty body")
@@ -142,8 +142,8 @@ func TestBuildWeeklyDigest_WithActivity(t *testing.T) {
 	if evt.Type != EventWeeklyDigest {
 		t.Errorf("type = %v, want %v", evt.Type, EventWeeklyDigest)
 	}
-	if evt.Title != "Weekly Digest" {
-		t.Errorf("title = %q, want 'Weekly Digest'", evt.Title)
+	if !strings.Contains(evt.Title, "Weekly Digest") {
+		t.Errorf("title = %q, want to contain 'Weekly Digest'", evt.Title)
 	}
 }
 
@@ -426,9 +426,9 @@ func TestFormatDaily_ContainsExpectedFields(t *testing.T) {
 		},
 	}
 
-	f := FormatDaily(report)
-	if f.Title != "Daily Digest" {
-		t.Errorf("title = %q, want 'Daily Digest'", f.Title)
+	f := FormatDaily(report, "")
+	if !strings.Contains(f.Title, "Daily Digest") {
+		t.Errorf("title = %q, want to contain 'Daily Digest'", f.Title)
 	}
 	if f.Severity != "info" {
 		t.Errorf("severity = %q, want 'info'", f.Severity)
@@ -438,7 +438,7 @@ func TestFormatDaily_ContainsExpectedFields(t *testing.T) {
 	}
 
 	// Body should mention key metrics (Prev* are zero so deltas show positive).
-	for _, want := range []string{"5 (+5)", "3 (+3)", "2 (+2)", "1.5M", "4 registered", "backend"} {
+	for _, want := range []string{"5 (\u25b25)", "3 (\u25b23)", "2 (\u25b22)", "1.5M", "4 registered"} {
 		if !strings.Contains(f.Body, want) {
 			t.Errorf("body missing %q:\n%s", want, f.Body)
 		}
@@ -459,7 +459,7 @@ func TestFormatDaily_NoStallsOrTokens(t *testing.T) {
 		EngineCount:   1,
 	}
 
-	f := FormatDaily(report)
+	f := FormatDaily(report, "")
 	if strings.Contains(f.Body, "Stalls") {
 		t.Error("body should not mention stalls when 0")
 	}
@@ -477,9 +477,15 @@ func TestFormatDaily_TrackAvgCompletion(t *testing.T) {
 		},
 	}
 
-	f := FormatDaily(report)
-	if !strings.Contains(f.Body, "avg") {
-		t.Errorf("body should contain 'avg' for track with completion time:\n%s", f.Body)
+	f := FormatDaily(report, "")
+	hasAvg := false
+	for _, fld := range f.Fields {
+		if fld.Name == "backend" && strings.Contains(fld.Value, "avg") {
+			hasAvg = true
+		}
+	}
+	if !hasAvg {
+		t.Errorf("track field should contain 'avg' for track with completion time, fields: %+v", f.Fields)
 	}
 }
 
@@ -503,16 +509,16 @@ func TestFormatWeekly_ContainsExpectedFields(t *testing.T) {
 		},
 	}
 
-	f := FormatWeekly(report)
-	if f.Title != "Weekly Digest" {
-		t.Errorf("title = %q, want 'Weekly Digest'", f.Title)
+	f := FormatWeekly(report, "")
+	if !strings.Contains(f.Title, "Weekly Digest") {
+		t.Errorf("title = %q, want to contain 'Weekly Digest'", f.Title)
 	}
 	if f.Severity != "info" {
 		t.Errorf("severity = %q, want 'info'", f.Severity)
 	}
 
-	// Prev* are zero so deltas show positive; MergeSuccessRate=88.9%, PrevMergeSuccessRate=0 → "+89%".
-	for _, want := range []string{"10 (+10)", "8 (+8)", "89%", "500.0K", "2 (+2)", "backend", "frontend"} {
+	// Prev* are zero so deltas show positive; MergeSuccessRate=88.9%, PrevMergeSuccessRate=0 → "▲89%".
+	for _, want := range []string{"10 (\u25b210)", "8 (\u25b28)", "89%", "500.0K", "2 (\u25b22)"} {
 		if !strings.Contains(f.Body, want) {
 			t.Errorf("body missing %q:\n%s", want, f.Body)
 		}
@@ -530,7 +536,7 @@ func TestFormatWeekly_NoMergeAttempts(t *testing.T) {
 		CarsClosed:  2,
 	}
 
-	f := FormatWeekly(report)
+	f := FormatWeekly(report, "")
 	if strings.Contains(f.Body, "Merge Success Rate") {
 		t.Error("body should not mention merge rate when 0 attempts")
 	}
@@ -543,7 +549,7 @@ func TestFormatWeekly_NoStallsOrTokens(t *testing.T) {
 		CarsClosed:  1,
 	}
 
-	f := FormatWeekly(report)
+	f := FormatWeekly(report, "")
 	if strings.Contains(f.Body, "Stalls") {
 		t.Error("body should not mention stalls when 0")
 	}
@@ -562,12 +568,12 @@ func TestFormatWithDelta(t *testing.T) {
 		previous int
 		want     string
 	}{
-		{12, 8, "12 (+4)"},
-		{8, 12, "8 (-4)"},
+		{12, 8, "12 (\u25b24)"},
+		{8, 12, "8 (\u25bc4)"},
 		{5, 5, "5 (=)"},
 		{0, 0, "0 (=)"},
-		{1, 0, "1 (+1)"},
-		{0, 3, "0 (-3)"},
+		{1, 0, "1 (\u25b21)"},
+		{0, 3, "0 (\u25bc3)"},
 	}
 	for _, tt := range tests {
 		got := formatWithDelta(tt.current, tt.previous)
@@ -587,12 +593,12 @@ func TestFormatRateWithDelta(t *testing.T) {
 		previous float64
 		want     string
 	}{
-		{90.0, 75.0, "90% (+15%)"},
-		{75.0, 90.0, "75% (-15%)"},
-		{88.0, 88.3, "88% (=)"},   // within ±0.5
-		{88.0, 87.6, "88% (=)"},   // exactly 0.4 delta — within ±0.5
-		{88.0, 87.4, "88% (+1%)"}, // 0.6 delta — outside ±0.5
-		{100.0, 0.0, "100% (+100%)"},
+		{90.0, 75.0, "90% (\u25b215%)"},
+		{75.0, 90.0, "75% (\u25bc15%)"},
+		{88.0, 88.3, "88% (=)"},    // within ±0.5
+		{88.0, 87.6, "88% (=)"},    // exactly 0.4 delta — within ±0.5
+		{88.0, 87.4, "88% (\u25b21%)"}, // 0.6 delta — outside ±0.5
+		{100.0, 0.0, "100% (\u25b2100%)"},
 	}
 	for _, tt := range tests {
 		got := formatRateWithDelta(tt.current, tt.previous)
@@ -668,19 +674,19 @@ func TestFormatDaily_WithDeltas(t *testing.T) {
 		PrevStallCount:    2,
 	}
 
-	f := FormatDaily(report)
+	f := FormatDaily(report, "")
 
 	// Created: +4 delta.
-	if !strings.Contains(f.Body, "+4") {
-		t.Errorf("body missing '+4' for created delta:\n%s", f.Body)
+	if !strings.Contains(f.Body, "\u25b24") {
+		t.Errorf("body missing upward arrow for created delta:\n%s", f.Body)
 	}
 	// Completed: equal.
 	if !strings.Contains(f.Body, "6 (=)") {
 		t.Errorf("body missing '6 (=)' for completed delta:\n%s", f.Body)
 	}
 	// Merged: negative delta.
-	if !strings.Contains(f.Body, "4 (-4)") {
-		t.Errorf("body missing '4 (-4)' for merged delta:\n%s", f.Body)
+	if !strings.Contains(f.Body, "4 (\u25bc4)") {
+		t.Errorf("body missing '4 (\u25bc4)' for merged delta:\n%s", f.Body)
 	}
 	// Stalls: equal.
 	if !strings.Contains(f.Body, "2 (=)") {
@@ -692,14 +698,14 @@ func TestFormatDaily_WithDeltas(t *testing.T) {
 	for _, fld := range f.Fields {
 		fieldVals[fld.Name] = fld.Value
 	}
-	if fieldVals["Created"] != "10 (+4)" {
-		t.Errorf("Created field = %q, want '10 (+4)'", fieldVals["Created"])
+	if fieldVals["Created"] != "10 (\u25b24)" {
+		t.Errorf("Created field = %q, want '10 (\u25b24)'", fieldVals["Created"])
 	}
 	if fieldVals["Completed"] != "6 (=)" {
 		t.Errorf("Completed field = %q, want '6 (=)'", fieldVals["Completed"])
 	}
-	if fieldVals["Merged"] != "4 (-4)" {
-		t.Errorf("Merged field = %q, want '4 (-4)'", fieldVals["Merged"])
+	if fieldVals["Merged"] != "4 (\u25bc4)" {
+		t.Errorf("Merged field = %q, want '4 (\u25bc4)'", fieldVals["Merged"])
 	}
 }
 
@@ -719,24 +725,24 @@ func TestFormatDaily_FirstEver(t *testing.T) {
 		// Prev* default to zero.
 	}
 
-	f := FormatDaily(report)
+	f := FormatDaily(report, "")
 
-	if !strings.Contains(f.Body, "12 (+12)") {
-		t.Errorf("body missing '12 (+12)' for first-ever created:\n%s", f.Body)
+	if !strings.Contains(f.Body, "12 (\u25b212)") {
+		t.Errorf("body missing '12 (\u25b212)' for first-ever created:\n%s", f.Body)
 	}
-	if !strings.Contains(f.Body, "8 (+8)") {
-		t.Errorf("body missing '8 (+8)' for first-ever completed:\n%s", f.Body)
+	if !strings.Contains(f.Body, "8 (\u25b28)") {
+		t.Errorf("body missing '8 (\u25b28)' for first-ever completed:\n%s", f.Body)
 	}
-	if !strings.Contains(f.Body, "5 (+5)") {
-		t.Errorf("body missing '5 (+5)' for first-ever merged:\n%s", f.Body)
+	if !strings.Contains(f.Body, "5 (\u25b25)") {
+		t.Errorf("body missing '5 (\u25b25)' for first-ever merged:\n%s", f.Body)
 	}
 
 	fieldVals := map[string]string{}
 	for _, fld := range f.Fields {
 		fieldVals[fld.Name] = fld.Value
 	}
-	if fieldVals["Created"] != "12 (+12)" {
-		t.Errorf("Created field = %q, want '12 (+12)'", fieldVals["Created"])
+	if fieldVals["Created"] != "12 (\u25b212)" {
+		t.Errorf("Created field = %q, want '12 (\u25b212)'", fieldVals["Created"])
 	}
 }
 
@@ -800,5 +806,71 @@ func TestDigestEventTypes(t *testing.T) {
 	}
 	if EventWeeklyDigest != "weekly_digest" {
 		t.Errorf("EventWeeklyDigest = %q, want 'weekly_digest'", EventWeeklyDigest)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Emoji, fields, and delta arrow tests
+// ---------------------------------------------------------------------------
+
+func TestFormatDaily_FieldsAndEmoji(t *testing.T) {
+	report := &DailyReport{
+		PeriodStart:       time.Date(2026, 3, 29, 0, 0, 0, 0, time.UTC),
+		PeriodEnd:         time.Date(2026, 3, 30, 0, 0, 0, 0, time.UTC),
+		CarsCreated:       5,
+		CarsCompleted:     3,
+		CarsMerged:        2,
+		EngineCount:       4,
+		PrevCarsCreated:   3,
+		PrevCarsCompleted: 3,
+		PrevCarsMerged:    1,
+		TrackBreakdown: []TrackDigest{
+			{Track: "backend", Completed: 2, Open: 3, AvgCompletion: 2 * time.Hour},
+			{Track: "frontend", Completed: 1, Open: 1},
+		},
+	}
+	got := FormatDaily(report, "")
+	if !strings.Contains(got.Title, "\U0001f4ca") {
+		t.Errorf("title should contain daily emoji, got: %q", got.Title)
+	}
+	if !strings.Contains(got.Body, "\u25b2") {
+		t.Errorf("body should contain upward arrow for positive delta, got: %q", got.Body)
+	}
+	hasTrackField := false
+	for _, f := range got.Fields {
+		if f.Name == "backend" || f.Name == "frontend" {
+			hasTrackField = true
+		}
+	}
+	if !hasTrackField {
+		t.Error("expected per-track fields in digest")
+	}
+}
+
+func TestFormatWeekly_FieldsAndEmoji(t *testing.T) {
+	report := &WeeklyReport{
+		PeriodStart:          time.Date(2026, 3, 22, 0, 0, 0, 0, time.UTC),
+		PeriodEnd:            time.Date(2026, 3, 29, 0, 0, 0, 0, time.UTC),
+		CarsClosed:           10,
+		CarsMerged:           8,
+		MergeAttempts:        9,
+		MergeSuccessRate:     88.9,
+		PrevCarsClosed:       7,
+		PrevCarsMerged:       6,
+		PrevMergeSuccessRate: 75.0,
+		TrackBreakdown:       []TrackDigest{{Track: "backend", Completed: 5, Open: 2}},
+	}
+	got := FormatWeekly(report, "")
+	if !strings.Contains(got.Title, "\U0001f4c8") {
+		t.Errorf("title should contain weekly emoji, got: %q", got.Title)
+	}
+	hasTrackField := false
+	for _, f := range got.Fields {
+		if f.Name == "backend" {
+			hasTrackField = true
+		}
+	}
+	if !hasTrackField {
+		t.Error("expected per-track fields in weekly digest")
 	}
 }

@@ -231,23 +231,24 @@ func (d *Daemon) dispatchEvents(ctx context.Context, eventsCh <-chan DetectedEve
 // filters, formats, and sends via the adapter.
 func (d *Daemon) handleDetectedEvent(ctx context.Context, event DetectedEvent, evtCfg config.EventsConfig) {
 	var formatted FormattedEvent
+	dashURL := d.cfg.DashboardURL
 
 	switch event.Type {
 	case EventCarStatusChange:
 		if !evtCfg.CarLifecycle {
 			return
 		}
-		formatted = FormatCarEvent(event)
+		formatted = FormatCarEvent(event, dashURL)
 	case EventEngineStalled:
 		if !evtCfg.EngineStalls {
 			return
 		}
-		formatted = FormatStallEvent(event)
+		formatted = FormatStallEvent(event, dashURL)
 	case EventEscalation:
 		if !evtCfg.Escalations {
 			return
 		}
-		formatted = FormatEscalation(event)
+		formatted = FormatEscalation(event, dashURL)
 	case EventPulse, EventDailyDigest, EventWeeklyDigest:
 		// Pulse and digest events are not gated by event toggles.
 		formatted = FormattedEvent{

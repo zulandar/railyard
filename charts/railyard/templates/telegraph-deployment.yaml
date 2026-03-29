@@ -52,7 +52,7 @@ spec:
         - name: telegraph
           image: {{ include "railyard.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command: ["ry"]
+          command: ["tini", "--", "ry"]
           args: ["telegraph", "start", "-c", "/etc/railyard/railyard.yaml"]
           workingDir: /repo
           env:

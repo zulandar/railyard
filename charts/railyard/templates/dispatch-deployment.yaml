@@ -51,7 +51,7 @@ spec:
         - name: dispatch
           image: {{ include "railyard.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command: ["ry"]
+          command: ["tini", "--", "ry"]
           args: ["dispatch", "-c", "/etc/railyard/railyard.yaml"]
           workingDir: /repo
           env:

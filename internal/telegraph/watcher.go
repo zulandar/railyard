@@ -93,6 +93,7 @@ type Watcher struct {
 	statusProvider StatusProvider
 	pollInterval   time.Duration
 	pulseInterval  time.Duration
+	dashboardURL   string
 	onPoll         func() // optional; called after each successful poll
 
 	mu            sync.Mutex
@@ -109,6 +110,7 @@ type WatcherOpts struct {
 	StatusProvider StatusProvider // defaults to orchestration.Status()
 	PollInterval   time.Duration  // defaults to DefaultPollInterval
 	PulseInterval  time.Duration  // defaults to DefaultPulseInterval
+	DashboardURL   string         // optional; used for links in formatted events
 	OnPoll         func()         // optional; called after each successful poll
 }
 
@@ -134,6 +136,7 @@ func NewWatcher(opts WatcherOpts) (*Watcher, error) {
 		statusProvider: sp,
 		pollInterval:   poll,
 		pulseInterval:  pulse,
+		dashboardURL:   opts.DashboardURL,
 		onPoll:         opts.OnPoll,
 		snapshot:       make(map[string]carSnapshot),
 		stallSnapshot:  make(map[string]bool),
@@ -391,7 +394,7 @@ func (w *Watcher) BuildPulse() (*DetectedEvent, error) {
 	w.lastDigest = &current
 	w.lastPulseAt = time.Now()
 
-	formatted := FormatPulse(info)
+	formatted := FormatPulse(info, w.dashboardURL)
 	return &DetectedEvent{
 		Type:      EventPulse,
 		Timestamp: time.Now(),

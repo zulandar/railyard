@@ -17,9 +17,9 @@ func TestFormatCarEvent_Claimed(t *testing.T) {
 		NewStatus: "in_progress",
 		Track:     "backend",
 		Title:     "Add user auth",
-	})
-	if e.Title != "Car backend-42 claimed" {
-		t.Errorf("title = %q, want %q", e.Title, "Car backend-42 claimed")
+	}, "")
+	if !strings.Contains(e.Title, "Car backend-42 claimed") {
+		t.Errorf("title = %q, want to contain %q", e.Title, "Car backend-42 claimed")
 	}
 	if !strings.Contains(e.Body, "Add user auth") {
 		t.Errorf("body should contain car title, got %q", e.Body)
@@ -41,8 +41,8 @@ func TestFormatCarEvent_Completed(t *testing.T) {
 		OldStatus: "in_progress",
 		NewStatus: "done",
 		Track:     "frontend",
-	})
-	if e.Title != "Car fe-10 completed" {
+	}, "")
+	if !strings.Contains(e.Title, "Car fe-10 completed") {
 		t.Errorf("title = %q", e.Title)
 	}
 	if e.Severity != "success" {
@@ -58,8 +58,8 @@ func TestFormatCarEvent_Merged(t *testing.T) {
 		CarID:     "car-1",
 		OldStatus: "done",
 		NewStatus: "merged",
-	})
-	if e.Title != "Car car-1 merged" {
+	}, "")
+	if !strings.Contains(e.Title, "Car car-1 merged") {
 		t.Errorf("title = %q", e.Title)
 	}
 	if e.Severity != "success" {
@@ -73,8 +73,8 @@ func TestFormatCarEvent_Blocked(t *testing.T) {
 		OldStatus: "open",
 		NewStatus: "blocked",
 		Track:     "backend",
-	})
-	if e.Title != "Car car-1 blocked" {
+	}, "")
+	if !strings.Contains(e.Title, "Car car-1 blocked") {
 		t.Errorf("title = %q", e.Title)
 	}
 	if e.Severity != "warning" {
@@ -89,8 +89,8 @@ func TestFormatCarEvent_MergeFailed(t *testing.T) {
 	e := FormatCarEvent(DetectedEvent{
 		CarID:     "car-1",
 		NewStatus: "merge-failed",
-	})
-	if e.Title != "Car car-1 merge failed" {
+	}, "")
+	if !strings.Contains(e.Title, "Car car-1 merge failed") {
 		t.Errorf("title = %q", e.Title)
 	}
 	if e.Severity != "warning" {
@@ -104,8 +104,8 @@ func TestFormatCarEvent_NewCarNoOldStatus(t *testing.T) {
 		OldStatus: "",
 		NewStatus: "draft",
 		Title:     "Brand new car",
-	})
-	if e.Title != "Car car-new created" {
+	}, "")
+	if !strings.Contains(e.Title, "Car car-new created") {
 		t.Errorf("title = %q", e.Title)
 	}
 	// Body should not contain transition arrow when no old status.
@@ -119,7 +119,7 @@ func TestFormatCarEvent_Fields(t *testing.T) {
 		CarID:     "car-1",
 		NewStatus: "open",
 		Track:     "backend",
-	})
+	}, "")
 	fieldNames := make(map[string]bool)
 	for _, f := range e.Fields {
 		fieldNames[f.Name] = true
@@ -140,7 +140,7 @@ func TestFormatCarEvent_NoTrackField(t *testing.T) {
 		CarID:     "car-1",
 		NewStatus: "open",
 		Track:     "",
-	})
+	}, "")
 	for _, f := range e.Fields {
 		if f.Name == "Track" {
 			t.Error("should not include Track field when track is empty")
@@ -155,8 +155,8 @@ func TestFormatStallEvent_WithCarAndTrack(t *testing.T) {
 		EngineID:   "eng-a1b2",
 		CurrentCar: "car-5",
 		Track:      "backend",
-	})
-	if e.Title != "Engine eng-a1b2 stalled" {
+	}, "")
+	if !strings.Contains(e.Title, "Engine eng-a1b2 stalled") {
 		t.Errorf("title = %q", e.Title)
 	}
 	if !strings.Contains(e.Body, "car-5") {
@@ -177,7 +177,7 @@ func TestFormatStallEvent_NoCar(t *testing.T) {
 	e := FormatStallEvent(DetectedEvent{
 		EngineID: "eng-1",
 		Track:    "frontend",
-	})
+	}, "")
 	if strings.Contains(e.Body, "Working on car") {
 		t.Errorf("body should not mention car when empty, got %q", e.Body)
 	}
@@ -193,7 +193,7 @@ func TestFormatStallEvent_NoTrack(t *testing.T) {
 	e := FormatStallEvent(DetectedEvent{
 		EngineID:   "eng-1",
 		CurrentCar: "car-1",
-	})
+	}, "")
 	for _, f := range e.Fields {
 		if f.Name == "Track" {
 			t.Error("should not include Track field when track is empty")
@@ -210,7 +210,7 @@ func TestFormatEscalation_NormalPriority(t *testing.T) {
 		Subject:   "Engine stalled",
 		Body:      "Engine eng-1 stopped responding",
 		Priority:  "normal",
-	})
+	}, "")
 	if e.Title != "Engine stalled" {
 		t.Errorf("title = %q, want subject", e.Title)
 	}
@@ -227,7 +227,7 @@ func TestFormatEscalation_HighPriority(t *testing.T) {
 		FromAgent: "yardmaster",
 		Subject:   "Critical failure",
 		Priority:  "high",
-	})
+	}, "")
 	if e.Severity != "error" {
 		t.Errorf("severity = %q, want error for high priority", e.Severity)
 	}
@@ -241,7 +241,7 @@ func TestFormatEscalation_UrgentPriority(t *testing.T) {
 		FromAgent: "engine-1",
 		Subject:   "Urgent issue",
 		Priority:  "urgent",
-	})
+	}, "")
 	if e.Severity != "error" {
 		t.Errorf("severity = %q, want error for urgent priority", e.Severity)
 	}
@@ -251,7 +251,7 @@ func TestFormatEscalation_NoSubjectFallback(t *testing.T) {
 	e := FormatEscalation(DetectedEvent{
 		FromAgent: "engine-1",
 		Body:      "Some issue happened",
-	})
+	}, "")
 	if e.Title != "Escalation from engine-1" {
 		t.Errorf("title = %q, want fallback", e.Title)
 	}
@@ -263,7 +263,7 @@ func TestFormatEscalation_Fields(t *testing.T) {
 		CarID:     "car-1",
 		Priority:  "high",
 		Subject:   "Test",
-	})
+	}, "")
 	fieldNames := make(map[string]bool)
 	for _, f := range e.Fields {
 		fieldNames[f.Name] = true
@@ -283,7 +283,7 @@ func TestFormatEscalation_NoCarField(t *testing.T) {
 	e := FormatEscalation(DetectedEvent{
 		FromAgent: "engine-1",
 		Subject:   "General issue",
-	})
+	}, "")
 	for _, f := range e.Fields {
 		if f.Name == "Car" {
 			t.Error("should not include Car field when car id is empty")
@@ -308,9 +308,9 @@ func TestFormatPulse_BasicStatus(t *testing.T) {
 		MessageDepth: 3,
 	}
 
-	e := FormatPulse(info)
-	if e.Title != "Railyard Pulse" {
-		t.Errorf("title = %q, want 'Railyard Pulse'", e.Title)
+	e := FormatPulse(info, "")
+	if !strings.Contains(e.Title, "Railyard Pulse") {
+		t.Errorf("title = %q, want to contain 'Railyard Pulse'", e.Title)
 	}
 	if e.Severity != "info" {
 		t.Errorf("severity = %q, want info", e.Severity)
@@ -339,7 +339,7 @@ func TestFormatPulse_NoTokensOrMessages(t *testing.T) {
 		},
 	}
 
-	e := FormatPulse(info)
+	e := FormatPulse(info, "")
 	if strings.Contains(e.Body, "Tokens") {
 		t.Errorf("body should not contain tokens when zero, got %q", e.Body)
 	}
@@ -351,8 +351,8 @@ func TestFormatPulse_NoTokensOrMessages(t *testing.T) {
 func TestFormatPulse_EmptyStatus(t *testing.T) {
 	info := &orchestration.StatusInfo{}
 
-	e := FormatPulse(info)
-	if e.Title != "Railyard Pulse" {
+	e := FormatPulse(info, "")
+	if !strings.Contains(e.Title, "Railyard Pulse") {
 		t.Errorf("title = %q", e.Title)
 	}
 	if !strings.Contains(e.Body, "0 total, 0 working") {
@@ -367,7 +367,7 @@ func TestFormatPulse_BlockedFieldIncluded(t *testing.T) {
 		},
 	}
 
-	e := FormatPulse(info)
+	e := FormatPulse(info, "")
 	hasBlocked := false
 	for _, f := range e.Fields {
 		if f.Name == "Blocked" {
@@ -389,7 +389,7 @@ func TestFormatPulse_NoBlockedFieldWhenZero(t *testing.T) {
 		},
 	}
 
-	e := FormatPulse(info)
+	e := FormatPulse(info, "")
 	for _, f := range e.Fields {
 		if f.Name == "Blocked" {
 			t.Error("should not include Blocked field when zero")
@@ -529,5 +529,88 @@ func TestEngineLink_WithoutURL(t *testing.T) {
 	got := engineLink("eng-abc", "")
 	if got != "eng-abc" {
 		t.Errorf("engineLink = %q, want %q", got, "eng-abc")
+	}
+}
+
+// --- Emoji and link integration tests ---
+
+func TestFormatCarEvent_EmojiAndLink(t *testing.T) {
+	event := DetectedEvent{
+		Type:      EventCarStatusChange,
+		CarID:     "car-042",
+		OldStatus: "in_progress",
+		NewStatus: "merged",
+		Track:     "backend",
+		Title:     "Implement login",
+	}
+	got := FormatCarEvent(event, "https://ry.example.com")
+	if !strings.Contains(got.Title, "\U0001f680") {
+		t.Errorf("title should contain merged emoji, got: %q", got.Title)
+	}
+	if !strings.Contains(got.Title, "car-042") {
+		t.Errorf("title should contain car ID, got: %q", got.Title)
+	}
+}
+
+func TestFormatCarEvent_NoDashboardURL(t *testing.T) {
+	event := DetectedEvent{
+		Type:      EventCarStatusChange,
+		CarID:     "car-042",
+		NewStatus: "merged",
+		Title:     "Implement login",
+	}
+	got := FormatCarEvent(event, "")
+	if strings.Contains(got.Body, "](") {
+		t.Errorf("body should not contain link when no URL, got: %q", got.Body)
+	}
+	if !strings.Contains(got.Title, "\U0001f680") {
+		t.Errorf("title should still have emoji, got: %q", got.Title)
+	}
+}
+
+func TestFormatStallEvent_EmojiAndLink(t *testing.T) {
+	event := DetectedEvent{
+		Type:       EventEngineStalled,
+		EngineID:   "eng-abc",
+		CurrentCar: "car-007",
+		Track:      "backend",
+	}
+	got := FormatStallEvent(event, "https://ry.example.com")
+	if !strings.Contains(got.Title, "\U0001f6d1") {
+		t.Errorf("title should contain stall emoji, got: %q", got.Title)
+	}
+	if !strings.Contains(got.Body, "[eng-abc](https://ry.example.com/engines/eng-abc)") {
+		t.Errorf("body should contain engine link, got: %q", got.Body)
+	}
+}
+
+func TestFormatEscalation_Link(t *testing.T) {
+	event := DetectedEvent{
+		Type:      EventEscalation,
+		FromAgent: "eng-xyz",
+		CarID:     "car-099",
+		Subject:   "Need help",
+		Body:      "Stuck on migration",
+	}
+	got := FormatEscalation(event, "https://ry.example.com")
+	for _, f := range got.Fields {
+		if f.Name == "Car" {
+			if !strings.Contains(f.Value, "[car-099]") {
+				t.Errorf("Car field should be linked, got: %q", f.Value)
+			}
+			return
+		}
+	}
+	t.Error("expected Car field in escalation")
+}
+
+func TestFormatPulse_Emoji(t *testing.T) {
+	info := &orchestration.StatusInfo{
+		Engines:      []orchestration.EngineInfo{{Status: "working"}},
+		TrackSummary: []orchestration.TrackSummary{{Ready: 2, InProgress: 1, Done: 5}},
+	}
+	got := FormatPulse(info, "")
+	if !strings.Contains(got.Title, "\U0001f493") {
+		t.Errorf("title should contain pulse emoji, got: %q", got.Title)
 	}
 }

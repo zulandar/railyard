@@ -26,7 +26,7 @@ spec:
         - name: dashboard
           image: {{ include "railyard.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command: ["ry"]
+          command: ["tini", "--", "ry"]
           args:
             - "dashboard"
             - "-c"

@@ -3,6 +3,7 @@ package telegraph
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -657,8 +658,8 @@ func TestBuildPulse_EmitsWhenActive(t *testing.T) {
 	if pulse.Type != EventPulse {
 		t.Errorf("type = %v, want %v", pulse.Type, EventPulse)
 	}
-	if pulse.Title != "Railyard Pulse" {
-		t.Errorf("title = %q, want 'Railyard Pulse'", pulse.Title)
+	if !strings.Contains(pulse.Title, "Railyard Pulse") {
+		t.Errorf("title = %q, want to contain 'Railyard Pulse'", pulse.Title)
 	}
 }
 

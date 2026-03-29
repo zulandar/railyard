@@ -113,11 +113,17 @@ func carStatusSeverity(newStatus string) string {
 }
 
 // FormatCarEvent formats a car status change event.
-func FormatCarEvent(event DetectedEvent) FormattedEvent {
+func FormatCarEvent(event DetectedEvent, dashboardURL string) FormattedEvent {
 	verb := carStatusVerb(event.NewStatus)
 	severity := carStatusSeverity(event.NewStatus)
 
+	emoji := statusEmoji(event.NewStatus)
 	title := fmt.Sprintf("Car %s %s", event.CarID, verb)
+	if emoji != "" {
+		title = fmt.Sprintf("%s Car %s %s", emoji, event.CarID, verb)
+	}
+
+	carRef := carLink(event.CarID, dashboardURL)
 
 	var bodyParts []string
 	if event.Title != "" {
@@ -129,7 +135,7 @@ func FormatCarEvent(event DetectedEvent) FormattedEvent {
 	body := strings.Join(bodyParts, "\n")
 
 	fields := []Field{
-		{Name: "Car", Value: event.CarID, Short: true},
+		{Name: "Car", Value: carRef, Short: true},
 		{Name: "Status", Value: event.NewStatus, Short: true},
 	}
 	if event.Track != "" {
@@ -146,12 +152,16 @@ func FormatCarEvent(event DetectedEvent) FormattedEvent {
 }
 
 // FormatStallEvent formats a stalled engine event.
-func FormatStallEvent(event DetectedEvent) FormattedEvent {
-	title := fmt.Sprintf("Engine %s stalled", event.EngineID)
+func FormatStallEvent(event DetectedEvent, dashboardURL string) FormattedEvent {
+	title := fmt.Sprintf("%s Engine %s stalled", stallEmoji(), event.EngineID)
+
+	engRef := engineLink(event.EngineID, dashboardURL)
+	carRef := carLink(event.CurrentCar, dashboardURL)
 
 	var bodyParts []string
+	bodyParts = append(bodyParts, fmt.Sprintf("Engine %s stalled", engRef))
 	if event.CurrentCar != "" {
-		bodyParts = append(bodyParts, fmt.Sprintf("Working on car %s", event.CurrentCar))
+		bodyParts = append(bodyParts, fmt.Sprintf("Working on car %s", carRef))
 	}
 	if event.Track != "" {
 		bodyParts = append(bodyParts, fmt.Sprintf("Track: %s", event.Track))
@@ -159,10 +169,10 @@ func FormatStallEvent(event DetectedEvent) FormattedEvent {
 	body := strings.Join(bodyParts, "\n")
 
 	fields := []Field{
-		{Name: "Engine", Value: event.EngineID, Short: true},
+		{Name: "Engine", Value: engRef, Short: true},
 	}
 	if event.CurrentCar != "" {
-		fields = append(fields, Field{Name: "Car", Value: event.CurrentCar, Short: true})
+		fields = append(fields, Field{Name: "Car", Value: carRef, Short: true})
 	}
 	if event.Track != "" {
 		fields = append(fields, Field{Name: "Track", Value: event.Track, Short: true})
@@ -178,7 +188,7 @@ func FormatStallEvent(event DetectedEvent) FormattedEvent {
 }
 
 // FormatEscalation formats an escalation message event.
-func FormatEscalation(event DetectedEvent) FormattedEvent {
+func FormatEscalation(event DetectedEvent, dashboardURL string) FormattedEvent {
 	severity := "warning"
 	if event.Priority == "high" || event.Priority == "urgent" {
 		severity = "error"
@@ -193,7 +203,7 @@ func FormatEscalation(event DetectedEvent) FormattedEvent {
 		{Name: "From", Value: event.FromAgent, Short: true},
 	}
 	if event.CarID != "" {
-		fields = append(fields, Field{Name: "Car", Value: event.CarID, Short: true})
+		fields = append(fields, Field{Name: "Car", Value: carLink(event.CarID, dashboardURL), Short: true})
 	}
 	if event.Priority != "" {
 		fields = append(fields, Field{Name: "Priority", Value: event.Priority, Short: true})
@@ -209,7 +219,7 @@ func FormatEscalation(event DetectedEvent) FormattedEvent {
 }
 
 // FormatPulse formats a status pulse digest from orchestration status info.
-func FormatPulse(info *orchestration.StatusInfo) FormattedEvent {
+func FormatPulse(info *orchestration.StatusInfo, dashboardURL string) FormattedEvent {
 	var totalActive, totalReady, totalDone, totalBlocked int64
 	for _, ts := range info.TrackSummary {
 		totalActive += ts.InProgress
@@ -250,7 +260,7 @@ func FormatPulse(info *orchestration.StatusInfo) FormattedEvent {
 	}
 
 	return FormattedEvent{
-		Title:    "Railyard Pulse",
+		Title:    "💓 Railyard Pulse",
 		Body:     body,
 		Severity: "info",
 		Color:    ColorInfo,

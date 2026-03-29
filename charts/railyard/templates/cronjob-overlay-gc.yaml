@@ -45,7 +45,7 @@ spec:
             - name: overlay-gc
               image: {{ include "railyard.image" . }}
               imagePullPolicy: {{ .Values.image.pullPolicy }}
-              command: ["ry"]
+              command: ["tini", "--", "ry"]
               args: ["overlay", "gc", "-c", "/etc/railyard/railyard.yaml"]
               env:
                 - name: DB_PASSWORD
