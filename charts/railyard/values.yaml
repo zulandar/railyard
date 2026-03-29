@@ -6,6 +6,10 @@
 # -- Project name used for namespace derivation and resource naming.
 project: ""
 
+# -- When true, completed cars create draft PRs instead of merging directly
+# to the default branch. Requires auth.githubToken with repo scope.
+requirePR: false
+
 # -- Git repository settings.
 git:
   owner: ""

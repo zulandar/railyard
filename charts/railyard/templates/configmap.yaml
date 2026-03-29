@@ -12,6 +12,7 @@ data:
     project: {{ .Values.project | quote }}
     {{- end }}
     default_branch: {{ .Values.git.defaultBranch | quote }}
+    require_pr: {{ .Values.requirePR | default false }}
     agent_provider: {{ .Values.engine.agentProvider | quote }}
 
     database:
