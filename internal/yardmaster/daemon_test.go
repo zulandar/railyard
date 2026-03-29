@@ -752,6 +752,324 @@ func TestHandlePrOpenCars_ChangesRequested(t *testing.T) {
 	}
 }
 
+func TestHandlePrOpenCars_ChangesRequestedWithInlineComments(t *testing.T) {
+	db := testDB(t)
+
+	db.Create(&models.Car{
+		ID:     "car-inline1",
+		Branch: "ry/backend/car-inline1",
+		Status: "pr_open",
+		Track:  "backend",
+	})
+
+	viewer := &mockPRViewer{
+		reviewDecision: "CHANGES_REQUESTED",
+		state:          "OPEN",
+		reviews:        []prReview{{Body: "Needs work", Author: "alice"}},
+		inlineComments: []prInlineComment{
+			{Path: "internal/dispatch/dispatch.go", Line: 93, Body: "Fix the fallback command", Author: "alice"},
+			{Path: "cmd/ry/main.go", Line: 12, Body: "Add error check here", Author: "bob"},
+		},
+	}
+
+	var buf bytes.Buffer
+	err := handlePrOpenCars(db, viewer, false, &buf)
+	if err != nil {
+		t.Fatalf("handlePrOpenCars: %v", err)
+	}
+
+	var notes []models.CarProgress
+	db.Where("car_id = ?", "car-inline1").Find(&notes)
+	if len(notes) == 0 {
+		t.Fatal("expected progress note")
+	}
+
+	note := notes[0].Note
+	if !strings.Contains(note, "## Inline comments") {
+		t.Error("progress note should contain '## Inline comments' section")
+	}
+	if !strings.Contains(note, "`internal/dispatch/dispatch.go` (line 93) @alice") {
+		t.Errorf("progress note should contain file:line for inline comment, got:\n%s", note)
+	}
+	if !strings.Contains(note, "`cmd/ry/main.go` (line 12) @bob") {
+		t.Errorf("progress note should contain second inline comment, got:\n%s", note)
+	}
+}
+
+func TestHandlePrOpenCars_ChangesRequestedWithConversationComments(t *testing.T) {
+	db := testDB(t)
+
+	db.Create(&models.Car{
+		ID:     "car-conv1",
+		Branch: "ry/backend/car-conv1",
+		Status: "pr_open",
+		Track:  "backend",
+	})
+
+	viewer := &mockPRViewer{
+		reviewDecision: "CHANGES_REQUESTED",
+		state:          "OPEN",
+		convComments: []prConversationComment{
+			{Body: "Overall looks good, just the inline items", Author: "alice"},
+			{Body: "Agreed with Alice's feedback", Author: "bob"},
+		},
+	}
+
+	var buf bytes.Buffer
+	err := handlePrOpenCars(db, viewer, false, &buf)
+	if err != nil {
+		t.Fatalf("handlePrOpenCars: %v", err)
+	}
+
+	var notes []models.CarProgress
+	db.Where("car_id = ?", "car-conv1").Find(&notes)
+	if len(notes) == 0 {
+		t.Fatal("expected progress note")
+	}
+
+	note := notes[0].Note
+	if !strings.Contains(note, "## Conversation") {
+		t.Error("progress note should contain '## Conversation' section")
+	}
+	if !strings.Contains(note, "@alice: Overall looks good") {
+		t.Errorf("progress note should contain conversation comment, got:\n%s", note)
+	}
+}
+
+func TestHandlePrOpenCars_ChangesRequestedAllCommentTypes(t *testing.T) {
+	db := testDB(t)
+
+	db.Create(&models.Car{
+		ID:     "car-all1",
+		Branch: "ry/backend/car-all1",
+		Status: "pr_open",
+		Track:  "backend",
+	})
+
+	viewer := &mockPRViewer{
+		reviewDecision: "CHANGES_REQUESTED",
+		state:          "OPEN",
+		reviews:        []prReview{{Body: "Needs changes", Author: "reviewer"}},
+		inlineComments: []prInlineComment{
+			{Path: "app/Models/Task.php", Line: 15, Body: "Use a scope here", Author: "reviewer"},
+		},
+		convComments: []prConversationComment{
+			{Body: "Just the one inline item", Author: "reviewer"},
+		},
+	}
+
+	var buf bytes.Buffer
+	err := handlePrOpenCars(db, viewer, false, &buf)
+	if err != nil {
+		t.Fatalf("handlePrOpenCars: %v", err)
+	}
+
+	var notes []models.CarProgress
+	db.Where("car_id = ?", "car-all1").Find(&notes)
+	if len(notes) == 0 {
+		t.Fatal("expected progress note")
+	}
+
+	note := notes[0].Note
+	// All three sections should be present.
+	if !strings.Contains(note, "## Review comments") {
+		t.Error("missing '## Review comments' section")
+	}
+	if !strings.Contains(note, "## Inline comments") {
+		t.Error("missing '## Inline comments' section")
+	}
+	if !strings.Contains(note, "## Conversation") {
+		t.Error("missing '## Conversation' section")
+	}
+	if !strings.Contains(note, "`app/Models/Task.php` (line 15) @reviewer") {
+		t.Errorf("inline comment not formatted correctly, got:\n%s", note)
+	}
+}
+
+func TestHandlePrOpenCars_ChangesRequestedEmptyComments(t *testing.T) {
+	db := testDB(t)
+
+	db.Create(&models.Car{
+		ID:     "car-empty1",
+		Branch: "ry/backend/car-empty1",
+		Status: "pr_open",
+		Track:  "backend",
+	})
+
+	// CHANGES_REQUESTED with no review bodies, no inline, no conversation.
+	viewer := &mockPRViewer{
+		reviewDecision: "CHANGES_REQUESTED",
+		state:          "OPEN",
+	}
+
+	var buf bytes.Buffer
+	err := handlePrOpenCars(db, viewer, false, &buf)
+	if err != nil {
+		t.Fatalf("handlePrOpenCars: %v", err)
+	}
+
+	var c models.Car
+	db.First(&c, "id = ?", "car-empty1")
+	if c.Status != "open" {
+		t.Errorf("status = %q, want %q", c.Status, "open")
+	}
+
+	var notes []models.CarProgress
+	db.Where("car_id = ?", "car-empty1").Find(&notes)
+	if len(notes) == 0 {
+		t.Fatal("expected progress note even with empty comments")
+	}
+	// Should still have the header.
+	if !strings.Contains(notes[0].Note, "PR review: changes requested") {
+		t.Errorf("note should contain header, got: %s", notes[0].Note)
+	}
+	// Should NOT have section headers when there are no comments.
+	if strings.Contains(notes[0].Note, "## Inline") {
+		t.Error("should not have Inline section when no inline comments")
+	}
+	if strings.Contains(notes[0].Note, "## Conversation") {
+		t.Error("should not have Conversation section when no conversation comments")
+	}
+}
+
+func TestHandlePrOpenCars_FetchCommentsError(t *testing.T) {
+	db := testDB(t)
+
+	db.Create(&models.Car{
+		ID:     "car-ferr1",
+		Branch: "ry/backend/car-ferr1",
+		Status: "pr_open",
+		Track:  "backend",
+	})
+
+	viewer := &mockPRViewer{
+		reviewDecision: "CHANGES_REQUESTED",
+		state:          "OPEN",
+		reviews:        []prReview{{Body: "Fix this", Author: "alice"}},
+		fetchErr:       fmt.Errorf("gh api failed"),
+	}
+
+	var buf bytes.Buffer
+	err := handlePrOpenCars(db, viewer, false, &buf)
+	if err != nil {
+		t.Fatalf("handlePrOpenCars: %v", err)
+	}
+
+	// Car should still transition to open despite FetchComments error.
+	var c models.Car
+	db.First(&c, "id = ?", "car-ferr1")
+	if c.Status != "open" {
+		t.Errorf("status = %q, want %q", c.Status, "open")
+	}
+
+	// Progress note should still contain review body.
+	var notes []models.CarProgress
+	db.Where("car_id = ?", "car-ferr1").Find(&notes)
+	if len(notes) == 0 {
+		t.Fatal("expected progress note")
+	}
+	if !strings.Contains(notes[0].Note, "@alice: Fix this") {
+		t.Errorf("note should contain review body, got: %s", notes[0].Note)
+	}
+}
+
+func TestParseInlineComments(t *testing.T) {
+	raw := `[
+		{
+			"path": "internal/dispatch/dispatch.go",
+			"line": 93,
+			"body": "Fix the fallback command",
+			"user": {"login": "codex-bot"}
+		},
+		{
+			"path": "cmd/ry/main.go",
+			"line": 0,
+			"body": "General file comment",
+			"user": {"login": "alice"}
+		}
+	]`
+
+	comments, err := parseInlineComments([]byte(raw))
+	if err != nil {
+		t.Fatalf("parseInlineComments: %v", err)
+	}
+	if len(comments) != 2 {
+		t.Fatalf("expected 2 comments, got %d", len(comments))
+	}
+
+	if comments[0].Path != "internal/dispatch/dispatch.go" {
+		t.Errorf("comments[0].Path = %q, want %q", comments[0].Path, "internal/dispatch/dispatch.go")
+	}
+	if comments[0].Line != 93 {
+		t.Errorf("comments[0].Line = %d, want 93", comments[0].Line)
+	}
+	if comments[0].Author != "codex-bot" {
+		t.Errorf("comments[0].Author = %q, want %q", comments[0].Author, "codex-bot")
+	}
+	if comments[1].Line != 0 {
+		t.Errorf("comments[1].Line = %d, want 0", comments[1].Line)
+	}
+}
+
+func TestFormatReviewNote_AllTypes(t *testing.T) {
+	reviews := []prReview{{Body: "Needs work", Author: "alice"}}
+	inline := []prInlineComment{
+		{Path: "foo.go", Line: 10, Body: "Fix this", Author: "bob"},
+	}
+	conv := []prConversationComment{
+		{Body: "See inline", Author: "alice"},
+	}
+
+	note := formatReviewNote(reviews, inline, conv)
+
+	if !strings.Contains(note, "## Review comments") {
+		t.Error("missing Review comments section")
+	}
+	if !strings.Contains(note, "@alice: Needs work") {
+		t.Error("missing review body")
+	}
+	if !strings.Contains(note, "`foo.go` (line 10) @bob") {
+		t.Error("missing inline comment with file:line")
+	}
+	if !strings.Contains(note, "## Conversation") {
+		t.Error("missing Conversation section")
+	}
+}
+
+func TestFormatReviewNote_EmptyBodies(t *testing.T) {
+	// Reviews with empty bodies should not produce a section.
+	reviews := []prReview{{Body: "", Author: "alice"}}
+	note := formatReviewNote(reviews, nil, nil)
+
+	if strings.Contains(note, "## Review comments") {
+		t.Error("should not have Review comments section when all bodies are empty")
+	}
+	if strings.Contains(note, "## Inline") {
+		t.Error("should not have Inline section when nil")
+	}
+	if strings.Contains(note, "## Conversation") {
+		t.Error("should not have Conversation section when nil")
+	}
+	if !strings.Contains(note, "PR review: changes requested") {
+		t.Error("should always have header")
+	}
+}
+
+func TestFormatReviewNote_InlineWithoutLine(t *testing.T) {
+	inline := []prInlineComment{
+		{Path: "README.md", Line: 0, Body: "General file note", Author: "bob"},
+	}
+	note := formatReviewNote(nil, inline, nil)
+
+	// Line 0 should omit the line number.
+	if strings.Contains(note, "(line 0)") {
+		t.Error("should not show '(line 0)' for comments without a line number")
+	}
+	if !strings.Contains(note, "`README.md` @bob") {
+		t.Errorf("should format without line number, got:\n%s", note)
+	}
+}
+
 func TestHandlePrOpenCars_Merged(t *testing.T) {
 	db := testDB(t)
 
@@ -1341,6 +1659,9 @@ type mockPRViewer struct {
 	reviewDecision string
 	state          string
 	reviews        []prReview
+	inlineComments []prInlineComment
+	convComments   []prConversationComment
+	fetchErr       error
 	err            error
 	mergeErr       error
 	mergeCalled    bool
@@ -1355,6 +1676,10 @@ func (m *mockPRViewer) ViewPR(branch string) (*prStatus, error) {
 		ReviewDecision: m.reviewDecision,
 		Reviews:        m.reviews,
 	}, nil
+}
+
+func (m *mockPRViewer) FetchComments(branch string) ([]prInlineComment, []prConversationComment, error) {
+	return m.inlineComments, m.convComments, m.fetchErr
 }
 
 func (m *mockPRViewer) MergePR(branch string) error {

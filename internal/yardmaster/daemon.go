@@ -891,6 +891,20 @@ type prReview struct {
 	Author string
 }
 
+// prInlineComment holds a file-level review comment from a PR.
+type prInlineComment struct {
+	Path   string // file path (e.g. "internal/dispatch/dispatch.go")
+	Line   int    // line number in the diff
+	Body   string
+	Author string
+}
+
+// prConversationComment holds a top-level PR conversation comment.
+type prConversationComment struct {
+	Body   string
+	Author string
+}
+
 // prStatus holds the GitHub PR status for a branch.
 type prStatus struct {
 	State          string // OPEN, MERGED, CLOSED
@@ -901,6 +915,7 @@ type prStatus struct {
 // PRViewer abstracts GitHub PR status lookups and merge operations for testability.
 type PRViewer interface {
 	ViewPR(branch string) (*prStatus, error)
+	FetchComments(branch string) ([]prInlineComment, []prConversationComment, error)
 	MergePR(branch string) error
 }
 
@@ -940,6 +955,82 @@ func (g *ghPRViewer) ViewPR(branch string) (*prStatus, error) {
 		ps.Reviews = append(ps.Reviews, prReview{Body: r.Body, Author: r.Author.Login})
 	}
 	return ps, nil
+}
+
+func (g *ghPRViewer) FetchComments(branch string) ([]prInlineComment, []prConversationComment, error) {
+	// Step 1: Get PR number and conversation comments in one call.
+	cmd := exec.Command("gh", "pr", "view", branch,
+		"--json", "number,comments")
+	cmd.Dir = g.repoDir
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, nil, fmt.Errorf("gh pr view %s: %w", branch, err)
+	}
+
+	var prData struct {
+		Number   int `json:"number"`
+		Comments []struct {
+			Body   string `json:"body"`
+			Author struct {
+				Login string `json:"login"`
+			} `json:"author"`
+		} `json:"comments"`
+	}
+	if err := json.Unmarshal(out, &prData); err != nil {
+		return nil, nil, fmt.Errorf("parse gh pr view comments: %w", err)
+	}
+
+	var conversation []prConversationComment
+	for _, c := range prData.Comments {
+		conversation = append(conversation, prConversationComment{
+			Body:   c.Body,
+			Author: c.Author.Login,
+		})
+	}
+
+	// Step 2: Fetch inline/line-level review comments via the REST API.
+	apiPath := fmt.Sprintf("repos/{owner}/{repo}/pulls/%d/comments", prData.Number)
+	cmd2 := exec.Command("gh", "api", apiPath)
+	cmd2.Dir = g.repoDir
+	out2, err := cmd2.Output()
+	if err != nil {
+		// Non-fatal: return what we have (conversation comments).
+		log.Printf("gh api %s: %v", apiPath, err)
+		return nil, conversation, nil
+	}
+
+	inline, err := parseInlineComments(out2)
+	if err != nil {
+		log.Printf("parse inline comments for PR %d: %v", prData.Number, err)
+		return nil, conversation, nil
+	}
+
+	return inline, conversation, nil
+}
+
+// parseInlineComments parses the JSON response from the GitHub pulls/comments API.
+func parseInlineComments(data []byte) ([]prInlineComment, error) {
+	var raw []struct {
+		Path string `json:"path"`
+		Line int    `json:"line"`
+		Body string `json:"body"`
+		User struct {
+			Login string `json:"login"`
+		} `json:"user"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, fmt.Errorf("json: %w", err)
+	}
+	var comments []prInlineComment
+	for _, r := range raw {
+		comments = append(comments, prInlineComment{
+			Path:   r.Path,
+			Line:   r.Line,
+			Body:   r.Body,
+			Author: r.User.Login,
+		})
+	}
+	return comments, nil
 }
 
 func (g *ghPRViewer) MergePR(branch string) error {
@@ -1017,19 +1108,60 @@ func handlePrOpenCars(db *gorm.DB, viewer PRViewer, autoMerge bool, out io.Write
 				log.Printf("update car %s to open: %v", c.ID, err)
 				continue
 			}
-			var reviewText strings.Builder
-			reviewText.WriteString("PR review: changes requested\n")
-			for _, r := range status.Reviews {
-				if r.Body != "" {
-					fmt.Fprintf(&reviewText, "- @%s: %s\n", r.Author, r.Body)
-				}
+
+			// Fetch inline and conversation comments for richer feedback.
+			inline, conversation, fetchErr := viewer.FetchComments(c.Branch)
+			if fetchErr != nil {
+				log.Printf("fetch comments for %s: %v", c.ID, fetchErr)
 			}
-			writeProgressNote(db, c.ID, "yardmaster", reviewText.String())
+
+			note := formatReviewNote(status.Reviews, inline, conversation)
+			writeProgressNote(db, c.ID, "yardmaster", note)
 			fmt.Fprintf(out, "PR changes requested for car %s — status → open\n", c.ID)
 		}
 	}
 
 	return nil
+}
+
+// formatReviewNote builds a structured progress note from all PR feedback types.
+func formatReviewNote(reviews []prReview, inline []prInlineComment, conversation []prConversationComment) string {
+	var b strings.Builder
+	b.WriteString("PR review: changes requested\n")
+
+	// Review bodies (top-level review summaries).
+	hasReviews := false
+	for _, r := range reviews {
+		if r.Body != "" {
+			if !hasReviews {
+				b.WriteString("\n## Review comments\n")
+				hasReviews = true
+			}
+			fmt.Fprintf(&b, "- @%s: %s\n", r.Author, r.Body)
+		}
+	}
+
+	// Inline/line-level comments with file:line context.
+	if len(inline) > 0 {
+		b.WriteString("\n## Inline comments\n")
+		for _, c := range inline {
+			if c.Line > 0 {
+				fmt.Fprintf(&b, "- `%s` (line %d) @%s:\n  %s\n", c.Path, c.Line, c.Author, c.Body)
+			} else {
+				fmt.Fprintf(&b, "- `%s` @%s:\n  %s\n", c.Path, c.Author, c.Body)
+			}
+		}
+	}
+
+	// Conversation comments (general PR discussion).
+	if len(conversation) > 0 {
+		b.WriteString("\n## Conversation\n")
+		for _, c := range conversation {
+			fmt.Fprintf(&b, "- @%s: %s\n", c.Author, c.Body)
+		}
+	}
+
+	return b.String()
 }
 
 // runPostMerge performs dependency unblocking and parent epic closure after a
