@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -497,7 +498,7 @@ func buildMessageOptions(msg telegraph.OutboundMessage) []slackapi.MsgOption {
 	if len(msg.Events) > 0 {
 		var attachments []slackapi.Attachment
 		for _, evt := range msg.Events {
-			attachments = append(attachments, eventToAttachment(evt))
+			attachments = append(attachments, eventToBlocks(evt))
 		}
 		options = append(options, slackapi.MsgOptionAttachments(attachments...))
 		// Use text as fallback.
@@ -511,24 +512,58 @@ func buildMessageOptions(msg telegraph.OutboundMessage) []slackapi.MsgOption {
 	return options
 }
 
-// eventToAttachment converts a FormattedEvent to a Slack Attachment.
-func eventToAttachment(evt telegraph.FormattedEvent) slackapi.Attachment {
-	att := slackapi.Attachment{
-		Title:    evt.Title,
-		Text:     evt.Body,
+// slackMrkdwn translates standard markdown to Slack mrkdwn format.
+// Converts **bold** → *bold* and [text](url) → <url|text>.
+func slackMrkdwn(text string) string {
+	// Convert markdown links [text](url) → <url|text>
+	linkRe := regexp.MustCompile(`\[([^\]]+)\]\(([^)]+)\)`)
+	text = linkRe.ReplaceAllString(text, "<$2|$1>")
+	// Convert **bold** → *bold*
+	boldRe := regexp.MustCompile(`\*\*([^*]+)\*\*`)
+	text = boldRe.ReplaceAllString(text, "*$1*")
+	return text
+}
+
+// eventToBlocks converts a FormattedEvent to a Slack Attachment containing Block Kit blocks.
+// Using blocks inside an attachment preserves the color sidebar while enabling rich formatting.
+func eventToBlocks(evt telegraph.FormattedEvent) slackapi.Attachment {
+	var blocks []slackapi.Block
+
+	// Header block with title.
+	if evt.Title != "" {
+		blocks = append(blocks, slackapi.NewHeaderBlock(
+			slackapi.NewTextBlockObject(slackapi.PlainTextType, evt.Title, true, false),
+		))
+	}
+
+	// Body section with mrkdwn formatting.
+	if evt.Body != "" {
+		blocks = append(blocks, slackapi.NewSectionBlock(
+			slackapi.NewTextBlockObject(slackapi.MarkdownType, slackMrkdwn(evt.Body), false, false),
+			nil, nil,
+		))
+	}
+
+	// Fields section — rendered as side-by-side key/value pairs.
+	if len(evt.Fields) > 0 {
+		var fieldTexts []*slackapi.TextBlockObject
+		for _, f := range evt.Fields {
+			fieldTexts = append(fieldTexts, slackapi.NewTextBlockObject(
+				slackapi.MarkdownType,
+				fmt.Sprintf("*%s*\n%s", f.Name, slackMrkdwn(f.Value)),
+				false, false,
+			))
+		}
+		blocks = append(blocks, slackapi.NewSectionBlock(nil, fieldTexts, nil))
+	}
+
+	return slackapi.Attachment{
 		Color:    evt.Color,
 		Fallback: evt.Title,
+		Blocks: slackapi.Blocks{
+			BlockSet: blocks,
+		},
 	}
-
-	for _, f := range evt.Fields {
-		att.Fields = append(att.Fields, slackapi.AttachmentField{
-			Title: f.Name,
-			Value: f.Value,
-			Short: f.Short,
-		})
-	}
-
-	return att
 }
 
 // retryOnRateLimit calls fn and retries with backoff on Slack rate limit errors.

@@ -1442,6 +1442,42 @@ func TestSetBotUserID(t *testing.T) {
 	}
 }
 
+func TestEventToEmbed_Timestamp(t *testing.T) {
+	evt := telegraph.FormattedEvent{
+		Title: "🚀 Car car-042 merged",
+		Body:  "in_progress → merged",
+		Color: "#36a64f",
+	}
+	embed := eventToEmbed(evt)
+	if embed.Timestamp == "" {
+		t.Error("expected timestamp to be set on embed")
+	}
+}
+
+func TestEventToEmbed_Author(t *testing.T) {
+	evt := telegraph.FormattedEvent{
+		Title: "🚀 Car car-042 merged",
+		Color: "#36a64f",
+	}
+	embed := eventToEmbed(evt)
+	if embed.Author == nil {
+		t.Fatal("expected author to be set on embed")
+	}
+	if embed.Author.Name != "Railyard" {
+		t.Errorf("author name = %q, want %q", embed.Author.Name, "Railyard")
+	}
+}
+
+func TestEventToEmbed_EmojiPassthrough(t *testing.T) {
+	evt := telegraph.FormattedEvent{
+		Title: "🛑 Engine eng-abc stalled",
+	}
+	embed := eventToEmbed(evt)
+	if !strings.Contains(embed.Title, "🛑") {
+		t.Errorf("embed title should preserve emoji, got: %q", embed.Title)
+	}
+}
+
 // --- AllowedChannels tests ---
 
 func TestHandleMessage_AllowedChannels_Passes(t *testing.T) {

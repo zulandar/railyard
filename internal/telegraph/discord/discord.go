@@ -418,6 +418,8 @@ func eventToEmbed(evt telegraph.FormattedEvent) *discordgo.MessageEmbed {
 	embed := &discordgo.MessageEmbed{
 		Title:       evt.Title,
 		Description: evt.Body,
+		Timestamp:   time.Now().Format(time.RFC3339),
+		Author:      &discordgo.MessageEmbedAuthor{Name: "Railyard"},
 	}
 
 	if evt.Color != "" {

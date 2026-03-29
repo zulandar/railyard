@@ -677,9 +677,9 @@ func TestBuildMessageOptions_WithEvents(t *testing.T) {
 	}
 }
 
-// --- eventToAttachment tests ---
+// --- eventToBlocks tests ---
 
-func TestEventToAttachment(t *testing.T) {
+func TestEventToBlocks(t *testing.T) {
 	evt := telegraph.FormattedEvent{
 		Title:    "Car merged",
 		Body:     "car-1 merged",
@@ -691,24 +691,16 @@ func TestEventToAttachment(t *testing.T) {
 		},
 	}
 
-	att := eventToAttachment(evt)
-	if att.Title != "Car merged" {
-		t.Errorf("title = %q", att.Title)
-	}
-	if att.Text != "car-1 merged" {
-		t.Errorf("text = %q", att.Text)
-	}
+	att := eventToBlocks(evt)
 	if att.Color != "#36a64f" {
 		t.Errorf("color = %q", att.Color)
 	}
-	if len(att.Fields) != 2 {
-		t.Errorf("fields count = %d, want 2", len(att.Fields))
+	if att.Fallback != "Car merged" {
+		t.Errorf("fallback = %q", att.Fallback)
 	}
-	if att.Fields[0].Title != "Car" {
-		t.Errorf("field[0] title = %q", att.Fields[0].Title)
-	}
-	if att.Fields[0].Short != true {
-		t.Error("field[0] should be short")
+	// Expect 3 blocks: header, body section, fields section.
+	if len(att.Blocks.BlockSet) != 3 {
+		t.Errorf("block count = %d, want 3", len(att.Blocks.BlockSet))
 	}
 }
 
@@ -1657,6 +1649,87 @@ func TestStartThread_PostError(t *testing.T) {
 	_, err := a.StartThread(context.Background(), "C1", "1234567890.123456", "hello", "Thread")
 	if err == nil {
 		t.Fatal("expected error from PostMessage")
+	}
+}
+
+// --- slackMrkdwn tests ---
+
+func TestSlackMrkdwn_Bold(t *testing.T) {
+	got := slackMrkdwn("This is **bold** text and **another**")
+	want := "This is *bold* text and *another*"
+	if got != want {
+		t.Errorf("slackMrkdwn bold = %q, want %q", got, want)
+	}
+}
+
+func TestSlackMrkdwn_Links(t *testing.T) {
+	got := slackMrkdwn("See [car-042](https://ry.example.com/cars/car-042) for details")
+	want := "See <https://ry.example.com/cars/car-042|car-042> for details"
+	if got != want {
+		t.Errorf("slackMrkdwn links = %q, want %q", got, want)
+	}
+}
+
+func TestSlackMrkdwn_PlainText(t *testing.T) {
+	got := slackMrkdwn("No special formatting here")
+	want := "No special formatting here"
+	if got != want {
+		t.Errorf("slackMrkdwn plain = %q, want %q", got, want)
+	}
+}
+
+func TestSlackMrkdwn_BoldAndLinks(t *testing.T) {
+	got := slackMrkdwn("**Engine**: [eng-abc](https://ry.example.com/engines/eng-abc)")
+	want := "*Engine*: <https://ry.example.com/engines/eng-abc|eng-abc>"
+	if got != want {
+		t.Errorf("slackMrkdwn combined = %q, want %q", got, want)
+	}
+}
+
+// --- eventToBlocks tests ---
+
+func TestEventToBlocks_CarEvent(t *testing.T) {
+	evt := telegraph.FormattedEvent{
+		Title:    "🚀 Car car-042 merged",
+		Body:     "Implement login\nin_progress → merged",
+		Severity: "success",
+		Color:    "#36a64f",
+		Fields: []telegraph.Field{
+			{Name: "Car", Value: "car-042", Short: true},
+			{Name: "Status", Value: "merged", Short: true},
+			{Name: "Track", Value: "backend", Short: true},
+		},
+	}
+	att := eventToBlocks(evt)
+	if att.Color != "#36a64f" {
+		t.Errorf("attachment color = %q, want %q", att.Color, "#36a64f")
+	}
+	if len(att.Blocks.BlockSet) == 0 {
+		t.Fatal("expected blocks inside attachment")
+	}
+	if att.Fallback != evt.Title {
+		t.Errorf("fallback = %q, want %q", att.Fallback, evt.Title)
+	}
+}
+
+func TestEventToBlocks_EmptyBody(t *testing.T) {
+	evt := telegraph.FormattedEvent{
+		Title: "💓 Railyard Pulse",
+		Color: "#2196f3",
+	}
+	att := eventToBlocks(evt)
+	if len(att.Blocks.BlockSet) == 0 {
+		t.Fatal("expected at least a header block")
+	}
+}
+
+func TestBuildMsgOptions_TextOnly(t *testing.T) {
+	msg := telegraph.OutboundMessage{
+		Text: "Hello world",
+	}
+	opts := buildMessageOptions(msg)
+	if len(opts) == 0 {
+		t.Fatal("expected at least one option")
 	}
 }
 
