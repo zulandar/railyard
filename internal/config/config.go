@@ -22,6 +22,7 @@ type Config struct {
 	DefaultBranch     string              `yaml:"default_branch"`
 	DefaultAcceptance string              `yaml:"default_acceptance"`
 	RequirePR         bool                `yaml:"require_pr"`
+	DashboardURL      string              `yaml:"dashboard_url"`
 	Database          DatabaseConfig      `yaml:"database"`
 	Stall             StallConfig         `yaml:"stall"`
 	Tracks            []TrackConfig       `yaml:"tracks"`

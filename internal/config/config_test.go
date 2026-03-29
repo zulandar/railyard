@@ -1952,6 +1952,20 @@ bull:
 	}
 }
 
+func TestParse_DashboardURL(t *testing.T) {
+	data, err := os.ReadFile("testdata/valid_full.yaml")
+	if err != nil {
+		t.Fatalf("read test data: %v", err)
+	}
+	cfg, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.DashboardURL != "https://ry.example.com" {
+		t.Errorf("DashboardURL = %q, want %q", cfg.DashboardURL, "https://ry.example.com")
+	}
+}
+
 func TestParse_DeprecatedDoltKey(t *testing.T) {
 	oldConfig := `
 owner: alice

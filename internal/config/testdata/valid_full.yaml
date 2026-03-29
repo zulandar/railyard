@@ -2,6 +2,7 @@ owner: alice
 repo: git@github.com:org/myapp.git
 branch_prefix: ry/alice
 agent_provider: claude
+dashboard_url: "https://ry.example.com"
 
 database:
   host: 10.0.0.5
