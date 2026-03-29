@@ -208,8 +208,9 @@ func CreateBranch(repoDir, branchName, baseBranch string) error {
 		baseBranch = "main"
 	}
 
-	// Try to create a new branch from the base branch.
-	cmd := exec.Command("git", "checkout", "-b", branchName, baseBranch)
+	// Try to create a new branch from HEAD (the worktree was already reset to
+	// origin/{baseBranch} by ResetWorktree, so HEAD is the correct branch point).
+	cmd := exec.Command("git", "checkout", "-b", branchName)
 	cmd.Dir = repoDir
 	out, err := cmd.CombinedOutput()
 	if err == nil {
