@@ -152,7 +152,11 @@ func CarList(db *gorm.DB, track, status, carType, parentID string) CarListResult
 		q = q.Where("track = ?", track)
 	}
 	if status != "" {
-		q = q.Where("status = ?", status)
+		if parts := strings.Split(status, ","); len(parts) > 1 {
+			q = q.Where("status IN ?", parts)
+		} else {
+			q = q.Where("status = ?", status)
+		}
 	}
 	if carType != "" {
 		q = q.Where("type = ?", carType)
