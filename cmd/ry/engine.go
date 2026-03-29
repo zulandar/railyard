@@ -277,8 +277,8 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 				continue
 			}
 
-			// Create git branch from the car's base branch.
-			if err := engine.CreateBranch(workDir, claimed.Branch, claimed.BaseBranch); err != nil {
+			// Create git branch from HEAD (ResetWorktree already set HEAD to origin/{baseBranch}).
+			if err := engine.CreateBranch(workDir, claimed.Branch, ""); err != nil {
 				log.Printf("create branch error: %v", err)
 				sleepWithContext(ctx, pollInterval)
 				continue
