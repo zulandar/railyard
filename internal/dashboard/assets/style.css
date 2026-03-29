@@ -234,3 +234,10 @@ dl.meta code { background: var(--bg); padding: 0.1rem 0.4rem; border-radius: 3px
 /* Progress bar */
 .progress-bar { background: var(--border); border-radius: 4px; height: 6px; margin-bottom: 0.75rem; }
 .progress-fill { background: var(--green); border-radius: 4px; height: 6px; }
+
+/* Provider badges */
+.badge-provider { background: rgba(139, 148, 158, 0.15); color: var(--text-muted); }
+.badge-provider-claude { background: var(--yellow); color: #000; }
+.badge-provider-codex { background: var(--green); color: #000; }
+.badge-provider-gemini { background: var(--accent); color: #000; }
+.badge-provider-copilot { background: var(--purple); color: #fff; }

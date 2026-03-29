@@ -83,6 +83,7 @@
             <th>Track</th>
             <th>Status</th>
             <th>Current Car</th>
+            <th>Provider</th>
             <th>Last Activity</th>
         </tr>
     </thead>
@@ -95,10 +96,11 @@
             <td>
                 {{if .CurrentCar}}<a href="/cars/{{.CurrentCar}}">{{.CurrentCar}}</a>{{else}}—{{end}}
             </td>
+            <td><span class="badge badge-provider badge-provider-{{.Provider}}">{{.Provider}}</span></td>
             <td>{{timeAgo .LastActivity}}</td>
         </tr>
     {{else}}
-        <tr><td colspan="5" style="color: var(--text-muted);">No engines running</td></tr>
+        <tr><td colspan="6" style="color: var(--text-muted);">No engines running</td></tr>
     {{end}}
     </tbody>
 </table>
