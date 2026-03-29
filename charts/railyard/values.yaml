@@ -10,6 +10,11 @@ project: ""
 # to the default branch. Requires auth.githubToken with repo scope.
 requirePR: false
 
+# -- Dashboard URL for clickable links in Telegraph messages.
+# When empty and dashboard.ingress is enabled, auto-derived as https://{ingress.host}.
+# Set explicitly for port-forward or non-HTTPS setups.
+dashboardURL: ""
+
 # -- Git repository settings.
 git:
   owner: ""

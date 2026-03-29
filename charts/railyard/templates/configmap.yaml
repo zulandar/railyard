@@ -14,7 +14,9 @@ data:
     default_branch: {{ .Values.git.defaultBranch | quote }}
     require_pr: {{ .Values.requirePR | default false }}
     agent_provider: {{ .Values.engine.agentProvider | quote }}
-    {{- if and .Values.dashboard.ingress.enabled .Values.dashboard.ingress.host }}
+    {{- if .Values.dashboardURL }}
+    dashboard_url: {{ .Values.dashboardURL | quote }}
+    {{- else if and .Values.dashboard.ingress.enabled .Values.dashboard.ingress.host }}
     dashboard_url: "https://{{ .Values.dashboard.ingress.host }}"
     {{- end }}
 
