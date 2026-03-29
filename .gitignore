@@ -11,6 +11,7 @@ docs/plans/
 .worktrees/
 coverage.out
 docs/superpowers/
+minikube-values.yaml
 
 # Secrets & credentials
 .env
