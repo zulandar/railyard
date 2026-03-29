@@ -179,7 +179,8 @@ func (r *Router) Handle(ctx context.Context, msg InboundMessage) {
 		sessionThreadID := msg.ChannelID // fallback if thread creation unavailable
 		if ts, ok := r.adapter.(ThreadStarter); ok {
 			ack := r.nextAck()
-			threadTitle := generateThreadTitle(ctx, r.titleGen, text)
+			titleBody := strings.TrimSpace(mentionRe.ReplaceAllString(text, ""))
+			threadTitle := generateThreadTitle(ctx, r.titleGen, titleBody)
 			newThreadID, err := ts.StartThread(ctx, msg.ChannelID, msg.MessageID, ack, threadTitle)
 			if err != nil {
 				log.Printf("telegraph: router: create thread: %v", err)
