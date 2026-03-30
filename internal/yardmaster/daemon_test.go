@@ -1658,6 +1658,7 @@ func TestHandleCompletedCars_EpicWithPendingChildren_StaysDone(t *testing.T) {
 type mockPRViewer struct {
 	reviewDecision string
 	state          string
+	mergeable      string
 	reviews        []prReview
 	inlineComments []prInlineComment
 	convComments   []prConversationComment
@@ -1674,6 +1675,7 @@ func (m *mockPRViewer) ViewPR(branch string) (*prStatus, error) {
 	return &prStatus{
 		State:          m.state,
 		ReviewDecision: m.reviewDecision,
+		Mergeable:      m.mergeable,
 		Reviews:        m.reviews,
 	}, nil
 }
@@ -1685,6 +1687,20 @@ func (m *mockPRViewer) FetchComments(branch string) ([]prInlineComment, []prConv
 func (m *mockPRViewer) MergePR(branch string) error {
 	m.mergeCalled = true
 	return m.mergeErr
+}
+
+func TestViewPR_IncludesMergeable(t *testing.T) {
+	viewer := &mockPRViewer{
+		state:     "OPEN",
+		mergeable: "CONFLICTING",
+	}
+	status, err := viewer.ViewPR("test-branch")
+	if err != nil {
+		t.Fatalf("ViewPR: %v", err)
+	}
+	if status.Mergeable != "CONFLICTING" {
+		t.Errorf("Mergeable = %q, want %q", status.Mergeable, "CONFLICTING")
+	}
 }
 
 // ---------------------------------------------------------------------------

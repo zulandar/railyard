@@ -909,6 +909,7 @@ type prConversationComment struct {
 type prStatus struct {
 	State          string // OPEN, MERGED, CLOSED
 	ReviewDecision string // APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED, ""
+	Mergeable      string // MERGEABLE, CONFLICTING, UNKNOWN
 	Reviews        []prReview
 }
 
@@ -926,7 +927,7 @@ type ghPRViewer struct {
 
 func (g *ghPRViewer) ViewPR(branch string) (*prStatus, error) {
 	cmd := exec.Command("gh", "pr", "view", branch,
-		"--json", "state,reviewDecision,reviews")
+		"--json", "state,reviewDecision,reviews,mergeable")
 	cmd.Dir = g.repoDir
 	out, err := cmd.Output()
 	if err != nil {
@@ -936,6 +937,7 @@ func (g *ghPRViewer) ViewPR(branch string) (*prStatus, error) {
 	var result struct {
 		State          string `json:"state"`
 		ReviewDecision string `json:"reviewDecision"`
+		Mergeable      string `json:"mergeable"`
 		Reviews        []struct {
 			Body   string `json:"body"`
 			Author struct {
@@ -950,6 +952,7 @@ func (g *ghPRViewer) ViewPR(branch string) (*prStatus, error) {
 	ps := &prStatus{
 		State:          result.State,
 		ReviewDecision: result.ReviewDecision,
+		Mergeable:      result.Mergeable,
 	}
 	for _, r := range result.Reviews {
 		ps.Reviews = append(ps.Reviews, prReview{Body: r.Body, Author: r.Author.Login})
