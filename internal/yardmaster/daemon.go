@@ -1060,6 +1060,16 @@ func handlePrOpenCars(db *gorm.DB, viewer PRViewer, autoMerge bool, repoDir stri
 			continue
 		}
 
+		// Resolve base branch for this car.
+		baseBranch := c.BaseBranch
+		if baseBranch == "" {
+			if cfg != nil && cfg.DefaultBranch != "" {
+				baseBranch = cfg.DefaultBranch
+			} else {
+				baseBranch = "main"
+			}
+		}
+
 		status, err := viewer.ViewPR(c.Branch)
 		if err != nil {
 			log.Printf("pr status for %s: %v", c.ID, err)
@@ -1067,6 +1077,40 @@ func handlePrOpenCars(db *gorm.DB, viewer PRViewer, autoMerge bool, repoDir stri
 		}
 
 		switch {
+		case status.Mergeable == "CONFLICTING" && status.State == "OPEN":
+			// Check if base branch has advanced since last rebase attempt.
+			currentBaseHead := getRemoteHeadCommit(repoDir, baseBranch)
+			if c.LastRebaseBaseHead == currentBaseHead {
+				continue // base hasn't moved, skip
+			}
+
+			// Attempt rebase using existing conflict resolution pipeline.
+			resolved, resolveErr := tryResolveConflict(repoDir, c.Branch, baseBranch)
+			if resolved {
+				if pushErr := gitForcePushBranch(repoDir, c.Branch); pushErr != nil {
+					log.Printf("force push after rebase for %s: %v", c.ID, pushErr)
+					writeProgressNote(db, c.ID, "yardmaster", fmt.Sprintf("Rebase succeeded but force push failed: %v", pushErr))
+				} else {
+					writeProgressNote(db, c.ID, "yardmaster", "Auto-rebased branch onto updated "+baseBranch)
+					fmt.Fprintf(out, "Auto-rebased PR branch for car %s\n", c.ID)
+				}
+			} else {
+				detail := ""
+				if resolveErr != nil {
+					detail = resolveErr.Error()
+				}
+				writeProgressNote(db, c.ID, "yardmaster",
+					fmt.Sprintf("PR has merge conflict that cannot be auto-resolved:\n%s", detail))
+				messaging.Send(db, YardmasterID, "human", "escalate",
+					fmt.Sprintf("Car %s PR has unresolvable merge conflict", c.ID),
+					messaging.SendOpts{CarID: c.ID, Priority: "normal"})
+				fmt.Fprintf(out, "Car %s PR has unresolvable conflict — human notified\n", c.ID)
+			}
+
+			// Record base HEAD regardless of outcome.
+			db.Model(&models.Car{}).Where("id = ?", c.ID).
+				Update("last_rebase_base_head", currentBaseHead)
+
 		case status.State == "MERGED":
 			now := time.Now()
 			if err := db.Model(&models.Car{}).Where("id = ?", c.ID).Updates(map[string]interface{}{

@@ -2057,3 +2057,262 @@ func TestDaemonLoop_PanicRecovery(t *testing.T) {
 		t.Errorf("should have recovered panic, got: %s", buf.String())
 	}
 }
+
+// ---------------------------------------------------------------------------
+// CONFLICTING PR auto-rebase tests
+// ---------------------------------------------------------------------------
+
+func TestHandlePrOpenCars_ConflictingAutoRebase(t *testing.T) {
+	repoDir, _, run := initTestRepoWithRemote(t)
+
+	writeFile(t, repoDir, "main.txt", "main content\n")
+	run(repoDir, "git", "add", ".")
+	run(repoDir, "git", "commit", "-m", "initial")
+	run(repoDir, "git", "push", "origin", "main")
+
+	branch := "ry/alice/backend/car-rebase1"
+	run(repoDir, "git", "checkout", "-b", branch)
+	writeFile(t, repoDir, "feature.txt", "feature content\n")
+	run(repoDir, "git", "add", ".")
+	run(repoDir, "git", "commit", "-m", "feature work")
+	run(repoDir, "git", "push", "origin", branch)
+
+	run(repoDir, "git", "checkout", "main")
+	writeFile(t, repoDir, "other.txt", "other work\n")
+	run(repoDir, "git", "add", ".")
+	run(repoDir, "git", "commit", "-m", "main advance")
+	run(repoDir, "git", "push", "origin", "main")
+
+	db := testDB(t)
+	db.Create(&models.Car{
+		ID:     "car-rebase1",
+		Title:  "Rebase test",
+		Track:  "backend",
+		Branch: branch,
+		Status: "pr_open",
+	})
+
+	viewer := &mockPRViewer{
+		state:     "OPEN",
+		mergeable: "CONFLICTING",
+	}
+
+	var buf bytes.Buffer
+	err := handlePrOpenCars(db, viewer, false, repoDir, nil, &buf)
+	if err != nil {
+		t.Fatalf("handlePrOpenCars: %v", err)
+	}
+
+	var c models.Car
+	db.First(&c, "id = ?", "car-rebase1")
+	if c.Status != "pr_open" {
+		t.Errorf("status = %q, want %q", c.Status, "pr_open")
+	}
+	if c.LastRebaseBaseHead == "" {
+		t.Error("LastRebaseBaseHead should be set after rebase attempt")
+	}
+
+	var notes []models.CarProgress
+	db.Where("car_id = ?", "car-rebase1").Find(&notes)
+	if len(notes) == 0 {
+		t.Error("expected progress note about auto-rebase")
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "Auto-rebased") {
+		t.Errorf("output should mention auto-rebase, got: %s", output)
+	}
+}
+
+func TestHandlePrOpenCars_ConflictingSkipWhenMainUnchanged(t *testing.T) {
+	repoDir, _, run := initTestRepoWithRemote(t)
+
+	writeFile(t, repoDir, "main.txt", "content\n")
+	run(repoDir, "git", "add", ".")
+	run(repoDir, "git", "commit", "-m", "initial")
+	run(repoDir, "git", "push", "origin", "main")
+
+	currentHead := getRemoteHeadCommit(repoDir, "main")
+
+	db := testDB(t)
+	db.Create(&models.Car{
+		ID:                 "car-skip1",
+		Title:              "Skip rebase test",
+		Track:              "backend",
+		Branch:             "ry/alice/backend/car-skip1",
+		Status:             "pr_open",
+		LastRebaseBaseHead: currentHead,
+	})
+
+	viewer := &mockPRViewer{
+		state:     "OPEN",
+		mergeable: "CONFLICTING",
+	}
+
+	var buf bytes.Buffer
+	err := handlePrOpenCars(db, viewer, false, repoDir, nil, &buf)
+	if err != nil {
+		t.Fatalf("handlePrOpenCars: %v", err)
+	}
+
+	var notes []models.CarProgress
+	db.Where("car_id = ?", "car-skip1").Find(&notes)
+	if len(notes) != 0 {
+		t.Errorf("expected no progress notes (rebase skipped), got %d", len(notes))
+	}
+
+	if buf.String() != "" {
+		t.Errorf("expected no output, got: %s", buf.String())
+	}
+}
+
+func TestHandlePrOpenCars_UnresolvableConflict(t *testing.T) {
+	repoDir, _, run := initTestRepoWithRemote(t)
+
+	writeFile(t, repoDir, "shared.txt", "original\n")
+	run(repoDir, "git", "add", ".")
+	run(repoDir, "git", "commit", "-m", "initial")
+	run(repoDir, "git", "push", "origin", "main")
+
+	branch := "ry/alice/backend/car-unresolvable1"
+	run(repoDir, "git", "checkout", "-b", branch)
+	writeFile(t, repoDir, "shared.txt", "feature version\n")
+	run(repoDir, "git", "add", ".")
+	run(repoDir, "git", "commit", "-m", "feature changes shared.txt")
+	run(repoDir, "git", "push", "origin", branch)
+
+	run(repoDir, "git", "checkout", "main")
+	writeFile(t, repoDir, "shared.txt", "main version\n")
+	run(repoDir, "git", "add", ".")
+	run(repoDir, "git", "commit", "-m", "main changes shared.txt")
+	run(repoDir, "git", "push", "origin", "main")
+
+	db := testDB(t)
+	db.Create(&models.Car{
+		ID:     "car-unresolvable1",
+		Title:  "Unresolvable conflict test",
+		Track:  "backend",
+		Branch: branch,
+		Status: "pr_open",
+	})
+
+	viewer := &mockPRViewer{
+		state:     "OPEN",
+		mergeable: "CONFLICTING",
+	}
+
+	var buf bytes.Buffer
+	err := handlePrOpenCars(db, viewer, false, repoDir, nil, &buf)
+	if err != nil {
+		t.Fatalf("handlePrOpenCars: %v", err)
+	}
+
+	var c models.Car
+	db.First(&c, "id = ?", "car-unresolvable1")
+	if c.Status != "pr_open" {
+		t.Errorf("status = %q, want %q", c.Status, "pr_open")
+	}
+	if c.LastRebaseBaseHead == "" {
+		t.Error("LastRebaseBaseHead should be set after failed rebase attempt")
+	}
+
+	var notes []models.CarProgress
+	db.Where("car_id = ?", "car-unresolvable1").Find(&notes)
+	if len(notes) == 0 {
+		t.Fatal("expected progress note about unresolvable conflict")
+	}
+	if !strings.Contains(notes[0].Note, "cannot be auto-resolved") {
+		t.Errorf("note should mention cannot be auto-resolved, got: %s", notes[0].Note)
+	}
+
+	var msgs []models.Message
+	db.Where("subject = ? AND car_id = ?", "escalate", "car-unresolvable1").Find(&msgs)
+	if len(msgs) == 0 {
+		t.Error("expected human escalation message")
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "unresolvable conflict") {
+		t.Errorf("output should mention unresolvable conflict, got: %s", output)
+	}
+}
+
+func TestHandlePrOpenCars_MergeableUnknownSkipped(t *testing.T) {
+	db := testDB(t)
+
+	db.Create(&models.Car{
+		ID:     "car-unknown1",
+		Title:  "Unknown mergeable test",
+		Track:  "backend",
+		Branch: "ry/alice/backend/car-unknown1",
+		Status: "pr_open",
+	})
+
+	viewer := &mockPRViewer{
+		state:     "OPEN",
+		mergeable: "UNKNOWN",
+	}
+
+	var buf bytes.Buffer
+	err := handlePrOpenCars(db, viewer, false, "", nil, &buf)
+	if err != nil {
+		t.Fatalf("handlePrOpenCars: %v", err)
+	}
+
+	var c models.Car
+	db.First(&c, "id = ?", "car-unknown1")
+	if c.Status != "pr_open" {
+		t.Errorf("status = %q, want %q", c.Status, "pr_open")
+	}
+	if c.LastRebaseBaseHead != "" {
+		t.Errorf("LastRebaseBaseHead should be empty, got %q", c.LastRebaseBaseHead)
+	}
+}
+
+func TestHandlePrOpenCars_ConflictingAndApproved(t *testing.T) {
+	repoDir, _, run := initTestRepoWithRemote(t)
+
+	writeFile(t, repoDir, "main.txt", "content\n")
+	run(repoDir, "git", "add", ".")
+	run(repoDir, "git", "commit", "-m", "initial")
+	run(repoDir, "git", "push", "origin", "main")
+
+	branch := "ry/alice/backend/car-both1"
+	run(repoDir, "git", "checkout", "-b", branch)
+	writeFile(t, repoDir, "feature.txt", "feature\n")
+	run(repoDir, "git", "add", ".")
+	run(repoDir, "git", "commit", "-m", "feature")
+	run(repoDir, "git", "push", "origin", branch)
+	run(repoDir, "git", "checkout", "main")
+
+	db := testDB(t)
+	db.Create(&models.Car{
+		ID:     "car-both1",
+		Title:  "Both conflicting and approved",
+		Track:  "backend",
+		Branch: branch,
+		Status: "pr_open",
+	})
+
+	viewer := &mockPRViewer{
+		state:          "OPEN",
+		mergeable:      "CONFLICTING",
+		reviewDecision: "APPROVED",
+	}
+
+	var buf bytes.Buffer
+	err := handlePrOpenCars(db, viewer, true, repoDir, nil, &buf)
+	if err != nil {
+		t.Fatalf("handlePrOpenCars: %v", err)
+	}
+
+	if viewer.mergeCalled {
+		t.Error("MergePR should not be called when PR is CONFLICTING")
+	}
+
+	var c models.Car
+	db.First(&c, "id = ?", "car-both1")
+	if c.Status != "pr_open" {
+		t.Errorf("status = %q, want %q", c.Status, "pr_open")
+	}
+}

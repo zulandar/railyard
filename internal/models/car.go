@@ -11,27 +11,27 @@ var ResolvedBlockerStatuses = []string{"cancelled", "merged"}
 
 // Car is the core work item in Railyard.
 type Car struct {
-	ID          string  `gorm:"primaryKey;size:32"`
-	Title       string  `gorm:"not null"`
-	Description string  `gorm:"type:text"`
-	Type        string  `gorm:"size:16;default:task"`
-	Status      string  `gorm:"size:16;default:draft;index"`
-	Priority    int     `gorm:"default:2"`
-	Track       string  `gorm:"size:64;index"`
-	Assignee    string  `gorm:"size:64"`
-	ParentID    *string `gorm:"size:32"`
-	Branch      string  `gorm:"size:128"`
-	BaseBranch  string  `gorm:"size:64" json:"base_branch"`
-	DesignNotes string  `gorm:"type:text"`
-	Acceptance  string  `gorm:"type:text"`
-	SkipTests   bool    `gorm:"default:false"`
-	RequestedBy string  `gorm:"size:64"`
+	ID                 string  `gorm:"primaryKey;size:32"`
+	Title              string  `gorm:"not null"`
+	Description        string  `gorm:"type:text"`
+	Type               string  `gorm:"size:16;default:task"`
+	Status             string  `gorm:"size:16;default:draft;index"`
+	Priority           int     `gorm:"default:2"`
+	Track              string  `gorm:"size:64;index"`
+	Assignee           string  `gorm:"size:64"`
+	ParentID           *string `gorm:"size:32"`
+	Branch             string  `gorm:"size:128"`
+	BaseBranch         string  `gorm:"size:64" json:"base_branch"`
+	DesignNotes        string  `gorm:"type:text"`
+	Acceptance         string  `gorm:"type:text"`
+	SkipTests          bool    `gorm:"default:false"`
+	RequestedBy        string  `gorm:"size:64"`
 	SourceIssue        int
 	LastRebaseBaseHead string `gorm:"size:40"` // SHA of base branch HEAD when rebase was last attempted
 	CreatedAt          time.Time
-	UpdatedAt   time.Time
-	ClaimedAt   *time.Time
-	CompletedAt *time.Time
+	UpdatedAt          time.Time
+	ClaimedAt          *time.Time
+	CompletedAt        *time.Time
 
 	Parent   *Car          `gorm:"foreignKey:ParentID"`
 	Children []Car         `gorm:"foreignKey:ParentID"`
