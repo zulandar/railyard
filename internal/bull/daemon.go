@@ -25,6 +25,7 @@ type retryEntry struct {
 // DaemonClient combines all GitHub operations the bull daemon needs.
 type DaemonClient interface {
 	ListNewIssues(ctx context.Context, since time.Time) ([]*github.Issue, error)
+	ListIssueComments(ctx context.Context, number int, limit int) ([]*github.IssueComment, error)
 	// TriageClient
 	AddComment(ctx context.Context, number int, body string) error
 	AddLabel(ctx context.Context, number int, label string) error
@@ -152,6 +153,7 @@ func RunDaemon(ctx context.Context, deps interface {
 					Tracked:      tracked,
 					CodeContext:  opts.CodeContext,
 					BranchPrefix: opts.BranchPrefix,
+					Comments:     fetchIssueComments(ctx, deps, num),
 				}
 				outcome, triageErr := ExecuteTriage(ctx, entry.issue, triageOpts)
 				if triageErr != nil {
@@ -196,6 +198,7 @@ func RunDaemon(ctx context.Context, deps interface {
 				// Phase 4: AI triage.
 				if opts.AI != nil {
 					fmt.Fprintf(out, "Phase 4: Triaging issue #%d\n", num)
+					comments := fetchIssueComments(ctx, deps, num)
 					triageOpts := TriageOpts{
 						Client:       deps,
 						AI:           opts.AI,
@@ -206,6 +209,7 @@ func RunDaemon(ctx context.Context, deps interface {
 						Tracked:      tracked,
 						CodeContext:  opts.CodeContext,
 						BranchPrefix: opts.BranchPrefix,
+						Comments:     comments,
 					}
 					outcome, triageErr := ExecuteTriage(ctx, issue, triageOpts)
 					if triageErr != nil {
@@ -247,6 +251,33 @@ func RunDaemon(ctx context.Context, deps interface {
 
 		sleepCtx(ctx, opts.PollInterval)
 	}
+}
+
+// maxIssueComments is the default number of comments to fetch per issue.
+const maxIssueComments = 10
+
+// fetchIssueComments retrieves comments for an issue and converts them to
+// CommentContext values in chronological order (oldest first). Errors are
+// non-fatal: an empty slice is returned so triage can proceed with the body only.
+func fetchIssueComments(ctx context.Context, client DaemonClient, number int) []CommentContext {
+	ghComments, err := client.ListIssueComments(ctx, number, maxIssueComments)
+	if err != nil {
+		log.Printf("bull: fetch comments for #%d: %v", number, err)
+		return nil
+	}
+	comments := make([]CommentContext, 0, len(ghComments))
+	for _, c := range ghComments {
+		comments = append(comments, CommentContext{
+			Author: c.GetUser().GetLogin(),
+			Body:   c.GetBody(),
+			Date:   c.GetCreatedAt().Format("2006-01-02"),
+		})
+	}
+	// API returns newest first (desc); reverse to chronological order.
+	for i, j := 0, len(comments)-1; i < j; i, j = i+1, j-1 {
+		comments[i], comments[j] = comments[j], comments[i]
+	}
+	return comments
 }
 
 // sleepCtx sleeps for d, returning early if ctx is cancelled.

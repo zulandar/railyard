@@ -140,6 +140,9 @@ type daemonDeps struct {
 func (d *daemonDeps) ListNewIssues(ctx context.Context, since time.Time) ([]*github.Issue, error) {
 	return d.client.ListNewIssues(ctx, since)
 }
+func (d *daemonDeps) ListIssueComments(ctx context.Context, number int, limit int) ([]*github.IssueComment, error) {
+	return d.client.ListIssueComments(ctx, number, limit)
+}
 func (d *daemonDeps) AddComment(ctx context.Context, number int, body string) error {
 	return d.client.AddComment(ctx, number, body)
 }

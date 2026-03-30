@@ -80,6 +80,10 @@ func (m *mockDaemonDeps) ListNewIssues(ctx context.Context, since time.Time) ([]
 	return m.issues, nil
 }
 
+func (m *mockDaemonDeps) ListIssueComments(_ context.Context, _ int, _ int) ([]*github.IssueComment, error) {
+	return nil, nil
+}
+
 func (m *mockDaemonDeps) GetIssue(ctx context.Context, number int) (*github.Issue, error) {
 	for _, i := range m.issues {
 		if i.GetNumber() == number {
