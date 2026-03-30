@@ -1048,6 +1048,57 @@ func TestRunTests_NoTestFilesPattern(t *testing.T) {
 	}
 }
 
+func TestTryResolveConflict_ForcePushToRemote(t *testing.T) {
+	repoDir, bareDir, run := initTestRepoWithRemote(t)
+
+	// Initial commit on main.
+	writeFile(t, repoDir, "main.txt", "main content\n")
+	run(repoDir, "git", "add", ".")
+	run(repoDir, "git", "commit", "-m", "initial")
+	run(repoDir, "git", "push", "origin", "main")
+
+	// Feature branch with non-conflicting change.
+	run(repoDir, "git", "checkout", "-b", "feature")
+	writeFile(t, repoDir, "feature.txt", "feature content\n")
+	run(repoDir, "git", "add", ".")
+	run(repoDir, "git", "commit", "-m", "feature work")
+	run(repoDir, "git", "push", "origin", "feature")
+
+	// Advance main (creates divergence but no conflict).
+	run(repoDir, "git", "checkout", "main")
+	writeFile(t, repoDir, "other.txt", "other content\n")
+	run(repoDir, "git", "add", ".")
+	run(repoDir, "git", "commit", "-m", "main advance")
+	run(repoDir, "git", "push", "origin", "main")
+
+	// Start a merge that will fail due to diverged histories.
+	mergeCmd := exec.Command("git", "merge", "--no-ff", "feature", "-m", "test merge")
+	mergeCmd.Dir = repoDir
+	mergeCmd.CombinedOutput() // may or may not conflict
+
+	// Resolve via rebase.
+	resolved, err := tryResolveConflict(repoDir, "feature", "main")
+	if err != nil {
+		t.Fatalf("tryResolveConflict error: %v", err)
+	}
+	if !resolved {
+		t.Fatal("expected conflict to be resolved via rebase")
+	}
+
+	// Force push the rebased feature branch.
+	if err := gitForcePushBranch(repoDir, "feature"); err != nil {
+		t.Fatalf("gitForcePushBranch: %v", err)
+	}
+
+	// Verify the remote feature branch has the rebased commit.
+	// The feature branch should now be a descendant of main's latest commit.
+	cmd := exec.Command("git", "merge-base", "--is-ancestor", "main", "feature")
+	cmd.Dir = bareDir
+	if err := cmd.Run(); err != nil {
+		t.Error("after rebase + force-push, feature should be descendant of main on remote")
+	}
+}
+
 func TestRunTests_NoTestsFoundPattern(t *testing.T) {
 	repoDir, run := initTestRepo(t)
 
