@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -148,7 +148,7 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 			if result.FailureCategory == SwitchFailInfra {
 				// Infrastructure failure — set merge-failed, escalate to human.
 				if dbErr := db.Model(&models.Car{}).Where("id = ?", carID).Update("status", "merge-failed").Error; dbErr != nil {
-					log.Printf("update car %s to merge-failed: %v", carID, dbErr)
+					slog.Error("update car to merge-failed", "car", carID, "error", dbErr)
 				}
 				messaging.Send(db, "yardmaster", "human", "infra-test-failure",
 					fmt.Sprintf("Infrastructure test failure for car %s (%s) on branch %s:\n%s",
@@ -158,7 +158,7 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 			} else {
 				// Code test failure — set blocked, notify engine.
 				if dbErr := db.Model(&models.Car{}).Where("id = ?", carID).Update("status", "blocked").Error; dbErr != nil {
-					log.Printf("update car %s to blocked: %v", carID, dbErr)
+					slog.Error("update car to blocked", "car", carID, "error", dbErr)
 				}
 				if car.Assignee != "" {
 					messaging.Send(db, "yardmaster", car.Assignee, "test-failure",
@@ -191,13 +191,13 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 			"status":       "merged",
 			"completed_at": now,
 		}).Error; dbErr != nil {
-			log.Printf("update car %s to merged (already-ancestor): %v", carID, dbErr)
+			slog.Error("update car to merged (already-ancestor)", "car", carID, "error", dbErr)
 		}
 
 		// Run the same post-merge logic as a normal merge.
 		unblocked, ubErr := UnblockDeps(db, carID)
 		if ubErr != nil {
-			log.Printf("unblock deps for %s (already-ancestor): %v", carID, ubErr)
+			slog.Error("unblock deps (already-ancestor)", "car", carID, "error", ubErr)
 		}
 		if len(unblocked) > 0 {
 			titles := make([]string, len(unblocked))
@@ -249,7 +249,7 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 			"status":       "pr_open",
 			"completed_at": now,
 		}).Error; dbErr != nil {
-			log.Printf("update car %s to pr_open: %v", carID, dbErr)
+			slog.Error("update car to pr_open", "car", carID, "error", dbErr)
 		}
 
 		return result, nil
@@ -309,13 +309,13 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 		"status":       "merged",
 		"completed_at": now,
 	}).Error; dbErr != nil {
-		log.Printf("update car %s to merged: %v", carID, dbErr)
+		slog.Error("update car to merged", "car", carID, "error", dbErr)
 	}
 
 	// Unblock cross-track dependencies.
 	unblocked, ubErr := UnblockDeps(db, carID)
 	if ubErr != nil {
-		log.Printf("unblock deps for %s: %v", carID, ubErr)
+		slog.Error("unblock deps", "car", carID, "error", ubErr)
 	}
 	if len(unblocked) > 0 {
 		titles := make([]string, len(unblocked))
@@ -504,7 +504,7 @@ func runTests(ctx context.Context, repoDir, branch, baseBranch, preTestCommand, 
 
 	// Run the track's configured test command.
 	if testCommand == "" {
-		log.Printf("[switch] no test_command configured for track; skipping tests")
+		slog.Warn("no test_command configured for track; skipping tests")
 		checkoutBase(repoDir, baseBranch)
 		return "", nil
 	}
@@ -538,7 +538,7 @@ func deleteRemoteBranch(repoDir, branch string) {
 	cmd := exec.Command("git", "push", "origin", "--delete", branch)
 	cmd.Dir = repoDir
 	if out, err := cmd.CombinedOutput(); err != nil {
-		log.Printf("yardmaster: delete remote branch %s: %s: %v (non-fatal)", branch, string(out), err)
+		slog.Warn("delete remote branch failed (non-fatal)", "branch", branch, "output", string(out), "error", err)
 	}
 }
 
@@ -886,7 +886,7 @@ func TryCloseEpic(db *gorm.DB, epicID string) {
 	if err := db.Model(&models.Car{}).
 		Where("parent_id = ? AND status NOT IN ?", epicID, []string{"done", "merged", "cancelled"}).
 		Count(&remaining).Error; err != nil {
-		log.Printf("TryCloseEpic: count remaining children for %s: %v", epicID, err)
+		slog.Error("TryCloseEpic: count remaining children", "epic", epicID, "error", err)
 		return
 	}
 
@@ -900,7 +900,7 @@ func TryCloseEpic(db *gorm.DB, epicID string) {
 		"status":       "done",
 		"completed_at": now,
 	}).Error; err != nil {
-		log.Printf("TryCloseEpic: update epic %s to done: %v", epicID, err)
+		slog.Error("TryCloseEpic: update epic to done", "epic", epicID, "error", err)
 		return
 	}
 

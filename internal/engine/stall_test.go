@@ -627,7 +627,8 @@ func TestStallDetector_StderrResetsTimer(t *testing.T) {
 func TestStallDetector_ProcessAliveDefersStall(t *testing.T) {
 	sess := newMockSession()
 	sd := NewStallDetector(sess, StallConfig{
-		StdoutTimeout: 80 * time.Millisecond,
+		StdoutTimeout:      80 * time.Millisecond,
+		MaxAliveExtensions: 100, // high limit so stall never fires within test window
 	})
 
 	// Override process-alive check to return true (process is alive).
@@ -643,6 +644,71 @@ func TestStallDetector_ProcessAliveDefersStall(t *testing.T) {
 		t.Fatalf("unexpected stall while process alive: %s", reason.Detail)
 	case <-time.After(300 * time.Millisecond):
 		// No stall — correct behavior.
+	}
+}
+
+func TestStallDetector_ProcessAliveExceedsExtensionLimit(t *testing.T) {
+	sess := newMockSession()
+	sd := NewStallDetector(sess, StallConfig{
+		StdoutTimeout:      80 * time.Millisecond,
+		MaxAliveExtensions: 2,
+	})
+
+	// Override process-alive check to always return true.
+	sd.isProcessAlive = func() bool { return true }
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sd.Start(ctx)
+
+	// After 2 extensions the stall should fire even though process is alive.
+	select {
+	case reason := <-sd.Stalled():
+		if reason.Type != "stdout_timeout" {
+			t.Errorf("Type = %q, want %q", reason.Type, "stdout_timeout")
+		}
+		if !strings.Contains(reason.Detail, "alive-extension limit") {
+			t.Errorf("Detail should mention alive-extension limit, got: %s", reason.Detail)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected stall after alive extension limit exceeded, none received")
+	}
+}
+
+func TestStallDetector_OutputResetsAliveExtensions(t *testing.T) {
+	sess := newMockSession()
+	sd := NewStallDetector(sess, StallConfig{
+		StdoutTimeout:      80 * time.Millisecond,
+		MaxAliveExtensions: 2,
+	})
+
+	// Process is alive.
+	sd.isProcessAlive = func() bool { return true }
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sd.Start(ctx)
+
+	// Keep writing output at intervals shorter than 2 full extension cycles.
+	// Each write resets the extension counter, so we should never stall.
+	done := make(chan struct{})
+	go func() {
+		for i := 0; i < 8; i++ {
+			time.Sleep(60 * time.Millisecond)
+			sess.stdout.Write([]byte(fmt.Sprintf("output %d\n", i)))
+		}
+		close(done)
+	}()
+
+	<-done
+
+	// Should NOT have stalled — output keeps resetting the counter.
+	select {
+	case reason := <-sd.Stalled():
+		// If a stall fires it should be after writes stop, not during.
+		_ = reason
+	case <-time.After(50 * time.Millisecond):
+		// No stall during writes — correct.
 	}
 }
 

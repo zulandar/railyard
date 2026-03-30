@@ -494,7 +494,9 @@ func queryCarOutcomeStats(db *gorm.DB, carID, branch, baseBranch, workDir string
 	// Count commits on branch relative to base using git rev-list.
 	if branch != "" && baseBranch != "" && workDir != "" {
 		revRange := "origin/" + baseBranch + ".." + branch
-		out, err := exec.Command("git", "rev-list", "--count", revRange).Output()
+		cmd := exec.Command("git", "rev-list", "--count", revRange)
+		cmd.Dir = workDir
+		out, err := cmd.Output()
 		if err == nil {
 			if n, err := strconv.Atoi(strings.TrimSpace(string(out))); err == nil {
 				stats.commits = n

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"time"
 
 	"github.com/google/go-github/v68/github"
@@ -262,7 +263,7 @@ const maxIssueComments = 10
 func fetchIssueComments(ctx context.Context, client DaemonClient, number int) []CommentContext {
 	ghComments, err := client.ListIssueComments(ctx, number, maxIssueComments)
 	if err != nil {
-		log.Printf("bull: fetch comments for #%d: %v", number, err)
+		slog.Warn("bull: fetch comments failed", "issue", number, "error", err)
 		return nil
 	}
 	comments := make([]CommentContext, 0, len(ghComments))

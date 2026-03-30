@@ -16,16 +16,18 @@ import (
 
 // Default stall detection thresholds.
 const (
-	DefaultStdoutTimeout    = 120 * time.Second
-	DefaultRepeatedErrorMax = 3
-	DefaultMaxClearCycles   = 5
+	DefaultStdoutTimeout      = 120 * time.Second
+	DefaultRepeatedErrorMax   = 3
+	DefaultMaxClearCycles     = 5
+	DefaultMaxAliveExtensions = 3
 )
 
 // StallConfig holds configurable thresholds for stall detection.
 type StallConfig struct {
-	StdoutTimeout    time.Duration
-	RepeatedErrorMax int
-	MaxClearCycles   int
+	StdoutTimeout      time.Duration
+	RepeatedErrorMax   int
+	MaxClearCycles     int
+	MaxAliveExtensions int // max consecutive process-alive deferrals before stall fires (0 = use default)
 }
 
 // StallReason describes why a stall was detected.
@@ -42,12 +44,13 @@ type StallDetector struct {
 	engineID string
 	carID    string
 
-	mu             sync.Mutex
-	lastActivityAt time.Time
-	recentLines    []string // rolling window of recent output lines (up to 100)
-	lastSnippet    string   // last chunk of output for context
-	cycle          int
-	stopped        bool
+	mu              sync.Mutex
+	lastActivityAt  time.Time
+	recentLines     []string // rolling window of recent output lines (up to 100)
+	lastSnippet     string   // last chunk of output for context
+	cycle           int
+	aliveExtensions int // consecutive process-alive deferrals with no real output
+	stopped         bool
 
 	stallCh chan StallReason
 
@@ -66,6 +69,9 @@ func NewStallDetector(sess *Session, cfg StallConfig) *StallDetector {
 	}
 	if cfg.MaxClearCycles <= 0 {
 		cfg.MaxClearCycles = DefaultMaxClearCycles
+	}
+	if cfg.MaxAliveExtensions <= 0 {
+		cfg.MaxAliveExtensions = DefaultMaxAliveExtensions
 	}
 
 	sd := &StallDetector{
@@ -199,6 +205,7 @@ func (sd *StallDetector) observeOutput(p []byte) {
 	}
 
 	sd.lastActivityAt = time.Now()
+	sd.aliveExtensions = 0
 
 	chunk := string(p)
 
@@ -242,6 +249,7 @@ func (sd *StallDetector) touchActivity() {
 	defer sd.mu.Unlock()
 	if !sd.stopped {
 		sd.lastActivityAt = time.Now()
+		sd.aliveExtensions = 0
 	}
 }
 
@@ -292,15 +300,20 @@ func (sd *StallDetector) monitor(ctx context.Context) {
 			if elapsed >= sd.cfg.StdoutTimeout {
 				sd.mu.Lock()
 				if !sd.stopped {
-					if sd.isProcessAlive != nil && sd.isProcessAlive() {
-						// Process is alive — extend timeout, don't fire stall.
+					if sd.isProcessAlive != nil && sd.isProcessAlive() && sd.aliveExtensions < sd.cfg.MaxAliveExtensions {
+						// Process is alive and under extension limit — extend timeout, don't fire stall.
+						sd.aliveExtensions++
 						sd.lastActivityAt = time.Now()
 						sd.mu.Unlock()
 						continue
 					}
+					detail := fmt.Sprintf("no output for %s (threshold %s) and process is not alive", elapsed.Round(time.Second), sd.cfg.StdoutTimeout)
+					if sd.aliveExtensions >= sd.cfg.MaxAliveExtensions {
+						detail = fmt.Sprintf("no output for %d consecutive checks (alive-extension limit %d exceeded)", sd.aliveExtensions+1, sd.cfg.MaxAliveExtensions)
+					}
 					sd.emitStall(StallReason{
 						Type:    "stdout_timeout",
-						Detail:  fmt.Sprintf("no output for %s (threshold %s) and process is not alive", elapsed.Round(time.Second), sd.cfg.StdoutTimeout),
+						Detail:  detail,
 						Snippet: snippet,
 					})
 				}

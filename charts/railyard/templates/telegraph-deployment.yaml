@@ -40,7 +40,9 @@ spec:
           args:
             - |
               git config --global --add safe.directory /repo
+              {{- if or .Values.auth.githubToken .Values.bull.githubToken .Values.auth.existingSecret }}
               git config --global credential.helper '!f() { echo "username=x-access-token"; echo "password=${GITHUB_TOKEN}"; }; f'
+              {{- end }}
               if [ -d /repo/.git ]; then
                 cd /repo && git fetch --all
               else
@@ -50,7 +52,9 @@ spec:
               cd /repo &&
               git config user.name "railyard" &&
               git config user.email "railyard@railyard.dev"
+              {{- if or .Values.auth.githubToken .Values.bull.githubToken .Values.auth.existingSecret }}
               git config credential.helper '!f() { echo "username=x-access-token"; echo "password=${GITHUB_TOKEN}"; }; f'
+              {{- end }}
               cp /etc/railyard/railyard.yaml /repo/railyard.yaml 2>/dev/null || true
           volumeMounts:
             - name: config
