@@ -320,7 +320,7 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 		sd.Start(ctx)
 
 		// Monitor: wait for subprocess exit or stall.
-		outcome := monitorSession(ctx, sess, sd)
+		outcome := monitorSession(ctx, sess, sd, gormDB, claimed.ID)
 		sd.Stop()
 
 		switch outcome.kind {
@@ -419,22 +419,40 @@ type sessionOutcome struct {
 }
 
 // monitorSession waits for the subprocess to exit, a stall, or context cancellation.
-func monitorSession(ctx context.Context, sess *engine.Session, sd *engine.StallDetector) sessionOutcome {
+// It verifies car status in the DB before returning outcomes.
+func monitorSession(ctx context.Context, sess *engine.Session, sd *engine.StallDetector, db *gorm.DB, carID string) sessionOutcome {
+	return monitorSessionWithDB(ctx, sess.Done(), sd.Stalled(), db, carID)
+}
+
+// monitorSessionWithDB is the testable core of monitorSession. It takes raw
+// channels and a DB connection, and verifies car status before returning outcomes.
+func monitorSessionWithDB(ctx context.Context, doneCh <-chan error, stallCh <-chan engine.StallReason, db *gorm.DB, carID string) sessionOutcome {
 	select {
 	case <-ctx.Done():
 		return sessionOutcome{kind: outcomeCancelled}
 
-	case reason := <-sd.Stalled():
+	case reason := <-stallCh:
+		// Before declaring stall, check if agent already finished.
+		var c models.Car
+		if dbErr := db.Select("status").First(&c, "id = ?", carID).Error; dbErr == nil && c.Status == "done" {
+			return sessionOutcome{kind: outcomeCompleted}
+		}
 		return sessionOutcome{kind: outcomeStall, stallReason: reason}
 
-	case err := <-sess.Done():
+	case err := <-doneCh:
 		if err != nil {
-			// Non-zero exit — treat as clear cycle (agent exited without completing).
 			return sessionOutcome{kind: outcomeClear}
 		}
-		// Zero exit — agent finished. Could be completion or normal exit.
-		// We treat zero exit as completion (the agent calls ry complete before exiting).
-		return sessionOutcome{kind: outcomeCompleted}
+		// Zero exit — verify the agent actually called ry complete.
+		var c models.Car
+		if dbErr := db.Select("status").First(&c, "id = ?", carID).Error; dbErr != nil {
+			log.Printf("monitorSession: read car %s: %v", carID, dbErr)
+			return sessionOutcome{kind: outcomeClear}
+		}
+		if c.Status == "done" {
+			return sessionOutcome{kind: outcomeCompleted}
+		}
+		return sessionOutcome{kind: outcomeClear}
 	}
 }
 

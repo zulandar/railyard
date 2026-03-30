@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/zulandar/railyard/internal/db"
+	"github.com/zulandar/railyard/internal/engine"
 	"github.com/zulandar/railyard/internal/models"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -185,5 +186,103 @@ func TestLoadMessages_ErrorForEmptyEngineID(t *testing.T) {
 	_, err := loadMessages(gormDB, "")
 	if err == nil {
 		t.Fatal("expected error for empty engineID, got nil")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// monitorSessionWithDB
+// ---------------------------------------------------------------------------
+
+func TestMonitorSession_ZeroExitCarDone(t *testing.T) {
+	gormDB := engineTestDB(t)
+
+	gormDB.Create(&models.Car{
+		ID:     "car-ms1",
+		Title:  "Done car",
+		Status: "done",
+		Track:  "backend",
+	})
+
+	doneCh := make(chan error, 1)
+	doneCh <- nil // zero exit
+
+	stallCh := make(chan engine.StallReason, 1)
+
+	outcome := monitorSessionWithDB(
+		context.Background(), doneCh, stallCh, gormDB, "car-ms1",
+	)
+
+	if outcome.kind != outcomeCompleted {
+		t.Errorf("kind = %d, want outcomeCompleted (%d)", outcome.kind, outcomeCompleted)
+	}
+}
+
+func TestMonitorSession_ZeroExitCarNotDone(t *testing.T) {
+	gormDB := engineTestDB(t)
+
+	gormDB.Create(&models.Car{
+		ID:     "car-ms2",
+		Title:  "In-progress car",
+		Status: "in_progress",
+		Track:  "backend",
+	})
+
+	doneCh := make(chan error, 1)
+	doneCh <- nil // zero exit
+
+	stallCh := make(chan engine.StallReason, 1)
+
+	outcome := monitorSessionWithDB(
+		context.Background(), doneCh, stallCh, gormDB, "car-ms2",
+	)
+
+	if outcome.kind != outcomeClear {
+		t.Errorf("kind = %d, want outcomeClear (%d)", outcome.kind, outcomeClear)
+	}
+}
+
+func TestMonitorSession_StallButCarDone(t *testing.T) {
+	gormDB := engineTestDB(t)
+
+	gormDB.Create(&models.Car{
+		ID:     "car-ms3",
+		Title:  "Done car with stall race",
+		Status: "done",
+		Track:  "backend",
+	})
+
+	doneCh := make(chan error, 1) // not fired
+	stallCh := make(chan engine.StallReason, 1)
+	stallCh <- engine.StallReason{Type: "stdout_timeout", Detail: "no output"}
+
+	outcome := monitorSessionWithDB(
+		context.Background(), doneCh, stallCh, gormDB, "car-ms3",
+	)
+
+	if outcome.kind != outcomeCompleted {
+		t.Errorf("kind = %d, want outcomeCompleted (%d) — stall was false alarm", outcome.kind, outcomeCompleted)
+	}
+}
+
+func TestMonitorSession_StallCarNotDone(t *testing.T) {
+	gormDB := engineTestDB(t)
+
+	gormDB.Create(&models.Car{
+		ID:     "car-ms4",
+		Title:  "In-progress car with stall",
+		Status: "in_progress",
+		Track:  "backend",
+	})
+
+	doneCh := make(chan error, 1)
+	stallCh := make(chan engine.StallReason, 1)
+	stallCh <- engine.StallReason{Type: "stdout_timeout", Detail: "no output"}
+
+	outcome := monitorSessionWithDB(
+		context.Background(), doneCh, stallCh, gormDB, "car-ms4",
+	)
+
+	if outcome.kind != outcomeStall {
+		t.Errorf("kind = %d, want outcomeStall (%d)", outcome.kind, outcomeStall)
 	}
 }
