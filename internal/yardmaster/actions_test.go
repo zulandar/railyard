@@ -3,18 +3,26 @@ package yardmaster
 import (
 	"bytes"
 	"context"
+	"log/slog"
 	"strings"
 	"testing"
 
+	"github.com/zulandar/railyard/internal/logutil"
 	"github.com/zulandar/railyard/internal/models"
 )
+
+// actTestLogger creates a *slog.Logger that writes to the given buffer at Debug level.
+func actTestLogger(buf *bytes.Buffer) *slog.Logger {
+	return slog.New(logutil.NewConsoleHandler(buf, buf, slog.LevelDebug))
+}
 
 // --- handleRestartEngine ---
 
 func TestHandleRestartEngine_NoCarID(t *testing.T) {
 	var buf bytes.Buffer
+	logger := actTestLogger(&buf)
 	msg := models.Message{Subject: "restart-engine", Body: "engine stuck"}
-	handleRestartEngine(context.Background(), nil, nil, "railyard.yaml", msg, &buf)
+	handleRestartEngine(context.Background(), nil, nil, "railyard.yaml", msg, logger)
 
 	if !strings.Contains(buf.String(), "no car-id provided") {
 		t.Errorf("output = %q, want to contain %q", buf.String(), "no car-id provided")
@@ -23,11 +31,12 @@ func TestHandleRestartEngine_NoCarID(t *testing.T) {
 
 func TestHandleRestartEngine_OutputPrefix(t *testing.T) {
 	var buf bytes.Buffer
+	logger := actTestLogger(&buf)
 	msg := models.Message{Subject: "restart-engine"}
-	handleRestartEngine(context.Background(), nil, nil, "railyard.yaml", msg, &buf)
+	handleRestartEngine(context.Background(), nil, nil, "railyard.yaml", msg, logger)
 
-	if !strings.HasPrefix(buf.String(), "Action restart-engine:") {
-		t.Errorf("output = %q, want prefix %q", buf.String(), "Action restart-engine:")
+	if !strings.Contains(buf.String(), "Action restart-engine:") {
+		t.Errorf("output = %q, want to contain %q", buf.String(), "Action restart-engine:")
 	}
 }
 
@@ -35,8 +44,9 @@ func TestHandleRestartEngine_OutputPrefix(t *testing.T) {
 
 func TestHandleRetryMerge_NoCarID(t *testing.T) {
 	var buf bytes.Buffer
+	logger := actTestLogger(&buf)
 	msg := models.Message{Subject: "retry-merge", Body: "fixed tests"}
-	handleRetryMerge(nil, msg, &buf)
+	handleRetryMerge(nil, msg, logger)
 
 	if !strings.Contains(buf.String(), "no car-id provided") {
 		t.Errorf("output = %q, want to contain %q", buf.String(), "no car-id provided")
@@ -45,11 +55,12 @@ func TestHandleRetryMerge_NoCarID(t *testing.T) {
 
 func TestHandleRetryMerge_OutputPrefix(t *testing.T) {
 	var buf bytes.Buffer
+	logger := actTestLogger(&buf)
 	msg := models.Message{Subject: "retry-merge"}
-	handleRetryMerge(nil, msg, &buf)
+	handleRetryMerge(nil, msg, logger)
 
-	if !strings.HasPrefix(buf.String(), "Action retry-merge:") {
-		t.Errorf("output = %q, want prefix %q", buf.String(), "Action retry-merge:")
+	if !strings.Contains(buf.String(), "Action retry-merge:") {
+		t.Errorf("output = %q, want to contain %q", buf.String(), "Action retry-merge:")
 	}
 }
 
@@ -62,8 +73,9 @@ func TestHandleRetryMerge_EpicAutoCloses(t *testing.T) {
 	db.Create(&models.Car{ID: "child-r2", Type: "task", Status: "merged", Track: "backend", ParentID: &epicID})
 
 	var buf bytes.Buffer
+	logger := actTestLogger(&buf)
 	msg := models.Message{Subject: "retry-merge", CarID: epicID, Body: "all children merged"}
-	handleRetryMerge(db, msg, &buf)
+	handleRetryMerge(db, msg, logger)
 
 	if !strings.Contains(buf.String(), "epic") {
 		t.Errorf("output = %q, want to mention epic", buf.String())
@@ -85,8 +97,9 @@ func TestHandleRetryMerge_EpicWithPendingChildren(t *testing.T) {
 	db.Create(&models.Car{ID: "child-r4", Type: "task", Status: "open", Track: "backend", ParentID: &epicID})
 
 	var buf bytes.Buffer
+	logger := actTestLogger(&buf)
 	msg := models.Message{Subject: "retry-merge", CarID: epicID, Body: "try closing"}
-	handleRetryMerge(db, msg, &buf)
+	handleRetryMerge(db, msg, logger)
 
 	var epic models.Car
 	db.First(&epic, "id = ?", epicID)
@@ -101,15 +114,16 @@ func TestHandleRetryMerge_AcceptsMergeFailed(t *testing.T) {
 	db.Create(&models.Car{ID: "car-mf1", Type: "task", Status: "merge-failed", Track: "backend"})
 
 	var buf bytes.Buffer
+	logger := actTestLogger(&buf)
 	msg := models.Message{Subject: "retry-merge", CarID: "car-mf1", Body: "fixed Docker"}
-	handleRetryMerge(db, msg, &buf)
+	handleRetryMerge(db, msg, logger)
 
 	var car models.Car
 	db.First(&car, "id = ?", "car-mf1")
 	if car.Status != "done" {
 		t.Errorf("car status = %q, want %q", car.Status, "done")
 	}
-	if !strings.Contains(buf.String(), "setting car car-mf1 back to done") {
+	if !strings.Contains(buf.String(), "setting car back to done") {
 		t.Errorf("output = %q, want setting back to done", buf.String())
 	}
 }
@@ -120,8 +134,9 @@ func TestHandleRetryMerge_RejectsOpenStatus(t *testing.T) {
 	db.Create(&models.Car{ID: "car-mf2", Type: "task", Status: "open", Track: "backend"})
 
 	var buf bytes.Buffer
+	logger := actTestLogger(&buf)
 	msg := models.Message{Subject: "retry-merge", CarID: "car-mf2", Body: "try again"}
-	handleRetryMerge(db, msg, &buf)
+	handleRetryMerge(db, msg, logger)
 
 	if !strings.Contains(buf.String(), "not blocked/merge-failed") {
 		t.Errorf("output = %q, want rejection for open status", buf.String())
@@ -132,8 +147,9 @@ func TestHandleRetryMerge_RejectsOpenStatus(t *testing.T) {
 
 func TestHandleRequeueCar_NoCarID(t *testing.T) {
 	var buf bytes.Buffer
+	logger := actTestLogger(&buf)
 	msg := models.Message{Subject: "requeue-car", Body: "wrong approach"}
-	handleRequeueCar(nil, msg, &buf)
+	handleRequeueCar(nil, msg, logger)
 
 	if !strings.Contains(buf.String(), "no car-id provided") {
 		t.Errorf("output = %q, want to contain %q", buf.String(), "no car-id provided")
@@ -142,11 +158,12 @@ func TestHandleRequeueCar_NoCarID(t *testing.T) {
 
 func TestHandleRequeueCar_OutputPrefix(t *testing.T) {
 	var buf bytes.Buffer
+	logger := actTestLogger(&buf)
 	msg := models.Message{Subject: "requeue-car"}
-	handleRequeueCar(nil, msg, &buf)
+	handleRequeueCar(nil, msg, logger)
 
-	if !strings.HasPrefix(buf.String(), "Action requeue-car:") {
-		t.Errorf("output = %q, want prefix %q", buf.String(), "Action requeue-car:")
+	if !strings.Contains(buf.String(), "Action requeue-car:") {
+		t.Errorf("output = %q, want to contain %q", buf.String(), "Action requeue-car:")
 	}
 }
 
@@ -154,8 +171,9 @@ func TestHandleRequeueCar_OutputPrefix(t *testing.T) {
 
 func TestHandleNudgeEngine_NoCarID(t *testing.T) {
 	var buf bytes.Buffer
+	logger := actTestLogger(&buf)
 	msg := models.Message{Subject: "nudge-engine", Body: "try approach X"}
-	handleNudgeEngine(nil, msg, &buf)
+	handleNudgeEngine(nil, msg, logger)
 
 	if !strings.Contains(buf.String(), "no car-id provided") {
 		t.Errorf("output = %q, want to contain %q", buf.String(), "no car-id provided")
@@ -164,11 +182,12 @@ func TestHandleNudgeEngine_NoCarID(t *testing.T) {
 
 func TestHandleNudgeEngine_OutputPrefix(t *testing.T) {
 	var buf bytes.Buffer
+	logger := actTestLogger(&buf)
 	msg := models.Message{Subject: "nudge-engine"}
-	handleNudgeEngine(nil, msg, &buf)
+	handleNudgeEngine(nil, msg, logger)
 
-	if !strings.HasPrefix(buf.String(), "Action nudge-engine:") {
-		t.Errorf("output = %q, want prefix %q", buf.String(), "Action nudge-engine:")
+	if !strings.Contains(buf.String(), "Action nudge-engine:") {
+		t.Errorf("output = %q, want to contain %q", buf.String(), "Action nudge-engine:")
 	}
 }
 
@@ -176,8 +195,9 @@ func TestHandleNudgeEngine_OutputPrefix(t *testing.T) {
 
 func TestHandleUnblockCar_NoCarID(t *testing.T) {
 	var buf bytes.Buffer
+	logger := actTestLogger(&buf)
 	msg := models.Message{Subject: "unblock-car", Body: "dep resolved"}
-	handleUnblockCar(nil, msg, &buf)
+	handleUnblockCar(nil, msg, logger)
 
 	if !strings.Contains(buf.String(), "no car-id provided") {
 		t.Errorf("output = %q, want to contain %q", buf.String(), "no car-id provided")
@@ -186,11 +206,12 @@ func TestHandleUnblockCar_NoCarID(t *testing.T) {
 
 func TestHandleUnblockCar_OutputPrefix(t *testing.T) {
 	var buf bytes.Buffer
+	logger := actTestLogger(&buf)
 	msg := models.Message{Subject: "unblock-car"}
-	handleUnblockCar(nil, msg, &buf)
+	handleUnblockCar(nil, msg, logger)
 
-	if !strings.HasPrefix(buf.String(), "Action unblock-car:") {
-		t.Errorf("output = %q, want prefix %q", buf.String(), "Action unblock-car:")
+	if !strings.Contains(buf.String(), "Action unblock-car:") {
+		t.Errorf("output = %q, want to contain %q", buf.String(), "Action unblock-car:")
 	}
 }
 
@@ -198,8 +219,9 @@ func TestHandleUnblockCar_OutputPrefix(t *testing.T) {
 
 func TestHandleCloseEpic_NoCarID(t *testing.T) {
 	var buf bytes.Buffer
+	logger := actTestLogger(&buf)
 	msg := models.Message{Subject: "close-epic", Body: "close it"}
-	handleCloseEpic(nil, msg, &buf)
+	handleCloseEpic(nil, msg, logger)
 
 	if !strings.Contains(buf.String(), "no car-id provided") {
 		t.Errorf("output = %q, want to contain %q", buf.String(), "no car-id provided")
@@ -215,8 +237,9 @@ func TestHandleCloseEpic_ClosesEpic(t *testing.T) {
 	db.Create(&models.Car{ID: "child-ca2", Type: "task", Status: "merged", Track: "backend", ParentID: &epicID})
 
 	var buf bytes.Buffer
+	logger := actTestLogger(&buf)
 	msg := models.Message{Subject: "close-epic", CarID: epicID, Body: "all children merged"}
-	handleCloseEpic(db, msg, &buf)
+	handleCloseEpic(db, msg, logger)
 
 	if !strings.Contains(buf.String(), "auto-close") {
 		t.Errorf("output = %q, want to mention auto-close", buf.String())
@@ -235,8 +258,9 @@ func TestHandleCloseEpic_SkipsNonEpic(t *testing.T) {
 	db.Create(&models.Car{ID: "task-ce1", Type: "task", Status: "open", Track: "backend"})
 
 	var buf bytes.Buffer
+	logger := actTestLogger(&buf)
 	msg := models.Message{Subject: "close-epic", CarID: "task-ce1", Body: "try closing"}
-	handleCloseEpic(db, msg, &buf)
+	handleCloseEpic(db, msg, logger)
 
 	if !strings.Contains(buf.String(), "not an epic") {
 		t.Errorf("output = %q, want to mention not an epic", buf.String())
@@ -248,23 +272,24 @@ func TestHandleCloseEpic_SkipsNonEpic(t *testing.T) {
 func TestAllHandlers_SkipOnEmptyCarID(t *testing.T) {
 	handlers := []struct {
 		name string
-		run  func(models.Message, *bytes.Buffer)
+		run  func(models.Message, *slog.Logger)
 	}{
-		{"restart-engine", func(m models.Message, b *bytes.Buffer) {
-			handleRestartEngine(context.Background(), nil, nil, "", m, b)
+		{"restart-engine", func(m models.Message, l *slog.Logger) {
+			handleRestartEngine(context.Background(), nil, nil, "", m, l)
 		}},
-		{"retry-merge", func(m models.Message, b *bytes.Buffer) { handleRetryMerge(nil, m, b) }},
-		{"requeue-car", func(m models.Message, b *bytes.Buffer) { handleRequeueCar(nil, m, b) }},
-		{"nudge-engine", func(m models.Message, b *bytes.Buffer) { handleNudgeEngine(nil, m, b) }},
-		{"unblock-car", func(m models.Message, b *bytes.Buffer) { handleUnblockCar(nil, m, b) }},
-		{"close-epic", func(m models.Message, b *bytes.Buffer) { handleCloseEpic(nil, m, b) }},
+		{"retry-merge", func(m models.Message, l *slog.Logger) { handleRetryMerge(nil, m, l) }},
+		{"requeue-car", func(m models.Message, l *slog.Logger) { handleRequeueCar(nil, m, l) }},
+		{"nudge-engine", func(m models.Message, l *slog.Logger) { handleNudgeEngine(nil, m, l) }},
+		{"unblock-car", func(m models.Message, l *slog.Logger) { handleUnblockCar(nil, m, l) }},
+		{"close-epic", func(m models.Message, l *slog.Logger) { handleCloseEpic(nil, m, l) }},
 	}
 
 	for _, h := range handlers {
 		t.Run(h.name, func(t *testing.T) {
 			var buf bytes.Buffer
+			logger := actTestLogger(&buf)
 			msg := models.Message{Subject: h.name, Body: "test"}
-			h.run(msg, &buf)
+			h.run(msg, logger)
 
 			output := buf.String()
 			if !strings.Contains(output, "no car-id provided") {

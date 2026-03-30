@@ -3,32 +3,39 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"github.com/spf13/cobra"
+	"github.com/zulandar/railyard/internal/logutil"
 	"github.com/zulandar/railyard/internal/yardmaster"
 )
 
 func newYardmasterCmd() *cobra.Command {
-	var configPath string
+	var (
+		configPath string
+		logLevel   string
+	)
 
 	cmd := &cobra.Command{
 		Use:   "yardmaster",
 		Short: "Start the Yardmaster supervisor daemon",
 		Long:  "Starts the yardmaster supervisor daemon loop. The yardmaster monitors engines, merges branches, handles stalls, and manages dependencies.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runYardmaster(cmd, configPath)
+			return runYardmaster(cmd, configPath, logLevel)
 		},
 	}
 
 	cmd.Flags().StringVarP(&configPath, "config", "c", "railyard.yaml", "path to Railyard config file")
+	cmd.Flags().StringVar(&logLevel, "log-level", "", "log level (debug, info, warn, error; env LOG_LEVEL)")
 	return cmd
 }
 
-func runYardmaster(cmd *cobra.Command, configPath string) error {
+func runYardmaster(cmd *cobra.Command, configPath, logLevel string) error {
+	level := logutil.ParseLevel(os.Getenv("LOG_LEVEL"), logLevel)
+	logger := logutil.NewLogger(cmd.OutOrStdout(), cmd.ErrOrStderr(), level)
+
 	cfg, gormDB, err := connectFromConfig(configPath)
 	if err != nil {
 		return err
@@ -36,7 +43,7 @@ func runYardmaster(cmd *cobra.Command, configPath string) error {
 
 	// Sync embedded CocoIndex scripts so overlay cleanup works.
 	if err := ensureCocoIndexScripts(cfg.CocoIndex.ScriptsPath); err != nil {
-		log.Printf("cocoindex scripts sync warning: %v", err)
+		logger.Warn("Cocoindex scripts sync warning", "error", err)
 	}
 
 	repoDir, err := os.Getwd()
@@ -51,7 +58,7 @@ func runYardmaster(cmd *cobra.Command, configPath string) error {
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		sig := <-sigCh
-		fmt.Fprintf(cmd.OutOrStdout(), "\nReceived %s, shutting down...\n", sig)
+		logger.Info("Received signal, shutting down", "signal", sig.String())
 		cancel()
 	}()
 
@@ -60,7 +67,7 @@ func runYardmaster(cmd *cobra.Command, configPath string) error {
 		Config:     cfg,
 		DB:         gormDB,
 		RepoDir:    repoDir,
-		Out:        cmd.OutOrStdout(),
+		Logger:     logger,
 	})
 }
 

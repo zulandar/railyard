@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -13,8 +14,14 @@ import (
 	"time"
 
 	"github.com/zulandar/railyard/internal/config"
+	"github.com/zulandar/railyard/internal/logutil"
 	"github.com/zulandar/railyard/internal/models"
 )
+
+// testLogger creates a *slog.Logger that writes to the given buffer at Debug level.
+func testLogger(buf *bytes.Buffer) *slog.Logger {
+	return slog.New(logutil.NewConsoleHandler(buf, buf, slog.LevelDebug))
+}
 
 func TestRunDaemon_NilDB(t *testing.T) {
 	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
@@ -46,6 +53,16 @@ func TestRunDaemon_EmptyRepoDir(t *testing.T) {
 	// DB check comes first.
 	if !strings.Contains(err.Error(), "db is required") {
 		t.Errorf("error = %q", err)
+	}
+}
+
+func TestRunDaemon_NilLogger_UsesDefault(t *testing.T) {
+	// Ensure nil logger doesn't panic — falls back to slog.Default().
+	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
+	err := RunDaemon(context.Background(), nil, cfg, "railyard.yaml", "/tmp", time.Second, nil)
+	// Will fail on db check, but should not panic.
+	if err == nil {
+		t.Fatal("expected error")
 	}
 }
 
@@ -106,7 +123,8 @@ func TestSweepOpenEpics_ClosesCompletedEpic(t *testing.T) {
 	db.Create(&models.Car{ID: "child-sw2", Type: "task", Status: "done", Track: "backend", ParentID: &epicID})
 
 	var buf bytes.Buffer
-	if err := sweepOpenEpics(db, &buf); err != nil {
+	logger := testLogger(&buf)
+	if err := sweepOpenEpics(db, logger); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -115,7 +133,7 @@ func TestSweepOpenEpics_ClosesCompletedEpic(t *testing.T) {
 	if epic.Status != "done" {
 		t.Errorf("epic status = %q, want %q", epic.Status, "done")
 	}
-	if !strings.Contains(buf.String(), "auto-closing epic") {
+	if !strings.Contains(buf.String(), "auto-closing") {
 		t.Errorf("output = %q, want to mention auto-closing", buf.String())
 	}
 }
@@ -129,7 +147,8 @@ func TestSweepOpenEpics_SkipsEpicWithPendingChildren(t *testing.T) {
 	db.Create(&models.Car{ID: "child-sw4", Type: "task", Status: "in_progress", Track: "backend", ParentID: &epicID})
 
 	var buf bytes.Buffer
-	if err := sweepOpenEpics(db, &buf); err != nil {
+	logger := testLogger(&buf)
+	if err := sweepOpenEpics(db, logger); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -146,7 +165,8 @@ func TestSweepOpenEpics_SkipsEmptyEpic(t *testing.T) {
 	db.Create(&models.Car{ID: "epic-sweep3", Type: "epic", Status: "open", Track: "backend"})
 
 	var buf bytes.Buffer
-	if err := sweepOpenEpics(db, &buf); err != nil {
+	logger := testLogger(&buf)
+	if err := sweepOpenEpics(db, logger); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -178,7 +198,8 @@ func TestProcessInbox_StaleDrainIgnored(t *testing.T) {
 
 	startedAt := time.Now()
 	var buf bytes.Buffer
-	draining, err := processInbox(context.Background(), db, nil, "", "", startedAt, &sync.WaitGroup{}, nil, make(chan struct{}, 3), &buf)
+	logger := testLogger(&buf)
+	draining, err := processInbox(context.Background(), db, nil, "", "", startedAt, &sync.WaitGroup{}, nil, make(chan struct{}, 3), logger)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -206,7 +227,8 @@ func TestProcessInbox_FreshDrainHonored(t *testing.T) {
 	db.Create(&freshDrain)
 
 	var buf bytes.Buffer
-	draining, err := processInbox(context.Background(), db, nil, "", "", startedAt, &sync.WaitGroup{}, nil, make(chan struct{}, 3), &buf)
+	logger := testLogger(&buf)
+	draining, err := processInbox(context.Background(), db, nil, "", "", startedAt, &sync.WaitGroup{}, nil, make(chan struct{}, 3), logger)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -220,7 +242,8 @@ func TestProcessInbox_EmptyInbox(t *testing.T) {
 
 	startedAt := time.Now()
 	var buf bytes.Buffer
-	draining, err := processInbox(context.Background(), db, nil, "", "", startedAt, &sync.WaitGroup{}, nil, make(chan struct{}, 3), &buf)
+	logger := testLogger(&buf)
+	draining, err := processInbox(context.Background(), db, nil, "", "", startedAt, &sync.WaitGroup{}, nil, make(chan struct{}, 3), logger)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -316,7 +339,8 @@ func TestReconcileStaleCars_PerBaseBranch(t *testing.T) {
 	db.Create(&models.Car{ID: "car-c", Branch: "ry/feat-c", BaseBranch: "main", Status: "open", Track: "backend"})
 
 	var buf bytes.Buffer
-	if err := reconcileStaleCars(db, repoDir, &buf); err != nil {
+	logger := testLogger(&buf)
+	if err := reconcileStaleCars(db, repoDir, logger); err != nil {
 		t.Fatalf("reconcileStaleCars: %v", err)
 	}
 
@@ -343,10 +367,10 @@ func TestReconcileStaleCars_PerBaseBranch(t *testing.T) {
 
 	// Verify output mentions both reconciled cars.
 	output := buf.String()
-	if !strings.Contains(output, "car-a") || !strings.Contains(output, "merged into main") {
+	if !strings.Contains(output, "car-a") {
 		t.Errorf("missing car-a reconciliation in output: %s", output)
 	}
-	if !strings.Contains(output, "car-b") || !strings.Contains(output, "merged into develop") {
+	if !strings.Contains(output, "car-b") {
 		t.Errorf("missing car-b reconciliation in output: %s", output)
 	}
 }
@@ -392,7 +416,8 @@ func TestReconcileStaleCars_PrOpenMergedBranch(t *testing.T) {
 	db.Create(&models.Car{ID: "car-e", Branch: "ry/feat-e", BaseBranch: "main", Status: "pr_open", Track: "backend"})
 
 	var buf bytes.Buffer
-	if err := reconcileStaleCars(db, repoDir, &buf); err != nil {
+	logger := testLogger(&buf)
+	if err := reconcileStaleCars(db, repoDir, logger); err != nil {
 		t.Fatalf("reconcileStaleCars: %v", err)
 	}
 
@@ -497,8 +522,9 @@ func TestMaybeSwitchEscalate_BelowThreshold(t *testing.T) {
 	cfg.Stall.MaxSwitchFailures = 3
 
 	var buf bytes.Buffer
+	logger := testLogger(&buf)
 	// This should NOT escalate (below threshold), so no "escalating" in output.
-	maybeSwitchEscalate(context.Background(), db, cfg, "car-esc1", SwitchFailMerge, nil, "", &sync.WaitGroup{}, nil, make(chan struct{}, 3), &buf)
+	maybeSwitchEscalate(context.Background(), db, cfg, "car-esc1", SwitchFailMerge, nil, "", &sync.WaitGroup{}, nil, make(chan struct{}, 3), logger)
 
 	if strings.Contains(buf.String(), "escalating") {
 		t.Errorf("should not escalate below threshold, got: %s", buf.String())
@@ -518,9 +544,10 @@ func TestMaybeSwitchEscalate_AtThreshold(t *testing.T) {
 	cfg.Stall.MaxSwitchFailures = 3
 
 	var buf bytes.Buffer
+	logger := testLogger(&buf)
 	// Escalation will fire (at threshold). The actual Claude call will fail
 	// since there's no `claude` binary in CI, but we can verify the log output.
-	maybeSwitchEscalate(context.Background(), db, cfg, "car-esc2", SwitchFailFetch, nil, "", &sync.WaitGroup{}, nil, make(chan struct{}, 3), &buf)
+	maybeSwitchEscalate(context.Background(), db, cfg, "car-esc2", SwitchFailFetch, nil, "", &sync.WaitGroup{}, nil, make(chan struct{}, 3), logger)
 
 	if !strings.Contains(buf.String(), "escalating") {
 		t.Errorf("should escalate at threshold, got: %s", buf.String())
@@ -539,7 +566,8 @@ func TestMaybeSwitchEscalate_InfraEscalatesImmediately(t *testing.T) {
 	cfg.Stall.MaxSwitchFailures = 3
 
 	var buf bytes.Buffer
-	maybeSwitchEscalate(context.Background(), db, cfg, "car-infra1", SwitchFailInfra, nil, "", &sync.WaitGroup{}, nil, make(chan struct{}, 3), &buf)
+	logger := testLogger(&buf)
+	maybeSwitchEscalate(context.Background(), db, cfg, "car-infra1", SwitchFailInfra, nil, "", &sync.WaitGroup{}, nil, make(chan struct{}, 3), logger)
 
 	if !strings.Contains(buf.String(), "infra failure") {
 		t.Errorf("should escalate immediately for infra, got: %s", buf.String())
@@ -562,7 +590,8 @@ func TestMaybeSwitchEscalate_SetsCarToMergeFailed(t *testing.T) {
 	cfg.Stall.MaxSwitchFailures = 3
 
 	var buf bytes.Buffer
-	maybeSwitchEscalate(context.Background(), db, cfg, "car-esc3", SwitchFailMerge, nil, "", &sync.WaitGroup{}, nil, make(chan struct{}, 3), &buf)
+	logger := testLogger(&buf)
+	maybeSwitchEscalate(context.Background(), db, cfg, "car-esc3", SwitchFailMerge, nil, "", &sync.WaitGroup{}, nil, make(chan struct{}, 3), logger)
 
 	// Car status should change to "merge-failed" to break the retry loop.
 	var car models.Car
@@ -582,7 +611,8 @@ func TestMaybeSwitchEscalate_InfraSetsCarToMergeFailed(t *testing.T) {
 	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
 
 	var buf bytes.Buffer
-	maybeSwitchEscalate(context.Background(), db, cfg, "car-infra2", SwitchFailInfra, nil, "", &sync.WaitGroup{}, nil, make(chan struct{}, 3), &buf)
+	logger := testLogger(&buf)
+	maybeSwitchEscalate(context.Background(), db, cfg, "car-infra2", SwitchFailInfra, nil, "", &sync.WaitGroup{}, nil, make(chan struct{}, 3), logger)
 
 	// Infra failures should also set merge-failed.
 	var car models.Car
@@ -600,10 +630,11 @@ func TestHandleEscalateResult_GuidanceWithoutEngine_FallsBackToHuman(t *testing.
 	db := testDB(t)
 
 	var buf bytes.Buffer
+	logger := testLogger(&buf)
 	handleEscalateResult(db, "", "car-001", &EscalateResult{
 		Action:  EscalateGuidance,
 		Message: "Try rebasing onto main",
-	}, &buf)
+	}, logger)
 
 	output := buf.String()
 	// Should mention falling back to human.
@@ -632,10 +663,11 @@ func TestHandleEscalateResult_ReassignWithoutEngine_FallsBackToHuman(t *testing.
 	db := testDB(t)
 
 	var buf bytes.Buffer
+	logger := testLogger(&buf)
 	handleEscalateResult(db, "", "car-002", &EscalateResult{
 		Action:  EscalateReassign,
 		Message: "Reassign to a different engine",
-	}, &buf)
+	}, logger)
 
 	output := buf.String()
 	if !strings.Contains(output, "no engine") {
@@ -650,13 +682,14 @@ func TestHandleEscalateResult_GuidanceWithEngine_SendsGuidance(t *testing.T) {
 	db := testDB(t)
 
 	var buf bytes.Buffer
+	logger := testLogger(&buf)
 	handleEscalateResult(db, "eng-001", "car-003", &EscalateResult{
 		Action:  EscalateGuidance,
 		Message: "Try a different approach",
-	}, &buf)
+	}, logger)
 
 	output := buf.String()
-	if !strings.Contains(output, "sending guidance to eng-001") {
+	if !strings.Contains(output, "sending guidance") || !strings.Contains(output, "eng-001") {
 		t.Errorf("should send guidance to engine, got: %s", output)
 	}
 
@@ -675,10 +708,11 @@ func TestHandleEscalateResult_HumanAlwaysWorks(t *testing.T) {
 	db := testDB(t)
 
 	var buf bytes.Buffer
+	logger := testLogger(&buf)
 	handleEscalateResult(db, "", "car-004", &EscalateResult{
 		Action:  EscalateHuman,
 		Message: "Needs manual merge resolution",
-	}, &buf)
+	}, logger)
 
 	output := buf.String()
 	if !strings.Contains(output, "alerting human") {
@@ -699,7 +733,8 @@ func TestHandleEscalateResult_NilResult(t *testing.T) {
 	db := testDB(t)
 
 	var buf bytes.Buffer
-	handleEscalateResult(db, "eng-001", "car-005", nil, &buf)
+	logger := testLogger(&buf)
+	handleEscalateResult(db, "eng-001", "car-005", nil, logger)
 
 	if buf.Len() != 0 {
 		t.Errorf("expected no output for nil result, got: %s", buf.String())
@@ -731,7 +766,8 @@ func TestHandlePrOpenCars_ChangesRequested(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := handlePrOpenCars(db, viewer, false, "", "", nil, &buf)
+	logger := testLogger(&buf)
+	err := handlePrOpenCars(db, viewer, false, "", "", nil, logger)
 	if err != nil {
 		t.Fatalf("handlePrOpenCars: %v", err)
 	}
@@ -773,7 +809,8 @@ func TestHandlePrOpenCars_ChangesRequestedWithInlineComments(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := handlePrOpenCars(db, viewer, false, "", "", nil, &buf)
+	logger := testLogger(&buf)
+	err := handlePrOpenCars(db, viewer, false, "", "", nil, logger)
 	if err != nil {
 		t.Fatalf("handlePrOpenCars: %v", err)
 	}
@@ -816,7 +853,8 @@ func TestHandlePrOpenCars_ChangesRequestedWithConversationComments(t *testing.T)
 	}
 
 	var buf bytes.Buffer
-	err := handlePrOpenCars(db, viewer, false, "", "", nil, &buf)
+	logger := testLogger(&buf)
+	err := handlePrOpenCars(db, viewer, false, "", "", nil, logger)
 	if err != nil {
 		t.Fatalf("handlePrOpenCars: %v", err)
 	}
@@ -859,7 +897,8 @@ func TestHandlePrOpenCars_ChangesRequestedAllCommentTypes(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := handlePrOpenCars(db, viewer, false, "", "", nil, &buf)
+	logger := testLogger(&buf)
+	err := handlePrOpenCars(db, viewer, false, "", "", nil, logger)
 	if err != nil {
 		t.Fatalf("handlePrOpenCars: %v", err)
 	}
@@ -903,7 +942,8 @@ func TestHandlePrOpenCars_ChangesRequestedEmptyComments(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := handlePrOpenCars(db, viewer, false, "", "", nil, &buf)
+	logger := testLogger(&buf)
+	err := handlePrOpenCars(db, viewer, false, "", "", nil, logger)
 	if err != nil {
 		t.Fatalf("handlePrOpenCars: %v", err)
 	}
@@ -950,7 +990,8 @@ func TestHandlePrOpenCars_FetchCommentsError(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := handlePrOpenCars(db, viewer, false, "", "", nil, &buf)
+	logger := testLogger(&buf)
+	err := handlePrOpenCars(db, viewer, false, "", "", nil, logger)
 	if err != nil {
 		t.Fatalf("handlePrOpenCars: %v", err)
 	}
@@ -1083,7 +1124,8 @@ func TestHandlePrOpenCars_Merged(t *testing.T) {
 	viewer := &mockPRViewer{state: "MERGED"}
 
 	var buf bytes.Buffer
-	err := handlePrOpenCars(db, viewer, false, "", "", nil, &buf)
+	logger := testLogger(&buf)
+	err := handlePrOpenCars(db, viewer, false, "", "", nil, logger)
 	if err != nil {
 		t.Fatalf("handlePrOpenCars: %v", err)
 	}
@@ -1108,7 +1150,8 @@ func TestHandlePrOpenCars_Closed(t *testing.T) {
 	viewer := &mockPRViewer{state: "CLOSED"}
 
 	var buf bytes.Buffer
-	err := handlePrOpenCars(db, viewer, false, "", "", nil, &buf)
+	logger := testLogger(&buf)
+	err := handlePrOpenCars(db, viewer, false, "", "", nil, logger)
 	if err != nil {
 		t.Fatalf("handlePrOpenCars: %v", err)
 	}
@@ -1126,7 +1169,8 @@ func TestHandlePrOpenCars_NoPrOpenCars(t *testing.T) {
 	viewer := &mockPRViewer{state: "OPEN"}
 
 	var buf bytes.Buffer
-	err := handlePrOpenCars(db, viewer, false, "", "", nil, &buf)
+	logger := testLogger(&buf)
+	err := handlePrOpenCars(db, viewer, false, "", "", nil, logger)
 	if err != nil {
 		t.Fatalf("handlePrOpenCars: %v", err)
 	}
@@ -1148,7 +1192,8 @@ func TestHandlePrOpenCars_ApprovedNoAction(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := handlePrOpenCars(db, viewer, false, "", "", nil, &buf)
+	logger := testLogger(&buf)
+	err := handlePrOpenCars(db, viewer, false, "", "", nil, logger)
 	if err != nil {
 		t.Fatalf("handlePrOpenCars: %v", err)
 	}
@@ -1174,7 +1219,8 @@ func TestHandlePrOpenCars_NoBranch(t *testing.T) {
 	viewer := &mockPRViewer{state: "CLOSED"}
 
 	var buf bytes.Buffer
-	err := handlePrOpenCars(db, viewer, false, "", "", nil, &buf)
+	logger := testLogger(&buf)
+	err := handlePrOpenCars(db, viewer, false, "", "", nil, logger)
 	if err != nil {
 		t.Fatalf("handlePrOpenCars: %v", err)
 	}
@@ -1210,7 +1256,8 @@ func TestHandlePrOpenCars_ApprovedAutoMerge(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := handlePrOpenCars(db, viewer, true, "", "", nil, &buf)
+	logger := testLogger(&buf)
+	err := handlePrOpenCars(db, viewer, true, "", "", nil, logger)
 	if err != nil {
 		t.Fatalf("handlePrOpenCars: %v", err)
 	}
@@ -1250,7 +1297,8 @@ func TestHandlePrOpenCars_ApprovedNoAutoMergeWhenDisabled(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := handlePrOpenCars(db, viewer, false, "", "", nil, &buf)
+	logger := testLogger(&buf)
+	err := handlePrOpenCars(db, viewer, false, "", "", nil, logger)
 	if err != nil {
 		t.Fatalf("handlePrOpenCars: %v", err)
 	}
@@ -1283,7 +1331,8 @@ func TestHandlePrOpenCars_ApprovedMergeFailure(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := handlePrOpenCars(db, viewer, true, "", "", nil, &buf)
+	logger := testLogger(&buf)
+	err := handlePrOpenCars(db, viewer, true, "", "", nil, logger)
 	if err != nil {
 		t.Fatalf("handlePrOpenCars: %v", err)
 	}
@@ -1320,7 +1369,8 @@ func TestHandlePrOpenCars_ApprovedButNotOpen_NoMerge(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := handlePrOpenCars(db, viewer, true, "", "", nil, &buf)
+	logger := testLogger(&buf)
+	err := handlePrOpenCars(db, viewer, true, "", "", nil, logger)
 	if err != nil {
 		t.Fatalf("handlePrOpenCars: %v", err)
 	}
@@ -1364,7 +1414,8 @@ func TestHandlePrOpenCars_ExternalMergeUnblocksDeps(t *testing.T) {
 	viewer := &mockPRViewer{state: "MERGED"}
 
 	var buf bytes.Buffer
-	err := handlePrOpenCars(db, viewer, false, "", "", nil, &buf)
+	logger := testLogger(&buf)
+	err := handlePrOpenCars(db, viewer, false, "", "", nil, logger)
 	if err != nil {
 		t.Fatalf("handlePrOpenCars: %v", err)
 	}
@@ -1385,7 +1436,7 @@ func TestHandlePrOpenCars_ExternalMergeUnblocksDeps(t *testing.T) {
 
 	// Parent epic should be checked (TryCloseEpic called).
 	output := buf.String()
-	if !strings.Contains(output, "Unblocked car car-extm2") {
+	if !strings.Contains(output, "Car unblocked") || !strings.Contains(output, "car-extm2") {
 		t.Errorf("output should mention unblocking, got: %s", output)
 	}
 }
@@ -1411,7 +1462,8 @@ func TestHandlePrOpenCars_AutoMergeUnblocksDeps(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := handlePrOpenCars(db, viewer, true, "", "", nil, &buf)
+	logger := testLogger(&buf)
+	err := handlePrOpenCars(db, viewer, true, "", "", nil, logger)
 	if err != nil {
 		t.Fatalf("handlePrOpenCars: %v", err)
 	}
@@ -1444,7 +1496,8 @@ func TestRunPostMerge_UnblocksAndClosesEpic(t *testing.T) {
 	db.Create(&models.CarDep{CarID: "car-rpm2", BlockedBy: "car-rpm1"})
 
 	var buf bytes.Buffer
-	runPostMerge(db, mergedCar, &buf)
+	logger := testLogger(&buf)
+	runPostMerge(db, mergedCar, logger)
 
 	// Car B should be unblocked.
 	var carB models.Car
@@ -1472,7 +1525,8 @@ func TestRunPostMerge_EmitsDepsUnblockedBroadcast(t *testing.T) {
 	db.Create(&models.CarDep{CarID: "car-bc2", BlockedBy: "car-bc1"})
 
 	var buf bytes.Buffer
-	runPostMerge(db, mergedCar, &buf)
+	logger := testLogger(&buf)
+	runPostMerge(db, mergedCar, logger)
 
 	// Verify the deps-unblocked broadcast message was sent.
 	var msg models.Message
@@ -1492,7 +1546,8 @@ func TestRunPostMerge_NoBroadcastWhenNoDeps(t *testing.T) {
 	db.Create(&mergedCar)
 
 	var buf bytes.Buffer
-	runPostMerge(db, mergedCar, &buf)
+	logger := testLogger(&buf)
+	runPostMerge(db, mergedCar, logger)
 
 	// No deps to unblock — no broadcast should be sent.
 	var count int64
@@ -1545,8 +1600,9 @@ func TestHandleCompletedCars_SkipsEpicAndMarkesMerged(t *testing.T) {
 	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
 
 	var buf bytes.Buffer
+	logger := testLogger(&buf)
 	// repoDir and ymDir don't matter — the epic should never reach Switch().
-	err := handleCompletedCars(context.Background(), db, cfg, "/nonexistent", "/nonexistent", &sync.WaitGroup{}, nil, make(chan struct{}, 3), &buf)
+	err := handleCompletedCars(context.Background(), db, cfg, "/nonexistent", "/nonexistent", &sync.WaitGroup{}, nil, make(chan struct{}, 3), logger)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1591,7 +1647,8 @@ func TestHandleCompletedCars_EpicCountError_LogsAndContinues(t *testing.T) {
 	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
 
 	var buf bytes.Buffer
-	err := handleCompletedCars(context.Background(), db, cfg, "/nonexistent", "/nonexistent", &sync.WaitGroup{}, nil, make(chan struct{}, 3), &buf)
+	logger := testLogger(&buf)
+	err := handleCompletedCars(context.Background(), db, cfg, "/nonexistent", "/nonexistent", &sync.WaitGroup{}, nil, make(chan struct{}, 3), logger)
 	// The function should return the error from car.List (which also queries cars table).
 	if err == nil {
 		// If it doesn't error on car.List, it should at least not panic.
@@ -1613,7 +1670,8 @@ func TestSweepOpenEpics_CountError_LogsAndContinues(t *testing.T) {
 	// We can't easily break just the Count without breaking car.List too,
 	// so this test verifies the function doesn't panic.
 	var buf bytes.Buffer
-	err := sweepOpenEpics(db, &buf)
+	logger := testLogger(&buf)
+	err := sweepOpenEpics(db, logger)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1638,7 +1696,8 @@ func TestHandleCompletedCars_EpicWithPendingChildren_StaysDone(t *testing.T) {
 	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
 
 	var buf bytes.Buffer
-	err := handleCompletedCars(context.Background(), db, cfg, "/nonexistent", "/nonexistent", &sync.WaitGroup{}, nil, make(chan struct{}, 3), &buf)
+	logger := testLogger(&buf)
+	err := handleCompletedCars(context.Background(), db, cfg, "/nonexistent", "/nonexistent", &sync.WaitGroup{}, nil, make(chan struct{}, 3), logger)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1766,7 +1825,8 @@ func TestMaybeSwitchEscalate_WithCooldown(t *testing.T) {
 
 	// First call: should escalate (tracker allows it).
 	var buf1 bytes.Buffer
-	maybeSwitchEscalate(context.Background(), db, cfg, "car-cool1", SwitchFailMerge, nil, "", &sync.WaitGroup{}, tracker, sem, &buf1)
+	logger1 := testLogger(&buf1)
+	maybeSwitchEscalate(context.Background(), db, cfg, "car-cool1", SwitchFailMerge, nil, "", &sync.WaitGroup{}, tracker, sem, logger1)
 	if !strings.Contains(buf1.String(), "escalating") {
 		t.Errorf("first call should escalate, got: %s", buf1.String())
 	}
@@ -1776,7 +1836,8 @@ func TestMaybeSwitchEscalate_WithCooldown(t *testing.T) {
 
 	// Second call: should be skipped by cooldown.
 	var buf2 bytes.Buffer
-	maybeSwitchEscalate(context.Background(), db, cfg, "car-cool1", SwitchFailMerge, nil, "", &sync.WaitGroup{}, tracker, sem, &buf2)
+	logger2 := testLogger(&buf2)
+	maybeSwitchEscalate(context.Background(), db, cfg, "car-cool1", SwitchFailMerge, nil, "", &sync.WaitGroup{}, tracker, sem, logger2)
 	if !strings.Contains(buf2.String(), "cooldown active") {
 		t.Errorf("second call should be skipped by cooldown, got: %s", buf2.String())
 	}
@@ -1815,7 +1876,8 @@ func TestHandleCompletedCars_SortsByPriorityThenCreatedAt(t *testing.T) {
 	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
 
 	var buf bytes.Buffer
-	err := handleCompletedCars(context.Background(), db, cfg, "/nonexistent", "/nonexistent", &sync.WaitGroup{}, nil, make(chan struct{}, 3), &buf)
+	logger := testLogger(&buf)
+	err := handleCompletedCars(context.Background(), db, cfg, "/nonexistent", "/nonexistent", &sync.WaitGroup{}, nil, make(chan struct{}, 3), logger)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1860,7 +1922,8 @@ func TestProcessInbox_DeduplicatesByFromSubjectCarID(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	draining, err := processInbox(context.Background(), db, nil, "", "", startedAt, &sync.WaitGroup{}, nil, make(chan struct{}, 3), &buf)
+	logger := testLogger(&buf)
+	draining, err := processInbox(context.Background(), db, nil, "", "", startedAt, &sync.WaitGroup{}, nil, make(chan struct{}, 3), logger)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1870,7 +1933,7 @@ func TestProcessInbox_DeduplicatesByFromSubjectCarID(t *testing.T) {
 
 	// Should only see one "test-failure for car car-dup1" in output (not three).
 	output := buf.String()
-	count := strings.Count(output, "test-failure for car car-dup1")
+	count := strings.Count(output, "test-failure acknowledged")
 	if count != 1 {
 		t.Errorf("expected 1 processed message, got %d mentions in output: %s", count, output)
 	}
@@ -1904,7 +1967,8 @@ func TestProcessInbox_DifferentSubjectsNotDeduped(t *testing.T) {
 	})
 
 	var buf bytes.Buffer
-	_, err := processInbox(context.Background(), db, nil, "", "", startedAt, &sync.WaitGroup{}, nil, make(chan struct{}, 3), &buf)
+	logger := testLogger(&buf)
+	_, err := processInbox(context.Background(), db, nil, "", "", startedAt, &sync.WaitGroup{}, nil, make(chan struct{}, 3), logger)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1925,33 +1989,28 @@ func TestProcessInbox_DifferentSubjectsNotDeduped(t *testing.T) {
 func TestTimePhase_LogsSlowPhase(t *testing.T) {
 	// Test the timePhase pattern: phases taking >5s should produce WARN output.
 	var buf bytes.Buffer
-	out := &buf
+	logger := testLogger(&buf)
 
 	timePhase := func(name string, fn func()) {
 		start := time.Now()
 		fn()
-		if elapsed := time.Since(start); elapsed > 5*time.Second {
-			fmt.Fprintf(out, "WARN: phase %s took %s\n", name, elapsed)
+		elapsed := time.Since(start)
+		if elapsed > 5*time.Second {
+			logger.Warn("Phase slow", "phase", name, "elapsed", elapsed)
+		} else if elapsed > time.Second {
+			logger.Info("Phase completed", "phase", name, "elapsed", elapsed)
+		} else {
+			logger.Debug("Phase completed", "phase", name, "elapsed", elapsed)
 		}
 	}
 
-	// Fast phase — no warning.
+	// Fast phase — no warning, but should have debug output.
 	timePhase("fast", func() {})
 	if strings.Contains(buf.String(), "WARN") {
 		t.Errorf("fast phase should not warn, got: %s", buf.String())
 	}
-
-	// We can't easily test the >5s path without sleeping, but we can verify
-	// the pattern works by testing with a threshold of 0 (simulated).
-	start := time.Now()
-	time.Sleep(1 * time.Millisecond)
-	elapsed := time.Since(start)
-	if elapsed > 0 {
-		// Pattern works — elapsed is measured correctly.
-		fmt.Fprintf(&buf, "WARN: phase simulated took %s\n", elapsed)
-	}
-	if !strings.Contains(buf.String(), "WARN: phase simulated") {
-		t.Errorf("expected WARN output for simulated slow phase, got: %s", buf.String())
+	if !strings.Contains(buf.String(), "Phase completed") {
+		t.Errorf("fast phase should have debug output, got: %s", buf.String())
 	}
 }
 
@@ -1977,7 +2036,8 @@ func TestHandleStaleEngines_UsesConfigThreshold(t *testing.T) {
 	cfg.Stall.StaleEngineThresholdSec = 120
 
 	var buf bytes.Buffer
-	if err := handleStaleEngines(db, cfg, "", &buf); err != nil {
+	logger := testLogger(&buf)
+	if err := handleStaleEngines(db, cfg, "", logger); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -1989,7 +2049,7 @@ func TestHandleStaleEngines_UsesConfigThreshold(t *testing.T) {
 	// With threshold=60s, this engine IS stale.
 	cfg.Stall.StaleEngineThresholdSec = 60
 	buf.Reset()
-	if err := handleStaleEngines(db, cfg, "", &buf); err != nil {
+	if err := handleStaleEngines(db, cfg, "", logger); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -2016,7 +2076,8 @@ func TestHandleStaleEngines_DefaultThresholdWhenZero(t *testing.T) {
 	cfg.Stall.StaleEngineThresholdSec = 0
 
 	var buf bytes.Buffer
-	if err := handleStaleEngines(db, cfg, "", &buf); err != nil {
+	logger := testLogger(&buf)
+	if err := handleStaleEngines(db, cfg, "", logger); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -2098,7 +2159,8 @@ func TestHandlePrOpenCars_ConflictingAutoRebase(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := handlePrOpenCars(db, viewer, false, repoDir, repoDir, nil, &buf)
+	logger := testLogger(&buf)
+	err := handlePrOpenCars(db, viewer, false, repoDir, repoDir, nil, logger)
 	if err != nil {
 		t.Fatalf("handlePrOpenCars: %v", err)
 	}
@@ -2150,7 +2212,8 @@ func TestHandlePrOpenCars_ConflictingSkipWhenMainUnchanged(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := handlePrOpenCars(db, viewer, false, repoDir, repoDir, nil, &buf)
+	logger := testLogger(&buf)
+	err := handlePrOpenCars(db, viewer, false, repoDir, repoDir, nil, logger)
 	if err != nil {
 		t.Fatalf("handlePrOpenCars: %v", err)
 	}
@@ -2202,7 +2265,8 @@ func TestHandlePrOpenCars_UnresolvableConflict(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := handlePrOpenCars(db, viewer, false, repoDir, repoDir, nil, &buf)
+	logger := testLogger(&buf)
+	err := handlePrOpenCars(db, viewer, false, repoDir, repoDir, nil, logger)
 	if err != nil {
 		t.Fatalf("handlePrOpenCars: %v", err)
 	}
@@ -2254,7 +2318,8 @@ func TestHandlePrOpenCars_MergeableUnknownSkipped(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := handlePrOpenCars(db, viewer, false, "", "", nil, &buf)
+	logger := testLogger(&buf)
+	err := handlePrOpenCars(db, viewer, false, "", "", nil, logger)
 	if err != nil {
 		t.Fatalf("handlePrOpenCars: %v", err)
 	}
@@ -2301,7 +2366,8 @@ func TestHandlePrOpenCars_ConflictingAndApproved(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := handlePrOpenCars(db, viewer, true, repoDir, repoDir, nil, &buf)
+	logger := testLogger(&buf)
+	err := handlePrOpenCars(db, viewer, true, repoDir, repoDir, nil, logger)
 	if err != nil {
 		t.Fatalf("handlePrOpenCars: %v", err)
 	}

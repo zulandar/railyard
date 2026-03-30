@@ -4,8 +4,7 @@ package yardmaster
 import (
 	"context"
 	"fmt"
-	"io"
-	"os"
+	"log/slog"
 	"time"
 
 	"github.com/zulandar/railyard/internal/config"
@@ -19,7 +18,7 @@ type StartOpts struct {
 	DB           *gorm.DB
 	RepoDir      string
 	PollInterval time.Duration // default 30s
-	Out          io.Writer     // default os.Stdout
+	Logger       *slog.Logger  // default slog.Default()
 }
 
 // Start launches the yardmaster daemon loop. It validates options, then
@@ -39,10 +38,10 @@ func Start(ctx context.Context, opts StartOpts) error {
 		return fmt.Errorf("yardmaster: repoDir is required")
 	}
 
-	out := opts.Out
-	if out == nil {
-		out = os.Stdout
+	logger := opts.Logger
+	if logger == nil {
+		logger = slog.Default()
 	}
 
-	return RunDaemon(ctx, opts.DB, opts.Config, opts.ConfigPath, opts.RepoDir, opts.PollInterval, out)
+	return RunDaemon(ctx, opts.DB, opts.Config, opts.ConfigPath, opts.RepoDir, opts.PollInterval, logger)
 }

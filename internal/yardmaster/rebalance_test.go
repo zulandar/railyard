@@ -2,18 +2,25 @@ package yardmaster
 
 import (
 	"bytes"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/zulandar/railyard/internal/config"
 	"github.com/zulandar/railyard/internal/engine"
+	"github.com/zulandar/railyard/internal/logutil"
 	"github.com/zulandar/railyard/internal/models"
 	"github.com/zulandar/railyard/internal/orchestration"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
+
+// rbTestLogger creates a *slog.Logger that writes to the given buffer at Debug level.
+func rbTestLogger(buf *bytes.Buffer) *slog.Logger {
+	return slog.New(logutil.NewConsoleHandler(buf, buf, slog.LevelDebug))
+}
 
 // testDB creates an in-memory SQLite database with all required tables.
 func testDB(t *testing.T) *gorm.DB {
@@ -87,7 +94,8 @@ func TestRebalanceEngines_CooldownSkip(t *testing.T) {
 	state.lastRebalanceAt = time.Now() // just rebalanced
 
 	var buf bytes.Buffer
-	if err := rebalanceEngines(db, cfg, "test.yaml", state, &buf); err != nil {
+	logger := rbTestLogger(&buf)
+	if err := rebalanceEngines(db, cfg, "test.yaml", state, logger); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// Should skip — no output.
@@ -111,7 +119,8 @@ func TestRebalanceEngines_NoSurplusNoDeficit(t *testing.T) {
 	db.Create(&models.Engine{ID: "eng-2", Track: "frontend", Status: engine.StatusWorking, CurrentCar: "car-2", StartedAt: now, LastActivity: now})
 
 	var buf bytes.Buffer
-	if err := rebalanceEngines(db, cfg, "test.yaml", state, &buf); err != nil {
+	logger := rbTestLogger(&buf)
+	if err := rebalanceEngines(db, cfg, "test.yaml", state, logger); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if tmux.sessionsCreated != 0 {
@@ -138,12 +147,13 @@ func TestRebalanceEngines_SingleMove(t *testing.T) {
 	db.Create(&models.Car{ID: "car-f3", Track: "frontend", Status: "open", Assignee: "", Type: "task"})
 
 	var buf bytes.Buffer
-	if err := rebalanceEngines(db, cfg, "test.yaml", state, &buf); err != nil {
+	logger := rbTestLogger(&buf)
+	if err := rebalanceEngines(db, cfg, "test.yaml", state, logger); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	// Should have moved 1 engine: backend → frontend.
-	if !strings.Contains(buf.String(), "Rebalanced 1 engine: backend → frontend") {
+	if !strings.Contains(buf.String(), "Rebalanced engine") || !strings.Contains(buf.String(), "from=backend") {
 		t.Errorf("output = %q, want rebalance message", buf.String())
 	}
 
@@ -186,7 +196,8 @@ func TestRebalanceEngines_RespectsEngineSlots(t *testing.T) {
 	db.Create(&models.Car{ID: "car-3", Track: "frontend", Status: "open", Assignee: "", Type: "task"})
 
 	var buf bytes.Buffer
-	if err := rebalanceEngines(db, cfg, "test.yaml", state, &buf); err != nil {
+	logger := rbTestLogger(&buf)
+	if err := rebalanceEngines(db, cfg, "test.yaml", state, logger); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -212,7 +223,8 @@ func TestRebalanceEngines_IdleThresholdNotMet(t *testing.T) {
 	db.Create(&models.Car{ID: "car-2", Track: "frontend", Status: "open", Assignee: "", Type: "task"})
 
 	var buf bytes.Buffer
-	if err := rebalanceEngines(db, cfg, "test.yaml", state, &buf); err != nil {
+	logger := rbTestLogger(&buf)
+	if err := rebalanceEngines(db, cfg, "test.yaml", state, logger); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -242,7 +254,8 @@ func TestRebalanceEngines_TrackCooldown(t *testing.T) {
 	db.Create(&models.Car{ID: "car-2", Track: "frontend", Status: "open", Assignee: "", Type: "task"})
 
 	var buf bytes.Buffer
-	if err := rebalanceEngines(db, cfg, "test.yaml", state, &buf); err != nil {
+	logger := rbTestLogger(&buf)
+	if err := rebalanceEngines(db, cfg, "test.yaml", state, logger); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -311,7 +324,8 @@ func TestRebalanceMove_NoIdleEngine(t *testing.T) {
 
 	// No engines at all on backend.
 	var buf bytes.Buffer
-	err := rebalanceMove(db, cfg, "test.yaml", "backend", "frontend", state, &buf)
+	logger := rbTestLogger(&buf)
+	err := rebalanceMove(db, cfg, "test.yaml", "backend", "frontend", state, logger)
 	if err == nil {
 		t.Fatal("expected error for no idle engine on donor")
 	}
@@ -334,7 +348,8 @@ func TestRebalanceMove_Success(t *testing.T) {
 	db.Create(&models.Engine{ID: "eng-f1", Track: "frontend", Status: engine.StatusWorking, CurrentCar: "car-1", StartedAt: now, LastActivity: now})
 
 	var buf bytes.Buffer
-	err := rebalanceMove(db, cfg, "test.yaml", "backend", "frontend", state, &buf)
+	logger := rbTestLogger(&buf)
+	err := rebalanceMove(db, cfg, "test.yaml", "backend", "frontend", state, logger)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -375,7 +390,8 @@ func TestRebalanceEngines_YardmasterExcluded(t *testing.T) {
 	db.Create(&models.Car{ID: "car-2", Track: "frontend", Status: "open", Assignee: "", Type: "task"})
 
 	var buf bytes.Buffer
-	if err := rebalanceEngines(db, cfg, "test.yaml", state, &buf); err != nil {
+	logger := rbTestLogger(&buf)
+	if err := rebalanceEngines(db, cfg, "test.yaml", state, logger); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 

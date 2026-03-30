@@ -2,7 +2,7 @@ package yardmaster
 
 import (
 	"fmt"
-	"io"
+	"log/slog"
 	"sort"
 	"time"
 
@@ -39,7 +39,7 @@ type trackMetrics struct {
 // rebalanceEngines checks for idle engines on tracks with no work and moves
 // them to tracks with a backlog. At most 1 engine is moved per deficit track
 // per cycle.
-func rebalanceEngines(db *gorm.DB, cfg *config.Config, configPath string, state *rebalanceState, out io.Writer) error {
+func rebalanceEngines(db *gorm.DB, cfg *config.Config, configPath string, state *rebalanceState, logger *slog.Logger) error {
 	now := time.Now()
 
 	// Cooldown guard.
@@ -131,13 +131,13 @@ func rebalanceEngines(db *gorm.DB, cfg *config.Config, configPath string, state 
 			continue
 		}
 
-		err := rebalanceMove(db, cfg, configPath, donor, dt.name, state, out)
+		err := rebalanceMove(db, cfg, configPath, donor, dt.name, state, logger)
 		if err != nil {
-			fmt.Fprintf(out, "Rebalance %s → %s failed: %v\n", donor, dt.name, err)
+			logger.Error("Rebalance failed", "from", donor, "to", dt.name, "error", err)
 			continue
 		}
 
-		fmt.Fprintf(out, "Rebalanced 1 engine: %s → %s\n", donor, dt.name)
+		logger.Info("Rebalanced engine", "from", donor, "to", dt.name)
 
 		// Update cooldowns.
 		state.lastTrackMoveAt[donor] = now
@@ -168,7 +168,7 @@ func rebalanceEngines(db *gorm.DB, cfg *config.Config, configPath string, state 
 
 // rebalanceMove kills one idle engine on the donor track and scales up the
 // receiver track by 1.
-func rebalanceMove(db *gorm.DB, cfg *config.Config, configPath, donorTrack, receiverTrack string, state *rebalanceState, out io.Writer) error {
+func rebalanceMove(db *gorm.DB, cfg *config.Config, configPath, donorTrack, receiverTrack string, state *rebalanceState, logger *slog.Logger) error {
 	dm := findIdleEngine(db, donorTrack)
 	if dm == nil {
 		return fmt.Errorf("no idle engine on donor track %s", donorTrack)
