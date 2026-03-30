@@ -42,7 +42,7 @@ type StallDetector struct {
 	carID    string
 
 	mu           sync.Mutex
-	lastStdoutAt time.Time
+	lastActivityAt time.Time
 	recentLines  []string // rolling window of recent output lines (up to 100)
 	lastSnippet  string   // last chunk of output for context
 	cycle        int
@@ -52,8 +52,8 @@ type StallDetector struct {
 }
 
 // NewStallDetector creates a StallDetector with the given thresholds.
-// It registers an onWrite callback on the session's stdout logWriter
-// to track output activity.
+// It registers onWrite callbacks on both stdout and stderr to track
+// output activity. Any write to either stream resets the activity timer.
 func NewStallDetector(sess *Session, cfg StallConfig) *StallDetector {
 	if cfg.StdoutTimeout <= 0 {
 		cfg.StdoutTimeout = DefaultStdoutTimeout
@@ -69,13 +69,19 @@ func NewStallDetector(sess *Session, cfg StallConfig) *StallDetector {
 		cfg:          cfg,
 		engineID:     sess.EngineID,
 		carID:        sess.CarID,
-		lastStdoutAt: time.Now(),
+		lastActivityAt: time.Now(),
 		stallCh:      make(chan StallReason, 1),
 	}
 
 	// Register callback on stdout to track activity and scan for repeated errors.
 	sess.stdout.onWrite = func(p []byte) {
 		sd.observeOutput(p)
+	}
+
+	// Register callback on stderr too — many tools (go test, compilers) write to stderr.
+	// Stderr only resets the activity timer; repeated-error scanning stays stdout-only.
+	sess.stderr.onWrite = func(p []byte) {
+		sd.touchActivity()
 	}
 
 	return sd
@@ -171,8 +177,8 @@ func HandleStall(db *gorm.DB, engineID, carID string, reason StallReason, repoDi
 	})
 }
 
-// observeOutput is called on each stdout Write. It records the timestamp
-// and scans for repeated error lines.
+// observeOutput is called on each stdout Write. It records the timestamp,
+// updates the snippet, and scans for repeated error lines.
 func (sd *StallDetector) observeOutput(p []byte) {
 	sd.mu.Lock()
 	defer sd.mu.Unlock()
@@ -181,7 +187,7 @@ func (sd *StallDetector) observeOutput(p []byte) {
 		return
 	}
 
-	sd.lastStdoutAt = time.Now()
+	sd.lastActivityAt = time.Now()
 
 	chunk := string(p)
 
@@ -214,6 +220,17 @@ func (sd *StallDetector) observeOutput(p []byte) {
 			Detail:  fmt.Sprintf("line repeated %d times: %s", sd.cfg.RepeatedErrorMax, repeated),
 			Snippet: sd.lastSnippet,
 		})
+	}
+}
+
+// touchActivity resets the activity timer without doing any error scanning.
+// Used by the stderr callback so that stderr writes keep the detector alive
+// but do not contribute to repeated-error detection.
+func (sd *StallDetector) touchActivity() {
+	sd.mu.Lock()
+	defer sd.mu.Unlock()
+	if !sd.stopped {
+		sd.lastActivityAt = time.Now()
 	}
 }
 
@@ -251,7 +268,7 @@ func (sd *StallDetector) monitor(ctx context.Context) {
 				sd.mu.Unlock()
 				return
 			}
-			elapsed := time.Since(sd.lastStdoutAt)
+			elapsed := time.Since(sd.lastActivityAt)
 			snippet := sd.lastSnippet
 			sd.mu.Unlock()
 

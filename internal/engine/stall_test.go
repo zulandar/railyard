@@ -595,6 +595,33 @@ func TestDefaultConstants(t *testing.T) {
 	}
 }
 
+func TestStallDetector_StderrResetsTimer(t *testing.T) {
+	sess := newMockSession()
+	sd := NewStallDetector(sess, StallConfig{
+		StdoutTimeout: 100 * time.Millisecond,
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sd.Start(ctx)
+
+	// Write to stderr (not stdout) to keep detector alive.
+	go func() {
+		for i := 0; i < 5; i++ {
+			time.Sleep(60 * time.Millisecond)
+			sess.stderr.Write([]byte("compiling...\n"))
+		}
+	}()
+
+	// Wait longer than timeout — stderr writes should prevent stall.
+	select {
+	case reason := <-sd.Stalled():
+		t.Fatalf("unexpected stall: %s", reason.Detail)
+	case <-time.After(350 * time.Millisecond):
+		// No stall — correct behavior.
+	}
+}
+
 // --- Helper ---
 
 // newMockSession creates a minimal Session with mock logWriters for testing.
