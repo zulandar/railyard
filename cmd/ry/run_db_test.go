@@ -281,7 +281,31 @@ func TestRunComplete_Success(t *testing.T) {
 	defer cleanup()
 
 	now := time.Now()
-	gormDB.Create(&models.Car{ID: "car-done", Title: "Completable", Status: "in_progress", Track: "backend", CreatedAt: now, UpdatedAt: now})
+	gormDB.Create(&models.Car{ID: "car-done", Title: "Completable", Status: "in_progress", Track: "backend", Branch: "ry/backend/car-done", BaseBranch: "main", CreatedAt: now, UpdatedAt: now})
+
+	// Set up a git repo with a commit ahead of main so the guard passes.
+	repoDir := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = repoDir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("%v: %s\n%s", args, err, out)
+		}
+	}
+	run("git", "init", "-b", "main")
+	run("git", "config", "user.email", "test@test.com")
+	run("git", "config", "user.name", "test")
+	run("git", "commit", "--allow-empty", "-m", "init")
+	run("git", "checkout", "-b", "ry/backend/car-done")
+	run("git", "commit", "--allow-empty", "-m", "real work")
+
+	origDir, _ := os.Getwd()
+	if err := os.Chdir(repoDir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	defer os.Chdir(origDir) //nolint:errcheck
 
 	out, err := execCmd(t, []string{"complete", "car-done", "finished", "work", "--config", "test.yaml"})
 	if err != nil {
