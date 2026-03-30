@@ -412,6 +412,47 @@ func TestRunComplete_WithCommitsSucceeds(t *testing.T) {
 	}
 }
 
+func TestRunComplete_GitErrorRejectsCompletion(t *testing.T) {
+	gormDB := mockTestDB(t)
+	cleanup := withMockDB(t, gormDB)
+	defer cleanup()
+
+	now := time.Now()
+	gormDB.Create(&models.Car{
+		ID:         "car-nogit",
+		Title:      "No git car",
+		Status:     "in_progress",
+		Track:      "backend",
+		Branch:     "ry/backend/car-nogit",
+		BaseBranch: "main",
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	})
+
+	// Change cwd to a non-git directory so CommitsAheadOfBase fails.
+	nonGitDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	if err := os.Chdir(nonGitDir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	defer os.Chdir(origDir) //nolint:errcheck
+
+	_, err := execCmd(t, []string{"complete", "car-nogit", "done", "--config", "test.yaml"})
+	if err == nil {
+		t.Fatal("expected error when git commands fail")
+	}
+	if !strings.Contains(err.Error(), "complete rejected") {
+		t.Errorf("expected 'complete rejected' error, got: %v", err)
+	}
+
+	// Verify car status was NOT changed to done.
+	var c models.Car
+	gormDB.First(&c, "id = ?", "car-nogit")
+	if c.Status == "done" {
+		t.Error("car should NOT be marked done when git check fails")
+	}
+}
+
 func TestRunComplete_NotFound(t *testing.T) {
 	gormDB := mockTestDB(t)
 	cleanup := withMockDB(t, gormDB)

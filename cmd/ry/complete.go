@@ -49,10 +49,16 @@ func runComplete(cmd *cobra.Command, configPath, carID, summary string) error {
 	if baseBranch == "" {
 		baseBranch = "main"
 	}
-	if cwd, wdErr := os.Getwd(); wdErr == nil {
-		if count, cErr := engine.CommitsAheadOfBase(cwd, baseBranch); cErr == nil && count == 0 {
-			return fmt.Errorf("complete rejected: branch has zero commits ahead of %s — you must commit your work before completing", baseBranch)
-		}
+	cwd, wdErr := os.Getwd()
+	if wdErr != nil {
+		return fmt.Errorf("complete rejected: cannot determine working directory: %w", wdErr)
+	}
+	count, cErr := engine.CommitsAheadOfBase(cwd, baseBranch)
+	if cErr != nil {
+		return fmt.Errorf("complete rejected: cannot verify commits ahead of %s: %w", baseBranch, cErr)
+	}
+	if count == 0 {
+		return fmt.Errorf("complete rejected: branch has zero commits ahead of %s — you must commit your work before completing", baseBranch)
 	}
 
 	// Transition to done.

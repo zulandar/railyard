@@ -40,7 +40,7 @@ func RenderContext(input ContextInput) (string, error) {
 	writeProgress(&w, input.Progress)
 	writeMessages(&w, input.Messages)
 	writeRecentCommits(&w, input.RecentCommits)
-	writeInstructions(&w, input.EngineID)
+	writeInstructions(&w, input.EngineID, input.Car.BaseBranch)
 	return w.String(), nil
 }
 
@@ -125,7 +125,10 @@ func writeRecentCommits(w *strings.Builder, commits []string) {
 	w.WriteString("\n")
 }
 
-func writeInstructions(w *strings.Builder, engineID string) {
+func writeInstructions(w *strings.Builder, engineID, baseBranch string) {
+	if baseBranch == "" {
+		baseBranch = "main"
+	}
 	// Git workflow — CRITICAL section must come first.
 	w.WriteString("## Git Workflow — CRITICAL\n")
 	w.WriteString("**You MUST commit your work to git regularly.** Uncommitted work is permanently lost if your session ends.\n\n")
@@ -149,7 +152,7 @@ func writeInstructions(w *strings.Builder, engineID string) {
 	}
 
 	w.WriteString("## When You're Done\n")
-	w.WriteString("1. Verify your work is committed: `git log --oneline origin/main..HEAD` must show at least one commit\n")
+	fmt.Fprintf(w, "1. Verify your work is committed: `git log --oneline origin/%s..HEAD` must show at least one commit\n", baseBranch)
 	w.WriteString("2. Run tests, ensure they pass\n")
 	w.WriteString("3. Mark the car complete by running this command:\n")
 	w.WriteString("```\n")

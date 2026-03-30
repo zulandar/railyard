@@ -736,6 +736,11 @@ func getMergedBranches(repoDir, target string) (map[string]bool, error) {
 // its tip on a side branch that was brought in via merge — the tip is NOT
 // on the first-parent lineage.
 //
+// NOTE: This relies on --no-ff merges (which Railyard's gitMerge enforces).
+// Fast-forward or squash merges (e.g. via GitHub UI) would place the branch
+// tip on the mainline, causing a false-negative. If external merge strategies
+// become supported, this function needs a rev-list --count fallback.
+//
 // Checks origin/{branch} first (remote truth), falling back to local ref.
 // Returns false (safe default) on any error.
 func branchHasUniqueCommits(repoDir, branch, baseBranch string) bool {

@@ -268,7 +268,7 @@ func TestRenderContext_Instructions(t *testing.T) {
 		"MUST commit your work to git regularly",
 		"ry complete` will be **rejected** if your branch has zero commits",
 		"## When You're Done",
-		"git log --oneline origin/main..HEAD",
+		"origin/main..HEAD",
 		"ry complete",
 		"do NOT send a message",
 		"## If You're Stuck",
@@ -284,6 +284,33 @@ func TestRenderContext_Instructions(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("instructions missing %q", want)
 		}
+	}
+}
+
+func TestRenderContext_InstructionsUsesBaseBranch(t *testing.T) {
+	input := makeInput()
+	input.Car.BaseBranch = "develop"
+	out, err := RenderContext(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "origin/develop..HEAD") {
+		t.Error("expected instructions to reference origin/develop..HEAD for non-main base branch")
+	}
+	if strings.Contains(out, "origin/main..HEAD") {
+		t.Error("instructions should NOT reference origin/main when BaseBranch is develop")
+	}
+}
+
+func TestRenderContext_InstructionsDefaultsToMain(t *testing.T) {
+	input := makeInput()
+	input.Car.BaseBranch = "" // empty should default to main
+	out, err := RenderContext(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "origin/main..HEAD") {
+		t.Error("expected instructions to default to origin/main..HEAD when BaseBranch is empty")
 	}
 }
 

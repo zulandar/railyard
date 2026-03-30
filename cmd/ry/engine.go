@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -634,9 +634,9 @@ func pushInflightBranch(gormDB *gorm.DB, eng *models.Engine, repoDir string) {
 
 	// Auto-commit uncommitted work before pushing so it isn't lost.
 	if committed, err := engine.AutoCommitIfDirty(repoDir, "railyard: auto-commit on engine shutdown"); err != nil {
-		log.Printf("engine: auto-commit before shutdown push warning: %v", err)
+		slog.Warn("engine: auto-commit before shutdown push failed", "car", c.ID, "error", err)
 	} else if committed {
-		log.Printf("engine: auto-committed uncommitted changes for %s", c.ID)
+		slog.Info("engine: auto-committed uncommitted changes", "car", c.ID)
 	}
 
 	engine.PushBranch(repoDir, c.Branch) //nolint:errcheck

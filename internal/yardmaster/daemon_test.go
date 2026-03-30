@@ -503,6 +503,47 @@ func TestReconcileStaleCars_ZeroCommitBranch(t *testing.T) {
 	}
 }
 
+// TestReconcileStaleCars_FFMergedBranch verifies the known limitation: a branch
+// merged via fast-forward (not --no-ff) is misidentified as zero-commit because
+// its tip lands on the first-parent lineage. This documents the edge case noted
+// in the branchHasUniqueCommits comment — Railyard's gitMerge uses --no-ff, but
+// external FF merges would hit this.
+func TestReconcileStaleCars_FFMergedBranch(t *testing.T) {
+	bareDir := t.TempDir()
+	parentDir := t.TempDir()
+
+	run := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("%v in %s failed: %s: %v", args, dir, out, err)
+		}
+	}
+
+	run(bareDir, "git", "init", "--bare", "-b", "main")
+	run(parentDir, "git", "clone", bareDir, "repo")
+	repoDir := filepath.Join(parentDir, "repo")
+	run(repoDir, "git", "config", "user.email", "test@test.com")
+	run(repoDir, "git", "config", "user.name", "test")
+	run(repoDir, "git", "commit", "--allow-empty", "-m", "init")
+	run(repoDir, "git", "push", "origin", "main")
+
+	// FF-merged branch: has a real commit, but merged via fast-forward.
+	run(repoDir, "git", "checkout", "-b", "ry/backend/car-ff")
+	run(repoDir, "git", "commit", "--allow-empty", "-m", "ff work")
+	run(repoDir, "git", "checkout", "main")
+	run(repoDir, "git", "merge", "ry/backend/car-ff") // default FF merge
+	run(repoDir, "git", "push", "origin", "main")
+
+	// branchHasUniqueCommits sees the tip on mainline → returns false.
+	got := branchHasUniqueCommits(repoDir, "ry/backend/car-ff", "main")
+	if got {
+		t.Error("expected branchHasUniqueCommits=false for FF-merged branch (known limitation)")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // countRecentSwitchFailures tests
 // ---------------------------------------------------------------------------
