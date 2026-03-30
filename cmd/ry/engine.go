@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"os"
+	"os/exec"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 	"text/tabwriter"
 	"time"
@@ -45,6 +47,7 @@ func newEngineStartCmd() *cobra.Command {
 		configPath   string
 		track        string
 		pollInterval time.Duration
+		logLevel     string
 	)
 
 	cmd := &cobra.Command{
@@ -52,19 +55,21 @@ func newEngineStartCmd() *cobra.Command {
 		Short: "Start the engine daemon",
 		Long:  "Starts the engine daemon loop: claims cars, spawns Claude Code, monitors subprocess, handles outcomes.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runEngineStart(cmd, configPath, track, pollInterval)
+			return runEngineStart(cmd, configPath, track, pollInterval, logLevel)
 		},
 	}
 
 	cmd.Flags().StringVarP(&configPath, "config", "c", "railyard.yaml", "path to Railyard config file")
 	cmd.Flags().StringVarP(&track, "track", "t", "", "track to work on (required)")
 	cmd.Flags().DurationVar(&pollInterval, "poll-interval", defaultPollInterval, "interval between claim attempts")
+	cmd.Flags().StringVar(&logLevel, "log-level", "", "log level (debug, info, warn, error; env LOG_LEVEL)")
 	_ = cmd.MarkFlagRequired("track")
 	return cmd
 }
 
-func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval time.Duration) error {
-	out := logutil.NewTimestampWriter(cmd.OutOrStdout())
+func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval time.Duration, logLevel string) error {
+	level := logutil.ParseLevel(os.Getenv("LOG_LEVEL"), logLevel)
+	logger := logutil.NewLogger(cmd.OutOrStdout(), cmd.ErrOrStderr(), level)
 
 	cfg, err := config.Load(configPath)
 	if err != nil {
@@ -74,7 +79,7 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 	// Sync embedded CocoIndex scripts to disk so overlay/MCP operations
 	// find them without requiring a prior 'ry cocoindex init'.
 	if err := ensureCocoIndexScripts(cfg.CocoIndex.ScriptsPath); err != nil {
-		log.Printf("cocoindex scripts sync warning: %v", err)
+		logger.Warn("Cocoindex scripts sync warning", "error", err)
 	}
 
 	// Validate that the track exists in config.
@@ -127,7 +132,7 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 	if err != nil {
 		return fmt.Errorf("register engine: %w", err)
 	}
-	fmt.Fprintf(out, "Engine %s registered on track %q (provider: %s)\n", eng.ID, track, providerName)
+	logger.Info("Engine registered", "engine", eng.ID, "track", track, "provider", providerName)
 
 	// Set up context with signal handling for clean shutdown.
 	ctx, cancel := context.WithCancel(context.Background())
@@ -137,7 +142,7 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		sig := <-sigCh
-		fmt.Fprintf(out, "\nReceived %s, shutting down...\n", sig)
+		logger.Info("Received signal, shutting down", "signal", sig.String())
 		cancel()
 	}()
 
@@ -163,28 +168,40 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 		return fmt.Errorf("setup worktree: %w", err)
 	}
 
-	fmt.Fprintf(out, "Engine %s starting daemon loop (poll every %s)...\n", eng.ID, pollInterval)
+	logger.Info("Engine starting daemon loop", "engine", eng.ID, "poll", pollInterval)
 
 	cycle := 0
+	var lastIdleLog time.Time
+	var claimTime time.Time
+
+	type cycleStats struct {
+		startedAt   time.Time
+		completed   int
+		stalled     int
+		cleared     int
+		totalTokens int
+		totalDur    time.Duration
+	}
+	var cStats cycleStats
 
 	for {
 		select {
 		case <-ctx.Done():
-			fmt.Fprintf(out, "Engine %s deregistering...\n", eng.ID)
+			logger.Info("Engine deregistering", "engine", eng.ID)
 			pushInflightBranch(gormDB, eng, workDir)
 			if err := engine.CleanupOverlay(eng.ID, cfg); err != nil {
-				log.Printf("overlay cleanup warning: %v", err)
+				logger.Warn("Overlay cleanup warning", "error", err)
 			}
 			if err := engine.Deregister(gormDB, eng.ID); err != nil {
-				log.Printf("deregister error: %v", err)
+				logger.Error("Deregister error", "error", err)
 			}
 			if err := engine.RemoveWorktree(repoDir, eng.ID); err != nil {
-				log.Printf("remove worktree error: %v", err)
+				logger.Warn("Remove worktree error", "error", err)
 			}
-			fmt.Fprintf(out, "Engine %s stopped.\n", eng.ID)
+			logger.Info("Engine stopped", "engine", eng.ID)
 			return nil
 		case err := <-hbErrCh:
-			fmt.Fprintf(out, "Heartbeat error: %v\n", err)
+			logger.Error("Heartbeat error", "error", err)
 			return fmt.Errorf("heartbeat: %w", err)
 		default:
 		}
@@ -192,12 +209,12 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 		// Process inbox — check for yardmaster instructions.
 		instructions, inboxErr := engine.ProcessInbox(gormDB, eng.ID)
 		if inboxErr != nil {
-			log.Printf("inbox error: %v", inboxErr)
+			logger.Error("Inbox error", "error", inboxErr)
 		}
 
 		// Handle pause instruction.
 		if engine.ShouldPause(instructions) {
-			fmt.Fprintf(out, "Paused by yardmaster. Waiting for resume...\n")
+			logger.Info("Paused by yardmaster, waiting for resume")
 			for {
 				sleepWithContext(ctx, pollInterval)
 				if ctx.Err() != nil {
@@ -205,7 +222,7 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 				}
 				resumeInst, _ := engine.ProcessInbox(gormDB, eng.ID)
 				if engine.HasResume(resumeInst) {
-					fmt.Fprintf(out, "Resumed by yardmaster.\n")
+					logger.Info("Resumed by yardmaster")
 					break
 				}
 			}
@@ -214,7 +231,7 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 
 		// Handle abort instruction for current car.
 		if eng.CurrentCar != "" && engine.ShouldAbort(instructions, eng.CurrentCar) {
-			fmt.Fprintf(out, "Abort instruction received for car %s\n", eng.CurrentCar)
+			logger.Info("Abort instruction received", "car", eng.CurrentCar)
 			gormDB.Model(&models.Engine{}).Where("id = ?", eng.ID).Updates(map[string]interface{}{
 				"current_car": "",
 				"status":      engine.StatusIdle,
@@ -229,16 +246,26 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				// No ready cars — sleep and retry.
+				if time.Since(lastIdleLog) >= 30*time.Second {
+					logger.Info("No cars available, polling")
+					lastIdleLog = time.Now()
+				}
 				sleepWithContext(ctx, pollInterval)
 				continue
 			}
-			log.Printf("claim error: %v", err)
+			logger.Error("Claim error", "error", err)
 			sleepWithContext(ctx, pollInterval)
 			continue
 		}
 
 		cycle++
-		fmt.Fprintf(out, "[cycle %d] Claimed car %s: %s\n", cycle, claimed.ID, claimed.Title)
+		lastIdleLog = time.Time{}
+		claimTime = time.Now()
+		if cStats.startedAt.IsZero() {
+			cStats.startedAt = claimTime
+		}
+		cycleLog := logger.With("cycle", cycle)
+		cycleLog.Info("Claimed car", "car", claimed.ID, "title", claimed.Title)
 
 		// Render context.
 		progress, _ := loadProgress(gormDB, claimed.ID)
@@ -255,7 +282,7 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 			EngineID:      eng.ID,
 		})
 		if err != nil {
-			log.Printf("render context error: %v", err)
+			logger.Error("Render context error", "error", err)
 			sleepWithContext(ctx, pollInterval)
 			continue
 		}
@@ -263,23 +290,23 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 		// Set up git branch — revision cars resume existing branch, new cars branch off base.
 		isRevision := claimed.CompletedAt != nil && claimed.Branch != "" && engine.RemoteBranchExists(workDir, claimed.Branch)
 		if isRevision {
-			log.Printf("Revision car %s — checking out existing branch %s", claimed.ID, claimed.Branch)
+			logger.Info("Revision car, checking out existing branch", "car", claimed.ID, "branch", claimed.Branch)
 			if err := engine.CheckoutExistingBranch(workDir, claimed.Branch); err != nil {
-				log.Printf("checkout existing branch error (falling back to new branch): %v", err)
+				logger.Warn("Checkout existing branch error, falling back to new branch", "error", err)
 				isRevision = false
 			}
 		}
 		if !isRevision {
 			// Reset worktree to clean state at the car's base branch before branching.
 			if err := engine.ResetWorktree(workDir, claimed.BaseBranch); err != nil {
-				log.Printf("reset worktree error: %v", err)
+				logger.Error("Reset worktree error", "error", err)
 				sleepWithContext(ctx, pollInterval)
 				continue
 			}
 
 			// Create git branch from HEAD (ResetWorktree already set HEAD to origin/{baseBranch}).
 			if err := engine.CreateBranch(workDir, claimed.Branch, ""); err != nil {
-				log.Printf("create branch error: %v", err)
+				logger.Error("Create branch error", "error", err)
 				sleepWithContext(ctx, pollInterval)
 				continue
 			}
@@ -288,13 +315,13 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 		// Build overlay index and write MCP config (non-fatal).
 		if cfg.CocoIndex.Overlay.Enabled {
 			if overlayTable, err := engine.BuildOverlay(workDir, eng.ID, track, cfg); err != nil {
-				log.Printf("overlay build warning: %v", err)
+				logger.Warn("Overlay build warning", "error", err)
 			} else if overlayTable != "" {
 				gormDB.Model(&models.Engine{}).Where("id = ?", eng.ID).Update("overlay_table", overlayTable)
 				eng.OverlayTable = overlayTable
 			}
 			if err := engine.WriteMCPConfig(workDir, eng.ID, track, cfg); err != nil {
-				log.Printf("mcp config warning: %v", err)
+				logger.Warn("MCP config warning", "error", err)
 			}
 		}
 
@@ -307,12 +334,12 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 			ProviderName:   providerName,
 		})
 		if err != nil {
-			log.Printf("spawn error: %v", err)
+			logger.Error("Spawn error", "error", err)
 			sleepWithContext(ctx, pollInterval)
 			continue
 		}
 
-		fmt.Fprintf(out, "[cycle %d] Spawned session %s (PID %d)\n", cycle, sess.ID, sess.PID)
+		cycleLog.Info("Spawned session", "session", sess.ID, "pid", sess.PID)
 
 		// Start stall detection.
 		sd := engine.NewStallDetector(sess, stallCfg)
@@ -325,55 +352,157 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 
 		switch outcome.kind {
 		case outcomeCompleted:
-			fmt.Fprintf(out, "[cycle %d] Car %s completed\n", cycle, claimed.ID)
+			stats := queryCarOutcomeStats(gormDB, claimed.ID, claimed.Branch, claimed.BaseBranch, workDir, claimTime)
+			cStats.completed++
+			cStats.totalTokens += stats.totalTokens
+			cStats.totalDur += stats.duration
+			attrs := []any{"car", claimed.ID, "duration", stats.duration, "tokens", formatTokens(stats.totalTokens)}
+			if stats.model != "" {
+				attrs = append(attrs, "model", stats.model)
+			}
+			if stats.commits > 0 {
+				attrs = append(attrs, "commits", stats.commits)
+			}
+			cycleLog.Info("Car completed", attrs...)
 			if err := engine.HandleCompletion(gormDB, claimed, eng, engine.CompletionOpts{
 				RepoDir:   workDir,
 				SessionID: sess.ID,
 			}); err != nil {
-				log.Printf("completion handling error: %v", err)
+				logger.Error("Completion handling error", "car", claimed.ID, "error", err)
 				handleCompletionFailure(gormDB, claimed.ID, eng.ID, sess.ID, err)
 			}
-			// Reset cycle for next car.
+			// Emit cycle summary and reset.
+			if cycle > 0 && (cStats.completed+cStats.stalled) > 0 {
+				total := cStats.completed + cStats.stalled
+				logger.Info("Cycle complete",
+					"cycle", cycle,
+					"cars", total,
+					"ok", cStats.completed,
+					"stalled", cStats.stalled,
+					"duration", cStats.totalDur,
+					"tokens", formatTokens(cStats.totalTokens),
+				)
+				cStats = cycleStats{}
+			}
 			cycle = 0
 
 		case outcomeClear:
-			fmt.Fprintf(out, "[cycle %d] Agent exited (clear cycle), will re-claim\n", cycle)
+			cStats.cleared++
+			cycleLog.Debug("Agent exited, clear cycle, will re-claim")
 			if err := engine.HandleClearCycle(gormDB, claimed, eng, engine.ClearCycleOpts{
 				RepoDir:   workDir,
 				SessionID: sess.ID,
 				Cycle:     cycle,
 			}); err != nil {
-				log.Printf("clear cycle handling error: %v", err)
+				logger.Error("Clear cycle handling error", "car", claimed.ID, "error", err)
 			}
 
 		case outcomeStall:
-			fmt.Fprintf(out, "[cycle %d] Stall detected: %s\n", cycle, outcome.stallReason.Detail)
+			stats := queryCarOutcomeStats(gormDB, claimed.ID, claimed.Branch, claimed.BaseBranch, workDir, claimTime)
+			cStats.stalled++
+			cStats.totalTokens += stats.totalTokens
+			cStats.totalDur += stats.duration
+			stallAttrs := []any{
+				"car", claimed.ID,
+				"reason", outcome.stallReason.Detail,
+				"type", outcome.stallReason.Type,
+				"duration", stats.duration,
+				"tokens", formatTokens(stats.totalTokens),
+			}
+			if stats.model != "" {
+				stallAttrs = append(stallAttrs, "model", stats.model)
+			}
+			if stats.commits > 0 {
+				stallAttrs = append(stallAttrs, "commits", stats.commits)
+			}
+			cycleLog.Warn("Stall detected", stallAttrs...)
 			if err := engine.HandleStall(gormDB, eng.ID, claimed.ID, outcome.stallReason, workDir, claimed.Branch); err != nil {
-				log.Printf("stall handling error: %v", err)
+				logger.Error("Stall handling error", "car", claimed.ID, "error", err)
 			}
 			// Clear current_car so the engine doesn't re-claim the now-blocked car.
 			gormDB.Model(&models.Engine{}).Where("id = ?", eng.ID).Update("current_car", "")
 			eng.CurrentCar = ""
+			// Emit cycle summary and reset.
+			if cycle > 0 && (cStats.completed+cStats.stalled) > 0 {
+				total := cStats.completed + cStats.stalled
+				logger.Info("Cycle complete",
+					"cycle", cycle,
+					"cars", total,
+					"ok", cStats.completed,
+					"stalled", cStats.stalled,
+					"duration", cStats.totalDur,
+					"tokens", formatTokens(cStats.totalTokens),
+				)
+				cStats = cycleStats{}
+			}
 			// Reset cycle — car is now blocked, engine should move on.
 			cycle = 0
 
 		case outcomeCancelled:
-			fmt.Fprintf(out, "[cycle %d] Cancelled, shutting down\n", cycle)
+			cycleLog.Info("Cancelled, shutting down")
 			pushInflightBranch(gormDB, eng, workDir)
 			if err := engine.CleanupOverlay(eng.ID, cfg); err != nil {
-				log.Printf("overlay cleanup warning: %v", err)
+				logger.Warn("Overlay cleanup warning", "error", err)
 			}
 			if err := engine.Deregister(gormDB, eng.ID); err != nil {
-				log.Printf("deregister error: %v", err)
+				logger.Error("Deregister error", "error", err)
 			}
 			if err := engine.RemoveWorktree(repoDir, eng.ID); err != nil {
-				log.Printf("remove worktree error: %v", err)
+				logger.Warn("Remove worktree error", "error", err)
 			}
 			return nil
 		}
 
 		sleepWithContext(ctx, pollInterval)
 	}
+}
+
+// formatTokens formats a token count as "1.2k" for counts >= 1000, or plain integer otherwise.
+func formatTokens(n int) string {
+	if n >= 1000 {
+		return fmt.Sprintf("%.1fk", float64(n)/1000)
+	}
+	return strconv.Itoa(n)
+}
+
+// carOutcomeStats holds statistics about a completed or stalled car.
+type carOutcomeStats struct {
+	duration    time.Duration
+	totalTokens int
+	model       string
+	commits     int
+}
+
+// queryCarOutcomeStats gathers duration, token totals, model, and commit count for a car.
+func queryCarOutcomeStats(db *gorm.DB, carID, branch, baseBranch, workDir string, claimTime time.Time) carOutcomeStats {
+	stats := carOutcomeStats{
+		duration: time.Since(claimTime),
+	}
+
+	// Query token totals and model from agent_logs table.
+	var tokenRow struct {
+		TotalTokens int
+		Model       string
+	}
+	db.Model(&models.AgentLog{}).
+		Select("COALESCE(SUM(token_count), 0) as total_tokens, COALESCE(MAX(model), '') as model").
+		Where("car_id = ?", carID).
+		Scan(&tokenRow)
+	stats.totalTokens = tokenRow.TotalTokens
+	stats.model = tokenRow.Model
+
+	// Count commits on branch relative to base using git rev-list.
+	if branch != "" && baseBranch != "" && workDir != "" {
+		revRange := "origin/" + baseBranch + ".." + branch
+		out, err := exec.Command("git", "rev-list", "--count", revRange).Output()
+		if err == nil {
+			if n, err := strconv.Atoi(strings.TrimSpace(string(out))); err == nil {
+				stats.commits = n
+			}
+		}
+	}
+
+	return stats
 }
 
 func newEngineDrainCmd() *cobra.Command {
@@ -447,7 +576,7 @@ func monitorSessionWithDB(ctx context.Context, doneCh <-chan error, stallCh <-ch
 		// Zero exit — verify the agent actually called ry complete.
 		var c models.Car
 		if dbErr := db.Select("status").First(&c, "id = ?", carID).Error; dbErr != nil {
-			log.Printf("monitorSession: read car %s: %v", carID, dbErr)
+			// log via slog default — monitorSessionWithDB has no logger param; use pkg-level
 			return sessionOutcome{kind: outcomeClear}
 		}
 		if c.Status == "done" {
@@ -494,17 +623,12 @@ func pushInflightBranch(gormDB *gorm.DB, eng *models.Engine, repoDir string) {
 	}
 	var c models.Car
 	if err := gormDB.Where("id = ?", eng.CurrentCar).First(&c).Error; err != nil {
-		log.Printf("engine: shutdown push: lookup car %s: %v", eng.CurrentCar, err)
 		return
 	}
 	if c.Branch == "" {
 		return
 	}
-	if err := engine.PushBranch(repoDir, c.Branch); err != nil {
-		log.Printf("engine: shutdown push warning (non-fatal): %v", err)
-	} else {
-		log.Printf("engine: shutdown push: pushed %s before cleanup", c.Branch)
-	}
+	engine.PushBranch(repoDir, c.Branch) //nolint:errcheck
 }
 
 // handleCompletionFailure sets a car to blocked and notifies the yardmaster
