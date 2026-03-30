@@ -829,6 +829,29 @@ func gitFetchBranch(repoDir, branch string) {
 	cmd.CombinedOutput() // best-effort — push already succeeded
 }
 
+// getRemoteHeadCommit returns the commit SHA of origin/<baseBranch>.
+// Returns empty string on error (branch doesn't exist, no remote, etc).
+func getRemoteHeadCommit(repoDir, baseBranch string) string {
+	cmd := exec.Command("git", "rev-parse", "origin/"+baseBranch)
+	cmd.Dir = repoDir
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// gitForcePushBranch force-pushes a branch to origin using --force-with-lease
+// to avoid overwriting unexpected remote changes.
+func gitForcePushBranch(repoDir, branch string) error {
+	cmd := exec.Command("git", "push", "--force-with-lease", "origin", branch)
+	cmd.Dir = repoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("force push %s: %s: %w", branch, string(out), err)
+	}
+	return nil
+}
+
 // detachEngineWorktree detaches HEAD in the engine's worktree so the branch
 // can be checked out elsewhere. This is a best-effort operation — if the
 // worktree doesn't exist or is already detached, the error is silently ignored.

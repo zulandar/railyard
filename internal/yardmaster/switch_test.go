@@ -1779,6 +1779,72 @@ func TestSwitchOpts_DefaultTimeout(t *testing.T) {
 	}
 }
 
+func TestGetRemoteHeadCommit(t *testing.T) {
+	repoDir, bareDir, run := initTestRepoWithRemote(t)
+
+	// Make a commit and push so origin/main has a known HEAD.
+	writeFile(t, repoDir, "file.txt", "content\n")
+	run(repoDir, "git", "add", ".")
+	run(repoDir, "git", "commit", "-m", "initial")
+	run(repoDir, "git", "push", "origin", "main")
+
+	// Get expected HEAD from bare repo.
+	cmd := exec.Command("git", "rev-parse", "main")
+	cmd.Dir = bareDir
+	expected, _ := cmd.Output()
+	expectedHead := strings.TrimSpace(string(expected))
+
+	got := getRemoteHeadCommit(repoDir, "main")
+	if got != expectedHead {
+		t.Errorf("getRemoteHeadCommit = %q, want %q", got, expectedHead)
+	}
+}
+
+func TestGetRemoteHeadCommit_InvalidBranch(t *testing.T) {
+	repoDir, _, _ := initTestRepoWithRemote(t)
+
+	got := getRemoteHeadCommit(repoDir, "nonexistent")
+	if got != "" {
+		t.Errorf("expected empty string for invalid branch, got %q", got)
+	}
+}
+
+func TestGitForcePushBranch(t *testing.T) {
+	repoDir, bareDir, run := initTestRepoWithRemote(t)
+
+	// Initial commit on main and push.
+	writeFile(t, repoDir, "file.txt", "v1\n")
+	run(repoDir, "git", "add", ".")
+	run(repoDir, "git", "commit", "-m", "initial")
+	run(repoDir, "git", "push", "origin", "main")
+
+	// Create feature branch, commit, push normally.
+	run(repoDir, "git", "checkout", "-b", "feature")
+	writeFile(t, repoDir, "feature.txt", "original\n")
+	run(repoDir, "git", "add", ".")
+	run(repoDir, "git", "commit", "-m", "feature work")
+	run(repoDir, "git", "push", "origin", "feature")
+
+	// Amend the commit (rewrite history).
+	writeFile(t, repoDir, "feature.txt", "amended\n")
+	run(repoDir, "git", "add", ".")
+	run(repoDir, "git", "commit", "--amend", "-m", "feature work amended")
+
+	// Force push should succeed.
+	err := gitForcePushBranch(repoDir, "feature")
+	if err != nil {
+		t.Fatalf("gitForcePushBranch: %v", err)
+	}
+
+	// Verify remote has the amended commit.
+	cmd := exec.Command("git", "log", "--oneline", "feature", "-1")
+	cmd.Dir = bareDir
+	out, _ := cmd.Output()
+	if !strings.Contains(string(out), "amended") {
+		t.Errorf("remote branch should have amended commit, got: %s", out)
+	}
+}
+
 func TestSwitch_FullMerge_DeletesRemoteBranch(t *testing.T) {
 	repoDir, bareDir, run := initTestRepoWithRemote(t)
 
