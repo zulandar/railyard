@@ -285,6 +285,8 @@ tracks:
 #   comments:
 #     enabled: true                     # Post comments on rejected issues (default: false)
 #     answer_questions: true            # Answer questions detected in issues (default: false)
+#   # Note: The most recent 10 comments on each issue are automatically
+#   # included in the AI triage prompt for better context.
 #   labels:
 #     under_review: "bull: under review"  # Applied during triage (default)
 #     in_progress: "bull: in progress"    # Applied when car is claimed by engine (default)
