@@ -42,12 +42,12 @@ type StallDetector struct {
 	engineID string
 	carID    string
 
-	mu           sync.Mutex
+	mu             sync.Mutex
 	lastActivityAt time.Time
-	recentLines  []string // rolling window of recent output lines (up to 100)
-	lastSnippet  string   // last chunk of output for context
-	cycle        int
-	stopped      bool
+	recentLines    []string // rolling window of recent output lines (up to 100)
+	lastSnippet    string   // last chunk of output for context
+	cycle          int
+	stopped        bool
 
 	stallCh chan StallReason
 
@@ -69,11 +69,11 @@ func NewStallDetector(sess *Session, cfg StallConfig) *StallDetector {
 	}
 
 	sd := &StallDetector{
-		cfg:          cfg,
-		engineID:     sess.EngineID,
-		carID:        sess.CarID,
+		cfg:            cfg,
+		engineID:       sess.EngineID,
+		carID:          sess.CarID,
 		lastActivityAt: time.Now(),
-		stallCh:      make(chan StallReason, 1),
+		stallCh:        make(chan StallReason, 1),
 	}
 
 	// Register callback on stdout to track activity and scan for repeated errors.
