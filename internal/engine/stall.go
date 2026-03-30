@@ -6,6 +6,7 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/zulandar/railyard/internal/messaging"
@@ -49,6 +50,8 @@ type StallDetector struct {
 	stopped      bool
 
 	stallCh chan StallReason
+
+	isProcessAlive func() bool // optional; returns true if subprocess PID is alive
 }
 
 // NewStallDetector creates a StallDetector with the given thresholds.
@@ -82,6 +85,14 @@ func NewStallDetector(sess *Session, cfg StallConfig) *StallDetector {
 	// Stderr only resets the activity timer; repeated-error scanning stays stdout-only.
 	sess.stderr.onWrite = func(p []byte) {
 		sd.touchActivity()
+	}
+
+	// Set up process-alive checker using the subprocess PID.
+	sd.isProcessAlive = func() bool {
+		if sess.cmd == nil || sess.cmd.Process == nil {
+			return false
+		}
+		return sess.cmd.Process.Signal(syscall.Signal(0)) == nil
 	}
 
 	return sd
@@ -250,9 +261,15 @@ func (sd *StallDetector) findRepeatedLine() string {
 // monitor periodically checks for stdout timeout.
 func (sd *StallDetector) monitor(ctx context.Context) {
 	// Check at 1/4 of the timeout interval for responsiveness.
+	// Floor is 50ms to allow short timeouts in tests, but cap the floor at 1s
+	// for normal (>= 4s) timeouts.
 	checkInterval := sd.cfg.StdoutTimeout / 4
-	if checkInterval < time.Second {
-		checkInterval = time.Second
+	floor := time.Second
+	if sd.cfg.StdoutTimeout < 4*time.Second {
+		floor = 50 * time.Millisecond
+	}
+	if checkInterval < floor {
+		checkInterval = floor
 	}
 
 	ticker := time.NewTicker(checkInterval)
@@ -275,9 +292,15 @@ func (sd *StallDetector) monitor(ctx context.Context) {
 			if elapsed >= sd.cfg.StdoutTimeout {
 				sd.mu.Lock()
 				if !sd.stopped {
+					if sd.isProcessAlive != nil && sd.isProcessAlive() {
+						// Process is alive — extend timeout, don't fire stall.
+						sd.lastActivityAt = time.Now()
+						sd.mu.Unlock()
+						continue
+					}
 					sd.emitStall(StallReason{
 						Type:    "stdout_timeout",
-						Detail:  fmt.Sprintf("no stdout for %s (threshold %s)", elapsed.Round(time.Second), sd.cfg.StdoutTimeout),
+						Detail:  fmt.Sprintf("no output for %s (threshold %s) and process is not alive", elapsed.Round(time.Second), sd.cfg.StdoutTimeout),
 						Snippet: snippet,
 					})
 				}

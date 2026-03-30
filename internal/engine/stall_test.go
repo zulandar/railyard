@@ -92,8 +92,8 @@ func TestStallDetector_StdoutTimeout(t *testing.T) {
 		if reason.Type != "stdout_timeout" {
 			t.Errorf("Type = %q, want %q", reason.Type, "stdout_timeout")
 		}
-		if !strings.Contains(reason.Detail, "no stdout") {
-			t.Errorf("Detail = %q, want to contain %q", reason.Detail, "no stdout")
+		if !strings.Contains(reason.Detail, "no output") {
+			t.Errorf("Detail = %q, want to contain %q", reason.Detail, "no output")
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for stdout_timeout stall")
@@ -619,6 +619,57 @@ func TestStallDetector_StderrResetsTimer(t *testing.T) {
 		t.Fatalf("unexpected stall: %s", reason.Detail)
 	case <-time.After(350 * time.Millisecond):
 		// No stall — correct behavior.
+	}
+}
+
+// --- Process-alive guard ---
+
+func TestStallDetector_ProcessAliveDefersStall(t *testing.T) {
+	sess := newMockSession()
+	sd := NewStallDetector(sess, StallConfig{
+		StdoutTimeout: 80 * time.Millisecond,
+	})
+
+	// Override process-alive check to return true (process is alive).
+	sd.isProcessAlive = func() bool { return true }
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sd.Start(ctx)
+
+	// Wait well past the timeout — process alive should defer the stall.
+	select {
+	case reason := <-sd.Stalled():
+		t.Fatalf("unexpected stall while process alive: %s", reason.Detail)
+	case <-time.After(300 * time.Millisecond):
+		// No stall — correct behavior.
+	}
+}
+
+func TestStallDetector_ProcessDeadEmitsStall(t *testing.T) {
+	sess := newMockSession()
+	sd := NewStallDetector(sess, StallConfig{
+		StdoutTimeout: 80 * time.Millisecond,
+	})
+
+	// Override process-alive check to return false (process is dead).
+	sd.isProcessAlive = func() bool { return false }
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sd.Start(ctx)
+
+	// Stall should fire — process is dead and no output.
+	select {
+	case reason := <-sd.Stalled():
+		if reason.Type != "stdout_timeout" {
+			t.Errorf("Type = %q, want %q", reason.Type, "stdout_timeout")
+		}
+		if !strings.Contains(reason.Detail, "process is not alive") {
+			t.Errorf("Detail should mention process not alive, got: %s", reason.Detail)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("expected stall for dead process, none received")
 	}
 }
 
