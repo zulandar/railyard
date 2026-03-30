@@ -52,8 +52,9 @@ type TriageOpts struct {
 	Tracks       []TrackInfo
 	IgnoreLabel  string
 	Tracked      []ExistingIssue
-	CodeContext  string
+	CodeContext   string
 	BranchPrefix string
+	Comments     []CommentContext
 }
 
 // TriageOutcome describes the result of triaging a single issue.
@@ -86,6 +87,7 @@ func ExecuteTriage(ctx context.Context, issue *github.Issue, opts TriageOpts) (*
 	for _, lbl := range issue.Labels {
 		issueCtx.Labels = append(issueCtx.Labels, lbl.GetName())
 	}
+	issueCtx.Comments = opts.Comments
 	prompt := BuildTriagePrompt(issueCtx, opts.Config.TriageMode, opts.Tracks, opts.CodeContext)
 
 	// 3. Call AI.

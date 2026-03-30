@@ -199,6 +199,31 @@ func (g *GitHubClient) AddComment(ctx context.Context, number int, body string) 
 	return nil
 }
 
+// ListIssueComments returns the most recent comments on an issue, newest first,
+// limited to the specified count.
+func (g *GitHubClient) ListIssueComments(ctx context.Context, number int, limit int) ([]*github.IssueComment, error) {
+	opts := &github.IssueListCommentsOptions{
+		Sort:      github.Ptr("created"),
+		Direction: github.Ptr("desc"),
+		ListOptions: github.ListOptions{
+			PerPage: limit,
+		},
+	}
+	comments, resp, err := g.client.Issues.ListComments(ctx, g.owner, g.repo, number, opts)
+	if err != nil {
+		if _, ok := g.handleRateLimitError(resp, err); ok {
+			comments, resp, err = g.client.Issues.ListComments(ctx, g.owner, g.repo, number, opts)
+			if err != nil {
+				return nil, fmt.Errorf("bull: list comments for #%d retry: %w", number, err)
+			}
+		} else {
+			return nil, fmt.Errorf("bull: list comments for #%d: %w", number, err)
+		}
+	}
+	g.waitIfRateLimited(resp)
+	return comments, nil
+}
+
 // CloseIssue adds a comment and then closes the issue.
 func (g *GitHubClient) CloseIssue(ctx context.Context, number int, comment string) error {
 	if err := g.AddComment(ctx, number, comment); err != nil {

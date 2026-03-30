@@ -56,6 +56,19 @@ func (m *mockTriageAI) RunPrompt(_ context.Context, _ string) (string, error) {
 	return m.response, m.err
 }
 
+type capturingTriageAI struct {
+	response   string
+	err        error
+	called     bool
+	lastPrompt string
+}
+
+func (m *capturingTriageAI) RunPrompt(_ context.Context, prompt string) (string, error) {
+	m.called = true
+	m.lastPrompt = prompt
+	return m.response, m.err
+}
+
 type mockTriageStore struct {
 	createdCars    []CarCreateOpts
 	recordedIssues []models.BullIssue
@@ -535,6 +548,37 @@ func TestExecuteTriage_RawResponsePopulatedOnReject(t *testing.T) {
 	}
 	if outcome.RawResponse != rawAIOutput {
 		t.Errorf("expected outcome.RawResponse = %q, got %q", rawAIOutput, outcome.RawResponse)
+	}
+}
+
+func TestExecuteTriage_CommentsIncludedInPrompt(t *testing.T) {
+	client := &mockTriageClient{}
+	store := &mockTriageStore{carIDToReturn: "CAR-COMMENTS"}
+
+	issue := makeIssue(30, "Parser crashes on edge case", "The parser crashes when handling specially crafted input with unicode characters")
+
+	capAI := &capturingTriageAI{response: makeAIResponse("bug", nil)}
+	opts := defaultOpts(client, &mockTriageAI{}, store)
+	opts.AI = capAI
+	opts.Comments = []CommentContext{
+		{Author: "helper", Body: "I can reproduce this too.", Date: "2026-03-15"},
+	}
+
+	_, err := ExecuteTriage(context.Background(), issue, opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !capAI.called {
+		t.Fatal("AI should have been called")
+	}
+	if !strings.Contains(capAI.lastPrompt, "Discussion") {
+		t.Error("prompt sent to AI should contain Discussion section")
+	}
+	if !strings.Contains(capAI.lastPrompt, "@helper") {
+		t.Error("prompt sent to AI should contain comment author")
+	}
+	if !strings.Contains(capAI.lastPrompt, "I can reproduce this too.") {
+		t.Error("prompt sent to AI should contain comment body")
 	}
 }
 
