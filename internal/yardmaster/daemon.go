@@ -181,7 +181,7 @@ func RunDaemon(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath,
 			timePhase("pr-review", func() {
 				if cfg.RequirePR {
 					prViewer := &ghPRViewer{repoDir: repoDir}
-					if err := handlePrOpenCars(db, prViewer, cfg.Yardmaster.AutoMergeOnApproval, repoDir, cfg, out); err != nil {
+					if err := handlePrOpenCars(db, prViewer, cfg.Yardmaster.AutoMergeOnApproval, repoDir, ymDir, cfg, out); err != nil {
 						log.Printf("yardmaster pr review error: %v", err)
 					}
 				}
@@ -1049,7 +1049,7 @@ func (g *ghPRViewer) MergePR(branch string) error {
 // handlePrOpenCars polls pr_open cars for GitHub review status and transitions
 // them based on the PR state: changes_requested → open, merged → merged, closed → cancelled.
 // When autoMerge is true, APPROVED PRs are automatically merged via the viewer.
-func handlePrOpenCars(db *gorm.DB, viewer PRViewer, autoMerge bool, repoDir string, cfg *config.Config, out io.Writer) error {
+func handlePrOpenCars(db *gorm.DB, viewer PRViewer, autoMerge bool, repoDir, ymDir string, cfg *config.Config, out io.Writer) error {
 	prCars, err := car.List(db, car.ListFilters{Status: "pr_open"})
 	if err != nil {
 		return err
@@ -1080,20 +1080,25 @@ func handlePrOpenCars(db *gorm.DB, viewer PRViewer, autoMerge bool, repoDir stri
 		case status.Mergeable == "CONFLICTING" && status.State == "OPEN":
 			// Check if base branch has advanced since last rebase attempt.
 			currentBaseHead := getRemoteHeadCommit(repoDir, baseBranch)
+			if currentBaseHead == "" {
+				continue // unable to determine remote HEAD, skip
+			}
 			if c.LastRebaseBaseHead == currentBaseHead {
 				continue // base hasn't moved, skip
 			}
 
 			// Attempt rebase using existing conflict resolution pipeline.
-			resolved, resolveErr := tryResolveConflict(repoDir, c.Branch, baseBranch)
+			// Use ymDir (yardmaster worktree) to avoid mutating primary repo.
+			resolved, resolveErr := tryResolveConflict(ymDir, c.Branch, baseBranch)
 			if resolved {
-				if pushErr := gitForcePushBranch(repoDir, c.Branch); pushErr != nil {
+				if pushErr := gitForcePushBranch(ymDir, c.Branch); pushErr != nil {
 					log.Printf("force push after rebase for %s: %v", c.ID, pushErr)
 					writeProgressNote(db, c.ID, "yardmaster", fmt.Sprintf("Rebase succeeded but force push failed: %v", pushErr))
-				} else {
-					writeProgressNote(db, c.ID, "yardmaster", "Auto-rebased branch onto updated "+baseBranch)
-					fmt.Fprintf(out, "Auto-rebased PR branch for car %s\n", c.ID)
+					// Don't record base HEAD so the next cycle retries.
+					continue
 				}
+				writeProgressNote(db, c.ID, "yardmaster", "Auto-rebased branch onto updated "+baseBranch)
+				fmt.Fprintf(out, "Auto-rebased PR branch for car %s\n", c.ID)
 			} else {
 				detail := ""
 				if resolveErr != nil {
@@ -1107,9 +1112,11 @@ func handlePrOpenCars(db *gorm.DB, viewer PRViewer, autoMerge bool, repoDir stri
 				fmt.Fprintf(out, "Car %s PR has unresolvable conflict — human notified\n", c.ID)
 			}
 
-			// Record base HEAD regardless of outcome.
-			db.Model(&models.Car{}).Where("id = ?", c.ID).
-				Update("last_rebase_base_head", currentBaseHead)
+			// Record base HEAD so we don't retry until the base advances again.
+			if err := db.Model(&models.Car{}).Where("id = ?", c.ID).
+				Update("last_rebase_base_head", currentBaseHead).Error; err != nil {
+				log.Printf("update last_rebase_base_head for %s: %v", c.ID, err)
+			}
 
 		case status.State == "MERGED":
 			now := time.Now()

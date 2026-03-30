@@ -731,7 +731,7 @@ func TestHandlePrOpenCars_ChangesRequested(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := handlePrOpenCars(db, viewer, false, "", nil, &buf)
+	err := handlePrOpenCars(db, viewer, false, "", "", nil, &buf)
 	if err != nil {
 		t.Fatalf("handlePrOpenCars: %v", err)
 	}
@@ -773,7 +773,7 @@ func TestHandlePrOpenCars_ChangesRequestedWithInlineComments(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := handlePrOpenCars(db, viewer, false, "", nil, &buf)
+	err := handlePrOpenCars(db, viewer, false, "", "", nil, &buf)
 	if err != nil {
 		t.Fatalf("handlePrOpenCars: %v", err)
 	}
@@ -816,7 +816,7 @@ func TestHandlePrOpenCars_ChangesRequestedWithConversationComments(t *testing.T)
 	}
 
 	var buf bytes.Buffer
-	err := handlePrOpenCars(db, viewer, false, "", nil, &buf)
+	err := handlePrOpenCars(db, viewer, false, "", "", nil, &buf)
 	if err != nil {
 		t.Fatalf("handlePrOpenCars: %v", err)
 	}
@@ -859,7 +859,7 @@ func TestHandlePrOpenCars_ChangesRequestedAllCommentTypes(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := handlePrOpenCars(db, viewer, false, "", nil, &buf)
+	err := handlePrOpenCars(db, viewer, false, "", "", nil, &buf)
 	if err != nil {
 		t.Fatalf("handlePrOpenCars: %v", err)
 	}
@@ -903,7 +903,7 @@ func TestHandlePrOpenCars_ChangesRequestedEmptyComments(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := handlePrOpenCars(db, viewer, false, "", nil, &buf)
+	err := handlePrOpenCars(db, viewer, false, "", "", nil, &buf)
 	if err != nil {
 		t.Fatalf("handlePrOpenCars: %v", err)
 	}
@@ -950,7 +950,7 @@ func TestHandlePrOpenCars_FetchCommentsError(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := handlePrOpenCars(db, viewer, false, "", nil, &buf)
+	err := handlePrOpenCars(db, viewer, false, "", "", nil, &buf)
 	if err != nil {
 		t.Fatalf("handlePrOpenCars: %v", err)
 	}
@@ -1083,7 +1083,7 @@ func TestHandlePrOpenCars_Merged(t *testing.T) {
 	viewer := &mockPRViewer{state: "MERGED"}
 
 	var buf bytes.Buffer
-	err := handlePrOpenCars(db, viewer, false, "", nil, &buf)
+	err := handlePrOpenCars(db, viewer, false, "", "", nil, &buf)
 	if err != nil {
 		t.Fatalf("handlePrOpenCars: %v", err)
 	}
@@ -1108,7 +1108,7 @@ func TestHandlePrOpenCars_Closed(t *testing.T) {
 	viewer := &mockPRViewer{state: "CLOSED"}
 
 	var buf bytes.Buffer
-	err := handlePrOpenCars(db, viewer, false, "", nil, &buf)
+	err := handlePrOpenCars(db, viewer, false, "", "", nil, &buf)
 	if err != nil {
 		t.Fatalf("handlePrOpenCars: %v", err)
 	}
@@ -1126,7 +1126,7 @@ func TestHandlePrOpenCars_NoPrOpenCars(t *testing.T) {
 	viewer := &mockPRViewer{state: "OPEN"}
 
 	var buf bytes.Buffer
-	err := handlePrOpenCars(db, viewer, false, "", nil, &buf)
+	err := handlePrOpenCars(db, viewer, false, "", "", nil, &buf)
 	if err != nil {
 		t.Fatalf("handlePrOpenCars: %v", err)
 	}
@@ -1148,7 +1148,7 @@ func TestHandlePrOpenCars_ApprovedNoAction(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := handlePrOpenCars(db, viewer, false, "", nil, &buf)
+	err := handlePrOpenCars(db, viewer, false, "", "", nil, &buf)
 	if err != nil {
 		t.Fatalf("handlePrOpenCars: %v", err)
 	}
@@ -1174,7 +1174,7 @@ func TestHandlePrOpenCars_NoBranch(t *testing.T) {
 	viewer := &mockPRViewer{state: "CLOSED"}
 
 	var buf bytes.Buffer
-	err := handlePrOpenCars(db, viewer, false, "", nil, &buf)
+	err := handlePrOpenCars(db, viewer, false, "", "", nil, &buf)
 	if err != nil {
 		t.Fatalf("handlePrOpenCars: %v", err)
 	}
@@ -1210,7 +1210,7 @@ func TestHandlePrOpenCars_ApprovedAutoMerge(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := handlePrOpenCars(db, viewer, true, "", nil, &buf)
+	err := handlePrOpenCars(db, viewer, true, "", "", nil, &buf)
 	if err != nil {
 		t.Fatalf("handlePrOpenCars: %v", err)
 	}
@@ -1250,7 +1250,7 @@ func TestHandlePrOpenCars_ApprovedNoAutoMergeWhenDisabled(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := handlePrOpenCars(db, viewer, false, "", nil, &buf)
+	err := handlePrOpenCars(db, viewer, false, "", "", nil, &buf)
 	if err != nil {
 		t.Fatalf("handlePrOpenCars: %v", err)
 	}
@@ -1283,7 +1283,7 @@ func TestHandlePrOpenCars_ApprovedMergeFailure(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := handlePrOpenCars(db, viewer, true, "", nil, &buf)
+	err := handlePrOpenCars(db, viewer, true, "", "", nil, &buf)
 	if err != nil {
 		t.Fatalf("handlePrOpenCars: %v", err)
 	}
@@ -1320,7 +1320,7 @@ func TestHandlePrOpenCars_ApprovedButNotOpen_NoMerge(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := handlePrOpenCars(db, viewer, true, "", nil, &buf)
+	err := handlePrOpenCars(db, viewer, true, "", "", nil, &buf)
 	if err != nil {
 		t.Fatalf("handlePrOpenCars: %v", err)
 	}
@@ -1364,7 +1364,7 @@ func TestHandlePrOpenCars_ExternalMergeUnblocksDeps(t *testing.T) {
 	viewer := &mockPRViewer{state: "MERGED"}
 
 	var buf bytes.Buffer
-	err := handlePrOpenCars(db, viewer, false, "", nil, &buf)
+	err := handlePrOpenCars(db, viewer, false, "", "", nil, &buf)
 	if err != nil {
 		t.Fatalf("handlePrOpenCars: %v", err)
 	}
@@ -1411,7 +1411,7 @@ func TestHandlePrOpenCars_AutoMergeUnblocksDeps(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := handlePrOpenCars(db, viewer, true, "", nil, &buf)
+	err := handlePrOpenCars(db, viewer, true, "", "", nil, &buf)
 	if err != nil {
 		t.Fatalf("handlePrOpenCars: %v", err)
 	}
@@ -2098,7 +2098,7 @@ func TestHandlePrOpenCars_ConflictingAutoRebase(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := handlePrOpenCars(db, viewer, false, repoDir, nil, &buf)
+	err := handlePrOpenCars(db, viewer, false, repoDir, repoDir, nil, &buf)
 	if err != nil {
 		t.Fatalf("handlePrOpenCars: %v", err)
 	}
@@ -2150,7 +2150,7 @@ func TestHandlePrOpenCars_ConflictingSkipWhenMainUnchanged(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := handlePrOpenCars(db, viewer, false, repoDir, nil, &buf)
+	err := handlePrOpenCars(db, viewer, false, repoDir, repoDir, nil, &buf)
 	if err != nil {
 		t.Fatalf("handlePrOpenCars: %v", err)
 	}
@@ -2202,7 +2202,7 @@ func TestHandlePrOpenCars_UnresolvableConflict(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := handlePrOpenCars(db, viewer, false, repoDir, nil, &buf)
+	err := handlePrOpenCars(db, viewer, false, repoDir, repoDir, nil, &buf)
 	if err != nil {
 		t.Fatalf("handlePrOpenCars: %v", err)
 	}
@@ -2254,7 +2254,7 @@ func TestHandlePrOpenCars_MergeableUnknownSkipped(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := handlePrOpenCars(db, viewer, false, "", nil, &buf)
+	err := handlePrOpenCars(db, viewer, false, "", "", nil, &buf)
 	if err != nil {
 		t.Fatalf("handlePrOpenCars: %v", err)
 	}
@@ -2301,7 +2301,7 @@ func TestHandlePrOpenCars_ConflictingAndApproved(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := handlePrOpenCars(db, viewer, true, repoDir, nil, &buf)
+	err := handlePrOpenCars(db, viewer, true, repoDir, repoDir, nil, &buf)
 	if err != nil {
 		t.Fatalf("handlePrOpenCars: %v", err)
 	}
