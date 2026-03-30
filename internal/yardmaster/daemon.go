@@ -181,7 +181,7 @@ func RunDaemon(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath,
 			timePhase("pr-review", func() {
 				if cfg.RequirePR {
 					prViewer := &ghPRViewer{repoDir: repoDir}
-					if err := handlePrOpenCars(db, prViewer, cfg.Yardmaster.AutoMergeOnApproval, out); err != nil {
+					if err := handlePrOpenCars(db, prViewer, cfg.Yardmaster.AutoMergeOnApproval, repoDir, cfg, out); err != nil {
 						log.Printf("yardmaster pr review error: %v", err)
 					}
 				}
@@ -1049,7 +1049,7 @@ func (g *ghPRViewer) MergePR(branch string) error {
 // handlePrOpenCars polls pr_open cars for GitHub review status and transitions
 // them based on the PR state: changes_requested → open, merged → merged, closed → cancelled.
 // When autoMerge is true, APPROVED PRs are automatically merged via the viewer.
-func handlePrOpenCars(db *gorm.DB, viewer PRViewer, autoMerge bool, out io.Writer) error {
+func handlePrOpenCars(db *gorm.DB, viewer PRViewer, autoMerge bool, repoDir string, cfg *config.Config, out io.Writer) error {
 	prCars, err := car.List(db, car.ListFilters{Status: "pr_open"})
 	if err != nil {
 		return err
