@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -284,5 +285,74 @@ func TestMonitorSession_StallCarNotDone(t *testing.T) {
 
 	if outcome.kind != outcomeStall {
 		t.Errorf("kind = %d, want outcomeStall (%d)", outcome.kind, outcomeStall)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// handleCompletionFailure
+// ---------------------------------------------------------------------------
+
+func TestEngine_CompletionPushFailure_CarBlocked(t *testing.T) {
+	gormDB := engineTestDB(t)
+
+	gormDB.Create(&models.Car{
+		ID:     "car-pf1",
+		Title:  "Push failure test",
+		Status: "done",
+		Track:  "backend",
+		Branch: "ry/alice/backend/car-pf1",
+	})
+	gormDB.Create(&models.Engine{
+		ID:         "eng-pf1",
+		Track:      "backend",
+		Status:     "busy",
+		CurrentCar: "car-pf1",
+	})
+
+	// HandleCompletion will fail because RepoDir doesn't exist.
+	var eng models.Engine
+	gormDB.First(&eng, "id = ?", "eng-pf1")
+	var car models.Car
+	gormDB.First(&car, "id = ?", "car-pf1")
+
+	err := engine.HandleCompletion(gormDB, &car, &eng, engine.CompletionOpts{
+		RepoDir:   "/nonexistent/path",
+		SessionID: "sess-pf1",
+	})
+	if err == nil {
+		t.Fatal("expected error from HandleCompletion with bad repoDir")
+	}
+
+	// Simulate what engine.go should do on HandleCompletion failure.
+	handleCompletionFailure(gormDB, "car-pf1", "eng-pf1", "sess-pf1", err)
+
+	// Verify car is blocked.
+	gormDB.First(&car, "id = ?", "car-pf1")
+	if car.Status != "blocked" {
+		t.Errorf("status = %q, want %q", car.Status, "blocked")
+	}
+
+	// Verify progress note.
+	var notes []models.CarProgress
+	gormDB.Where("car_id = ?", "car-pf1").Find(&notes)
+	if len(notes) == 0 {
+		t.Fatal("expected progress note about completion failure")
+	}
+	found := false
+	for _, n := range notes {
+		if strings.Contains(n.Note, "Completion failed") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected progress note mentioning 'Completion failed'")
+	}
+
+	// Verify yardmaster message.
+	var msgs []models.Message
+	gormDB.Where("subject = ? AND car_id = ?", "completion-failed", "car-pf1").Find(&msgs)
+	if len(msgs) == 0 {
+		t.Error("expected yardmaster message about completion failure")
 	}
 }

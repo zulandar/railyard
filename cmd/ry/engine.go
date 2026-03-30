@@ -331,6 +331,7 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 				SessionID: sess.ID,
 			}); err != nil {
 				log.Printf("completion handling error: %v", err)
+				handleCompletionFailure(gormDB, claimed.ID, eng.ID, sess.ID, err)
 			}
 			// Reset cycle for next car.
 			cycle = 0
@@ -504,6 +505,27 @@ func pushInflightBranch(gormDB *gorm.DB, eng *models.Engine, repoDir string) {
 	} else {
 		log.Printf("engine: shutdown push: pushed %s before cleanup", c.Branch)
 	}
+}
+
+// handleCompletionFailure sets a car to blocked and notifies the yardmaster
+// when HandleCompletion fails (e.g., push failure). This prevents the car
+// from sitting in "done" status with no code on the remote.
+func handleCompletionFailure(db *gorm.DB, carID, engineID, sessionID string, completionErr error) {
+	db.Model(&models.Car{}).Where("id = ?", carID).
+		Update("status", "blocked")
+
+	db.Create(&models.CarProgress{
+		CarID:        carID,
+		EngineID:     engineID,
+		SessionID:    sessionID,
+		Note:         fmt.Sprintf("Completion failed: %v", completionErr),
+		FilesChanged: "[]",
+		CreatedAt:    time.Now(),
+	})
+
+	messaging.Send(db, engineID, "yardmaster", "completion-failed",
+		fmt.Sprintf("Car %s completion failed (push): %v", carID, completionErr),
+		messaging.SendOpts{CarID: carID, Priority: "urgent"})
 }
 
 // sleepWithContext sleeps for the given duration but returns early if ctx is cancelled.
