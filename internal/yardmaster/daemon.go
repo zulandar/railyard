@@ -682,6 +682,14 @@ func reconcileStaleCars(db *gorm.DB, repoDir string, logger *slog.Logger) error 
 
 		for _, c := range cars {
 			if mergedBranches[c.Branch] {
+				// Guard: skip branches with zero commits ahead of base.
+				// A zero-commit branch means the engine never committed work —
+				// it should not be treated as merged.
+				if !branchHasUniqueCommits(repoDir, c.Branch, base) {
+					logger.Warn("Reconcile: skip zero-commit branch",
+						"car", c.ID, "branch", c.Branch, "base", base)
+					continue
+				}
 				logger.Info("Car state transition", "car", c.ID, "title", c.Title, "transition", "reconciled->merged", "branch", c.Branch, "base", base)
 				if err := db.Model(&models.Car{}).Where("id = ?", c.ID).Updates(map[string]interface{}{
 					"status":       "merged",
@@ -718,6 +726,61 @@ func getMergedBranches(repoDir, target string) (map[string]bool, error) {
 		}
 	}
 	return merged, nil
+}
+
+// branchHasUniqueCommits returns true if the given branch has at least one
+// unique commit (i.e., the branch was worked on). It detects zero-commit
+// branches by checking whether the branch tip is on the base's first-parent
+// (mainline) history. A zero-commit branch was created from base and never
+// committed to, so its tip IS a mainline commit. A truly merged branch has
+// its tip on a side branch that was brought in via merge — the tip is NOT
+// on the first-parent lineage.
+//
+// Checks origin/{branch} first (remote truth), falling back to local ref.
+// Returns false (safe default) on any error.
+func branchHasUniqueCommits(repoDir, branch, baseBranch string) bool {
+	// Resolve branch ref: prefer origin.
+	branchRef := "origin/" + branch
+	check := exec.Command("git", "rev-parse", "--verify", branchRef)
+	check.Dir = repoDir
+	if _, err := check.CombinedOutput(); err != nil {
+		branchRef = branch
+	}
+
+	// Resolve base ref: prefer origin.
+	baseRef := "origin/" + baseBranch
+	checkBase := exec.Command("git", "rev-parse", "--verify", baseRef)
+	checkBase.Dir = repoDir
+	if _, err := checkBase.CombinedOutput(); err != nil {
+		baseRef = baseBranch
+	}
+
+	// Get branch tip commit hash.
+	tipCmd := exec.Command("git", "rev-parse", branchRef)
+	tipCmd.Dir = repoDir
+	tipOut, err := tipCmd.CombinedOutput()
+	if err != nil {
+		return false
+	}
+	tip := strings.TrimSpace(string(tipOut))
+
+	// Walk base's first-parent lineage (the mainline). If the branch tip
+	// appears here, it was never on a side branch — zero-commit.
+	// Limit to 500 commits for performance; older zero-commit branches
+	// would pass through (safe: they'd just be re-checked next cycle).
+	logCmd := exec.Command("git", "rev-list", "--first-parent", "--max-count=500", baseRef)
+	logCmd.Dir = repoDir
+	logOut, err := logCmd.CombinedOutput()
+	if err != nil {
+		return false
+	}
+
+	for _, line := range strings.Split(string(logOut), "\n") {
+		if strings.TrimSpace(line) == tip {
+			return false // tip is on mainline = zero-commit branch
+		}
+	}
+	return true // tip was on a side branch = has unique work
 }
 
 // handleEscalateResult acts on the decision returned by Claude escalation.

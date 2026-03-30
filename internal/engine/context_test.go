@@ -264,7 +264,11 @@ func TestRenderContext_Instructions(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
+		"## Git Workflow — CRITICAL",
+		"MUST commit your work to git regularly",
+		"ry complete` will be **rejected** if your branch has zero commits",
 		"## When You're Done",
+		"git log --oneline origin/main..HEAD",
 		"ry complete",
 		"do NOT send a message",
 		"## If You're Stuck",
@@ -280,6 +284,21 @@ func TestRenderContext_Instructions(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("instructions missing %q", want)
 		}
+	}
+}
+
+func TestRenderContext_GitWorkflowBeforeInstructions(t *testing.T) {
+	out, err := RenderContext(makeInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitIdx := strings.Index(out, "## Git Workflow — CRITICAL")
+	doneIdx := strings.Index(out, "## When You're Done")
+	if gitIdx == -1 {
+		t.Fatal("missing Git Workflow section")
+	}
+	if gitIdx > doneIdx {
+		t.Error("Git Workflow section should appear before 'When You're Done'")
 	}
 }
 
@@ -344,6 +363,7 @@ func TestRenderContext_FullTemplate(t *testing.T) {
 		"## Previous Progress (if resuming)",
 		"## Yardmaster Messages",
 		"## Recent Commits on Your Branch",
+		"## Git Workflow — CRITICAL",
 		"## Git Commit Attribution",
 		"## When You're Done",
 		"## If You're Stuck",

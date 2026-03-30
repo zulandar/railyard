@@ -2,11 +2,13 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/zulandar/railyard/internal/car"
+	"github.com/zulandar/railyard/internal/engine"
 	"github.com/zulandar/railyard/internal/models"
 )
 
@@ -39,6 +41,18 @@ func runComplete(cmd *cobra.Command, configPath, carID, summary string) error {
 	b, err := car.Get(gormDB, carID)
 	if err != nil {
 		return err
+	}
+
+	// Guard: reject completion if branch has zero commits ahead of base.
+	// ry complete runs inside the engine's worktree, so use cwd.
+	baseBranch := b.BaseBranch
+	if baseBranch == "" {
+		baseBranch = "main"
+	}
+	if cwd, wdErr := os.Getwd(); wdErr == nil {
+		if count, cErr := engine.CommitsAheadOfBase(cwd, baseBranch); cErr == nil && count == 0 {
+			return fmt.Errorf("complete rejected: branch has zero commits ahead of %s — you must commit your work before completing", baseBranch)
+		}
 	}
 
 	// Transition to done.

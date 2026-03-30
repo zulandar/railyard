@@ -434,6 +434,75 @@ func TestReconcileStaleCars_PrOpenMergedBranch(t *testing.T) {
 	}
 }
 
+// TestReconcileStaleCars_ZeroCommitBranch verifies that the reconciler does NOT
+// mark a car as merged when its branch has zero commits ahead of base. This is
+// the "ghost completion" scenario: engine creates a branch but never commits.
+func TestReconcileStaleCars_ZeroCommitBranch(t *testing.T) {
+	bareDir := t.TempDir()
+	parentDir := t.TempDir()
+
+	run := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("%v in %s failed: %s: %v", args, dir, out, err)
+		}
+	}
+
+	run(bareDir, "git", "init", "--bare", "-b", "main")
+	run(parentDir, "git", "clone", bareDir, "repo")
+	repoDir := filepath.Join(parentDir, "repo")
+	run(repoDir, "git", "config", "user.email", "test@test.com")
+	run(repoDir, "git", "config", "user.name", "test")
+	run(repoDir, "git", "commit", "--allow-empty", "-m", "init")
+	run(repoDir, "git", "push", "origin", "main")
+
+	// Zero-commit branch: created from main, pushed with no additional commits.
+	// This simulates an engine that claimed a car but never committed.
+	run(repoDir, "git", "checkout", "-b", "ry/backend/car-ghost")
+	run(repoDir, "git", "push", "origin", "ry/backend/car-ghost")
+	run(repoDir, "git", "checkout", "main")
+
+	// Real merged branch: has commits and is merged into main.
+	run(repoDir, "git", "checkout", "-b", "ry/backend/car-real")
+	run(repoDir, "git", "commit", "--allow-empty", "-m", "real work")
+	run(repoDir, "git", "checkout", "main")
+	run(repoDir, "git", "merge", "--no-ff", "ry/backend/car-real", "-m", "merge real")
+	run(repoDir, "git", "push", "origin", "main")
+
+	db := testDB(t)
+	db.Create(&models.Car{ID: "car-ghost", Branch: "ry/backend/car-ghost", BaseBranch: "main", Status: "in_progress", Track: "backend"})
+	db.Create(&models.Car{ID: "car-real", Branch: "ry/backend/car-real", BaseBranch: "main", Status: "in_progress", Track: "backend"})
+
+	var buf bytes.Buffer
+	logger := testLogger(&buf)
+	if err := reconcileStaleCars(db, repoDir, logger); err != nil {
+		t.Fatalf("reconcileStaleCars: %v", err)
+	}
+
+	// Ghost car: zero commits ahead of main — must NOT be marked merged.
+	var ghost models.Car
+	db.First(&ghost, "id = ?", "car-ghost")
+	if ghost.Status != "in_progress" {
+		t.Errorf("car-ghost status = %q, want %q (zero-commit branch should not reconcile)", ghost.Status, "in_progress")
+	}
+
+	// Real car: has commits merged into main — should be reconciled.
+	var real models.Car
+	db.First(&real, "id = ?", "car-real")
+	if real.Status != "merged" {
+		t.Errorf("car-real status = %q, want %q", real.Status, "merged")
+	}
+
+	// Verify warning log for the ghost branch.
+	output := buf.String()
+	if !strings.Contains(output, "zero-commit branch") {
+		t.Errorf("expected warning about zero-commit branch in output: %s", output)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // countRecentSwitchFailures tests
 // ---------------------------------------------------------------------------

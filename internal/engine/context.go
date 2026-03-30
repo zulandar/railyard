@@ -126,6 +126,18 @@ func writeRecentCommits(w *strings.Builder, commits []string) {
 }
 
 func writeInstructions(w *strings.Builder, engineID string) {
+	// Git workflow — CRITICAL section must come first.
+	w.WriteString("## Git Workflow — CRITICAL\n")
+	w.WriteString("**You MUST commit your work to git regularly.** Uncommitted work is permanently lost if your session ends.\n\n")
+	w.WriteString("- After completing a meaningful chunk of work (new file, passing test, feature milestone), run:\n")
+	w.WriteString("  ```\n")
+	w.WriteString("  git add -A && git commit -m \"description of what was done\"\n")
+	w.WriteString("  ```\n")
+	w.WriteString("- ALWAYS verify you have committed changes before running `ry complete`.\n")
+	w.WriteString("- Run `git status` to confirm your work is committed — if it shows \"nothing to commit\" and you have made no commits on your branch, you have NOT saved any work.\n")
+	w.WriteString("- The daemon handles `git push` — do NOT push yourself.\n")
+	w.WriteString("- `ry complete` will be **rejected** if your branch has zero commits. Your work must be committed to git.\n\n")
+
 	// Co-author trailer instruction.
 	if engineID != "" {
 		w.WriteString("## Git Commit Attribution\n")
@@ -137,12 +149,13 @@ func writeInstructions(w *strings.Builder, engineID string) {
 	}
 
 	w.WriteString("## When You're Done\n")
-	w.WriteString("1. Run tests, ensure they pass\n")
-	w.WriteString("2. Mark the car complete by running this command:\n")
+	w.WriteString("1. Verify your work is committed: `git log --oneline origin/main..HEAD` must show at least one commit\n")
+	w.WriteString("2. Run tests, ensure they pass\n")
+	w.WriteString("3. Mark the car complete by running this command:\n")
 	w.WriteString("```\n")
 	w.WriteString("ry complete <car-id> \"summary of what was done\"\n")
 	w.WriteString("```\n")
-	w.WriteString("3. The daemon will handle git push and /clear\n")
+	w.WriteString("4. The daemon will handle git push and /clear\n")
 	w.WriteString("\n**IMPORTANT**: Use the `ry complete` command above — do NOT send a message to the Yardmaster to report completion. Messages are for help requests only.\n")
 	w.WriteString("\n## If You're Stuck\n")
 	w.WriteString("1. Update progress: `ry car progress <car-id> \"what you tried, what failed\"`\n")

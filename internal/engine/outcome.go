@@ -117,8 +117,15 @@ func HandleClearCycle(db *gorm.DB, car *models.Car, engine *models.Engine, opts 
 		return fmt.Errorf("engine: write clear cycle progress: %w", err)
 	}
 
-	// Push branch to remote so work survives worktree cleanup.
+	// Auto-commit any uncommitted work so it survives worktree cleanup.
 	if car.Branch != "" && opts.RepoDir != "" {
+		msg := fmt.Sprintf("railyard: auto-commit uncommitted work (cycle %d)", opts.Cycle)
+		if committed, acErr := AutoCommitIfDirty(opts.RepoDir, msg); acErr != nil {
+			log.Printf("engine: auto-commit warning (non-fatal): %v", acErr)
+		} else if committed {
+			log.Printf("engine: auto-committed uncommitted changes for %s", car.ID)
+		}
+
 		if err := PushBranch(opts.RepoDir, car.Branch); err != nil {
 			log.Printf("engine: clear cycle push warning (non-fatal): %v", err)
 		}

@@ -301,6 +301,81 @@ func ChangedFiles(repoDir string) ([]string, error) {
 	return strings.Split(raw, "\n"), nil
 }
 
+// CommitsAheadOfBase returns the number of commits on HEAD that are not in baseBranch.
+// It tries origin/{baseBranch} first, falling back to local {baseBranch}.
+func CommitsAheadOfBase(repoDir, baseBranch string) (int, error) {
+	if repoDir == "" {
+		return 0, fmt.Errorf("engine: repo directory is required")
+	}
+	if baseBranch == "" {
+		baseBranch = "main"
+	}
+
+	// Prefer origin ref for accuracy.
+	target := "origin/" + baseBranch
+	check := exec.Command("git", "rev-parse", "--verify", target)
+	check.Dir = repoDir
+	if _, err := check.CombinedOutput(); err != nil {
+		target = baseBranch
+	}
+
+	cmd := exec.Command("git", "rev-list", "--count", target+"..HEAD")
+	cmd.Dir = repoDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return 0, fmt.Errorf("engine: rev-list count: %s", strings.TrimSpace(string(out)))
+	}
+
+	var count int
+	if _, err := fmt.Sscanf(strings.TrimSpace(string(out)), "%d", &count); err != nil {
+		return 0, fmt.Errorf("engine: parse rev-list count: %w", err)
+	}
+	return count, nil
+}
+
+// AutoCommitIfDirty stages all changes (including untracked files) and commits
+// them with the given message. Returns true if a commit was created, false if
+// the worktree was clean. This is a safety net for preserving work when an
+// engine session exits without committing.
+func AutoCommitIfDirty(repoDir, message string) (bool, error) {
+	if repoDir == "" {
+		return false, fmt.Errorf("engine: repo directory is required")
+	}
+
+	// Check for any changes (staged, unstaged, or untracked).
+	status := exec.Command("git", "status", "--porcelain")
+	status.Dir = repoDir
+	out, err := status.CombinedOutput()
+	if err != nil {
+		return false, fmt.Errorf("engine: git status: %s", strings.TrimSpace(string(out)))
+	}
+	if strings.TrimSpace(string(out)) == "" {
+		return false, nil // clean worktree
+	}
+
+	// Stage everything.
+	add := exec.Command("git", "add", "-A")
+	add.Dir = repoDir
+	if addOut, addErr := add.CombinedOutput(); addErr != nil {
+		return false, fmt.Errorf("engine: git add: %s", strings.TrimSpace(string(addOut)))
+	}
+
+	// Commit.
+	if message == "" {
+		message = "railyard: auto-commit uncommitted work"
+	}
+	commit := exec.Command("git", "commit", "-m", message)
+	commit.Dir = repoDir
+	if commitOut, commitErr := commit.CombinedOutput(); commitErr != nil {
+		// "nothing to commit" is not an error — race with clean check.
+		if strings.Contains(string(commitOut), "nothing to commit") {
+			return false, nil
+		}
+		return false, fmt.Errorf("engine: git commit: %s", strings.TrimSpace(string(commitOut)))
+	}
+	return true, nil
+}
+
 // EnsureDispatchWorktree creates a persistent git worktree at .railyard/dispatch/
 // for the dispatcher agent. Returns the absolute path to the worktree directory.
 // If the worktree already exists, it is reused.

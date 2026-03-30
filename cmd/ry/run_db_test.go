@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -299,6 +301,114 @@ func TestRunComplete_Success(t *testing.T) {
 	}
 	if c.Status != "done" {
 		t.Errorf("status = %q, want %q", c.Status, "done")
+	}
+}
+
+func TestRunComplete_ZeroCommitRejection(t *testing.T) {
+	gormDB := mockTestDB(t)
+	cleanup := withMockDB(t, gormDB)
+	defer cleanup()
+
+	now := time.Now()
+	gormDB.Create(&models.Car{
+		ID:         "car-ghost",
+		Title:      "Ghost car",
+		Status:     "in_progress",
+		Track:      "backend",
+		Branch:     "ry/backend/car-ghost",
+		BaseBranch: "main",
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	})
+
+	// Create a git repo with a zero-commit branch to simulate the ghost scenario.
+	repoDir := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = repoDir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("%v: %s\n%s", args, err, out)
+		}
+	}
+	run("git", "init", "-b", "main")
+	run("git", "config", "user.email", "test@test.com")
+	run("git", "config", "user.name", "test")
+	run("git", "commit", "--allow-empty", "-m", "init")
+	run("git", "checkout", "-b", "ry/backend/car-ghost")
+	// No commits on the branch — zero commits ahead of main.
+
+	// Change cwd to the zero-commit repo.
+	origDir, _ := os.Getwd()
+	if err := os.Chdir(repoDir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	defer os.Chdir(origDir) //nolint:errcheck
+
+	_, err := execCmd(t, []string{"complete", "car-ghost", "done", "--config", "test.yaml"})
+	if err == nil {
+		t.Fatal("expected error for zero-commit branch")
+	}
+	if !strings.Contains(err.Error(), "zero commits") {
+		t.Errorf("expected 'zero commits' error, got: %v", err)
+	}
+
+	// Verify car status was NOT changed to done.
+	var c models.Car
+	gormDB.First(&c, "id = ?", "car-ghost")
+	if c.Status == "done" {
+		t.Error("car should NOT be marked done when branch has zero commits")
+	}
+}
+
+func TestRunComplete_WithCommitsSucceeds(t *testing.T) {
+	gormDB := mockTestDB(t)
+	cleanup := withMockDB(t, gormDB)
+	defer cleanup()
+
+	now := time.Now()
+	gormDB.Create(&models.Car{
+		ID:         "car-real",
+		Title:      "Real car",
+		Status:     "in_progress",
+		Track:      "backend",
+		Branch:     "ry/backend/car-real",
+		BaseBranch: "main",
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	})
+
+	// Create a git repo with a branch that has commits.
+	repoDir := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = repoDir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("%v: %s\n%s", args, err, out)
+		}
+	}
+	run("git", "init", "-b", "main")
+	run("git", "config", "user.email", "test@test.com")
+	run("git", "config", "user.name", "test")
+	run("git", "commit", "--allow-empty", "-m", "init")
+	run("git", "checkout", "-b", "ry/backend/car-real")
+	run("git", "commit", "--allow-empty", "-m", "real work")
+
+	origDir, _ := os.Getwd()
+	if err := os.Chdir(repoDir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	defer os.Chdir(origDir) //nolint:errcheck
+
+	out, err := execCmd(t, []string{"complete", "car-real", "finished", "--config", "test.yaml"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "marked done") {
+		t.Errorf("expected 'marked done', got: %s", out)
 	}
 }
 

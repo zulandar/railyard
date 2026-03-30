@@ -760,6 +760,214 @@ func TestChangedFiles_MultipleFiles(t *testing.T) {
 	}
 }
 
+// --- CommitsAheadOfBase tests ---
+
+func TestCommitsAheadOfBase_EmptyRepoDir(t *testing.T) {
+	_, err := CommitsAheadOfBase("", "main")
+	if err == nil {
+		t.Fatal("expected error for empty repo dir")
+	}
+}
+
+func TestCommitsAheadOfBase_ZeroCommits(t *testing.T) {
+	dir := initTestRepo(t)
+
+	// Create a branch from main — zero commits ahead.
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v: %s\n%s", args, err, out)
+		}
+	}
+	run("git", "checkout", "-b", "feature")
+
+	count, err := CommitsAheadOfBase(dir, "main")
+	if err != nil {
+		t.Fatalf("CommitsAheadOfBase: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("count = %d, want 0", count)
+	}
+}
+
+func TestCommitsAheadOfBase_WithCommits(t *testing.T) {
+	dir := initTestRepo(t)
+
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v: %s\n%s", args, err, out)
+		}
+	}
+	run("git", "checkout", "-b", "feature")
+	if err := os.WriteFile(filepath.Join(dir, "feature.txt"), []byte("work\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	run("git", "add", ".")
+	run("git", "commit", "-m", "feature work")
+
+	count, err := CommitsAheadOfBase(dir, "main")
+	if err != nil {
+		t.Fatalf("CommitsAheadOfBase: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("count = %d, want 1", count)
+	}
+}
+
+func TestCommitsAheadOfBase_DefaultBase(t *testing.T) {
+	dir := initTestRepo(t)
+
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v: %s\n%s", args, err, out)
+		}
+	}
+	run("git", "checkout", "-b", "feature")
+	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("x\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	run("git", "add", ".")
+	run("git", "commit", "-m", "work")
+
+	// Empty baseBranch defaults to "main".
+	count, err := CommitsAheadOfBase(dir, "")
+	if err != nil {
+		t.Fatalf("CommitsAheadOfBase: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("count = %d, want 1", count)
+	}
+}
+
+// --- AutoCommitIfDirty tests ---
+
+func TestAutoCommitIfDirty_EmptyRepoDir(t *testing.T) {
+	_, err := AutoCommitIfDirty("", "msg")
+	if err == nil {
+		t.Fatal("expected error for empty repo dir")
+	}
+}
+
+func TestAutoCommitIfDirty_CleanWorktree(t *testing.T) {
+	dir := initTestRepo(t)
+
+	committed, err := AutoCommitIfDirty(dir, "test")
+	if err != nil {
+		t.Fatalf("AutoCommitIfDirty: %v", err)
+	}
+	if committed {
+		t.Error("expected no commit on clean worktree")
+	}
+}
+
+func TestAutoCommitIfDirty_WithUncommittedChanges(t *testing.T) {
+	dir := initTestRepo(t)
+
+	// Create a dirty file.
+	if err := os.WriteFile(filepath.Join(dir, "dirty.txt"), []byte("uncommitted\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	committed, err := AutoCommitIfDirty(dir, "auto-save")
+	if err != nil {
+		t.Fatalf("AutoCommitIfDirty: %v", err)
+	}
+	if !committed {
+		t.Fatal("expected commit on dirty worktree")
+	}
+
+	// Verify commit message.
+	cmd := exec.Command("git", "log", "-1", "--format=%s")
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git log: %v", err)
+	}
+	if strings.TrimSpace(string(out)) != "auto-save" {
+		t.Errorf("commit message = %q, want %q", strings.TrimSpace(string(out)), "auto-save")
+	}
+
+	// Verify worktree is now clean.
+	committed2, err := AutoCommitIfDirty(dir, "should-not-run")
+	if err != nil {
+		t.Fatalf("second AutoCommitIfDirty: %v", err)
+	}
+	if committed2 {
+		t.Error("expected no commit after auto-commit cleaned worktree")
+	}
+}
+
+func TestAutoCommitIfDirty_DefaultMessage(t *testing.T) {
+	dir := initTestRepo(t)
+
+	if err := os.WriteFile(filepath.Join(dir, "new.txt"), []byte("data\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	committed, err := AutoCommitIfDirty(dir, "")
+	if err != nil {
+		t.Fatalf("AutoCommitIfDirty: %v", err)
+	}
+	if !committed {
+		t.Fatal("expected commit")
+	}
+
+	cmd := exec.Command("git", "log", "-1", "--format=%s")
+	cmd.Dir = dir
+	out, _ := cmd.CombinedOutput()
+	if !strings.Contains(string(out), "railyard: auto-commit uncommitted work") {
+		t.Errorf("expected default message, got %q", strings.TrimSpace(string(out)))
+	}
+}
+
+func TestAutoCommitIfDirty_StagedAndUntracked(t *testing.T) {
+	dir := initTestRepo(t)
+
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v: %s\n%s", args, err, out)
+		}
+	}
+
+	// Staged change.
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("modified\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	run("git", "add", "README.md")
+
+	// Untracked file.
+	if err := os.WriteFile(filepath.Join(dir, "untracked.txt"), []byte("new\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	committed, err := AutoCommitIfDirty(dir, "mixed changes")
+	if err != nil {
+		t.Fatalf("AutoCommitIfDirty: %v", err)
+	}
+	if !committed {
+		t.Fatal("expected commit")
+	}
+
+	// Both files should be in the commit.
+	cmd := exec.Command("git", "diff", "--name-only", "HEAD~1", "HEAD")
+	cmd.Dir = dir
+	out, _ := cmd.CombinedOutput()
+	if !strings.Contains(string(out), "README.md") || !strings.Contains(string(out), "untracked.txt") {
+		t.Errorf("expected both files in commit, got: %s", out)
+	}
+}
+
 // --- EnsureDispatchWorktree tests ---
 
 func TestEnsureDispatchWorktree(t *testing.T) {
