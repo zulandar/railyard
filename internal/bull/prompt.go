@@ -28,13 +28,21 @@ type TrackInfo struct {
 	Conventions  []string
 }
 
+// CommentContext holds a single GitHub issue comment for triage prompt generation.
+type CommentContext struct {
+	Author string
+	Body   string
+	Date   string
+}
+
 // IssueContext provides the input data for building a triage prompt.
 type IssueContext struct {
-	Number int
-	Title  string
-	Body   string
-	Labels []string
-	Author string
+	Number   int
+	Title    string
+	Body     string
+	Labels   []string
+	Author   string
+	Comments []CommentContext
 }
 
 // BuildTriagePrompt generates the AI prompt for triaging a GitHub issue.
@@ -56,6 +64,14 @@ func BuildTriagePrompt(issue IssueContext, mode string, tracks []TrackInfo, code
 		b.WriteString(fmt.Sprintf("- **Labels**: %s\n", strings.Join(issue.Labels, ", ")))
 	}
 	b.WriteString(fmt.Sprintf("\n### Body\n\n%s\n\n", issue.Body))
+
+	// Discussion (issue comments)
+	if len(issue.Comments) > 0 {
+		b.WriteString("### Discussion\n\n")
+		for _, c := range issue.Comments {
+			fmt.Fprintf(&b, "**@%s** (%s):\n%s\n\n", c.Author, c.Date, c.Body)
+		}
+	}
 
 	// Available tracks
 	b.WriteString("## Available Tracks\n\n")

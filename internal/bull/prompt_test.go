@@ -236,6 +236,79 @@ func TestBuildTriagePrompt_ConventionsIncludeKeyValuePairs(t *testing.T) {
 	}
 }
 
+func TestBuildTriagePrompt_IncludesDiscussionSection(t *testing.T) {
+	issue := IssueContext{
+		Number: 50,
+		Title:  "Bug in parser",
+		Body:   "The parser fails on large inputs.",
+		Author: "alice",
+		Comments: []CommentContext{
+			{Author: "bob", Body: "I can reproduce this with a 10MB file.", Date: "2026-03-01"},
+			{Author: "carol", Body: "Same here, also crashes with 5MB.", Date: "2026-03-02"},
+		},
+	}
+
+	prompt := BuildTriagePrompt(issue, "standard", []TrackInfo{{Name: "backend"}}, "")
+
+	if !strings.Contains(prompt, "### Discussion") {
+		t.Error("prompt should include '### Discussion' section when comments are present")
+	}
+	if !strings.Contains(prompt, "@bob") {
+		t.Error("prompt should include comment author @bob")
+	}
+	if !strings.Contains(prompt, "I can reproduce this with a 10MB file.") {
+		t.Error("prompt should include bob's comment body")
+	}
+	if !strings.Contains(prompt, "@carol") {
+		t.Error("prompt should include comment author @carol")
+	}
+	if !strings.Contains(prompt, "2026-03-01") {
+		t.Error("prompt should include comment date")
+	}
+}
+
+func TestBuildTriagePrompt_OmitsDiscussionWhenNoComments(t *testing.T) {
+	issue := IssueContext{
+		Number: 51,
+		Title:  "Simple bug",
+		Body:   "Something is broken in the application.",
+		Author: "dev",
+	}
+
+	prompt := BuildTriagePrompt(issue, "standard", []TrackInfo{{Name: "backend"}}, "")
+
+	if strings.Contains(prompt, "Discussion") {
+		t.Error("prompt should not include Discussion section when no comments")
+	}
+}
+
+func TestBuildTriagePrompt_CommentsInChronologicalOrder(t *testing.T) {
+	issue := IssueContext{
+		Number: 52,
+		Title:  "Ordering test",
+		Body:   "Test body for verifying comment order in prompt.",
+		Author: "dev",
+		Comments: []CommentContext{
+			{Author: "first", Body: "First comment posted.", Date: "2026-01-01"},
+			{Author: "second", Body: "Second comment posted.", Date: "2026-01-02"},
+			{Author: "third", Body: "Third comment posted.", Date: "2026-01-03"},
+		},
+	}
+
+	prompt := BuildTriagePrompt(issue, "standard", []TrackInfo{{Name: "backend"}}, "")
+
+	idxFirst := strings.Index(prompt, "First comment posted.")
+	idxSecond := strings.Index(prompt, "Second comment posted.")
+	idxThird := strings.Index(prompt, "Third comment posted.")
+
+	if idxFirst == -1 || idxSecond == -1 || idxThird == -1 {
+		t.Fatal("all three comments should appear in prompt")
+	}
+	if idxFirst > idxSecond || idxSecond > idxThird {
+		t.Error("comments should appear in chronological order (oldest first)")
+	}
+}
+
 func TestParseTriageResult_ValidJSON(t *testing.T) {
 	response := `{"classification":"bug","priority":2,"track":"frontend","title":"Fix login button","description":"The login button is broken.","acceptance":"Button responds to clicks."}`
 
