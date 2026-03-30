@@ -26,8 +26,9 @@ type Car struct {
 	Acceptance  string  `gorm:"type:text"`
 	SkipTests   bool    `gorm:"default:false"`
 	RequestedBy string  `gorm:"size:64"`
-	SourceIssue int
-	CreatedAt   time.Time
+	SourceIssue        int
+	LastRebaseBaseHead string `gorm:"size:40"` // SHA of base branch HEAD when rebase was last attempted
+	CreatedAt          time.Time
 	UpdatedAt   time.Time
 	ClaimedAt   *time.Time
 	CompletedAt *time.Time

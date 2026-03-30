@@ -770,6 +770,27 @@ func TestCar_SourceIssue_CRUD(t *testing.T) {
 	}
 }
 
+func TestCarLastRebaseBaseHead(t *testing.T) {
+	db := openTestDB(t)
+
+	car := Car{
+		ID:                 "car-lrbh",
+		Title:              "Test LastRebaseBaseHead",
+		LastRebaseBaseHead: "abc123def456abc123def456abc123def456abcd",
+	}
+	if err := db.Create(&car).Error; err != nil {
+		t.Fatalf("create car: %v", err)
+	}
+
+	var loaded Car
+	if err := db.First(&loaded, "id = ?", "car-lrbh").Error; err != nil {
+		t.Fatalf("load car: %v", err)
+	}
+	if loaded.LastRebaseBaseHead != "abc123def456abc123def456abc123def456abcd" {
+		t.Errorf("LastRebaseBaseHead = %q, want %q", loaded.LastRebaseBaseHead, "abc123def456abc123def456abc123def456abcd")
+	}
+}
+
 func TestDispatchSession_PreloadConversations(t *testing.T) {
 	db := openTestDB(t)
 	now := time.Now()
