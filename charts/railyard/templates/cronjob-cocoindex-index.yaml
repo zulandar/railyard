@@ -7,7 +7,7 @@ metadata:
     {{- include "railyard.labels" . | nindent 4 }}
     app.kubernetes.io/component: cocoindex-index
 spec:
-  schedule: {{ .Values.cocoindex.indexSchedule | default "*/5 * * * *" | quote }}
+  schedule: {{ .Values.cocoindex.indexSchedule | default "*/30 * * * *" | quote }}
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 1
   failedJobsHistoryLimit: 3
@@ -46,7 +46,7 @@ spec:
                     cd /repo && git fetch --all && git reset --hard origin/{{ .Values.git.defaultBranch }}
                   else
                     rm -rf /repo/* /repo/.[!.]* 2>/dev/null
-                    git clone --branch {{ .Values.git.defaultBranch }} {{ .Values.git.repo }} /repo
+                    git clone --depth=1 --branch {{ .Values.git.defaultBranch }} {{ .Values.git.repo }} /repo
                   fi
               {{- if or .Values.auth.githubToken .Values.bull.githubToken .Values.auth.existingSecret }}
               env:
@@ -112,5 +112,10 @@ spec:
               configMap:
                 name: {{ include "railyard.fullname" . }}-config
             - name: repo
+              {{- if .Values.cocoindex.persistence.enabled }}
+              persistentVolumeClaim:
+                claimName: {{ include "railyard.fullname" . }}-cocoindex-repo
+              {{- else }}
               emptyDir: {}
+              {{- end }}
 {{- end }}

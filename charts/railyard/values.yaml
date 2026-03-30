@@ -90,10 +90,16 @@ pgvector:
 # CocoIndex (semantic code search)
 # ---------------------------------------------------------------------------
 cocoindex:
-  # -- Cron schedule for main index builds (default: every 5 minutes).
+  # -- Cron schedule for main index builds (default: every 30 minutes).
   # The job clones/fetches the default branch, then runs incremental
   # indexing. Set to "" to disable the CronJob.
-  indexSchedule: "*/5 * * * *"
+  indexSchedule: "*/30 * * * *"
+  # -- Persist the repo across CronJob runs so only deltas are fetched.
+  # When false (default), each run clones from scratch using emptyDir.
+  persistence:
+    enabled: false
+    size: 5Gi
+    storageClass: ""
 
 # ---------------------------------------------------------------------------
 # Agent authentication
