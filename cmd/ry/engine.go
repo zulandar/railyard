@@ -568,6 +568,7 @@ func monitorSessionWithDB(ctx context.Context, doneCh <-chan error, stallCh <-ch
 		// Before declaring stall, check if agent already finished.
 		var c models.Car
 		if dbErr := db.Select("status").First(&c, "id = ?", carID).Error; dbErr == nil && c.Status == "done" {
+			slog.Info("engine: stall suppressed, car already done", "car", carID)
 			return sessionOutcome{kind: outcomeCompleted}
 		}
 		return sessionOutcome{kind: outcomeStall, stallReason: reason}
@@ -578,13 +579,18 @@ func monitorSessionWithDB(ctx context.Context, doneCh <-chan error, stallCh <-ch
 		}
 		// Zero exit — verify the agent actually called ry complete.
 		var c models.Car
-		if dbErr := db.Select("status").First(&c, "id = ?", carID).Error; dbErr != nil {
-			// log via slog default — monitorSessionWithDB has no logger param; use pkg-level
+		if dbErr := db.Select("status", "blocked_reason").First(&c, "id = ?", carID).Error; dbErr != nil {
+			slog.Warn("engine: monitor could not load car status", "car", carID, "error", dbErr)
 			return sessionOutcome{kind: outcomeClear}
 		}
 		if c.Status == "done" {
 			return sessionOutcome{kind: outcomeCompleted}
 		}
+		slog.Warn("engine: agent exited cleanly but car not done",
+			"car", carID,
+			"status", c.Status,
+			"blocked_reason", c.BlockedReason,
+		)
 		return sessionOutcome{kind: outcomeClear}
 	}
 }

@@ -566,7 +566,11 @@ func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, r
 			}
 
 		} else if !result.TestsPassed {
-			logger.Warn("Car tests failed, blocked", "car", c.ID)
+			logger.Warn("Car tests failed, blocked",
+				"car", c.ID,
+				"failure_category", failCategory,
+				"test_output_tail", truncateSwitchLog(result.TestOutput, 200),
+			)
 		}
 	}
 
@@ -583,6 +587,7 @@ func handleBlockedCars(db *gorm.DB, logger *slog.Logger) error {
 		}
 
 		for _, c := range completedCars {
+			logger.Debug("handleBlockedCars: checking deps for merged car", "car", c.ID)
 			unblocked, err := UnblockDeps(db, c.ID)
 			if err != nil {
 				logger.Error("Unblock deps", "car", c.ID, "error", err)
@@ -1318,4 +1323,12 @@ func sleepWithContext(ctx context.Context, d time.Duration) {
 	case <-ctx.Done():
 	case <-time.After(d):
 	}
+}
+
+// truncateSwitchLog returns the last n bytes of s for compact log output.
+func truncateSwitchLog(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return "..." + s[len(s)-n:]
 }

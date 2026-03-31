@@ -394,6 +394,14 @@ func UnblockDeps(db *gorm.DB, carID string) ([]models.Car, error) {
 				targetStatus = "done"
 			}
 
+			slog.Info("UnblockDeps: transitioning car",
+				"car", dep.CarID,
+				"dependency", carID,
+				"blocked_reason", b.BlockedReason,
+				"from", "blocked",
+				"to", targetStatus,
+			)
+
 			result := db.Model(&models.Car{}).Where("id = ? AND status = ?", dep.CarID, "blocked").
 				Updates(map[string]interface{}{
 					"status":         targetStatus,
