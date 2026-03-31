@@ -147,7 +147,10 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 
 			if result.FailureCategory == SwitchFailInfra {
 				// Infrastructure failure — set merge-failed, escalate to human.
-				if dbErr := db.Model(&models.Car{}).Where("id = ?", carID).Update("status", "merge-failed").Error; dbErr != nil {
+				if dbErr := db.Model(&models.Car{}).Where("id = ?", carID).Updates(map[string]interface{}{
+					"status":         "merge-failed",
+					"blocked_reason": "",
+				}).Error; dbErr != nil {
 					slog.Error("update car to merge-failed", "car", carID, "error", dbErr)
 				}
 				messaging.Send(db, "yardmaster", "human", "infra-test-failure",
@@ -157,7 +160,10 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 				)
 			} else {
 				// Code test failure — set blocked, notify engine.
-				if dbErr := db.Model(&models.Car{}).Where("id = ?", carID).Update("status", "blocked").Error; dbErr != nil {
+				if dbErr := db.Model(&models.Car{}).Where("id = ?", carID).Updates(map[string]interface{}{
+					"status":         "blocked",
+					"blocked_reason": models.BlockedReasonTestFailed,
+				}).Error; dbErr != nil {
 					slog.Error("update car to blocked", "car", carID, "error", dbErr)
 				}
 				if car.Assignee != "" {

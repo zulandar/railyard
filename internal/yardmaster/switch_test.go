@@ -2003,3 +2003,47 @@ func TestGitMu_SerializesAccess(t *testing.T) {
 		t.Fatal("goroutine should have acquired lock after unlock")
 	}
 }
+
+func TestSwitch_TestFailure_SetsBlockedReason(t *testing.T) {
+	repoDir, _, run := initTestRepoWithRemote(t)
+
+	// Create a feature branch with a commit.
+	run(repoDir, "git", "checkout", "-b", "ry/alice/backend/car-br-tf")
+	run(repoDir, "git", "commit", "--allow-empty", "-m", "feature work")
+	run(repoDir, "git", "checkout", "main")
+
+	db := testDB(t)
+	db.Create(&models.Car{
+		ID:     "car-br-tf",
+		Title:  "Test failure blocked reason",
+		Track:  "backend",
+		Branch: "ry/alice/backend/car-br-tf",
+		Status: "done",
+	})
+
+	result, err := Switch(db, "car-br-tf", SwitchOpts{
+		RepoDir:     repoDir,
+		TestCommand: "exit 1", // force test failure
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.TestsPassed {
+		t.Fatal("expected tests to fail")
+	}
+	if result.FailureCategory != SwitchFailTest {
+		t.Errorf("FailureCategory = %q, want %q", result.FailureCategory, SwitchFailTest)
+	}
+
+	// Verify the car's BlockedReason was set.
+	var car models.Car
+	if err := db.First(&car, "id = ?", "car-br-tf").Error; err != nil {
+		t.Fatalf("load car: %v", err)
+	}
+	if car.Status != "blocked" {
+		t.Errorf("status = %q, want %q", car.Status, "blocked")
+	}
+	if car.BlockedReason != models.BlockedReasonTestFailed {
+		t.Errorf("BlockedReason = %q, want %q", car.BlockedReason, models.BlockedReasonTestFailed)
+	}
+}
