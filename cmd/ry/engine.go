@@ -71,6 +71,7 @@ func newEngineStartCmd() *cobra.Command {
 func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval time.Duration, logLevel string) error {
 	level := logutil.ParseLevel(os.Getenv("LOG_LEVEL"), logLevel)
 	logger := logutil.NewLogger(cmd.OutOrStdout(), cmd.ErrOrStderr(), level)
+	slog.SetDefault(logger)
 
 	cfg, err := config.Load(configPath)
 	if err != nil {

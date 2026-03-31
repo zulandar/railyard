@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -35,6 +36,7 @@ func newYardmasterCmd() *cobra.Command {
 func runYardmaster(cmd *cobra.Command, configPath, logLevel string) error {
 	level := logutil.ParseLevel(os.Getenv("LOG_LEVEL"), logLevel)
 	logger := logutil.NewLogger(cmd.OutOrStdout(), cmd.ErrOrStderr(), level)
+	slog.SetDefault(logger)
 
 	cfg, gormDB, err := connectFromConfig(configPath)
 	if err != nil {
