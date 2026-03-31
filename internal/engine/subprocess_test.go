@@ -649,9 +649,9 @@ func TestRedactSecrets_APIKeys(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := redactSecrets(tt.input)
+			got := RedactSecrets(tt.input)
 			if got != tt.want {
-				t.Errorf("redactSecrets(%q) = %q, want %q", tt.input, got, tt.want)
+				t.Errorf("RedactSecrets(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
 	}

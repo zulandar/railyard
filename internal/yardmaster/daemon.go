@@ -578,7 +578,7 @@ func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, r
 			logger.Warn("Car tests failed, blocked",
 				"car", c.ID,
 				"failure_category", failCategory,
-				"test_output_tail", truncateSwitchLog(result.TestOutput, 200),
+				"test_output_tail", engine.RedactSecrets(truncateSwitchLog(result.TestOutput, 200)),
 			)
 		}
 	}

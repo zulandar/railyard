@@ -574,7 +574,7 @@ func CheckoutExistingBranch(wtDir, branch string) error {
 
 // railyardIgnoreEntries are paths that railyard generates at runtime and must
 // not be committed by AutoCommitIfDirty. EnsureRailyardIgnore adds any missing
-// entries to .gitignore in the given directory.
+// entries to .git/info/exclude in the given directory.
 var railyardIgnoreEntries = []string{
 	".mcp.json",
 	".claude",
@@ -583,15 +583,33 @@ var railyardIgnoreEntries = []string{
 	".beads/",
 }
 
-// EnsureRailyardIgnore ensures that railyard runtime files are listed in the
-// repo's .gitignore so AutoCommitIfDirty does not commit them. Idempotent —
-// only appends entries that are missing. Creates .gitignore if it doesn't exist.
+// EnsureRailyardIgnore ensures that railyard runtime files are excluded from
+// git tracking via .git/info/exclude. Unlike .gitignore, this file is local-only
+// (not tracked), survives git reset --hard, and applies to all worktrees.
+// Idempotent — only appends entries that are missing.
 func EnsureRailyardIgnore(repoDir string) error {
-	gitignorePath := filepath.Join(repoDir, ".gitignore")
+	// Find the git common dir (handles both regular repos and worktrees).
+	cmd := exec.Command("git", "rev-parse", "--git-common-dir")
+	cmd.Dir = repoDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("engine: git common dir: %w", err)
+	}
+	gitCommonDir := strings.TrimSpace(string(out))
+	if !filepath.IsAbs(gitCommonDir) {
+		gitCommonDir = filepath.Join(repoDir, gitCommonDir)
+	}
+
+	excludePath := filepath.Join(gitCommonDir, "info", "exclude")
+
+	// Ensure the info/ directory exists.
+	if err := os.MkdirAll(filepath.Dir(excludePath), 0755); err != nil {
+		return fmt.Errorf("engine: create info dir: %w", err)
+	}
 
 	// Read existing entries.
 	existing := make(map[string]bool)
-	if data, err := os.ReadFile(gitignorePath); err == nil {
+	if data, err := os.ReadFile(excludePath); err == nil {
 		for _, line := range strings.Split(string(data), "\n") {
 			trimmed := strings.TrimSpace(line)
 			if trimmed != "" && !strings.HasPrefix(trimmed, "#") {
@@ -613,9 +631,9 @@ func EnsureRailyardIgnore(repoDir string) error {
 	}
 
 	// Append missing entries.
-	f, err := os.OpenFile(gitignorePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(excludePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		return fmt.Errorf("engine: open .gitignore: %w", err)
+		return fmt.Errorf("engine: open exclude file: %w", err)
 	}
 	defer f.Close()
 
@@ -624,10 +642,10 @@ func EnsureRailyardIgnore(repoDir string) error {
 		block += entry + "\n"
 	}
 	if _, err := f.WriteString(block); err != nil {
-		return fmt.Errorf("engine: write .gitignore: %w", err)
+		return fmt.Errorf("engine: write exclude file: %w", err)
 	}
 
-	slog.Info("engine: added missing entries to .gitignore", "count", len(missing), "entries", missing)
+	slog.Info("engine: added missing entries to .git/info/exclude", "count", len(missing), "entries", missing)
 	return nil
 }
 
