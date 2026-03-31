@@ -1141,9 +1141,10 @@ func (g *ghPRViewer) CountNonAuthorInlineComments(branch string) (int, error) {
 		return 0, fmt.Errorf("parse gh pr view: %w", err)
 	}
 
-	// Step 2: Fetch inline review comments via REST API.
+	// Step 2: Fetch inline review comments via REST API with pagination.
+	// GitHub defaults to 30 per page; --paginate fetches all pages.
 	apiPath := fmt.Sprintf("repos/{owner}/{repo}/pulls/%d/comments", prData.Number)
-	cmd2 := exec.Command("gh", "api", apiPath)
+	cmd2 := exec.Command("gh", "api", "--paginate", apiPath)
 	cmd2.Dir = g.repoDir
 	out2, err := cmd2.Output()
 	if err != nil {
@@ -1326,10 +1327,13 @@ func handlePrOpenCars(db *gorm.DB, viewer PRViewer, autoMerge bool, repoDir, ymD
 			logger.Info("PR changes requested", "car", c.ID, "transition", "pr_open->open")
 
 		case status.State == "OPEN" && cfg != nil && hasReworkLabel(status.Labels, cfg.Yardmaster.ReworkLabel):
-			reopenCarWithFeedback(db, viewer, c, nil, logger)
+			// Remove the label BEFORE reopening the car to prevent a reopen loop
+			// if the label removal fails (stale label + rework cycle = infinite loop).
 			if err := viewer.RemoveLabel(c.Branch, cfg.Yardmaster.ReworkLabel); err != nil {
-				logger.Warn("Remove rework label", "car", c.ID, "error", err)
+				logger.Error("Remove rework label failed, skipping reopen to avoid loop", "car", c.ID, "error", err)
+				continue
 			}
+			reopenCarWithFeedback(db, viewer, c, nil, logger)
 			logger.Info("PR rework label detected", "car", c.ID, "transition", "pr_open->open")
 
 		case status.State == "OPEN" && status.ReviewDecision != "APPROVED":

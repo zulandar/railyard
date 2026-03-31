@@ -301,12 +301,16 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 		result.PRUrl = prURL
 
 		// Snapshot current inline comment count for feedback detection.
-		commentCount := 0
+		// On failure, preserve the existing count from the car record to avoid
+		// resetting to 0, which would cause all old comments to appear "new"
+		// and spuriously reopen the car on the next poll cycle.
+		commentCount := car.LastPRCommentCount
 		if opts.CommentCounter != nil {
 			if cnt, cntErr := opts.CommentCounter(car.Branch); cntErr == nil {
 				commentCount = cnt
 			} else {
-				slog.Warn("Count comments for snapshot", "car", carID, "error", cntErr)
+				slog.Warn("Count comments for snapshot failed, preserving existing count",
+					"car", carID, "existing_count", car.LastPRCommentCount, "error", cntErr)
 			}
 		}
 

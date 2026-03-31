@@ -2774,7 +2774,7 @@ func TestHandlePrOpenCars_ReworkLabelCaseExact(t *testing.T) {
 	}
 }
 
-func TestHandlePrOpenCars_RemoveLabelFailureNonFatal(t *testing.T) {
+func TestHandlePrOpenCars_RemoveLabelFailureSkipsReopen(t *testing.T) {
 	db := testDB(t)
 	db.Create(&models.Car{
 		ID:     "car-label5",
@@ -2799,8 +2799,8 @@ func TestHandlePrOpenCars_RemoveLabelFailureNonFatal(t *testing.T) {
 
 	var c models.Car
 	db.First(&c, "id = ?", "car-label5")
-	if c.Status != "open" {
-		t.Errorf("status = %q, want %q (should reopen even if label removal fails)", c.Status, "open")
+	if c.Status != "pr_open" {
+		t.Errorf("status = %q, want %q (should NOT reopen when label removal fails to avoid infinite loop)", c.Status, "pr_open")
 	}
 }
 
