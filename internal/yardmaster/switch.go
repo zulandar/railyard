@@ -129,6 +129,7 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 			detachDir = opts.RepoDir
 		}
 		detachEngineWorktree(detachDir, car.Assignee)
+		slog.Debug("Switch: engine worktree detached", "car", carID, "assignee", car.Assignee)
 	}
 
 	// Run tests on the branch (unless skip_tests is set on the car).
@@ -258,6 +259,8 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 		return result, nil
 	}
 
+	slog.Debug("Switch: branch has unique commits, proceeding to merge/PR", "car", carID, "require_pr", opts.RequirePR)
+
 	if opts.RequirePR {
 		// Push the branch to origin so a PR can reference it.
 		if err := gitPushBranch(opts.RepoDir, car.Branch); err != nil {
@@ -300,9 +303,11 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 	preMergeHead := getHeadCommit(opts.RepoDir)
 
 	// Merge to the base branch.
+	slog.Debug("Switch: attempting merge", "car", carID, "branch", car.Branch, "base_branch", baseBranch)
 	if err := gitMerge(opts.RepoDir, car.Branch, baseBranch); err != nil {
 		// Attempt conflict resolution: abort failed merge, rebase branch, retry.
 		resolved, resolveErr := tryResolveConflict(opts.RepoDir, car.Branch, baseBranch)
+		slog.Debug("Switch: conflict resolution attempted", "car", carID, "resolved", resolved)
 		if !resolved {
 			result.FailureCategory = SwitchFailMerge
 			if resolveErr != nil {
@@ -327,6 +332,7 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 
 	// Push to remote before marking merged — the car should only be
 	// considered merged once the code is confirmed on the remote.
+	slog.Debug("Switch: pushing merge to remote", "car", carID, "base_branch", baseBranch)
 	if err := gitPush(opts.RepoDir, baseBranch); err != nil {
 		// Undo the local merge so the car will be retried next cycle.
 		gitResetToCommit(opts.RepoDir, preMergeHead)
@@ -341,6 +347,7 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 	gitFetchBranch(opts.RepoDir, baseBranch)
 
 	deleteRemoteBranch(opts.RepoDir, car.Branch)
+	slog.Debug("Switch: feature branch deleted from remote", "car", carID, "branch", car.Branch)
 
 	result.Merged = true
 	slog.Info("Switch: merged and pushed",
@@ -415,6 +422,12 @@ func UnblockDeps(db *gorm.DB, carID string) ([]models.Car, error) {
 			Count(&otherBlockers).Error; err != nil {
 			return nil, fmt.Errorf("yardmaster: count other blockers for %s: %w", dep.CarID, err)
 		}
+
+		slog.Debug("UnblockDeps: evaluated dependency",
+			"car", dep.CarID,
+			"resolved_dep", carID,
+			"other_blockers", otherBlockers,
+		)
 
 		if otherBlockers == 0 {
 			// Load the car to check BlockedReason before deciding target status.

@@ -430,6 +430,8 @@ func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, r
 		return err
 	}
 
+	slog.Debug("handleCompletedCars: found done cars", "count", len(cars))
+
 	// Sort by priority ASC (lower = higher priority), then CreatedAt ASC.
 	sort.Slice(cars, func(i, j int) bool {
 		if cars[i].Priority != cars[j].Priority {

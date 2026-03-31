@@ -608,6 +608,7 @@ func claimOrReclaim(gormDB *gorm.DB, eng *models.Engine, track string) (*models.
 		b, err := car.Get(gormDB, eng.CurrentCar)
 		// Only re-claim if car is still actively workable (not done, cancelled, or blocked).
 		if err == nil && b.Status != "done" && b.Status != "cancelled" && b.Status != "blocked" {
+			slog.Debug("engine: re-claiming existing car", "engine", eng.ID, "car", b.ID, "status", b.Status)
 			return b, nil
 		}
 		// Clear stale current_car — car is in a terminal/blocked state.
