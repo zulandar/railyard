@@ -512,6 +512,12 @@ func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, r
 			}
 		}
 
+		// Build a CommentCounter if PR mode is active — nil is safe otherwise.
+		var commentCounter func(string) (int, error)
+		if cfg.RequirePR {
+			commentCounter = (&ghPRViewer{repoDir: repoDir}).CountNonAuthorInlineComments
+		}
+
 		result, err := Switch(db, c.ID, SwitchOpts{
 			RepoDir:          ymDir,
 			PrimaryRepoDir:   repoDir,
@@ -520,6 +526,7 @@ func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, r
 			TestCommand:      testCommand,
 			RequirePR:        cfg.RequirePR,
 			SwitchTimeoutSec: cfg.Stall.SwitchTimeoutSec,
+			CommentCounter:   commentCounter,
 		})
 
 		// Handle any failure — write a categorized progress note and check
