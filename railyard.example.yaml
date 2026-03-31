@@ -112,6 +112,8 @@ repo: git@github.com:org/myproject.git
 #   rework_label: "railyard: rework" # GitHub label that triggers rework on pr_open PRs
 #                                    # Applied manually or by bots; removed after car is reopened.
 #                                    # Configurable per-project in Helm values (yardmaster.reworkLabel).
+#   revised_label: "railyard: revised" # Applied after revision pushes to existing PR; signals re-review needed.
+#                                      # Removed when car is reopened for further rework.
 
 # ---------------------------------------------------------------------------
 # Car priorities (reference)

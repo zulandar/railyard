@@ -22,6 +22,7 @@ import (
 // the yardmaster worktree.
 var gitMu sync.Mutex
 
+
 // SwitchOpts holds parameters for the switch (merge) operation.
 type SwitchOpts struct {
 	RepoDir          string                           // working directory (yardmaster worktree when running via daemon)
@@ -33,6 +34,16 @@ type SwitchOpts struct {
 	RequirePR        bool                             // create a draft PR instead of direct merge
 	SwitchTimeoutSec int                              // max seconds for runTests (default 600 if 0)
 	CommentCounter   func(branch string) (int, error) // nil-safe; returns non-author inline comment count for pr_open snapshot
+	RevisedLabel     string                           // label to apply after a revision pushes to an existing PR (e.g. "railyard: revised")
+
+	// PR operation hooks — nil defaults to the gh-CLI implementations.
+	// Injectable for testing the RequirePR logic without a real GitHub remote.
+	PushBranchFn    func(repoDir, branch string) error
+	GetExistingPRFn func(repoDir, branch string) (string, error)
+	CreateDraftPRFn func(repoDir, title, body, branch string) (string, error)
+	UpdatePRBodyFn  func(repoDir, branch, body string) error
+	MarkPRReadyFn   func(repoDir, branch string) error
+	AddPRLabelFn    func(repoDir, branch, label string) error
 }
 
 // SwitchFailureCategory categorizes Switch errors so the daemon can track and
@@ -263,23 +274,62 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 	slog.Debug("Switch: branch has unique commits, proceeding to merge/PR", "car", carID, "require_pr", opts.RequirePR)
 
 	if opts.RequirePR {
+		// Resolve PR operation functions — injectable for testing, default to gh CLI.
+		pushBranch := gitPushBranch
+		if opts.PushBranchFn != nil {
+			pushBranch = opts.PushBranchFn
+		}
+		getExisting := getExistingPR
+		if opts.GetExistingPRFn != nil {
+			getExisting = opts.GetExistingPRFn
+		}
+		createDraft := createDraftPR
+		if opts.CreateDraftPRFn != nil {
+			createDraft = opts.CreateDraftPRFn
+		}
+		updateBody := updatePRBody
+		if opts.UpdatePRBodyFn != nil {
+			updateBody = opts.UpdatePRBodyFn
+		}
+		markReady := markPRReady
+		if opts.MarkPRReadyFn != nil {
+			markReady = opts.MarkPRReadyFn
+		}
+		addLabel := addPRLabel
+		if opts.AddPRLabelFn != nil {
+			addLabel = opts.AddPRLabelFn
+		}
+
 		// Push the branch to origin so a PR can reference it.
-		if err := gitPushBranch(opts.RepoDir, car.Branch); err != nil {
+		if err := pushBranch(opts.RepoDir, car.Branch); err != nil {
 			result.FailureCategory = SwitchFailPush
 			result.Error = fmt.Errorf("push branch: %w", err)
 			return result, result.Error
 		}
 
 		// Check if a PR already exists for this branch (rework cycle).
-		existingURL, existsErr := getExistingPR(opts.RepoDir, car.Branch)
+		existingURL, existsErr := getExisting(opts.RepoDir, car.Branch)
 
 		var prURL string
 		if existsErr == nil && existingURL != "" {
 			// PR exists — update body with latest progress notes.
 			prBody := buildPRBody(db, &car, opts.RepoDir, baseBranch)
-			if updErr := updatePRBody(opts.RepoDir, car.Branch, prBody); updErr != nil {
+			if updErr := updateBody(opts.RepoDir, car.Branch, prBody); updErr != nil {
 				slog.Warn("Update PR body failed", "car", carID, "error", updErr)
 			}
+
+			// Mark PR as ready for review (un-draft) so reviewers know it's been revised.
+			if err := markReady(opts.RepoDir, car.Branch); err != nil {
+				slog.Warn("Mark PR ready failed", "car", carID, "error", err)
+			}
+
+			// Apply revised label to signal reviewers that changes have been pushed.
+			if opts.RevisedLabel != "" {
+				if err := addLabel(opts.RepoDir, car.Branch, opts.RevisedLabel); err != nil {
+					slog.Warn("Add revised label failed", "car", carID, "error", err)
+				}
+			}
+
 			prURL = existingURL
 			slog.Info("Switch: existing PR updated with new commits",
 				"car", carID, "branch", car.Branch, "pr_url", prURL)
@@ -287,7 +337,7 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 			// No existing PR — create a new draft.
 			prBody := buildPRBody(db, &car, opts.RepoDir, baseBranch)
 			var createErr error
-			prURL, createErr = createDraftPR(opts.RepoDir, car.Title, prBody, car.Branch)
+			prURL, createErr = createDraft(opts.RepoDir, car.Title, prBody, car.Branch)
 			if createErr != nil {
 				result.FailureCategory = SwitchFailPR
 				result.Error = fmt.Errorf("create PR: %w", createErr)
@@ -1156,6 +1206,29 @@ func updatePRBody(repoDir, branch, body string) error {
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("gh pr edit %s: %s: %w", branch, string(out), err)
+	}
+	return nil
+}
+
+// markPRReady converts a draft PR to ready-for-review using the gh CLI.
+// Non-fatal if the PR is already ready (gh pr ready is idempotent).
+func markPRReady(repoDir, branch string) error {
+	cmd := exec.Command("gh", "pr", "ready", branch)
+	cmd.Dir = repoDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("gh pr ready %s: %s: %w", branch, string(out), err)
+	}
+	return nil
+}
+
+// addPRLabel adds a label to an existing PR for the given branch.
+func addPRLabel(repoDir, branch, label string) error {
+	cmd := exec.Command("gh", "pr", "edit", branch, "--add-label", label)
+	cmd.Dir = repoDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("gh pr edit --add-label %s: %s: %w", label, string(out), err)
 	}
 	return nil
 }

@@ -2051,3 +2051,39 @@ tracks:
 		t.Errorf("Yardmaster.ReworkLabel = %q, want default %q", cfg.Yardmaster.ReworkLabel, "railyard: rework")
 	}
 }
+
+func TestDefaults_YardmasterRevisedLabel(t *testing.T) {
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+tracks:
+  - name: backend
+    language: go
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Yardmaster.RevisedLabel != "railyard: revised" {
+		t.Errorf("Yardmaster.RevisedLabel = %q, want %q", cfg.Yardmaster.RevisedLabel, "railyard: revised")
+	}
+}
+
+func TestParse_YardmasterRevisedLabelCustom(t *testing.T) {
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+tracks:
+  - name: backend
+    language: go
+yardmaster:
+  revised_label: "custom: revised"
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Yardmaster.RevisedLabel != "custom: revised" {
+		t.Errorf("Yardmaster.RevisedLabel = %q, want %q", cfg.Yardmaster.RevisedLabel, "custom: revised")
+	}
+}

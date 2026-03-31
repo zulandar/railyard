@@ -2133,14 +2133,369 @@ func TestUnblockDeps_StalledCar_TransitionsToOpen(t *testing.T) {
 		t.Fatalf("expected 1 unblocked car, got %d", len(unblocked))
 	}
 
-	var car models.Car
-	if err := db.First(&car, "id = ?", "car-stall-a").Error; err != nil {
+	var stallCar models.Car
+	if err := db.First(&stallCar, "id = ?", "car-stall-a").Error; err != nil {
 		t.Fatalf("load car: %v", err)
 	}
-	if car.Status != "open" {
-		t.Errorf("status = %q, want %q", car.Status, "open")
+	if stallCar.Status != "open" {
+		t.Errorf("status = %q, want %q", stallCar.Status, "open")
 	}
-	if car.BlockedReason != "" {
-		t.Errorf("BlockedReason = %q, want empty (cleared)", car.BlockedReason)
+	if stallCar.BlockedReason != "" {
+		t.Errorf("BlockedReason = %q, want empty (cleared)", stallCar.BlockedReason)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// RequirePR path tests (using injectable PR hooks)
+// ---------------------------------------------------------------------------
+
+// prCallTracker records which PR operations were called and with what arguments.
+type prCallTracker struct {
+	pushCalled       bool
+	getExistingURL   string // non-empty = existing PR found
+	getExistingErr   error
+	createDraftURL   string
+	createDraftErr   error
+	updateBodyCalled bool
+	markReadyCalled  bool
+	markReadyErr     error
+	addLabelCalled   bool
+	addedLabel       string
+	addLabelErr      error
+}
+
+func (p *prCallTracker) hooks() (
+	pushFn func(string, string) error,
+	getExistingFn func(string, string) (string, error),
+	createDraftFn func(string, string, string, string) (string, error),
+	updateBodyFn func(string, string, string) error,
+	markReadyFn func(string, string) error,
+	addLabelFn func(string, string, string) error,
+) {
+	pushFn = func(_, _ string) error {
+		p.pushCalled = true
+		return nil
+	}
+	getExistingFn = func(_, _ string) (string, error) {
+		return p.getExistingURL, p.getExistingErr
+	}
+	createDraftFn = func(_, _, _, _ string) (string, error) {
+		return p.createDraftURL, p.createDraftErr
+	}
+	updateBodyFn = func(_, _, _ string) error {
+		p.updateBodyCalled = true
+		return nil
+	}
+	markReadyFn = func(_, _ string) error {
+		p.markReadyCalled = true
+		return p.markReadyErr
+	}
+	addLabelFn = func(_, _, label string) error {
+		p.addLabelCalled = true
+		p.addedLabel = label
+		return p.addLabelErr
+	}
+	return
+}
+
+func TestSwitch_RequirePR_NewDraftPR(t *testing.T) {
+	repoDir, _, run := initTestRepoWithRemote(t)
+	db := testDB(t)
+
+	run(repoDir, "git", "checkout", "-b", "ry/backend/car-pr1")
+	writeFile(t, repoDir, "feature.go", "package main\n// new\n")
+	run(repoDir, "git", "add", ".")
+	run(repoDir, "git", "commit", "-m", "feature")
+	run(repoDir, "git", "checkout", "main")
+
+	db.Create(&models.Car{
+		ID: "car-pr1", Title: "New Feature", Track: "backend",
+		Status: "done", Branch: "ry/backend/car-pr1",
+	})
+
+	tracker := &prCallTracker{
+		getExistingErr: fmt.Errorf("no PR found"), // no existing PR
+		createDraftURL: "https://github.com/org/repo/pull/1",
+	}
+	push, getEx, createDr, updateBd, markRd, addLb := tracker.hooks()
+
+	result, err := Switch(db, "car-pr1", SwitchOpts{
+		RepoDir:         repoDir,
+		RequirePR:       true,
+		RevisedLabel:    "railyard: revised",
+		PushBranchFn:    push,
+		GetExistingPRFn: getEx,
+		CreateDraftPRFn: createDr,
+		UpdatePRBodyFn:  updateBd,
+		MarkPRReadyFn:   markRd,
+		AddPRLabelFn:    addLb,
+	})
+	if err != nil {
+		t.Fatalf("Switch: %v", err)
+	}
+
+	if !tracker.pushCalled {
+		t.Error("expected push to be called")
+	}
+	if !result.PRCreated {
+		t.Error("expected PRCreated=true")
+	}
+	if result.PRUrl != "https://github.com/org/repo/pull/1" {
+		t.Errorf("PRUrl = %q", result.PRUrl)
+	}
+	// New PR should NOT mark ready or add revised label.
+	if tracker.markReadyCalled {
+		t.Error("markReady should NOT be called for new PRs")
+	}
+	if tracker.addLabelCalled {
+		t.Error("addLabel should NOT be called for new PRs")
+	}
+	if tracker.updateBodyCalled {
+		t.Error("updateBody should NOT be called for new PRs (body passed to createDraft)")
+	}
+
+	// Car should be pr_open.
+	var car models.Car
+	db.First(&car, "id = ?", "car-pr1")
+	if car.Status != "pr_open" {
+		t.Errorf("status = %q, want %q", car.Status, "pr_open")
+	}
+}
+
+func TestSwitch_RequirePR_ExistingPR_MarksReadyAndLabels(t *testing.T) {
+	repoDir, _, run := initTestRepoWithRemote(t)
+	db := testDB(t)
+
+	run(repoDir, "git", "checkout", "-b", "ry/backend/car-pr2")
+	writeFile(t, repoDir, "feature.go", "package main\n// revised\n")
+	run(repoDir, "git", "add", ".")
+	run(repoDir, "git", "commit", "-m", "revision")
+	run(repoDir, "git", "checkout", "main")
+
+	db.Create(&models.Car{
+		ID: "car-pr2", Title: "Revised Feature", Track: "backend",
+		Status: "done", Branch: "ry/backend/car-pr2",
+	})
+
+	tracker := &prCallTracker{
+		getExistingURL: "https://github.com/org/repo/pull/2", // existing PR
+	}
+	push, getEx, createDr, updateBd, markRd, addLb := tracker.hooks()
+
+	result, err := Switch(db, "car-pr2", SwitchOpts{
+		RepoDir:         repoDir,
+		RequirePR:       true,
+		RevisedLabel:    "railyard: revised",
+		PushBranchFn:    push,
+		GetExistingPRFn: getEx,
+		CreateDraftPRFn: createDr,
+		UpdatePRBodyFn:  updateBd,
+		MarkPRReadyFn:   markRd,
+		AddPRLabelFn:    addLb,
+	})
+	if err != nil {
+		t.Fatalf("Switch: %v", err)
+	}
+
+	if !result.PRCreated {
+		t.Error("expected PRCreated=true")
+	}
+	if result.PRUrl != "https://github.com/org/repo/pull/2" {
+		t.Errorf("PRUrl = %q", result.PRUrl)
+	}
+	if !tracker.updateBodyCalled {
+		t.Error("expected updateBody to be called for existing PR")
+	}
+	if !tracker.markReadyCalled {
+		t.Error("expected markReady to be called for existing PR (revision)")
+	}
+	if !tracker.addLabelCalled {
+		t.Error("expected addLabel to be called for existing PR")
+	}
+	if tracker.addedLabel != "railyard: revised" {
+		t.Errorf("addedLabel = %q, want %q", tracker.addedLabel, "railyard: revised")
+	}
+
+	var car models.Car
+	db.First(&car, "id = ?", "car-pr2")
+	if car.Status != "pr_open" {
+		t.Errorf("status = %q, want %q", car.Status, "pr_open")
+	}
+}
+
+func TestSwitch_RequirePR_ExistingPR_NoLabelWhenEmpty(t *testing.T) {
+	repoDir, _, run := initTestRepoWithRemote(t)
+	db := testDB(t)
+
+	run(repoDir, "git", "checkout", "-b", "ry/backend/car-pr3")
+	writeFile(t, repoDir, "feature.go", "package main\n// no label\n")
+	run(repoDir, "git", "add", ".")
+	run(repoDir, "git", "commit", "-m", "revision no label")
+	run(repoDir, "git", "checkout", "main")
+
+	db.Create(&models.Car{
+		ID: "car-pr3", Title: "No Label", Track: "backend",
+		Status: "done", Branch: "ry/backend/car-pr3",
+	})
+
+	tracker := &prCallTracker{
+		getExistingURL: "https://github.com/org/repo/pull/3",
+	}
+	push, getEx, createDr, updateBd, markRd, addLb := tracker.hooks()
+
+	_, err := Switch(db, "car-pr3", SwitchOpts{
+		RepoDir:         repoDir,
+		RequirePR:       true,
+		RevisedLabel:    "", // empty — should skip label
+		PushBranchFn:    push,
+		GetExistingPRFn: getEx,
+		CreateDraftPRFn: createDr,
+		UpdatePRBodyFn:  updateBd,
+		MarkPRReadyFn:   markRd,
+		AddPRLabelFn:    addLb,
+	})
+	if err != nil {
+		t.Fatalf("Switch: %v", err)
+	}
+
+	if tracker.addLabelCalled {
+		t.Error("addLabel should NOT be called when RevisedLabel is empty")
+	}
+	// markReady should still be called even without a label.
+	if !tracker.markReadyCalled {
+		t.Error("markReady should still be called for existing PR")
+	}
+}
+
+func TestSwitch_RequirePR_CreateDraftFails(t *testing.T) {
+	repoDir, _, run := initTestRepoWithRemote(t)
+	db := testDB(t)
+
+	run(repoDir, "git", "checkout", "-b", "ry/backend/car-pr4")
+	writeFile(t, repoDir, "feature.go", "package main\n// fail\n")
+	run(repoDir, "git", "add", ".")
+	run(repoDir, "git", "commit", "-m", "feature fail")
+	run(repoDir, "git", "checkout", "main")
+
+	db.Create(&models.Car{
+		ID: "car-pr4", Title: "Fail PR", Track: "backend",
+		Status: "done", Branch: "ry/backend/car-pr4",
+	})
+
+	tracker := &prCallTracker{
+		getExistingErr: fmt.Errorf("no PR"),
+		createDraftErr: fmt.Errorf("gh pr create failed"),
+	}
+	push, getEx, createDr, updateBd, markRd, addLb := tracker.hooks()
+
+	result, err := Switch(db, "car-pr4", SwitchOpts{
+		RepoDir:         repoDir,
+		RequirePR:       true,
+		PushBranchFn:    push,
+		GetExistingPRFn: getEx,
+		CreateDraftPRFn: createDr,
+		UpdatePRBodyFn:  updateBd,
+		MarkPRReadyFn:   markRd,
+		AddPRLabelFn:    addLb,
+	})
+	if err == nil {
+		t.Fatal("expected error from createDraftPR failure")
+	}
+	if result.FailureCategory != SwitchFailPR {
+		t.Errorf("FailureCategory = %q, want %q", result.FailureCategory, SwitchFailPR)
+	}
+}
+
+func TestSwitch_RequirePR_MarkReadyError_NonFatal(t *testing.T) {
+	repoDir, _, run := initTestRepoWithRemote(t)
+	db := testDB(t)
+
+	run(repoDir, "git", "checkout", "-b", "ry/backend/car-pr5")
+	writeFile(t, repoDir, "feature.go", "package main\n// ready fail\n")
+	run(repoDir, "git", "add", ".")
+	run(repoDir, "git", "commit", "-m", "revision ready fail")
+	run(repoDir, "git", "checkout", "main")
+
+	db.Create(&models.Car{
+		ID: "car-pr5", Title: "Ready Fail", Track: "backend",
+		Status: "done", Branch: "ry/backend/car-pr5",
+	})
+
+	tracker := &prCallTracker{
+		getExistingURL: "https://github.com/org/repo/pull/5",
+		markReadyErr:   fmt.Errorf("gh pr ready failed"),
+	}
+	push, getEx, createDr, updateBd, markRd, addLb := tracker.hooks()
+
+	result, err := Switch(db, "car-pr5", SwitchOpts{
+		RepoDir:         repoDir,
+		RequirePR:       true,
+		RevisedLabel:    "railyard: revised",
+		PushBranchFn:    push,
+		GetExistingPRFn: getEx,
+		CreateDraftPRFn: createDr,
+		UpdatePRBodyFn:  updateBd,
+		MarkPRReadyFn:   markRd,
+		AddPRLabelFn:    addLb,
+	})
+	if err != nil {
+		t.Fatalf("Switch should not fail on markReady error: %v", err)
+	}
+	// markReady failure is non-fatal — PR should still be created.
+	if !result.PRCreated {
+		t.Error("expected PRCreated=true despite markReady error")
+	}
+	// Label should still be attempted.
+	if !tracker.addLabelCalled {
+		t.Error("addLabel should still be called despite markReady error")
+	}
+
+	var car models.Car
+	db.First(&car, "id = ?", "car-pr5")
+	if car.Status != "pr_open" {
+		t.Errorf("status = %q, want %q", car.Status, "pr_open")
+	}
+}
+
+func TestSwitch_RequirePR_CommentCountSnapshot(t *testing.T) {
+	repoDir, _, run := initTestRepoWithRemote(t)
+	db := testDB(t)
+
+	run(repoDir, "git", "checkout", "-b", "ry/backend/car-pr6")
+	writeFile(t, repoDir, "feature.go", "package main\n// snapshot\n")
+	run(repoDir, "git", "add", ".")
+	run(repoDir, "git", "commit", "-m", "feature snapshot")
+	run(repoDir, "git", "checkout", "main")
+
+	db.Create(&models.Car{
+		ID: "car-pr6", Title: "Snapshot", Track: "backend",
+		Status: "done", Branch: "ry/backend/car-pr6",
+	})
+
+	tracker := &prCallTracker{
+		getExistingErr: fmt.Errorf("no PR"),
+		createDraftURL: "https://github.com/org/repo/pull/6",
+	}
+	push, getEx, createDr, updateBd, markRd, addLb := tracker.hooks()
+
+	_, err := Switch(db, "car-pr6", SwitchOpts{
+		RepoDir:         repoDir,
+		RequirePR:       true,
+		PushBranchFn:    push,
+		GetExistingPRFn: getEx,
+		CreateDraftPRFn: createDr,
+		UpdatePRBodyFn:  updateBd,
+		MarkPRReadyFn:   markRd,
+		AddPRLabelFn:    addLb,
+		CommentCounter:  func(_ string) (int, error) { return 5, nil },
+	})
+	if err != nil {
+		t.Fatalf("Switch: %v", err)
+	}
+
+	var car models.Car
+	db.First(&car, "id = ?", "car-pr6")
+	if car.LastPRCommentCount != 5 {
+		t.Errorf("LastPRCommentCount = %d, want 5", car.LastPRCommentCount)
 	}
 }

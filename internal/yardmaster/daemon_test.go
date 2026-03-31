@@ -1875,6 +1875,8 @@ func (m *mockPRViewer) RemoveLabel(branch, label string) error {
 	return m.removeLabelErr
 }
 
+
+
 func TestViewPR_IncludesMergeable(t *testing.T) {
 	viewer := &mockPRViewer{
 		state:     "OPEN",
@@ -2529,7 +2531,7 @@ func TestReopenCarWithFeedback_SetsStatusOpen(t *testing.T) {
 
 	var buf bytes.Buffer
 	logger := testLogger(&buf)
-	reopenCarWithFeedback(db, viewer, models.Car{ID: "car-reopen1", Branch: "ry/backend/car-reopen1"}, nil, logger)
+	reopenCarWithFeedback(db, viewer, models.Car{ID: "car-reopen1", Branch: "ry/backend/car-reopen1"}, nil, "", logger)
 
 	var c models.Car
 	db.First(&c, "id = ?", "car-reopen1")
@@ -2554,7 +2556,7 @@ func TestReopenCarWithFeedback_PreservesCompletedAt(t *testing.T) {
 	viewer := &mockPRViewer{}
 	var buf bytes.Buffer
 	logger := testLogger(&buf)
-	reopenCarWithFeedback(db, viewer, models.Car{ID: "car-reopen2", Branch: "ry/backend/car-reopen2"}, nil, logger)
+	reopenCarWithFeedback(db, viewer, models.Car{ID: "car-reopen2", Branch: "ry/backend/car-reopen2"}, nil, "", logger)
 
 	var c models.Car
 	db.First(&c, "id = ?", "car-reopen2")
@@ -2574,7 +2576,7 @@ func TestReopenCarWithFeedback_FetchCommentsError_StillReopens(t *testing.T) {
 	viewer := &mockPRViewer{fetchErr: fmt.Errorf("gh api failed")}
 	var buf bytes.Buffer
 	logger := testLogger(&buf)
-	reopenCarWithFeedback(db, viewer, models.Car{ID: "car-reopen3", Branch: "ry/backend/car-reopen3"}, nil, logger)
+	reopenCarWithFeedback(db, viewer, models.Car{ID: "car-reopen3", Branch: "ry/backend/car-reopen3"}, nil, "", logger)
 
 	var c models.Car
 	db.First(&c, "id = ?", "car-reopen3")
@@ -2603,7 +2605,7 @@ func TestReopenCarWithFeedback_ProgressNoteFormat(t *testing.T) {
 	var buf bytes.Buffer
 	logger := testLogger(&buf)
 	reviews := []prReview{{Body: "Needs work", Author: "alice"}}
-	reopenCarWithFeedback(db, viewer, models.Car{ID: "car-reopen4", Branch: "ry/backend/car-reopen4"}, reviews, logger)
+	reopenCarWithFeedback(db, viewer, models.Car{ID: "car-reopen4", Branch: "ry/backend/car-reopen4"}, reviews, "", logger)
 
 	var notes []models.CarProgress
 	db.Where("car_id = ?", "car-reopen4").Find(&notes)
@@ -2633,7 +2635,7 @@ func TestReopenCarWithFeedback_EmptyComments(t *testing.T) {
 	viewer := &mockPRViewer{}
 	var buf bytes.Buffer
 	logger := testLogger(&buf)
-	reopenCarWithFeedback(db, viewer, models.Car{ID: "car-reopen5", Branch: "ry/backend/car-reopen5"}, nil, logger)
+	reopenCarWithFeedback(db, viewer, models.Car{ID: "car-reopen5", Branch: "ry/backend/car-reopen5"}, nil, "", logger)
 
 	var c models.Car
 	db.First(&c, "id = ?", "car-reopen5")
@@ -2645,6 +2647,74 @@ func TestReopenCarWithFeedback_EmptyComments(t *testing.T) {
 	db.Where("car_id = ?", "car-reopen5").Find(&notes)
 	if len(notes) == 0 {
 		t.Fatal("expected progress note even with empty comments")
+	}
+}
+
+func TestReopenCarWithFeedback_RemovesRevisedLabel(t *testing.T) {
+	db := testDB(t)
+	db.Create(&models.Car{
+		ID:     "car-reopen6",
+		Branch: "ry/backend/car-reopen6",
+		Status: "pr_open",
+	})
+
+	viewer := &mockPRViewer{}
+	var buf bytes.Buffer
+	logger := testLogger(&buf)
+	reopenCarWithFeedback(db, viewer, models.Car{ID: "car-reopen6", Branch: "ry/backend/car-reopen6"}, nil, "railyard: revised", logger)
+
+	if !viewer.removeLabelCalled {
+		t.Error("expected RemoveLabel to be called for revised label")
+	}
+	if viewer.removedLabel != "railyard: revised" {
+		t.Errorf("removedLabel = %q, want %q", viewer.removedLabel, "railyard: revised")
+	}
+}
+
+func TestReopenCarWithFeedback_SkipsRemoveWhenNoRevisedLabel(t *testing.T) {
+	db := testDB(t)
+	db.Create(&models.Car{
+		ID:     "car-reopen7",
+		Branch: "ry/backend/car-reopen7",
+		Status: "pr_open",
+	})
+
+	viewer := &mockPRViewer{}
+	var buf bytes.Buffer
+	logger := testLogger(&buf)
+	reopenCarWithFeedback(db, viewer, models.Car{ID: "car-reopen7", Branch: "ry/backend/car-reopen7"}, nil, "", logger)
+
+	if viewer.removeLabelCalled {
+		t.Error("RemoveLabel should not be called when revisedLabel is empty")
+	}
+}
+
+func TestHandlePrOpenCars_ChangesRequested_RemovesRevisedLabel(t *testing.T) {
+	db := testDB(t)
+	db.Create(&models.Car{
+		ID:     "car-revised1",
+		Branch: "ry/backend/car-revised1",
+		Status: "pr_open",
+	})
+
+	viewer := &mockPRViewer{
+		state:          "OPEN",
+		reviewDecision: "CHANGES_REQUESTED",
+	}
+	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
+	cfg.Yardmaster.RevisedLabel = "railyard: revised"
+	var buf bytes.Buffer
+	logger := testLogger(&buf)
+	err := handlePrOpenCars(db, viewer, false, "", "", cfg, logger)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !viewer.removeLabelCalled {
+		t.Error("expected revised label to be removed on changes_requested reopen")
+	}
+	if viewer.removedLabel != "railyard: revised" {
+		t.Errorf("removedLabel = %q, want %q", viewer.removedLabel, "railyard: revised")
 	}
 }
 

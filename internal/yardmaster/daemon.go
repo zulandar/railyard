@@ -527,6 +527,7 @@ func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, r
 			RequirePR:        cfg.RequirePR,
 			SwitchTimeoutSec: cfg.Stall.SwitchTimeoutSec,
 			CommentCounter:   commentCounter,
+			RevisedLabel:     cfg.Yardmaster.RevisedLabel,
 		})
 
 		// Handle any failure — write a categorized progress note and check
@@ -1179,6 +1180,8 @@ func (g *ghPRViewer) RemoveLabel(branch, label string) error {
 	return nil
 }
 
+
+
 // parseInlineComments parses the JSON response from the GitHub pulls/comments API.
 func parseInlineComments(data []byte) ([]prInlineComment, error) {
 	var raw []struct {
@@ -1221,6 +1224,11 @@ func handlePrOpenCars(db *gorm.DB, viewer PRViewer, autoMerge bool, repoDir, ymD
 	prCars, err := car.List(db, car.ListFilters{Status: "pr_open"})
 	if err != nil {
 		return err
+	}
+
+	var revisedLabel string
+	if cfg != nil {
+		revisedLabel = cfg.Yardmaster.RevisedLabel
 	}
 
 	for _, c := range prCars {
@@ -1323,7 +1331,7 @@ func handlePrOpenCars(db *gorm.DB, viewer PRViewer, autoMerge bool, repoDir, ymD
 			runPostMerge(db, c, logger)
 
 		case status.ReviewDecision == "CHANGES_REQUESTED":
-			reopenCarWithFeedback(db, viewer, c, status.Reviews, logger)
+			reopenCarWithFeedback(db, viewer, c, status.Reviews, revisedLabel, logger)
 			logger.Info("PR changes requested", "car", c.ID, "transition", "pr_open->open")
 
 		case status.State == "OPEN" && cfg != nil && hasReworkLabel(status.Labels, cfg.Yardmaster.ReworkLabel):
@@ -1333,7 +1341,7 @@ func handlePrOpenCars(db *gorm.DB, viewer PRViewer, autoMerge bool, repoDir, ymD
 				logger.Error("Remove rework label failed, skipping reopen to avoid loop", "car", c.ID, "error", err)
 				continue
 			}
-			reopenCarWithFeedback(db, viewer, c, nil, logger)
+			reopenCarWithFeedback(db, viewer, c, nil, revisedLabel, logger)
 			logger.Info("PR rework label detected", "car", c.ID, "transition", "pr_open->open")
 
 		case status.State == "OPEN" && status.ReviewDecision != "APPROVED":
@@ -1343,7 +1351,7 @@ func handlePrOpenCars(db *gorm.DB, viewer PRViewer, autoMerge bool, repoDir, ymD
 				continue
 			}
 			if count > c.LastPRCommentCount {
-				reopenCarWithFeedback(db, viewer, c, nil, logger)
+				reopenCarWithFeedback(db, viewer, c, nil, revisedLabel, logger)
 				logger.Info("PR new inline comments detected", "car", c.ID,
 					"old_count", c.LastPRCommentCount, "new_count", count,
 					"transition", "pr_open->open")
@@ -1366,13 +1374,22 @@ func hasReworkLabel(labels []string, reworkLabel string) bool {
 
 // reopenCarWithFeedback transitions a pr_open car back to open with review feedback
 // as a progress note. CompletedAt is preserved so engines detect isRevision=true.
-func reopenCarWithFeedback(db *gorm.DB, viewer PRViewer, c models.Car, reviews []prReview, logger *slog.Logger) {
+// If revisedLabel is non-empty, it is removed from the PR (best-effort) so it can
+// be re-applied on the next revision cycle.
+func reopenCarWithFeedback(db *gorm.DB, viewer PRViewer, c models.Car, reviews []prReview, revisedLabel string, logger *slog.Logger) {
 	if err := db.Model(&models.Car{}).Where("id = ?", c.ID).Updates(map[string]interface{}{
 		"status":   "open",
 		"assignee": "",
 	}).Error; err != nil {
 		logger.Error("Update car to open", "car", c.ID, "error", err)
 		return
+	}
+
+	// Remove the revised label so it can be re-applied on the next revision.
+	if revisedLabel != "" {
+		if err := viewer.RemoveLabel(c.Branch, revisedLabel); err != nil {
+			logger.Warn("Remove revised label (best-effort)", "car", c.ID, "error", err)
+		}
 	}
 
 	inline, conversation, fetchErr := viewer.FetchComments(c.Branch)

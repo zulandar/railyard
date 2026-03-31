@@ -49,3 +49,4 @@ tracks:
 yardmaster:
   autoMergeOnApproval: true
   reworkLabel: "custom: rework"
+  revisedLabel: "custom: revised"

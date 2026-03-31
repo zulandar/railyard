@@ -117,3 +117,20 @@ func TestConfigmap_ReworkLabel_Custom(t *testing.T) {
 		t.Error("expected custom rework_label value from test-values-full.yaml")
 	}
 }
+
+func TestConfigmap_RevisedLabel_Default(t *testing.T) {
+	out := helmTemplate(t, "ci/test-values-minimal.yaml")
+	if !strings.Contains(out, "revised_label:") {
+		t.Fatal("expected revised_label in configmap output")
+	}
+	if !strings.Contains(out, `"railyard: revised"`) {
+		t.Error("expected default revised_label value")
+	}
+}
+
+func TestConfigmap_RevisedLabel_Custom(t *testing.T) {
+	out := helmTemplate(t, "ci/test-values-full.yaml")
+	if !strings.Contains(out, `"custom: revised"`) {
+		t.Error("expected custom revised_label value from test-values-full.yaml")
+	}
+}

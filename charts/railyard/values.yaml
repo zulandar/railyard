@@ -225,6 +225,10 @@ yardmaster:
   # -- GitHub label that triggers car rework on pr_open PRs.
   # Applied manually or by bots; removed automatically after the car is reopened.
   reworkLabel: "railyard: rework"
+  # -- GitHub label applied when a revision pushes to an existing PR, signaling
+  # reviewers that changes have been made. Removed automatically when the car is
+  # reopened for further rework.
+  revisedLabel: "railyard: revised"
 
 # ---------------------------------------------------------------------------
 # Stall detection

@@ -75,6 +75,7 @@ data:
       health_port: {{ .Values.yardmaster.healthPort | default 8081 }}
       auto_merge_on_approval: {{ .Values.yardmaster.autoMergeOnApproval | default false }}
       rework_label: {{ .Values.yardmaster.reworkLabel | default "railyard: rework" | quote }}
+      revised_label: {{ .Values.yardmaster.revisedLabel | default "railyard: revised" | quote }}
 
     {{- if .Values.telegraph.enabled }}
     telegraph:

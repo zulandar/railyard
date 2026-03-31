@@ -40,6 +40,7 @@ type YardmasterConfig struct {
 	HealthPort          int    `yaml:"health_port"`
 	AutoMergeOnApproval bool   `yaml:"auto_merge_on_approval"`
 	ReworkLabel         string `yaml:"rework_label"`
+	RevisedLabel        string `yaml:"revised_label"`
 }
 
 // IsKubernetesMode returns true when the config targets a Kubernetes deployment.
@@ -330,6 +331,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Yardmaster.ReworkLabel == "" {
 		c.Yardmaster.ReworkLabel = "railyard: rework"
+	}
+	if c.Yardmaster.RevisedLabel == "" {
+		c.Yardmaster.RevisedLabel = "railyard: revised"
 	}
 	if c.AgentProvider == "" {
 		c.AgentProvider = "claude"
