@@ -46,3 +46,6 @@ tracks:
     language: php
     testCommand: "vendor/bin/phpunit"
     preTestCommand: "composer install --no-interaction --quiet"
+yardmaster:
+  autoMergeOnApproval: true
+  reworkLabel: "custom: rework"
