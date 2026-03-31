@@ -1174,6 +1174,11 @@ func (g *ghPRViewer) RemoveLabel(branch, label string) error {
 	cmd.Dir = g.repoDir
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		// If the label isn't on the PR (or doesn't exist in the repo),
+		// the desired state is already achieved — not an error.
+		if strings.Contains(string(out), "not found") {
+			return nil
+		}
 		return fmt.Errorf("gh pr edit --remove-label %s: %s: %w", label, string(out), err)
 	}
 	return nil
