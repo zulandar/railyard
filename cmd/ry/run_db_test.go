@@ -283,23 +283,27 @@ func TestRunComplete_Success(t *testing.T) {
 	now := time.Now()
 	gormDB.Create(&models.Car{ID: "car-done", Title: "Completable", Status: "in_progress", Track: "backend", Branch: "ry/backend/car-done", BaseBranch: "main", CreatedAt: now, UpdatedAt: now})
 
-	// Set up a git repo with a commit ahead of main so the guard passes.
+	// Set up a git repo with a bare remote and a commit ahead of main.
+	bareDir := t.TempDir()
 	repoDir := t.TempDir()
-	run := func(args ...string) {
+	run := func(dir string, args ...string) {
 		t.Helper()
 		cmd := exec.Command(args[0], args[1:]...)
-		cmd.Dir = repoDir
+		cmd.Dir = dir
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("%v: %s\n%s", args, err, out)
 		}
 	}
-	run("git", "init", "-b", "main")
-	run("git", "config", "user.email", "test@test.com")
-	run("git", "config", "user.name", "test")
-	run("git", "commit", "--allow-empty", "-m", "init")
-	run("git", "checkout", "-b", "ry/backend/car-done")
-	run("git", "commit", "--allow-empty", "-m", "real work")
+	run(bareDir, "git", "init", "--bare", "-b", "main")
+	run(repoDir, "git", "init", "-b", "main")
+	run(repoDir, "git", "config", "user.email", "test@test.com")
+	run(repoDir, "git", "config", "user.name", "test")
+	run(repoDir, "git", "commit", "--allow-empty", "-m", "init")
+	run(repoDir, "git", "remote", "add", "origin", bareDir)
+	run(repoDir, "git", "push", "origin", "main")
+	run(repoDir, "git", "checkout", "-b", "ry/backend/car-done")
+	run(repoDir, "git", "commit", "--allow-empty", "-m", "real work")
 
 	origDir, _ := os.Getwd()
 	if err := os.Chdir(repoDir); err != nil {
@@ -403,23 +407,27 @@ func TestRunComplete_WithCommitsSucceeds(t *testing.T) {
 		UpdatedAt:  now,
 	})
 
-	// Create a git repo with a branch that has commits.
+	// Create a git repo with a bare remote and a branch that has commits.
+	bareDir := t.TempDir()
 	repoDir := t.TempDir()
-	run := func(args ...string) {
+	run := func(dir string, args ...string) {
 		t.Helper()
 		cmd := exec.Command(args[0], args[1:]...)
-		cmd.Dir = repoDir
+		cmd.Dir = dir
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("%v: %s\n%s", args, err, out)
 		}
 	}
-	run("git", "init", "-b", "main")
-	run("git", "config", "user.email", "test@test.com")
-	run("git", "config", "user.name", "test")
-	run("git", "commit", "--allow-empty", "-m", "init")
-	run("git", "checkout", "-b", "ry/backend/car-real")
-	run("git", "commit", "--allow-empty", "-m", "real work")
+	run(bareDir, "git", "init", "--bare", "-b", "main")
+	run(repoDir, "git", "init", "-b", "main")
+	run(repoDir, "git", "config", "user.email", "test@test.com")
+	run(repoDir, "git", "config", "user.name", "test")
+	run(repoDir, "git", "commit", "--allow-empty", "-m", "init")
+	run(repoDir, "git", "remote", "add", "origin", bareDir)
+	run(repoDir, "git", "push", "origin", "main")
+	run(repoDir, "git", "checkout", "-b", "ry/backend/car-real")
+	run(repoDir, "git", "commit", "--allow-empty", "-m", "real work")
 
 	origDir, _ := os.Getwd()
 	if err := os.Chdir(repoDir); err != nil {
@@ -433,6 +441,63 @@ func TestRunComplete_WithCommitsSucceeds(t *testing.T) {
 	}
 	if !strings.Contains(out, "marked done") {
 		t.Errorf("expected 'marked done', got: %s", out)
+	}
+}
+
+func TestRunComplete_PushFailureRejectsCompletion(t *testing.T) {
+	gormDB := mockTestDB(t)
+	cleanup := withMockDB(t, gormDB)
+	defer cleanup()
+
+	now := time.Now()
+	gormDB.Create(&models.Car{
+		ID:         "car-nopush",
+		Title:      "No push car",
+		Status:     "in_progress",
+		Track:      "backend",
+		Branch:     "ry/backend/car-nopush",
+		BaseBranch: "main",
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	})
+
+	// Git repo with commits but NO remote — push will fail.
+	repoDir := t.TempDir()
+	run := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("%v: %s\n%s", args, err, out)
+		}
+	}
+	run(repoDir, "git", "init", "-b", "main")
+	run(repoDir, "git", "config", "user.email", "test@test.com")
+	run(repoDir, "git", "config", "user.name", "test")
+	run(repoDir, "git", "commit", "--allow-empty", "-m", "init")
+	run(repoDir, "git", "checkout", "-b", "ry/backend/car-nopush")
+	run(repoDir, "git", "commit", "--allow-empty", "-m", "real work")
+
+	origDir, _ := os.Getwd()
+	if err := os.Chdir(repoDir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	defer os.Chdir(origDir) //nolint:errcheck
+
+	_, err := execCmd(t, []string{"complete", "car-nopush", "done", "--config", "test.yaml"})
+	if err == nil {
+		t.Fatal("expected error when push fails (no remote)")
+	}
+	if !strings.Contains(err.Error(), "push branch") {
+		t.Errorf("expected push failure error, got: %v", err)
+	}
+
+	// Car must NOT be marked done — push failed before status change.
+	var c models.Car
+	gormDB.First(&c, "id = ?", "car-nopush")
+	if c.Status == "done" {
+		t.Error("car should NOT be marked done when push fails")
 	}
 }
 

@@ -18,8 +18,8 @@ type CompletionOpts struct {
 }
 
 // HandleCompletion processes a successful car completion. The car must already
-// be marked done (by the agent via ry complete). This function pushes the branch,
-// writes a final progress note, and returns the engine to idle.
+// be marked done (by the agent via ry complete), which also pushes the branch.
+// This function writes a final progress note and returns the engine to idle.
 func HandleCompletion(db *gorm.DB, car *models.Car, engine *models.Engine, opts CompletionOpts) error {
 	if car == nil {
 		return fmt.Errorf("engine: car is required")
@@ -31,12 +31,15 @@ func HandleCompletion(db *gorm.DB, car *models.Car, engine *models.Engine, opts 
 		return fmt.Errorf("engine: repoDir is required")
 	}
 
-	// Push the branch.
+	// Best-effort push — ry complete already pushed, but re-push in case
+	// the agent committed additional changes after ry complete returned.
 	if car.Branch != "" {
 		if err := PushBranch(opts.RepoDir, car.Branch); err != nil {
-			return fmt.Errorf("engine: completion push: %w", err)
+			slog.Warn("engine: completion re-push failed (non-fatal, ry complete already pushed)",
+				"car", car.ID, "branch", car.Branch, "error", err)
+		} else {
+			slog.Info("engine: branch pushed for completion", "car", car.ID, "branch", car.Branch)
 		}
-		slog.Info("engine: branch pushed for completion", "car", car.ID, "branch", car.Branch)
 	}
 
 	// Write final progress note.

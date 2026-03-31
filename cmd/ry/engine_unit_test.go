@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
@@ -292,7 +291,7 @@ func TestMonitorSession_StallCarNotDone(t *testing.T) {
 // handleCompletionFailure
 // ---------------------------------------------------------------------------
 
-func TestEngine_CompletionPushFailure_CarBlocked(t *testing.T) {
+func TestEngine_CompletionPushFailure_NonFatal(t *testing.T) {
 	gormDB := engineTestDB(t)
 
 	gormDB.Create(&models.Car{
@@ -309,7 +308,8 @@ func TestEngine_CompletionPushFailure_CarBlocked(t *testing.T) {
 		CurrentCar: "car-pf1",
 	})
 
-	// HandleCompletion will fail because RepoDir doesn't exist.
+	// HandleCompletion re-push will fail (bad repoDir), but this is non-fatal
+	// because ry complete already pushed the branch before setting status to done.
 	var eng models.Engine
 	gormDB.First(&eng, "id = ?", "eng-pf1")
 	var car models.Car
@@ -319,40 +319,31 @@ func TestEngine_CompletionPushFailure_CarBlocked(t *testing.T) {
 		RepoDir:   "/nonexistent/path",
 		SessionID: "sess-pf1",
 	})
-	if err == nil {
-		t.Fatal("expected error from HandleCompletion with bad repoDir")
+	if err != nil {
+		t.Fatalf("HandleCompletion should succeed even with bad push (non-fatal): %v", err)
 	}
 
-	// Simulate what engine.go should do on HandleCompletion failure.
-	handleCompletionFailure(gormDB, "car-pf1", "eng-pf1", "sess-pf1", err)
-
-	// Verify car is blocked.
-	gormDB.First(&car, "id = ?", "car-pf1")
-	if car.Status != "blocked" {
-		t.Errorf("status = %q, want %q", car.Status, "blocked")
+	// Verify engine went idle despite push failure.
+	gormDB.First(&eng, "id = ?", "eng-pf1")
+	if eng.Status != engine.StatusIdle {
+		t.Errorf("engine.Status = %q, want %q", eng.Status, engine.StatusIdle)
+	}
+	if eng.CurrentCar != "" {
+		t.Errorf("engine.CurrentCar = %q, want empty", eng.CurrentCar)
 	}
 
-	// Verify progress note.
+	// Verify progress note was still written.
 	var notes []models.CarProgress
 	gormDB.Where("car_id = ?", "car-pf1").Find(&notes)
 	if len(notes) == 0 {
-		t.Fatal("expected progress note about completion failure")
-	}
-	found := false
-	for _, n := range notes {
-		if strings.Contains(n.Note, "Completion failed") {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Error("expected progress note mentioning 'Completion failed'")
+		t.Fatal("expected progress note")
 	}
 
-	// Verify yardmaster message.
+	// With the new design, push is handled by ry complete before status=done,
+	// so HandleCompletion push failure is non-fatal — no blocking or alerting.
 	var msgs []models.Message
 	gormDB.Where("subject = ? AND car_id = ?", "completion-failed", "car-pf1").Find(&msgs)
-	if len(msgs) == 0 {
-		t.Error("expected yardmaster message about completion failure")
+	if len(msgs) != 0 {
+		t.Errorf("expected no completion-failed messages (push is non-fatal), got %d", len(msgs))
 	}
 }

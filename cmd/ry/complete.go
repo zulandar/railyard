@@ -69,6 +69,15 @@ func runComplete(cmd *cobra.Command, configPath, carID, summary string) error {
 		"base_branch", baseBranch,
 	)
 
+	// Push branch to remote BEFORE setting status to "done". This ensures the
+	// yardmaster never sees a "done" car whose branch hasn't been pushed yet.
+	if b.Branch != "" {
+		if pushErr := engine.PushBranch(cwd, b.Branch); pushErr != nil {
+			return fmt.Errorf("complete rejected: push branch %s failed: %w", b.Branch, pushErr)
+		}
+		slog.Info("ry complete: branch pushed", "car", carID, "branch", b.Branch)
+	}
+
 	// Transition to done.
 	if err := car.Update(gormDB, carID, map[string]interface{}{
 		"status": "done",
