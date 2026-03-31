@@ -1352,3 +1352,90 @@ func TestSyncWorktreeToBranch_PreservesRailyardFiles(t *testing.T) {
 		t.Errorf("symlink target = %q, want %q", linkTarget, filepath.Join(dir, "railyard.yaml"))
 	}
 }
+
+// --- EnsureRailyardIgnore tests ---
+
+func TestEnsureRailyardIgnore_AddsMissingEntries(t *testing.T) {
+	dir := t.TempDir()
+
+	// No .gitignore exists yet.
+	if err := EnsureRailyardIgnore(dir); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	if err != nil {
+		t.Fatalf("read .gitignore: %v", err)
+	}
+	content := string(data)
+
+	for _, entry := range railyardIgnoreEntries {
+		if !strings.Contains(content, entry) {
+			t.Errorf(".gitignore missing entry %q", entry)
+		}
+	}
+}
+
+func TestEnsureRailyardIgnore_Idempotent(t *testing.T) {
+	dir := t.TempDir()
+
+	// Run twice.
+	if err := EnsureRailyardIgnore(dir); err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	if err := EnsureRailyardIgnore(dir); err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	if err != nil {
+		t.Fatalf("read .gitignore: %v", err)
+	}
+
+	// Each entry should appear as an exact line exactly once.
+	lines := strings.Split(string(data), "\n")
+	for _, entry := range railyardIgnoreEntries {
+		count := 0
+		for _, line := range lines {
+			if strings.TrimSpace(line) == entry {
+				count++
+			}
+		}
+		if count != 1 {
+			t.Errorf("entry %q appears %d times, want 1", entry, count)
+		}
+	}
+}
+
+func TestEnsureRailyardIgnore_PreservesExisting(t *testing.T) {
+	dir := t.TempDir()
+
+	// Write an existing .gitignore with some entries.
+	existing := "node_modules/\n.mcp.json\n"
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(existing), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := EnsureRailyardIgnore(dir); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	if err != nil {
+		t.Fatalf("read .gitignore: %v", err)
+	}
+	content := string(data)
+
+	// .mcp.json was already present — should not be duplicated.
+	if strings.Count(content, ".mcp.json") != 1 {
+		t.Errorf(".mcp.json duplicated, content:\n%s", content)
+	}
+	// node_modules/ should still be there.
+	if !strings.Contains(content, "node_modules/") {
+		t.Error("existing entry node_modules/ was lost")
+	}
+	// Other railyard entries should be added.
+	if !strings.Contains(content, ".claude") {
+		t.Error("missing .claude entry")
+	}
+}

@@ -170,6 +170,17 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 		return fmt.Errorf("setup worktree: %w", err)
 	}
 
+	// Ensure railyard runtime files are in .gitignore so AutoCommitIfDirty
+	// does not accidentally commit them (e.g. .mcp.json).
+	if err := engine.EnsureRailyardIgnore(workDir); err != nil {
+		logger.Warn("Gitignore setup warning", "error", err)
+	}
+
+	// Also ensure primary repo's .gitignore has the entries (for pushInflightBranch).
+	if err := engine.EnsureRailyardIgnore(repoDir); err != nil {
+		logger.Warn("Gitignore setup warning (primary repo)", "error", err)
+	}
+
 	logger.Info("Engine starting daemon loop", "engine", eng.ID, "poll", pollInterval)
 
 	cycle := 0

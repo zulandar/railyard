@@ -3,6 +3,7 @@ package engine
 import (
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -568,6 +569,65 @@ func CheckoutExistingBranch(wtDir, branch string) error {
 	pull.Dir = wtDir
 	pull.CombinedOutput() // Non-fatal — branch may already be up to date.
 
+	return nil
+}
+
+// railyardIgnoreEntries are paths that railyard generates at runtime and must
+// not be committed by AutoCommitIfDirty. EnsureRailyardIgnore adds any missing
+// entries to .gitignore in the given directory.
+var railyardIgnoreEntries = []string{
+	".mcp.json",
+	".claude",
+	".railyard/",
+	".claudeignore",
+	".beads/",
+}
+
+// EnsureRailyardIgnore ensures that railyard runtime files are listed in the
+// repo's .gitignore so AutoCommitIfDirty does not commit them. Idempotent —
+// only appends entries that are missing. Creates .gitignore if it doesn't exist.
+func EnsureRailyardIgnore(repoDir string) error {
+	gitignorePath := filepath.Join(repoDir, ".gitignore")
+
+	// Read existing entries.
+	existing := make(map[string]bool)
+	if data, err := os.ReadFile(gitignorePath); err == nil {
+		for _, line := range strings.Split(string(data), "\n") {
+			trimmed := strings.TrimSpace(line)
+			if trimmed != "" && !strings.HasPrefix(trimmed, "#") {
+				existing[trimmed] = true
+			}
+		}
+	}
+
+	// Collect missing entries.
+	var missing []string
+	for _, entry := range railyardIgnoreEntries {
+		if !existing[entry] {
+			missing = append(missing, entry)
+		}
+	}
+
+	if len(missing) == 0 {
+		return nil
+	}
+
+	// Append missing entries.
+	f, err := os.OpenFile(gitignorePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("engine: open .gitignore: %w", err)
+	}
+	defer f.Close()
+
+	block := "\n# Railyard runtime (auto-added)\n"
+	for _, entry := range missing {
+		block += entry + "\n"
+	}
+	if _, err := f.WriteString(block); err != nil {
+		return fmt.Errorf("engine: write .gitignore: %w", err)
+	}
+
+	slog.Info("engine: added missing entries to .gitignore", "count", len(missing), "entries", missing)
 	return nil
 }
 
