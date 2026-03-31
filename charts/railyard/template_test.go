@@ -100,3 +100,20 @@ func TestYardmasterDeployment_LogLevel_OmittedWhenEmpty(t *testing.T) {
 		t.Error("LOG_LEVEL should not appear when logLevel is not set")
 	}
 }
+
+func TestConfigmap_ReworkLabel_Default(t *testing.T) {
+	out := helmTemplate(t, "ci/test-values-minimal.yaml")
+	if !strings.Contains(out, "rework_label:") {
+		t.Fatal("expected rework_label in configmap output")
+	}
+	if !strings.Contains(out, `"railyard: rework"`) {
+		t.Error("expected default rework_label value")
+	}
+}
+
+func TestConfigmap_ReworkLabel_Custom(t *testing.T) {
+	out := helmTemplate(t, "ci/test-values-full.yaml")
+	if !strings.Contains(out, `"custom: rework"`) {
+		t.Error("expected custom rework_label value from test-values-full.yaml")
+	}
+}
