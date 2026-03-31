@@ -647,7 +647,10 @@ func pushInflightBranch(gormDB *gorm.DB, eng *models.Engine, repoDir string) {
 // from sitting in "done" status with no code on the remote.
 func handleCompletionFailure(db *gorm.DB, carID, engineID, sessionID string, completionErr error) {
 	db.Model(&models.Car{}).Where("id = ?", carID).
-		Update("status", "blocked")
+		Updates(map[string]interface{}{
+			"status":         "blocked",
+			"blocked_reason": models.BlockedReasonCompletionFailed,
+		})
 
 	db.Create(&models.CarProgress{
 		CarID:        carID,

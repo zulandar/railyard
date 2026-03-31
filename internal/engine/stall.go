@@ -167,7 +167,10 @@ func HandleStall(db *gorm.DB, engineID, carID string, reason StallReason, repoDi
 
 		// Update car status to blocked.
 		result = tx.Model(&models.Car{}).Where("id = ?", carID).
-			Update("status", "blocked")
+			Updates(map[string]interface{}{
+				"status":         "blocked",
+				"blocked_reason": models.BlockedReasonStalled,
+			})
 		if result.Error != nil {
 			return fmt.Errorf("engine: mark car blocked %s: %w", carID, result.Error)
 		}
