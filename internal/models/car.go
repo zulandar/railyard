@@ -9,6 +9,15 @@ import "time"
 // permanently blocked.
 var ResolvedBlockerStatuses = []string{"cancelled", "merged"}
 
+// BlockedReason values record why a car was set to "blocked" status.
+// UnblockDeps uses this to decide whether to transition to "done" (retry
+// merge) or "open" (needs fresh engine work).
+const (
+	BlockedReasonTestFailed       = "test-failed"
+	BlockedReasonStalled          = "stalled"
+	BlockedReasonCompletionFailed = "completion-failed"
+)
+
 // Car is the core work item in Railyard.
 type Car struct {
 	ID                 string  `gorm:"primaryKey;size:32"`
@@ -25,6 +34,7 @@ type Car struct {
 	DesignNotes        string  `gorm:"type:text"`
 	Acceptance         string  `gorm:"type:text"`
 	SkipTests          bool    `gorm:"default:false"`
+	BlockedReason      string  `gorm:"size:32"` // why blocked: "test-failed", "stalled", "completion-failed", or "" for dependency
 	RequestedBy        string  `gorm:"size:64"`
 	SourceIssue        int
 	LastRebaseBaseHead string `gorm:"size:40"` // SHA of base branch HEAD when rebase was last attempted
