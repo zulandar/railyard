@@ -1,0 +1,97 @@
+name: Bug Report
+description: Report a bug in Railyard
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please fill in as much detail as possible.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What happened? What did you expect to happen?
+      placeholder: |
+        Describe the bug clearly. Include what you expected vs what actually occurred.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: How can we reproduce this?
+      placeholder: |
+        1. Configure railyard with...
+        2. Create a car with...
+        3. Observe that...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which part of Railyard is affected?
+      options:
+        - Yardmaster
+        - Engine
+        - Switch / Merge
+        - PR Review Detection
+        - Bull (Issue Triage)
+        - Telegraph (Chat Bridge)
+        - Dashboard
+        - CLI (ry)
+        - Helm Chart / Deployment
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Deployment details
+      placeholder: |
+        - Railyard version / chart version: v0.9.4
+        - Kubernetes: yes/no (namespace, provider)
+        - Agent provider: claude / openai
+        - Engine model: claude-sonnet-4-6
+      render: markdown
+    validations:
+      required: true
+
+  - type: textarea
+    id: car-context
+    attributes:
+      label: Car Context
+      description: If this involves a specific car, provide its details.
+      placeholder: |
+        - Car ID: car-xxxxx
+        - Track: backend
+        - Branch: ry/backend/car-xxxxx
+        - Status at time of issue: pr_open / done / merge-failed / blocked
+      render: markdown
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Logs
+      description: Yardmaster logs, engine logs, or CLI output. Redact any secrets.
+      placeholder: |
+        kubectl logs <yardmaster-pod> -n <namespace> | grep "car-xxxxx"
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Anything else that might help (screenshots, DB state, PR links, etc.)
+    validations:
+      required: false

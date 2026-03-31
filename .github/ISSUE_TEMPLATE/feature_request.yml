@@ -1,0 +1,64 @@
+name: Feature Request
+description: Suggest a new feature or improvement
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Have an idea for Railyard? We'd love to hear it.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or Motivation
+      description: What problem does this solve? Why is it needed?
+      placeholder: |
+        Describe the pain point or use case that motivates this request.
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: How should this work?
+      placeholder: |
+        Describe the behavior you'd like to see. Include any API, config, or CLI changes.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which part of Railyard would this affect?
+      options:
+        - Yardmaster
+        - Engine
+        - Switch / Merge
+        - PR Review Detection
+        - Bull (Issue Triage)
+        - Telegraph (Chat Bridge)
+        - Dashboard
+        - CLI (ry)
+        - Helm Chart / Deployment
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Any workarounds or alternative approaches you've thought about?
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Anything else — examples, references, screenshots, etc.
+    validations:
+      required: false
