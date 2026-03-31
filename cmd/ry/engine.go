@@ -389,7 +389,11 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 
 		case outcomeClear:
 			cStats.cleared++
-			cycleLog.Debug("Agent exited, clear cycle, will re-claim")
+			cycleLog.Info("Agent exited, clear cycle",
+				"car", claimed.ID,
+				"session", sess.ID,
+				"will_reclaim", true,
+			)
 			if err := engine.HandleClearCycle(gormDB, claimed, eng, engine.ClearCycleOpts{
 				RepoDir:   workDir,
 				SessionID: sess.ID,
@@ -575,6 +579,7 @@ func monitorSessionWithDB(ctx context.Context, doneCh <-chan error, stallCh <-ch
 
 	case err := <-doneCh:
 		if err != nil {
+			slog.Warn("engine: agent process exited with error", "car", carID, "error", err)
 			return sessionOutcome{kind: outcomeClear}
 		}
 		// Zero exit — verify the agent actually called ry complete.
@@ -605,6 +610,18 @@ func claimOrReclaim(gormDB *gorm.DB, eng *models.Engine, track string) (*models.
 			return b, nil
 		}
 		// Clear stale current_car — car is in a terminal/blocked state.
+		if err != nil {
+			slog.Warn("engine: clearing stale current_car (car not found)",
+				"engine", eng.ID,
+				"car", eng.CurrentCar,
+			)
+		} else {
+			slog.Info("engine: clearing stale current_car",
+				"engine", eng.ID,
+				"car", eng.CurrentCar,
+				"car_status", b.Status,
+			)
+		}
 		gormDB.Model(&models.Engine{}).Where("id = ?", eng.ID).Update("current_car", "")
 		eng.CurrentCar = ""
 	}
@@ -645,13 +662,24 @@ func pushInflightBranch(gormDB *gorm.DB, eng *models.Engine, repoDir string) {
 		slog.Info("engine: auto-committed uncommitted changes", "car", c.ID)
 	}
 
-	engine.PushBranch(repoDir, c.Branch) //nolint:errcheck
+	if err := engine.PushBranch(repoDir, c.Branch); err != nil {
+		slog.Warn("engine: shutdown push failed (non-fatal)", "car", c.ID, "branch", c.Branch, "error", err)
+	} else {
+		slog.Info("engine: shutdown push succeeded", "car", c.ID, "branch", c.Branch)
+	}
 }
 
 // handleCompletionFailure sets a car to blocked and notifies the yardmaster
 // when HandleCompletion fails (e.g., push failure). This prevents the car
 // from sitting in "done" status with no code on the remote.
 func handleCompletionFailure(db *gorm.DB, carID, engineID, sessionID string, completionErr error) {
+	slog.Warn("engine: completion failed, blocking car",
+		"car", carID,
+		"engine", engineID,
+		"session", sessionID,
+		"error", completionErr,
+		"blocked_reason", models.BlockedReasonCompletionFailed,
+	)
 	db.Model(&models.Car{}).Where("id = ?", carID).
 		Updates(map[string]interface{}{
 			"status":         "blocked",
