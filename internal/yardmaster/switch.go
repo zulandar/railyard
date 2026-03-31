@@ -2,6 +2,7 @@ package yardmaster
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -1188,15 +1189,30 @@ func createDraftPR(repoDir, title, body, branch string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// getExistingPR checks if a PR already exists for the given branch and returns its URL.
+// getExistingPR checks if an OPEN PR already exists for the given branch and
+// returns its URL. Returns ("", error) when no open PR exists — this includes
+// branches whose PR was already merged or closed, so the caller creates a new
+// draft instead of updating the stale PR.
 func getExistingPR(repoDir, branch string) (string, error) {
-	cmd := exec.Command("gh", "pr", "view", branch, "--json", "url", "-q", ".url")
+	cmd := exec.Command("gh", "pr", "view", branch, "--json", "url,state")
 	cmd.Dir = repoDir
 	out, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("gh pr view %s: %w", branch, err)
 	}
-	return strings.TrimSpace(string(out)), nil
+
+	var result struct {
+		URL   string `json:"url"`
+		State string `json:"state"`
+	}
+	if err := json.Unmarshal(out, &result); err != nil {
+		return "", fmt.Errorf("parse gh pr view %s: %w", branch, err)
+	}
+
+	if result.State != "OPEN" {
+		return "", fmt.Errorf("pr for %s is %s, not OPEN", branch, result.State)
+	}
+	return result.URL, nil
 }
 
 // updatePRBody updates the body of an existing PR for the given branch.

@@ -2499,3 +2499,65 @@ func TestSwitch_RequirePR_CommentCountSnapshot(t *testing.T) {
 		t.Errorf("LastPRCommentCount = %d, want 5", car.LastPRCommentCount)
 	}
 }
+
+func TestSwitch_RequirePR_MergedPR_CreatesNewDraft(t *testing.T) {
+	repoDir, _, run := initTestRepoWithRemote(t)
+	db := testDB(t)
+
+	run(repoDir, "git", "checkout", "-b", "ry/backend/car-pr7")
+	writeFile(t, repoDir, "feature.go", "package main\n// post-merge revision\n")
+	run(repoDir, "git", "add", ".")
+	run(repoDir, "git", "commit", "-m", "post-merge revision")
+	run(repoDir, "git", "checkout", "main")
+
+	db.Create(&models.Car{
+		ID: "car-pr7", Title: "Post-Merge Revision", Track: "backend",
+		Status: "done", Branch: "ry/backend/car-pr7",
+	})
+
+	// Simulate: getExistingPR returns error because the old PR is MERGED.
+	tracker := &prCallTracker{
+		getExistingErr: fmt.Errorf("pr for ry/backend/car-pr7 is MERGED, not OPEN"),
+		createDraftURL: "https://github.com/org/repo/pull/10",
+	}
+	push, getEx, createDr, updateBd, markRd, addLb := tracker.hooks()
+
+	result, err := Switch(db, "car-pr7", SwitchOpts{
+		RepoDir:         repoDir,
+		RequirePR:       true,
+		RevisedLabel:    "railyard: revised",
+		PushBranchFn:    push,
+		GetExistingPRFn: getEx,
+		CreateDraftPRFn: createDr,
+		UpdatePRBodyFn:  updateBd,
+		MarkPRReadyFn:   markRd,
+		AddPRLabelFn:    addLb,
+	})
+	if err != nil {
+		t.Fatalf("Switch: %v", err)
+	}
+
+	// Should create a NEW draft, not update the merged PR.
+	if !result.PRCreated {
+		t.Error("expected PRCreated=true")
+	}
+	if result.PRUrl != "https://github.com/org/repo/pull/10" {
+		t.Errorf("PRUrl = %q, want new PR URL", result.PRUrl)
+	}
+	// Should NOT have called update/ready/label (those are for existing open PRs).
+	if tracker.updateBodyCalled {
+		t.Error("updateBody should NOT be called — old PR was merged")
+	}
+	if tracker.markReadyCalled {
+		t.Error("markReady should NOT be called — old PR was merged")
+	}
+	if tracker.addLabelCalled {
+		t.Error("addLabel should NOT be called — old PR was merged")
+	}
+
+	var car models.Car
+	db.First(&car, "id = ?", "car-pr7")
+	if car.Status != "pr_open" {
+		t.Errorf("status = %q, want %q", car.Status, "pr_open")
+	}
+}
