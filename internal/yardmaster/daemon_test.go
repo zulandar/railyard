@@ -1825,22 +1825,22 @@ func TestHandleCompletedCars_EpicWithPendingChildren_StaysDone(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 type mockPRViewer struct {
-	reviewDecision     string
-	state              string
-	mergeable          string
-	reviews            []prReview
-	labels             []string
-	inlineComments     []prInlineComment
-	convComments       []prConversationComment
-	fetchErr           error
-	err                error
-	mergeErr           error
-	mergeCalled        bool
-	commentCount int
-	countErr           error
-	removeLabelCalled  bool
-	removedLabel       string
-	removeLabelErr     error
+	reviewDecision    string
+	state             string
+	mergeable         string
+	reviews           []prReview
+	labels            []string
+	inlineComments    []prInlineComment
+	convComments      []prConversationComment
+	fetchErr          error
+	err               error
+	mergeErr          error
+	mergeCalled       bool
+	commentCount      int
+	countErr          error
+	removeLabelCalled bool
+	removedLabel      string
+	removeLabelErr    error
 }
 
 func (m *mockPRViewer) ViewPR(branch string) (*prStatus, error) {
@@ -1874,8 +1874,6 @@ func (m *mockPRViewer) RemoveLabel(branch, label string) error {
 	m.removedLabel = label
 	return m.removeLabelErr
 }
-
-
 
 func TestViewPR_IncludesMergeable(t *testing.T) {
 	viewer := &mockPRViewer{
@@ -2941,7 +2939,7 @@ func TestHandlePrOpenCars_NewComments(t *testing.T) {
 	})
 
 	viewer := &mockPRViewer{
-		state:              "OPEN",
+		state:        "OPEN",
 		commentCount: 2,
 		inlineComments: []prInlineComment{
 			{Path: "main.go", Line: 10, Body: "Fix this", Author: "reviewer"},
@@ -2981,7 +2979,7 @@ func TestHandlePrOpenCars_NoNewComments(t *testing.T) {
 	})
 
 	viewer := &mockPRViewer{
-		state:              "OPEN",
+		state:        "OPEN",
 		commentCount: 3,
 	}
 
@@ -3011,9 +3009,9 @@ func TestHandlePrOpenCars_CommentsIgnoredWhenApproved(t *testing.T) {
 	})
 
 	viewer := &mockPRViewer{
-		state:              "OPEN",
-		reviewDecision:     "APPROVED",
-		commentCount: 5,
+		state:          "OPEN",
+		reviewDecision: "APPROVED",
+		commentCount:   5,
 	}
 
 	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
@@ -3042,7 +3040,7 @@ func TestHandlePrOpenCars_InlineCountDecreasesNoTrigger(t *testing.T) {
 	})
 
 	viewer := &mockPRViewer{
-		state:              "OPEN",
+		state:        "OPEN",
 		commentCount: 3,
 	}
 
@@ -3113,7 +3111,7 @@ func TestHandlePrOpenCars_ZeroToZeroNoTrigger(t *testing.T) {
 	})
 
 	viewer := &mockPRViewer{
-		state:              "OPEN",
+		state:        "OPEN",
 		commentCount: 0,
 	}
 
@@ -3139,7 +3137,7 @@ func TestHandlePrOpenCars_MultiplePrOpenCars(t *testing.T) {
 	db.Create(&models.Car{ID: "car-cmt7c", Branch: "ry/backend/car-cmt7c", Status: "pr_open", Track: "backend", LastPRCommentCount: 0})
 
 	viewer := &mockPRViewer{
-		state:              "OPEN",
+		state:        "OPEN",
 		commentCount: 2,
 	}
 
@@ -3177,7 +3175,7 @@ func TestHandlePrOpenCars_CommentCountResetOnReentry(t *testing.T) {
 	})
 
 	viewer := &mockPRViewer{
-		state:              "OPEN",
+		state:        "OPEN",
 		commentCount: 4,
 	}
 
@@ -3207,8 +3205,8 @@ func TestHandlePrOpenCars_LabelTakesPriorityOverComments(t *testing.T) {
 	})
 
 	viewer := &mockPRViewer{
-		state:              "OPEN",
-		labels:             []string{"railyard: rework"},
+		state:        "OPEN",
+		labels:       []string{"railyard: rework"},
 		commentCount: 5,
 	}
 
@@ -3285,10 +3283,10 @@ func TestHandlePrOpenCars_AllTriggersInOneBatch(t *testing.T) {
 	db.Create(&models.Car{ID: "car-bat-d", Branch: "ry/backend/car-bat-d", Status: "pr_open", Track: "backend", LastPRCommentCount: 3})
 
 	viewer := &mockPRViewer{
-		reviewDecision:     "CHANGES_REQUESTED",
-		state:              "OPEN",
-		reviews:            []prReview{{Body: "Fix", Author: "rev"}},
-		commentCount: 5,
+		reviewDecision: "CHANGES_REQUESTED",
+		state:          "OPEN",
+		reviews:        []prReview{{Body: "Fix", Author: "rev"}},
+		commentCount:   5,
 	}
 
 	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})

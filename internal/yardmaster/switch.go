@@ -23,7 +23,6 @@ import (
 // the yardmaster worktree.
 var gitMu sync.Mutex
 
-
 // SwitchOpts holds parameters for the switch (merge) operation.
 type SwitchOpts struct {
 	RepoDir          string                           // working directory (yardmaster worktree when running via daemon)

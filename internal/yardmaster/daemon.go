@@ -1179,8 +1179,6 @@ func (g *ghPRViewer) RemoveLabel(branch, label string) error {
 	return nil
 }
 
-
-
 // parseInlineComments parses the JSON response from the GitHub pulls/comments API.
 func parseInlineComments(data []byte) ([]prInlineComment, error) {
 	var raw []struct {
