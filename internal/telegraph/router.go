@@ -239,16 +239,97 @@ func (r *Router) handleCommand(ctx context.Context, msg InboundMessage, text str
 // ackPhrases are the random acknowledgment messages the bot sends when it
 // starts working on a dispatch request.
 var ackPhrases = []string{
+	// Classic acknowledgments
 	"On it, boss.",
-	"Looking into it...",
-	"Making some juicy stuff happen...",
 	"Copy that, working on it now.",
 	"Roger that. Give me a sec.",
+	"Say no more.",
+	"Consider it handled.",
+	"I see what you need. On it.",
+	"Got it. Watch this.",
+	"Challenge accepted.",
+	"You came to the right place.",
+	"Affirmative. Commencing awesomeness.",
+
+	// Juicy vibes
+	"Making some juicy stuff happen...",
+	"Juicy details incoming...",
+	"Working on something juicy for you...",
+	"One juicy solution, coming right up.",
+	"Let me dig into the juicy bits.",
+	"Time to get juicy with it.",
+	"This one's got some juice to it. Let me work.",
+	"One sec, making it juicy.",
+	"Squeezing out something juicy...",
+	"Extra juicy, coming right up.",
+
+	// Cooking & brewing
+	"One sec, let me cook.",
+	"Brewing something good...",
+	"Cooking up something fresh...",
+	"Let me whip something up.",
+	"Getting the good stuff ready...",
+	"Time to make the donuts.",
+	"Marinating on this one...",
+	"Recipe loaded. Preheating the oven.",
+
+	// Mechanical & engines
 	"Firing up the engines...",
-	"Let me see what I can do.",
-	"Already on it.",
+	"Revving up...",
+	"Spinning up the hamster wheels...",
+	"Warming up the compiler...",
+	"Wheels are turning...",
+	"On track and picking up speed...",
+	"I'm on it like a car on rails.",
+	"All systems go.",
+
+	// Magic & mystery
 	"Hold tight, working my magic...",
+	"Let me work my magic real quick.",
+	"Let me sprinkle some magic on this.",
+	"Queuing up some magic...",
+	"Pulling some strings...",
+	"Activating problem-solving mode...",
+	"Deploying brain cells...",
+	"Loading awesomeness...",
+
+	// Confident swagger
 	"Consider it done. Well, almost.",
+	"This is going to be good.",
+	"Your wish is my command. Almost literally.",
+	"One moment while I do something amazing.",
+	"I live for this. One moment.",
+	"Hold my coffee.",
+	"I've got just the thing.",
+	"Buckle up, working on it.",
+	"This is the fun part. Hang tight.",
+
+	// Getting to work
+	"Looking into it...",
+	"Let me see what I can do.",
+	"Rolling up my sleeves...",
+	"Diving in headfirst...",
+	"Getting my hands dirty...",
+	"Let me take a crack at this.",
+	"Making moves...",
+	"Dusting off my toolkit...",
+	"Putting the pieces together...",
+	"Assembling the pieces...",
+	"Give me a sec to do my thing.",
+	"Let me handle the heavy lifting.",
+	"Running the play...",
+	"Pouring the foundation...",
+
+	// Playful status updates
+	"Processing... but like, with style.",
+	"Loading... just kidding, already started.",
+	"Standing by... just kidding, I'm already working.",
+	"Incoming solution in 3... 2... okay maybe a few more seconds.",
+	"Working on it. Try not to miss me.",
+	"Consider me deployed.",
+	"Crunching the numbers... and the code.",
+	"On the case like a detective with coffee.",
+	"Brain engaged. Fingers moving.",
 }
 
 // sendUnavailable notifies the user in-thread that a dispatch session could
