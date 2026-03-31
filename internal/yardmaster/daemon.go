@@ -515,7 +515,7 @@ func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, r
 		// Build a CommentCounter if PR mode is active — nil is safe otherwise.
 		var commentCounter func(string) (int, error)
 		if cfg.RequirePR {
-			commentCounter = (&ghPRViewer{repoDir: repoDir}).CountNonAuthorInlineComments
+			commentCounter = (&ghPRViewer{repoDir: repoDir}).CountComments
 		}
 
 		result, err := Switch(db, c.ID, SwitchOpts{
@@ -1021,7 +1021,7 @@ type PRViewer interface {
 	ViewPR(branch string) (*prStatus, error)
 	FetchComments(branch string) ([]prInlineComment, []prConversationComment, error)
 	MergePR(branch string) error
-	CountNonAuthorInlineComments(branch string) (int, error)
+	CountComments(branch string) (int, error)
 	RemoveLabel(branch, label string) error
 }
 
@@ -1122,10 +1122,12 @@ func (g *ghPRViewer) FetchComments(branch string) ([]prInlineComment, []prConver
 	return inline, conversation, nil
 }
 
-func (g *ghPRViewer) CountNonAuthorInlineComments(branch string) (int, error) {
-	// Step 1: Get PR number and author.
+func (g *ghPRViewer) CountComments(branch string) (int, error) {
+	// Step 1: Get PR number and conversation comments.
+	// The PR body/description is NOT included in "comments" — only posts made
+	// after the PR was created, which is exactly what we want.
 	cmd := exec.Command("gh", "pr", "view", branch,
-		"--json", "number,author")
+		"--json", "number,comments")
 	cmd.Dir = g.repoDir
 	out, err := cmd.Output()
 	if err != nil {
@@ -1133,40 +1135,37 @@ func (g *ghPRViewer) CountNonAuthorInlineComments(branch string) (int, error) {
 	}
 
 	var prData struct {
-		Number int `json:"number"`
-		Author struct {
-			Login string `json:"login"`
-		} `json:"author"`
+		Number   int `json:"number"`
+		Comments []struct {
+			Author struct {
+				Login string `json:"login"`
+			} `json:"author"`
+		} `json:"comments"`
 	}
 	if err := json.Unmarshal(out, &prData); err != nil {
 		return 0, fmt.Errorf("parse gh pr view: %w", err)
 	}
 
+	count := len(prData.Comments)
+
 	// Step 2: Fetch inline review comments via REST API with pagination.
-	// GitHub defaults to 30 per page; --paginate fetches all pages.
 	apiPath := fmt.Sprintf("repos/{owner}/{repo}/pulls/%d/comments", prData.Number)
 	cmd2 := exec.Command("gh", "api", "--paginate", apiPath)
 	cmd2.Dir = g.repoDir
 	out2, err := cmd2.Output()
 	if err != nil {
-		return 0, fmt.Errorf("gh api %s: %w", apiPath, err)
+		// Non-fatal: return conversation count if inline fetch fails.
+		slog.Warn("gh api error for inline comments", "path", apiPath, "error", err)
+		return count, nil
 	}
 
-	var comments []struct {
-		User struct {
-			Login string `json:"login"`
-		} `json:"user"`
-	}
-	if err := json.Unmarshal(out2, &comments); err != nil {
-		return 0, fmt.Errorf("parse inline comments: %w", err)
+	var inlineComments []json.RawMessage
+	if err := json.Unmarshal(out2, &inlineComments); err != nil {
+		slog.Warn("parse inline comments error", "pr", prData.Number, "error", err)
+		return count, nil
 	}
 
-	count := 0
-	for _, c := range comments {
-		if c.User.Login != prData.Author.Login {
-			count++
-		}
-	}
+	count += len(inlineComments)
 	return count, nil
 }
 
@@ -1345,14 +1344,14 @@ func handlePrOpenCars(db *gorm.DB, viewer PRViewer, autoMerge bool, repoDir, ymD
 			logger.Info("PR rework label detected", "car", c.ID, "transition", "pr_open->open")
 
 		case status.State == "OPEN" && status.ReviewDecision != "APPROVED":
-			count, countErr := viewer.CountNonAuthorInlineComments(c.Branch)
+			count, countErr := viewer.CountComments(c.Branch)
 			if countErr != nil {
-				logger.Warn("Count inline comments", "car", c.ID, "error", countErr)
+				logger.Warn("Count comments", "car", c.ID, "error", countErr)
 				continue
 			}
 			if count > c.LastPRCommentCount {
 				reopenCarWithFeedback(db, viewer, c, nil, revisedLabel, logger)
-				logger.Info("PR new inline comments detected", "car", c.ID,
+				logger.Info("PR new comments detected", "car", c.ID,
 					"old_count", c.LastPRCommentCount, "new_count", count,
 					"transition", "pr_open->open")
 			}

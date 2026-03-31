@@ -1836,7 +1836,7 @@ type mockPRViewer struct {
 	err                error
 	mergeErr           error
 	mergeCalled        bool
-	inlineCommentCount int
+	commentCount int
 	countErr           error
 	removeLabelCalled  bool
 	removedLabel       string
@@ -1865,8 +1865,8 @@ func (m *mockPRViewer) MergePR(branch string) error {
 	return m.mergeErr
 }
 
-func (m *mockPRViewer) CountNonAuthorInlineComments(branch string) (int, error) {
-	return m.inlineCommentCount, m.countErr
+func (m *mockPRViewer) CountComments(branch string) (int, error) {
+	return m.commentCount, m.countErr
 }
 
 func (m *mockPRViewer) RemoveLabel(branch, label string) error {
@@ -2930,7 +2930,7 @@ func TestHasReworkLabel_EmptyLabels(t *testing.T) {
 	}
 }
 
-func TestHandlePrOpenCars_NewInlineComments(t *testing.T) {
+func TestHandlePrOpenCars_NewComments(t *testing.T) {
 	db := testDB(t)
 	db.Create(&models.Car{
 		ID:                 "car-cmt1",
@@ -2942,7 +2942,7 @@ func TestHandlePrOpenCars_NewInlineComments(t *testing.T) {
 
 	viewer := &mockPRViewer{
 		state:              "OPEN",
-		inlineCommentCount: 2,
+		commentCount: 2,
 		inlineComments: []prInlineComment{
 			{Path: "main.go", Line: 10, Body: "Fix this", Author: "reviewer"},
 			{Path: "main.go", Line: 20, Body: "And this", Author: "reviewer"},
@@ -2982,7 +2982,7 @@ func TestHandlePrOpenCars_NoNewComments(t *testing.T) {
 
 	viewer := &mockPRViewer{
 		state:              "OPEN",
-		inlineCommentCount: 3,
+		commentCount: 3,
 	}
 
 	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
@@ -3013,7 +3013,7 @@ func TestHandlePrOpenCars_CommentsIgnoredWhenApproved(t *testing.T) {
 	viewer := &mockPRViewer{
 		state:              "OPEN",
 		reviewDecision:     "APPROVED",
-		inlineCommentCount: 5,
+		commentCount: 5,
 	}
 
 	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
@@ -3043,7 +3043,7 @@ func TestHandlePrOpenCars_InlineCountDecreasesNoTrigger(t *testing.T) {
 
 	viewer := &mockPRViewer{
 		state:              "OPEN",
-		inlineCommentCount: 3,
+		commentCount: 3,
 	}
 
 	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
@@ -3114,7 +3114,7 @@ func TestHandlePrOpenCars_ZeroToZeroNoTrigger(t *testing.T) {
 
 	viewer := &mockPRViewer{
 		state:              "OPEN",
-		inlineCommentCount: 0,
+		commentCount: 0,
 	}
 
 	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
@@ -3140,7 +3140,7 @@ func TestHandlePrOpenCars_MultiplePrOpenCars(t *testing.T) {
 
 	viewer := &mockPRViewer{
 		state:              "OPEN",
-		inlineCommentCount: 2,
+		commentCount: 2,
 	}
 
 	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
@@ -3178,7 +3178,7 @@ func TestHandlePrOpenCars_CommentCountResetOnReentry(t *testing.T) {
 
 	viewer := &mockPRViewer{
 		state:              "OPEN",
-		inlineCommentCount: 4,
+		commentCount: 4,
 	}
 
 	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
@@ -3209,7 +3209,7 @@ func TestHandlePrOpenCars_LabelTakesPriorityOverComments(t *testing.T) {
 	viewer := &mockPRViewer{
 		state:              "OPEN",
 		labels:             []string{"railyard: rework"},
-		inlineCommentCount: 5,
+		commentCount: 5,
 	}
 
 	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
@@ -3288,7 +3288,7 @@ func TestHandlePrOpenCars_AllTriggersInOneBatch(t *testing.T) {
 		reviewDecision:     "CHANGES_REQUESTED",
 		state:              "OPEN",
 		reviews:            []prReview{{Body: "Fix", Author: "rev"}},
-		inlineCommentCount: 5,
+		commentCount: 5,
 	}
 
 	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})

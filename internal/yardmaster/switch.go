@@ -34,7 +34,7 @@ type SwitchOpts struct {
 	TestCommand      string                           // per-track test command (e.g. "go test ./...", "phpunit", "npm test")
 	RequirePR        bool                             // create a draft PR instead of direct merge
 	SwitchTimeoutSec int                              // max seconds for runTests (default 600 if 0)
-	CommentCounter   func(branch string) (int, error) // nil-safe; returns non-author inline comment count for pr_open snapshot
+	CommentCounter   func(branch string) (int, error) // nil-safe; returns non-author comment count (inline + conversation) for pr_open snapshot
 	RevisedLabel     string                           // label to apply after a revision pushes to an existing PR (e.g. "railyard: revised")
 
 	// PR operation hooks — nil defaults to the gh-CLI implementations.
