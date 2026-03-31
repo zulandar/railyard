@@ -512,6 +512,12 @@ func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, r
 			}
 		}
 
+		// Build a CommentCounter if PR mode is active — nil is safe otherwise.
+		var commentCounter func(string) (int, error)
+		if cfg.RequirePR {
+			commentCounter = (&ghPRViewer{repoDir: repoDir}).CountNonAuthorInlineComments
+		}
+
 		result, err := Switch(db, c.ID, SwitchOpts{
 			RepoDir:          ymDir,
 			PrimaryRepoDir:   repoDir,
@@ -520,6 +526,7 @@ func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, r
 			TestCommand:      testCommand,
 			RequirePR:        cfg.RequirePR,
 			SwitchTimeoutSec: cfg.Stall.SwitchTimeoutSec,
+			CommentCounter:   commentCounter,
 		})
 
 		// Handle any failure — write a categorized progress note and check
@@ -1005,6 +1012,7 @@ type prStatus struct {
 	ReviewDecision string // APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED, ""
 	Mergeable      string // MERGEABLE, CONFLICTING, UNKNOWN
 	Reviews        []prReview
+	Labels         []string // label names on the PR
 }
 
 // PRViewer abstracts GitHub PR status lookups and merge operations for testability.
@@ -1012,6 +1020,8 @@ type PRViewer interface {
 	ViewPR(branch string) (*prStatus, error)
 	FetchComments(branch string) ([]prInlineComment, []prConversationComment, error)
 	MergePR(branch string) error
+	CountNonAuthorInlineComments(branch string) (int, error)
+	RemoveLabel(branch, label string) error
 }
 
 // ghPRViewer implements PRViewer using the gh CLI.
@@ -1021,7 +1031,7 @@ type ghPRViewer struct {
 
 func (g *ghPRViewer) ViewPR(branch string) (*prStatus, error) {
 	cmd := exec.Command("gh", "pr", "view", branch,
-		"--json", "state,reviewDecision,reviews,mergeable")
+		"--json", "state,reviewDecision,reviews,mergeable,labels")
 	cmd.Dir = g.repoDir
 	out, err := cmd.Output()
 	if err != nil {
@@ -1038,6 +1048,9 @@ func (g *ghPRViewer) ViewPR(branch string) (*prStatus, error) {
 				Login string `json:"login"`
 			} `json:"author"`
 		} `json:"reviews"`
+		Labels []struct {
+			Name string `json:"name"`
+		} `json:"labels"`
 	}
 	if err := json.Unmarshal(out, &result); err != nil {
 		return nil, fmt.Errorf("parse gh pr view: %w", err)
@@ -1050,6 +1063,9 @@ func (g *ghPRViewer) ViewPR(branch string) (*prStatus, error) {
 	}
 	for _, r := range result.Reviews {
 		ps.Reviews = append(ps.Reviews, prReview{Body: r.Body, Author: r.Author.Login})
+	}
+	for _, l := range result.Labels {
+		ps.Labels = append(ps.Labels, l.Name)
 	}
 	return ps, nil
 }
@@ -1103,6 +1119,64 @@ func (g *ghPRViewer) FetchComments(branch string) ([]prInlineComment, []prConver
 	}
 
 	return inline, conversation, nil
+}
+
+func (g *ghPRViewer) CountNonAuthorInlineComments(branch string) (int, error) {
+	// Step 1: Get PR number and author.
+	cmd := exec.Command("gh", "pr", "view", branch,
+		"--json", "number,author")
+	cmd.Dir = g.repoDir
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, fmt.Errorf("gh pr view %s: %w", branch, err)
+	}
+
+	var prData struct {
+		Number int `json:"number"`
+		Author struct {
+			Login string `json:"login"`
+		} `json:"author"`
+	}
+	if err := json.Unmarshal(out, &prData); err != nil {
+		return 0, fmt.Errorf("parse gh pr view: %w", err)
+	}
+
+	// Step 2: Fetch inline review comments via REST API with pagination.
+	// GitHub defaults to 30 per page; --paginate fetches all pages.
+	apiPath := fmt.Sprintf("repos/{owner}/{repo}/pulls/%d/comments", prData.Number)
+	cmd2 := exec.Command("gh", "api", "--paginate", apiPath)
+	cmd2.Dir = g.repoDir
+	out2, err := cmd2.Output()
+	if err != nil {
+		return 0, fmt.Errorf("gh api %s: %w", apiPath, err)
+	}
+
+	var comments []struct {
+		User struct {
+			Login string `json:"login"`
+		} `json:"user"`
+	}
+	if err := json.Unmarshal(out2, &comments); err != nil {
+		return 0, fmt.Errorf("parse inline comments: %w", err)
+	}
+
+	count := 0
+	for _, c := range comments {
+		if c.User.Login != prData.Author.Login {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func (g *ghPRViewer) RemoveLabel(branch, label string) error {
+	cmd := exec.Command("gh", "pr", "edit", branch, "--remove-label", label)
+	cmd.Dir = g.repoDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("gh pr edit --remove-label %s: %s: %w", label, string(out), err)
+	}
+	return nil
 }
 
 // parseInlineComments parses the JSON response from the GitHub pulls/comments API.
@@ -1249,27 +1323,65 @@ func handlePrOpenCars(db *gorm.DB, viewer PRViewer, autoMerge bool, repoDir, ymD
 			runPostMerge(db, c, logger)
 
 		case status.ReviewDecision == "CHANGES_REQUESTED":
-			if err := db.Model(&models.Car{}).Where("id = ?", c.ID).Updates(map[string]interface{}{
-				"status":   "open",
-				"assignee": "",
-			}).Error; err != nil {
-				logger.Error("Update car to open", "car", c.ID, "error", err)
+			reopenCarWithFeedback(db, viewer, c, status.Reviews, logger)
+			logger.Info("PR changes requested", "car", c.ID, "transition", "pr_open->open")
+
+		case status.State == "OPEN" && cfg != nil && hasReworkLabel(status.Labels, cfg.Yardmaster.ReworkLabel):
+			// Remove the label BEFORE reopening the car to prevent a reopen loop
+			// if the label removal fails (stale label + rework cycle = infinite loop).
+			if err := viewer.RemoveLabel(c.Branch, cfg.Yardmaster.ReworkLabel); err != nil {
+				logger.Error("Remove rework label failed, skipping reopen to avoid loop", "car", c.ID, "error", err)
 				continue
 			}
+			reopenCarWithFeedback(db, viewer, c, nil, logger)
+			logger.Info("PR rework label detected", "car", c.ID, "transition", "pr_open->open")
 
-			// Fetch inline and conversation comments for richer feedback.
-			inline, conversation, fetchErr := viewer.FetchComments(c.Branch)
-			if fetchErr != nil {
-				logger.Warn("Fetch comments error", "car", c.ID, "error", fetchErr)
+		case status.State == "OPEN" && status.ReviewDecision != "APPROVED":
+			count, countErr := viewer.CountNonAuthorInlineComments(c.Branch)
+			if countErr != nil {
+				logger.Warn("Count inline comments", "car", c.ID, "error", countErr)
+				continue
 			}
-
-			note := formatReviewNote(status.Reviews, inline, conversation)
-			writeProgressNote(db, c.ID, "yardmaster", note)
-			logger.Info("PR changes requested", "car", c.ID, "transition", "pr_open->open")
+			if count > c.LastPRCommentCount {
+				reopenCarWithFeedback(db, viewer, c, nil, logger)
+				logger.Info("PR new inline comments detected", "car", c.ID,
+					"old_count", c.LastPRCommentCount, "new_count", count,
+					"transition", "pr_open->open")
+			}
 		}
 	}
 
 	return nil
+}
+
+// hasReworkLabel checks whether the given label is present in the PR's label list.
+func hasReworkLabel(labels []string, reworkLabel string) bool {
+	for _, l := range labels {
+		if l == reworkLabel {
+			return true
+		}
+	}
+	return false
+}
+
+// reopenCarWithFeedback transitions a pr_open car back to open with review feedback
+// as a progress note. CompletedAt is preserved so engines detect isRevision=true.
+func reopenCarWithFeedback(db *gorm.DB, viewer PRViewer, c models.Car, reviews []prReview, logger *slog.Logger) {
+	if err := db.Model(&models.Car{}).Where("id = ?", c.ID).Updates(map[string]interface{}{
+		"status":   "open",
+		"assignee": "",
+	}).Error; err != nil {
+		logger.Error("Update car to open", "car", c.ID, "error", err)
+		return
+	}
+
+	inline, conversation, fetchErr := viewer.FetchComments(c.Branch)
+	if fetchErr != nil {
+		logger.Warn("Fetch comments error", "car", c.ID, "error", fetchErr)
+	}
+
+	note := formatReviewNote(reviews, inline, conversation)
+	writeProgressNote(db, c.ID, "yardmaster", note)
 }
 
 // formatReviewNote builds a structured progress note from all PR feedback types.

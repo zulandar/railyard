@@ -14,6 +14,9 @@ func testConfig(tracks ...config.TrackConfig) *config.Config {
 		Repo:         "git@github.com:org/myapp.git",
 		BranchPrefix: "ry/alice",
 		Tracks:       tracks,
+		Yardmaster: config.YardmasterConfig{
+			ReworkLabel: "railyard: rework",
+		},
 	}
 }
 

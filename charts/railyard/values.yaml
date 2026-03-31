@@ -222,6 +222,9 @@ yardmaster:
   healthPort: 8081
   # -- Auto-merge APPROVED PRs via gh CLI (requires require_pr mode).
   autoMergeOnApproval: false
+  # -- GitHub label that triggers car rework on pr_open PRs.
+  # Applied manually or by bots; removed automatically after the car is reopened.
+  reworkLabel: "railyard: rework"
 
 # ---------------------------------------------------------------------------
 # Stall detection

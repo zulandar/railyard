@@ -37,7 +37,8 @@ type Car struct {
 	BlockedReason      string  `gorm:"size:32"` // why blocked: "test-failed", "stalled", "completion-failed", or "" for dependency
 	RequestedBy        string  `gorm:"size:64"`
 	SourceIssue        int
-	LastRebaseBaseHead string `gorm:"size:40"` // SHA of base branch HEAD when rebase was last attempted
+	LastRebaseBaseHead string `gorm:"size:40"`   // SHA of base branch HEAD when rebase was last attempted
+	LastPRCommentCount int    `gorm:"default:0"` // non-author inline comment count when car entered pr_open
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 	ClaimedAt          *time.Time

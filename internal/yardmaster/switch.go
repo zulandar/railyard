@@ -24,14 +24,15 @@ var gitMu sync.Mutex
 
 // SwitchOpts holds parameters for the switch (merge) operation.
 type SwitchOpts struct {
-	RepoDir          string // working directory (yardmaster worktree when running via daemon)
-	PrimaryRepoDir   string // primary repo directory (for engine worktree detachment; empty = use RepoDir)
-	BaseBranch       string // target branch for merge (default "main"); used for worktree-safe operations
-	DryRun           bool   // run tests but don't merge
-	PreTestCommand   string // command to run before tests (e.g. "go mod vendor", "npm install")
-	TestCommand      string // per-track test command (e.g. "go test ./...", "phpunit", "npm test")
-	RequirePR        bool   // create a draft PR instead of direct merge
-	SwitchTimeoutSec int    // max seconds for runTests (default 600 if 0)
+	RepoDir          string                           // working directory (yardmaster worktree when running via daemon)
+	PrimaryRepoDir   string                           // primary repo directory (for engine worktree detachment; empty = use RepoDir)
+	BaseBranch       string                           // target branch for merge (default "main"); used for worktree-safe operations
+	DryRun           bool                             // run tests but don't merge
+	PreTestCommand   string                           // command to run before tests (e.g. "go mod vendor", "npm install")
+	TestCommand      string                           // per-track test command (e.g. "go test ./...", "phpunit", "npm test")
+	RequirePR        bool                             // create a draft PR instead of direct merge
+	SwitchTimeoutSec int                              // max seconds for runTests (default 600 if 0)
+	CommentCounter   func(branch string) (int, error) // nil-safe; returns non-author inline comment count for pr_open snapshot
 }
 
 // SwitchFailureCategory categorizes Switch errors so the daemon can track and
@@ -269,29 +270,56 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 			return result, result.Error
 		}
 
-		// Build the PR body from the car record and progress notes.
-		prBody := buildPRBody(db, &car, opts.RepoDir, baseBranch)
+		// Check if a PR already exists for this branch (rework cycle).
+		existingURL, existsErr := getExistingPR(opts.RepoDir, car.Branch)
 
-		prURL, err := createDraftPR(opts.RepoDir, car.Title, prBody, car.Branch)
-		if err != nil {
-			result.FailureCategory = SwitchFailPR
-			result.Error = fmt.Errorf("create PR: %w", err)
-			return result, result.Error
+		var prURL string
+		if existsErr == nil && existingURL != "" {
+			// PR exists — update body with latest progress notes.
+			prBody := buildPRBody(db, &car, opts.RepoDir, baseBranch)
+			if updErr := updatePRBody(opts.RepoDir, car.Branch, prBody); updErr != nil {
+				slog.Warn("Update PR body failed", "car", carID, "error", updErr)
+			}
+			prURL = existingURL
+			slog.Info("Switch: existing PR updated with new commits",
+				"car", carID, "branch", car.Branch, "pr_url", prURL)
+		} else {
+			// No existing PR — create a new draft.
+			prBody := buildPRBody(db, &car, opts.RepoDir, baseBranch)
+			var createErr error
+			prURL, createErr = createDraftPR(opts.RepoDir, car.Title, prBody, car.Branch)
+			if createErr != nil {
+				result.FailureCategory = SwitchFailPR
+				result.Error = fmt.Errorf("create PR: %w", createErr)
+				return result, result.Error
+			}
+			slog.Info("Switch: draft PR created",
+				"car", carID, "branch", car.Branch, "pr_url", prURL)
 		}
 
 		result.PRCreated = true
 		result.PRUrl = prURL
-		slog.Info("Switch: draft PR created",
-			"car", carID,
-			"branch", car.Branch,
-			"pr_url", prURL,
-		)
+
+		// Snapshot current inline comment count for feedback detection.
+		// On failure, preserve the existing count from the car record to avoid
+		// resetting to 0, which would cause all old comments to appear "new"
+		// and spuriously reopen the car on the next poll cycle.
+		commentCount := car.LastPRCommentCount
+		if opts.CommentCounter != nil {
+			if cnt, cntErr := opts.CommentCounter(car.Branch); cntErr == nil {
+				commentCount = cnt
+			} else {
+				slog.Warn("Count comments for snapshot failed, preserving existing count",
+					"car", carID, "existing_count", car.LastPRCommentCount, "error", cntErr)
+			}
+		}
 
 		// Mark car as pr_open — not merged yet, waiting for human review.
 		now := time.Now()
 		if dbErr := db.Model(&models.Car{}).Where("id = ?", carID).Updates(map[string]interface{}{
-			"status":       "pr_open",
-			"completed_at": now,
+			"status":                "pr_open",
+			"completed_at":          now,
+			"last_pr_comment_count": commentCount,
 		}).Error; dbErr != nil {
 			slog.Error("update car to pr_open", "car", carID, "error", dbErr)
 		}
@@ -1108,4 +1136,26 @@ func createDraftPR(repoDir, title, body, branch string) (string, error) {
 		return "", fmt.Errorf("gh pr create: %s: %w", string(out), err)
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// getExistingPR checks if a PR already exists for the given branch and returns its URL.
+func getExistingPR(repoDir, branch string) (string, error) {
+	cmd := exec.Command("gh", "pr", "view", branch, "--json", "url", "-q", ".url")
+	cmd.Dir = repoDir
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("gh pr view %s: %w", branch, err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// updatePRBody updates the body of an existing PR for the given branch.
+func updatePRBody(repoDir, branch, body string) error {
+	cmd := exec.Command("gh", "pr", "edit", branch, "--body", body)
+	cmd.Dir = repoDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("gh pr edit %s: %s: %w", branch, string(out), err)
+	}
+	return nil
 }

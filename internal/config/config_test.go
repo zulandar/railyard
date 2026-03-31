@@ -1996,3 +1996,58 @@ func TestParse_DatabaseKeyWorks(t *testing.T) {
 		t.Errorf("Database.Host = %q, want %q", cfg.Database.Host, "10.0.0.5")
 	}
 }
+
+func TestDefaults_YardmasterReworkLabel(t *testing.T) {
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+tracks:
+  - name: backend
+    language: go
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Yardmaster.ReworkLabel != "railyard: rework" {
+		t.Errorf("Yardmaster.ReworkLabel = %q, want %q", cfg.Yardmaster.ReworkLabel, "railyard: rework")
+	}
+}
+
+func TestParse_YardmasterReworkLabelCustom(t *testing.T) {
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+yardmaster:
+  rework_label: "needs-rework"
+tracks:
+  - name: backend
+    language: go
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Yardmaster.ReworkLabel != "needs-rework" {
+		t.Errorf("Yardmaster.ReworkLabel = %q, want %q", cfg.Yardmaster.ReworkLabel, "needs-rework")
+	}
+}
+
+func TestParse_YardmasterReworkLabelEmptyGetsDefault(t *testing.T) {
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+yardmaster:
+  health_port: 9090
+tracks:
+  - name: backend
+    language: go
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Yardmaster.ReworkLabel != "railyard: rework" {
+		t.Errorf("Yardmaster.ReworkLabel = %q, want default %q", cfg.Yardmaster.ReworkLabel, "railyard: rework")
+	}
+}
