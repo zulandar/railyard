@@ -24,14 +24,14 @@ var gitMu sync.Mutex
 
 // SwitchOpts holds parameters for the switch (merge) operation.
 type SwitchOpts struct {
-	RepoDir          string // working directory (yardmaster worktree when running via daemon)
-	PrimaryRepoDir   string // primary repo directory (for engine worktree detachment; empty = use RepoDir)
-	BaseBranch       string // target branch for merge (default "main"); used for worktree-safe operations
-	DryRun           bool   // run tests but don't merge
-	PreTestCommand   string // command to run before tests (e.g. "go mod vendor", "npm install")
-	TestCommand      string // per-track test command (e.g. "go test ./...", "phpunit", "npm test")
-	RequirePR        bool   // create a draft PR instead of direct merge
-	SwitchTimeoutSec int    // max seconds for runTests (default 600 if 0)
+	RepoDir          string                           // working directory (yardmaster worktree when running via daemon)
+	PrimaryRepoDir   string                           // primary repo directory (for engine worktree detachment; empty = use RepoDir)
+	BaseBranch       string                           // target branch for merge (default "main"); used for worktree-safe operations
+	DryRun           bool                             // run tests but don't merge
+	PreTestCommand   string                           // command to run before tests (e.g. "go mod vendor", "npm install")
+	TestCommand      string                           // per-track test command (e.g. "go test ./...", "phpunit", "npm test")
+	RequirePR        bool                             // create a draft PR instead of direct merge
+	SwitchTimeoutSec int                              // max seconds for runTests (default 600 if 0)
 	CommentCounter   func(branch string) (int, error) // nil-safe; returns non-author inline comment count for pr_open snapshot
 }
 
