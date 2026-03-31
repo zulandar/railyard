@@ -430,6 +430,8 @@ func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, r
 		return err
 	}
 
+	slog.Debug("handleCompletedCars: found done cars", "count", len(cars))
+
 	// Sort by priority ASC (lower = higher priority), then CreatedAt ASC.
 	sort.Slice(cars, func(i, j int) bool {
 		if cars[i].Priority != cars[j].Priority {
@@ -480,14 +482,21 @@ func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, r
 			continue
 		}
 
-		logger.Info("Car completed, switching", "car", c.ID, "title", c.Title)
-
 		// Reset the yardmaster worktree to the car's base branch before each
 		// switch so we start from a clean state.
 		baseBranch := c.BaseBranch
 		if baseBranch == "" {
 			baseBranch = "main"
 		}
+
+		logger.Info("Car completed, switching",
+			"car", c.ID,
+			"title", c.Title,
+			"branch", c.Branch,
+			"base_branch", baseBranch,
+			"track", c.Track,
+			"assignee", c.Assignee,
+		)
 		if ymDir != repoDir {
 			if err := engine.SyncWorktreeToBranch(ymDir, baseBranch, repoDir); err != nil {
 				logger.Warn("Reset yardmaster worktree", "car", c.ID, "error", err)
@@ -566,7 +575,11 @@ func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, r
 			}
 
 		} else if !result.TestsPassed {
-			logger.Warn("Car tests failed, blocked", "car", c.ID)
+			logger.Warn("Car tests failed, blocked",
+				"car", c.ID,
+				"failure_category", failCategory,
+				"test_output_tail", engine.RedactSecrets(truncateSwitchLog(result.TestOutput, 200)),
+			)
 		}
 	}
 
@@ -583,6 +596,7 @@ func handleBlockedCars(db *gorm.DB, logger *slog.Logger) error {
 		}
 
 		for _, c := range completedCars {
+			logger.Debug("handleBlockedCars: checking deps for merged car", "car", c.ID)
 			unblocked, err := UnblockDeps(db, c.ID)
 			if err != nil {
 				logger.Error("Unblock deps", "car", c.ID, "error", err)
@@ -658,8 +672,11 @@ func reconcileStaleCars(db *gorm.DB, repoDir string, logger *slog.Logger) error 
 	}
 
 	if len(activeCars) == 0 {
+		slog.Debug("reconcileStaleCars: no active cars with branches")
 		return nil
 	}
+
+	slog.Debug("reconcileStaleCars: checking active cars", "count", len(activeCars))
 
 	// Group cars by base branch.
 	carsByBase := make(map[string][]models.Car)
@@ -679,6 +696,11 @@ func reconcileStaleCars(db *gorm.DB, repoDir string, logger *slog.Logger) error 
 			logger.Warn("Reconcile: skip base", "base", base, "error", err)
 			continue
 		}
+		slog.Debug("reconcileStaleCars: checking base branch",
+			"base", base,
+			"cars_on_base", len(cars),
+			"merged_branches_found", len(mergedBranches),
+		)
 
 		for _, c := range cars {
 			if mergedBranches[c.Branch] {
@@ -902,6 +924,12 @@ func maybeSwitchEscalate(ctx context.Context, db *gorm.DB, cfg *config.Config, c
 
 	failures := countRecentSwitchFailures(db, carID)
 	if failures < maxFailures {
+		slog.Debug("maybeSwitchEscalate: below threshold, not escalating",
+			"car", carID,
+			"failures", failures,
+			"max_failures", maxFailures,
+			"category", cat,
+		)
 		return
 	}
 
@@ -1318,4 +1346,12 @@ func sleepWithContext(ctx context.Context, d time.Duration) {
 	case <-ctx.Done():
 	case <-time.After(d):
 	}
+}
+
+// truncateSwitchLog returns the last n bytes of s for compact log output.
+func truncateSwitchLog(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return "..." + s[len(s)-n:]
 }

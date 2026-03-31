@@ -151,3 +151,24 @@ func TestConsoleHandler_QuotedStrings(t *testing.T) {
 		t.Errorf("expected quoted title in: %s", line)
 	}
 }
+
+func TestConsoleHandler_DebugVisible(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(NewConsoleHandler(&buf, &buf, slog.LevelDebug))
+	logger.Debug("debug message", "key", "val")
+	if !strings.Contains(buf.String(), "debug message") {
+		t.Errorf("debug message not visible at Debug level, got: %q", buf.String())
+	}
+	if !strings.Contains(buf.String(), "key=val") {
+		t.Errorf("debug attributes not visible, got: %q", buf.String())
+	}
+}
+
+func TestConsoleHandler_DebugFilteredAtInfo(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(NewConsoleHandler(&buf, &buf, slog.LevelInfo))
+	logger.Debug("should not appear")
+	if strings.Contains(buf.String(), "should not appear") {
+		t.Errorf("debug message should be filtered at Info level, got: %q", buf.String())
+	}
+}

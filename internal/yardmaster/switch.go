@@ -104,12 +104,22 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 		Branch: car.Branch,
 	}
 
+	slog.Info("Switch: starting merge pipeline",
+		"car", carID,
+		"branch", car.Branch,
+		"base_branch", baseBranch,
+		"assignee", car.Assignee,
+		"skip_tests", car.SkipTests,
+	)
+
 	// Fetch the branch.
 	if err := gitFetch(opts.RepoDir); err != nil {
 		result.FailureCategory = SwitchFailFetch
 		result.Error = fmt.Errorf("fetch: %w", err)
 		return result, result.Error
 	}
+
+	slog.Debug("Switch: fetch complete", "car", carID)
 
 	// Detach the engine worktree so the branch can be checked out.
 	// Engine worktrees live under the primary repo, not the yardmaster worktree.
@@ -119,6 +129,7 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 			detachDir = opts.RepoDir
 		}
 		detachEngineWorktree(detachDir, car.Assignee)
+		slog.Debug("Switch: engine worktree detached", "car", carID, "assignee", car.Assignee)
 	}
 
 	// Run tests on the branch (unless skip_tests is set on the car).
@@ -133,6 +144,14 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSec)*time.Second)
 		defer cancel()
 
+		slog.Info("Switch: running tests",
+			"car", carID,
+			"branch", car.Branch,
+			"test_command", opts.TestCommand,
+			"pre_test_command", opts.PreTestCommand,
+			"timeout_sec", timeoutSec,
+		)
+
 		testOutput, testErr := runTests(ctx, opts.RepoDir, car.Branch, baseBranch, opts.PreTestCommand, opts.TestCommand)
 		result.TestOutput = testOutput
 
@@ -145,9 +164,18 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 				result.FailureCategory = classifyTestFailure(testErr, testOutput)
 			}
 
+			slog.Warn("Switch: tests failed",
+				"car", carID,
+				"category", result.FailureCategory,
+				"error", testErr,
+			)
+
 			if result.FailureCategory == SwitchFailInfra {
 				// Infrastructure failure — set merge-failed, escalate to human.
-				if dbErr := db.Model(&models.Car{}).Where("id = ?", carID).Update("status", "merge-failed").Error; dbErr != nil {
+				if dbErr := db.Model(&models.Car{}).Where("id = ?", carID).Updates(map[string]interface{}{
+					"status":         "merge-failed",
+					"blocked_reason": "",
+				}).Error; dbErr != nil {
 					slog.Error("update car to merge-failed", "car", carID, "error", dbErr)
 				}
 				messaging.Send(db, "yardmaster", "human", "infra-test-failure",
@@ -157,7 +185,10 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 				)
 			} else {
 				// Code test failure — set blocked, notify engine.
-				if dbErr := db.Model(&models.Car{}).Where("id = ?", carID).Update("status", "blocked").Error; dbErr != nil {
+				if dbErr := db.Model(&models.Car{}).Where("id = ?", carID).Updates(map[string]interface{}{
+					"status":         "blocked",
+					"blocked_reason": models.BlockedReasonTestFailed,
+				}).Error; dbErr != nil {
 					slog.Error("update car to blocked", "car", carID, "error", dbErr)
 				}
 				if car.Assignee != "" {
@@ -173,6 +204,7 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 		}
 
 		result.TestsPassed = true
+		slog.Info("Switch: tests passed", "car", carID)
 	}
 
 	if opts.DryRun {
@@ -182,6 +214,11 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 	// If the branch has no unique diff vs main (e.g. a dependent car's merge
 	// already included this branch's commits), skip the merge.
 	if isBranchMerged(opts.RepoDir, car.Branch, baseBranch) {
+		slog.Info("Switch: branch already merged (ancestor of base)",
+			"car", carID,
+			"branch", car.Branch,
+			"base_branch", baseBranch,
+		)
 		deleteRemoteBranch(opts.RepoDir, car.Branch)
 		result.Merged = true
 		result.AlreadyMerged = true
@@ -222,6 +259,8 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 		return result, nil
 	}
 
+	slog.Debug("Switch: branch has unique commits, proceeding to merge/PR", "car", carID, "require_pr", opts.RequirePR)
+
 	if opts.RequirePR {
 		// Push the branch to origin so a PR can reference it.
 		if err := gitPushBranch(opts.RepoDir, car.Branch); err != nil {
@@ -242,6 +281,11 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 
 		result.PRCreated = true
 		result.PRUrl = prURL
+		slog.Info("Switch: draft PR created",
+			"car", carID,
+			"branch", car.Branch,
+			"pr_url", prURL,
+		)
 
 		// Mark car as pr_open — not merged yet, waiting for human review.
 		now := time.Now()
@@ -259,9 +303,11 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 	preMergeHead := getHeadCommit(opts.RepoDir)
 
 	// Merge to the base branch.
+	slog.Debug("Switch: attempting merge", "car", carID, "branch", car.Branch, "base_branch", baseBranch)
 	if err := gitMerge(opts.RepoDir, car.Branch, baseBranch); err != nil {
 		// Attempt conflict resolution: abort failed merge, rebase branch, retry.
 		resolved, resolveErr := tryResolveConflict(opts.RepoDir, car.Branch, baseBranch)
+		slog.Debug("Switch: conflict resolution attempted", "car", carID, "resolved", resolved)
 		if !resolved {
 			result.FailureCategory = SwitchFailMerge
 			if resolveErr != nil {
@@ -286,6 +332,7 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 
 	// Push to remote before marking merged — the car should only be
 	// considered merged once the code is confirmed on the remote.
+	slog.Debug("Switch: pushing merge to remote", "car", carID, "base_branch", baseBranch)
 	if err := gitPush(opts.RepoDir, baseBranch); err != nil {
 		// Undo the local merge so the car will be retried next cycle.
 		gitResetToCommit(opts.RepoDir, preMergeHead)
@@ -300,8 +347,14 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 	gitFetchBranch(opts.RepoDir, baseBranch)
 
 	deleteRemoteBranch(opts.RepoDir, car.Branch)
+	slog.Debug("Switch: feature branch deleted from remote", "car", carID, "branch", car.Branch)
 
 	result.Merged = true
+	slog.Info("Switch: merged and pushed",
+		"car", carID,
+		"branch", car.Branch,
+		"base_branch", baseBranch,
+	)
 
 	// Mark car as merged — push succeeded, safe to update status.
 	now := time.Now()
@@ -370,16 +423,48 @@ func UnblockDeps(db *gorm.DB, carID string) ([]models.Car, error) {
 			return nil, fmt.Errorf("yardmaster: count other blockers for %s: %w", dep.CarID, err)
 		}
 
+		slog.Debug("UnblockDeps: evaluated dependency",
+			"car", dep.CarID,
+			"resolved_dep", carID,
+			"other_blockers", otherBlockers,
+		)
+
 		if otherBlockers == 0 {
-			// No other blockers — unblock this car (only if it's actually blocked).
+			// Load the car to check BlockedReason before deciding target status.
+			var b models.Car
+			if err := db.First(&b, "id = ?", dep.CarID).Error; err != nil {
+				continue
+			}
+			if b.Status != "blocked" {
+				continue
+			}
+
+			// Test-failure blocks transition to "done" so the merge pipeline
+			// retries (the dependency that caused the failure is now merged).
+			// All other blocks transition to "open" for fresh engine work.
+			targetStatus := "open"
+			if b.BlockedReason == models.BlockedReasonTestFailed {
+				targetStatus = "done"
+			}
+
+			slog.Info("UnblockDeps: transitioning car",
+				"car", dep.CarID,
+				"dependency", carID,
+				"blocked_reason", b.BlockedReason,
+				"from", "blocked",
+				"to", targetStatus,
+			)
+
 			result := db.Model(&models.Car{}).Where("id = ? AND status = ?", dep.CarID, "blocked").
-				Update("status", "open")
+				Updates(map[string]interface{}{
+					"status":         targetStatus,
+					"blocked_reason": "",
+				})
 
 			if result.RowsAffected > 0 {
-				var b models.Car
-				if err := db.First(&b, "id = ?", dep.CarID).Error; err == nil {
-					unblocked = append(unblocked, b)
-				}
+				b.Status = targetStatus
+				b.BlockedReason = ""
+				unblocked = append(unblocked, b)
 			}
 		}
 	}
@@ -467,16 +552,20 @@ func truncateOutput(output string, maxLen int) string {
 func runTests(ctx context.Context, repoDir, branch, baseBranch, preTestCommand, testCommand string) (string, error) {
 	// Discard any uncommitted changes before switching branches.
 	gitCleanWorkingTree(repoDir)
+	slog.Debug("runTests: cleaned working tree", "branch", branch)
 
 	// Checkout the branch (worktree-safe: fall back to detached HEAD).
+	checkoutMethod := "direct"
 	checkout := exec.Command("git", "checkout", branch)
 	checkout.Dir = repoDir
 	if out, err := checkout.CombinedOutput(); err != nil {
 		// Fallback: detach at origin/<branch> (handles worktree collision).
+		checkoutMethod = "detached-origin"
 		detach := exec.Command("git", "checkout", "--detach", "origin/"+branch)
 		detach.Dir = repoDir
 		if dOut, dErr := detach.CombinedOutput(); dErr != nil {
 			// Last resort: detach at local branch ref.
+			checkoutMethod = "detached-local"
 			last := exec.Command("git", "checkout", "--detach", branch)
 			last.Dir = repoDir
 			if lOut, lErr := last.CombinedOutput(); lErr != nil {
@@ -485,9 +574,11 @@ func runTests(ctx context.Context, repoDir, branch, baseBranch, preTestCommand, 
 			}
 		}
 	}
+	slog.Debug("runTests: checked out branch", "branch", branch, "method", checkoutMethod)
 
 	// Run pre-test command if configured (e.g. "go mod vendor", "npm install").
 	if preTestCommand != "" {
+		slog.Debug("runTests: running pre-test command", "command", preTestCommand)
 		preCmd := exec.CommandContext(ctx, "sh", "-c", preTestCommand)
 		preCmd.Dir = repoDir
 		if out, err := preCmd.CombinedOutput(); err != nil {
@@ -500,6 +591,7 @@ func runTests(ctx context.Context, repoDir, branch, baseBranch, preTestCommand, 
 			}
 			return string(out), fmt.Errorf("pre-test command failed: %w", err)
 		}
+		slog.Debug("runTests: pre-test command succeeded")
 	}
 
 	// Run the track's configured test command.
@@ -508,6 +600,7 @@ func runTests(ctx context.Context, repoDir, branch, baseBranch, preTestCommand, 
 		checkoutBase(repoDir, baseBranch)
 		return "", nil
 	}
+	slog.Debug("runTests: executing test command", "command", testCommand)
 	testCmd := exec.CommandContext(ctx, "sh", "-c", testCommand)
 	testCmd.Dir = repoDir
 
@@ -516,6 +609,7 @@ func runTests(ctx context.Context, repoDir, branch, baseBranch, preTestCommand, 
 
 	// Return to base branch regardless.
 	checkoutBase(repoDir, baseBranch)
+	slog.Debug("runTests: returned to base branch", "base_branch", baseBranch)
 
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
@@ -524,6 +618,7 @@ func runTests(ctx context.Context, repoDir, branch, baseBranch, preTestCommand, 
 		// Check for "no tests" patterns — treat as pass.
 		for _, pat := range noTestPatterns {
 			if strings.Contains(output, pat) {
+				slog.Debug("runTests: no-test pattern matched, treating as pass", "pattern", pat)
 				return output, nil
 			}
 		}

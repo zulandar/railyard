@@ -1,0 +1,10 @@
+project: myproject
+logLevel: debug
+git:
+  owner: testuser
+  repo: git@github.com:test/repo.git
+tracks:
+  - name: backend
+    engineSlots: 1
+    language: go
+    testCommand: "go test ./..."

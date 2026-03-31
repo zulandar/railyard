@@ -3,6 +3,7 @@ package engine
 import (
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -568,6 +569,83 @@ func CheckoutExistingBranch(wtDir, branch string) error {
 	pull.Dir = wtDir
 	pull.CombinedOutput() // Non-fatal — branch may already be up to date.
 
+	return nil
+}
+
+// railyardIgnoreEntries are paths that railyard generates at runtime and must
+// not be committed by AutoCommitIfDirty. EnsureRailyardIgnore adds any missing
+// entries to .git/info/exclude in the given directory.
+var railyardIgnoreEntries = []string{
+	".mcp.json",
+	".claude",
+	".railyard/",
+	".claudeignore",
+	".beads/",
+}
+
+// EnsureRailyardIgnore ensures that railyard runtime files are excluded from
+// git tracking via .git/info/exclude. Unlike .gitignore, this file is local-only
+// (not tracked), survives git reset --hard, and applies to all worktrees.
+// Idempotent — only appends entries that are missing.
+func EnsureRailyardIgnore(repoDir string) error {
+	// Find the git common dir (handles both regular repos and worktrees).
+	cmd := exec.Command("git", "rev-parse", "--git-common-dir")
+	cmd.Dir = repoDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("engine: git common dir: %w", err)
+	}
+	gitCommonDir := strings.TrimSpace(string(out))
+	if !filepath.IsAbs(gitCommonDir) {
+		gitCommonDir = filepath.Join(repoDir, gitCommonDir)
+	}
+
+	excludePath := filepath.Join(gitCommonDir, "info", "exclude")
+
+	// Ensure the info/ directory exists.
+	if err := os.MkdirAll(filepath.Dir(excludePath), 0755); err != nil {
+		return fmt.Errorf("engine: create info dir: %w", err)
+	}
+
+	// Read existing entries.
+	existing := make(map[string]bool)
+	if data, err := os.ReadFile(excludePath); err == nil {
+		for _, line := range strings.Split(string(data), "\n") {
+			trimmed := strings.TrimSpace(line)
+			if trimmed != "" && !strings.HasPrefix(trimmed, "#") {
+				existing[trimmed] = true
+			}
+		}
+	}
+
+	// Collect missing entries.
+	var missing []string
+	for _, entry := range railyardIgnoreEntries {
+		if !existing[entry] {
+			missing = append(missing, entry)
+		}
+	}
+
+	if len(missing) == 0 {
+		return nil
+	}
+
+	// Append missing entries.
+	f, err := os.OpenFile(excludePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("engine: open exclude file: %w", err)
+	}
+	defer f.Close()
+
+	block := "\n# Railyard runtime (auto-added)\n"
+	for _, entry := range missing {
+		block += entry + "\n"
+	}
+	if _, err := f.WriteString(block); err != nil {
+		return fmt.Errorf("engine: write exclude file: %w", err)
+	}
+
+	slog.Info("engine: added missing entries to .git/info/exclude", "count", len(missing), "entries", missing)
 	return nil
 }
 

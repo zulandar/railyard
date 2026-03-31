@@ -12,7 +12,7 @@ func TestLogSanitizationMultipleSecrets(t *testing.T) {
 	ghPAT := "ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ012345678a"
 
 	input := "Calling API with key=" + apiKey + " and github token=" + ghPAT
-	result := redactSecrets(input)
+	result := RedactSecrets(input)
 
 	if strings.Contains(result, apiKey) {
 		t.Errorf("API key was not redacted: %s", result)
@@ -41,7 +41,7 @@ func TestLogSanitizationPartialMatchSkPrefix(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			result := redactSecrets(tc.input)
+			result := RedactSecrets(tc.input)
 			if result != tc.want {
 				t.Errorf("partial match was incorrectly redacted: input=%q got=%q want=%q", tc.input, result, tc.want)
 			}
@@ -71,7 +71,7 @@ func TestLogSanitizationDSNPattern(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			result := redactSecrets(tc.input)
+			result := RedactSecrets(tc.input)
 			if result == tc.input {
 				t.Errorf("DSN credentials were not redacted: %s", result)
 			}
@@ -95,7 +95,7 @@ func TestLogSanitizationSlackTokens(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			input := "Using token: " + tc.token
-			result := redactSecrets(input)
+			result := RedactSecrets(input)
 			if strings.Contains(result, tc.token) {
 				t.Errorf("%s was not redacted: %s", tc.name, result)
 			}
@@ -107,7 +107,7 @@ func TestLogSanitizationSlackTokens(t *testing.T) {
 func TestLogSanitizationAWSAccessKeys(t *testing.T) {
 	awsKey := "AKIAIOSFODNN7EXAMPLE"
 	input := "aws_access_key_id = " + awsKey
-	result := redactSecrets(input)
+	result := RedactSecrets(input)
 
 	if strings.Contains(result, awsKey) {
 		t.Errorf("AWS access key was not redacted: %s", result)
@@ -135,7 +135,7 @@ func TestLogSanitizationNoFalsePositives(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			result := redactSecrets(tc.input)
+			result := RedactSecrets(tc.input)
 			if result != tc.input {
 				t.Errorf("false positive: input=%q got=%q", tc.input, result)
 			}
@@ -146,7 +146,7 @@ func TestLogSanitizationNoFalsePositives(t *testing.T) {
 // TestLogSanitizationEdgeCases covers empty strings and very long content.
 func TestLogSanitizationEdgeCases(t *testing.T) {
 	t.Run("empty string", func(t *testing.T) {
-		result := redactSecrets("")
+		result := RedactSecrets("")
 		if result != "" {
 			t.Errorf("expected empty string, got %q", result)
 		}
@@ -156,7 +156,7 @@ func TestLogSanitizationEdgeCases(t *testing.T) {
 		// 100KB of normal log content
 		line := "2026-01-15T10:30:00Z INFO processing request id=12345\n"
 		longContent := strings.Repeat(line, 2000)
-		result := redactSecrets(longContent)
+		result := RedactSecrets(longContent)
 		if result != longContent {
 			t.Error("long content without secrets was modified")
 		}
@@ -168,7 +168,7 @@ func TestLogSanitizationEdgeCases(t *testing.T) {
 		secret := "sk-abcdefghijklmnopqrstuvwxyz1234567890"
 		suffix := strings.Repeat(line, 1000)
 		input := prefix + secret + suffix
-		result := redactSecrets(input)
+		result := RedactSecrets(input)
 
 		if strings.Contains(result, secret) {
 			t.Error("secret embedded in long content was not redacted")
@@ -183,7 +183,7 @@ func TestLogSanitizationEdgeCases(t *testing.T) {
 func TestRedactBearerTokens(t *testing.T) {
 	token := "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkw"
 	input := "Authorization: " + token
-	result := redactSecrets(input)
+	result := RedactSecrets(input)
 
 	if strings.Contains(result, "eyJhbGci") {
 		t.Errorf("Bearer token was not redacted: %s", result)
@@ -195,7 +195,7 @@ func TestRedactGitHubFineGrainedPAT(t *testing.T) {
 	// Fine-grained PATs: github_pat_ followed by 60+ alphanumeric/underscore chars
 	pat := "github_pat_" + strings.Repeat("a1B2c3D4e5F6g7H8i9J0", 4) // 80 chars after prefix
 	input := "token=" + pat
-	result := redactSecrets(input)
+	result := RedactSecrets(input)
 
 	if strings.Contains(result, pat) {
 		t.Errorf("fine-grained GitHub PAT was not redacted: %s", result)

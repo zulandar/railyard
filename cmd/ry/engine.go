@@ -71,6 +71,7 @@ func newEngineStartCmd() *cobra.Command {
 func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval time.Duration, logLevel string) error {
 	level := logutil.ParseLevel(os.Getenv("LOG_LEVEL"), logLevel)
 	logger := logutil.NewLogger(cmd.OutOrStdout(), cmd.ErrOrStderr(), level)
+	slog.SetDefault(logger)
 
 	cfg, err := config.Load(configPath)
 	if err != nil {
@@ -167,6 +168,14 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 	workDir, err := engine.EnsureWorktree(repoDir, eng.ID)
 	if err != nil {
 		return fmt.Errorf("setup worktree: %w", err)
+	}
+
+	// Ensure railyard runtime files are excluded via .git/info/exclude so
+	// AutoCommitIfDirty does not accidentally commit them (e.g. .mcp.json).
+	// Uses .git/info/exclude instead of .gitignore because .gitignore is a
+	// tracked file that gets wiped by ResetWorktree's git reset --hard.
+	if err := engine.EnsureRailyardIgnore(workDir); err != nil {
+		logger.Warn("Git exclude setup warning", "error", err)
 	}
 
 	logger.Info("Engine starting daemon loop", "engine", eng.ID, "poll", pollInterval)
@@ -389,7 +398,11 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 
 		case outcomeClear:
 			cStats.cleared++
-			cycleLog.Debug("Agent exited, clear cycle, will re-claim")
+			cycleLog.Info("Agent exited, clear cycle",
+				"car", claimed.ID,
+				"session", sess.ID,
+				"will_reclaim", true,
+			)
 			if err := engine.HandleClearCycle(gormDB, claimed, eng, engine.ClearCycleOpts{
 				RepoDir:   workDir,
 				SessionID: sess.ID,
@@ -568,23 +581,30 @@ func monitorSessionWithDB(ctx context.Context, doneCh <-chan error, stallCh <-ch
 		// Before declaring stall, check if agent already finished.
 		var c models.Car
 		if dbErr := db.Select("status").First(&c, "id = ?", carID).Error; dbErr == nil && c.Status == "done" {
+			slog.Info("engine: stall suppressed, car already done", "car", carID)
 			return sessionOutcome{kind: outcomeCompleted}
 		}
 		return sessionOutcome{kind: outcomeStall, stallReason: reason}
 
 	case err := <-doneCh:
 		if err != nil {
+			slog.Warn("engine: agent process exited with error", "car", carID, "error", err)
 			return sessionOutcome{kind: outcomeClear}
 		}
 		// Zero exit — verify the agent actually called ry complete.
 		var c models.Car
-		if dbErr := db.Select("status").First(&c, "id = ?", carID).Error; dbErr != nil {
-			// log via slog default — monitorSessionWithDB has no logger param; use pkg-level
+		if dbErr := db.Select("status", "blocked_reason").First(&c, "id = ?", carID).Error; dbErr != nil {
+			slog.Warn("engine: monitor could not load car status", "car", carID, "error", dbErr)
 			return sessionOutcome{kind: outcomeClear}
 		}
 		if c.Status == "done" {
 			return sessionOutcome{kind: outcomeCompleted}
 		}
+		slog.Warn("engine: agent exited cleanly but car not done",
+			"car", carID,
+			"status", c.Status,
+			"blocked_reason", c.BlockedReason,
+		)
 		return sessionOutcome{kind: outcomeClear}
 	}
 }
@@ -596,9 +616,22 @@ func claimOrReclaim(gormDB *gorm.DB, eng *models.Engine, track string) (*models.
 		b, err := car.Get(gormDB, eng.CurrentCar)
 		// Only re-claim if car is still actively workable (not done, cancelled, or blocked).
 		if err == nil && b.Status != "done" && b.Status != "cancelled" && b.Status != "blocked" {
+			slog.Debug("engine: re-claiming existing car", "engine", eng.ID, "car", b.ID, "status", b.Status)
 			return b, nil
 		}
 		// Clear stale current_car — car is in a terminal/blocked state.
+		if err != nil {
+			slog.Warn("engine: clearing stale current_car (car not found)",
+				"engine", eng.ID,
+				"car", eng.CurrentCar,
+			)
+		} else {
+			slog.Info("engine: clearing stale current_car",
+				"engine", eng.ID,
+				"car", eng.CurrentCar,
+				"car_status", b.Status,
+			)
+		}
 		gormDB.Model(&models.Engine{}).Where("id = ?", eng.ID).Update("current_car", "")
 		eng.CurrentCar = ""
 	}
@@ -639,15 +672,29 @@ func pushInflightBranch(gormDB *gorm.DB, eng *models.Engine, repoDir string) {
 		slog.Info("engine: auto-committed uncommitted changes", "car", c.ID)
 	}
 
-	engine.PushBranch(repoDir, c.Branch) //nolint:errcheck
+	if err := engine.PushBranch(repoDir, c.Branch); err != nil {
+		slog.Warn("engine: shutdown push failed (non-fatal)", "car", c.ID, "branch", c.Branch, "error", err)
+	} else {
+		slog.Info("engine: shutdown push succeeded", "car", c.ID, "branch", c.Branch)
+	}
 }
 
 // handleCompletionFailure sets a car to blocked and notifies the yardmaster
 // when HandleCompletion fails (e.g., push failure). This prevents the car
 // from sitting in "done" status with no code on the remote.
 func handleCompletionFailure(db *gorm.DB, carID, engineID, sessionID string, completionErr error) {
+	slog.Warn("engine: completion failed, blocking car",
+		"car", carID,
+		"engine", engineID,
+		"session", sessionID,
+		"error", completionErr,
+		"blocked_reason", models.BlockedReasonCompletionFailed,
+	)
 	db.Model(&models.Car{}).Where("id = ?", carID).
-		Update("status", "blocked")
+		Updates(map[string]interface{}{
+			"status":         "blocked",
+			"blocked_reason": models.BlockedReasonCompletionFailed,
+		})
 
 	db.Create(&models.CarProgress{
 		CarID:        carID,

@@ -10,6 +10,10 @@ project: ""
 # to the default branch. Requires auth.githubToken with repo scope.
 requirePR: false
 
+# -- Log level for engine and yardmaster pods (debug, info, warn, error).
+# Defaults to "info" when empty.
+logLevel: ""
+
 # -- Dashboard URL for clickable links in Telegraph messages.
 # When empty and dashboard.ingress is enabled, auto-derived as https://{ingress.host}.
 # Set explicitly for port-forward or non-HTTPS setups.

@@ -3,7 +3,7 @@ package engine
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/zulandar/railyard/internal/models"
@@ -36,6 +36,7 @@ func HandleCompletion(db *gorm.DB, car *models.Car, engine *models.Engine, opts 
 		if err := PushBranch(opts.RepoDir, car.Branch); err != nil {
 			return fmt.Errorf("engine: completion push: %w", err)
 		}
+		slog.Info("engine: branch pushed for completion", "car", car.ID, "branch", car.Branch)
 	}
 
 	// Write final progress note.
@@ -63,6 +64,7 @@ func HandleCompletion(db *gorm.DB, car *models.Car, engine *models.Engine, opts 
 	}).Error; err != nil {
 		return fmt.Errorf("engine: reset engine to idle: %w", err)
 	}
+	slog.Info("engine: completion done, engine idle", "car", car.ID, "engine", engine.ID, "session", opts.SessionID)
 
 	return nil
 }
@@ -121,13 +123,15 @@ func HandleClearCycle(db *gorm.DB, car *models.Car, engine *models.Engine, opts 
 	if car.Branch != "" && opts.RepoDir != "" {
 		msg := fmt.Sprintf("railyard: auto-commit uncommitted work (cycle %d)", opts.Cycle)
 		if committed, acErr := AutoCommitIfDirty(opts.RepoDir, msg); acErr != nil {
-			log.Printf("engine: auto-commit warning (non-fatal): %v", acErr)
+			slog.Warn("engine: auto-commit warning (non-fatal)", "car", car.ID, "cycle", opts.Cycle, "error", acErr)
 		} else if committed {
-			log.Printf("engine: auto-committed uncommitted changes for %s", car.ID)
+			slog.Info("engine: auto-committed uncommitted changes", "car", car.ID, "cycle", opts.Cycle, "branch", car.Branch)
 		}
 
 		if err := PushBranch(opts.RepoDir, car.Branch); err != nil {
-			log.Printf("engine: clear cycle push warning (non-fatal): %v", err)
+			slog.Warn("engine: clear cycle push failed (non-fatal)", "car", car.ID, "cycle", opts.Cycle, "branch", car.Branch, "error", err)
+		} else {
+			slog.Info("engine: clear cycle push succeeded", "car", car.ID, "cycle", opts.Cycle, "branch", car.Branch)
 		}
 	}
 

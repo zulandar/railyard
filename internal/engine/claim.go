@@ -2,7 +2,7 @@ package engine
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"math/rand/v2"
 	"strings"
 	"time"
@@ -81,7 +81,18 @@ func ClaimCar(db *gorm.DB, engineID, track string) (*models.Car, error) {
 		})
 
 		if lastErr == nil {
+			slog.Info("engine: claimed car",
+				"engine", engineID,
+				"car", claimed.ID,
+				"track", track,
+				"priority", claimed.Priority,
+			)
 			return &claimed, nil
+		}
+
+		if strings.Contains(lastErr.Error(), "no ready cars") {
+			// No cars available — not an error worth retrying.
+			break
 		}
 
 		if !isSerializationError(lastErr) {
@@ -89,7 +100,13 @@ func ClaimCar(db *gorm.DB, engineID, track string) (*models.Car, error) {
 		}
 
 		// Retryable serialization failure — backoff with jitter and try again.
-		log.Printf("[engine] ClaimCar: serialization conflict (attempt %d/%d), retrying: %v", attempt+1, claimMaxRetries, lastErr)
+		slog.Warn("engine: claim serialization conflict, retrying",
+			"engine", engineID,
+			"track", track,
+			"attempt", attempt+1,
+			"max_retries", claimMaxRetries,
+			"error", lastErr,
+		)
 		jitter := time.Duration(50+rand.IntN(150)) * time.Millisecond
 		time.Sleep(jitter)
 	}

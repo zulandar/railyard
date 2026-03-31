@@ -1352,3 +1352,118 @@ func TestSyncWorktreeToBranch_PreservesRailyardFiles(t *testing.T) {
 		t.Errorf("symlink target = %q, want %q", linkTarget, filepath.Join(dir, "railyard.yaml"))
 	}
 }
+
+// --- EnsureRailyardIgnore tests ---
+
+func TestEnsureRailyardIgnore_AddsMissingEntries(t *testing.T) {
+	dir := t.TempDir()
+	// Initialize a git repo so git rev-parse works.
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v failed: %s: %v", args, out, err)
+		}
+	}
+	run("git", "init")
+
+	if err := EnsureRailyardIgnore(dir); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	excludePath := filepath.Join(dir, ".git", "info", "exclude")
+	data, err := os.ReadFile(excludePath)
+	if err != nil {
+		t.Fatalf("read exclude: %v", err)
+	}
+	content := string(data)
+
+	for _, entry := range railyardIgnoreEntries {
+		if !strings.Contains(content, entry) {
+			t.Errorf("exclude missing entry %q", entry)
+		}
+	}
+}
+
+func TestEnsureRailyardIgnore_Idempotent(t *testing.T) {
+	dir := t.TempDir()
+	cmd := exec.Command("git", "init")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %s: %v", out, err)
+	}
+
+	// Run twice.
+	if err := EnsureRailyardIgnore(dir); err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	if err := EnsureRailyardIgnore(dir); err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+
+	excludePath := filepath.Join(dir, ".git", "info", "exclude")
+	data, err := os.ReadFile(excludePath)
+	if err != nil {
+		t.Fatalf("read exclude: %v", err)
+	}
+
+	// Each entry should appear exactly once.
+	for _, entry := range railyardIgnoreEntries {
+		count := 0
+		for _, line := range strings.Split(string(data), "\n") {
+			if strings.TrimSpace(line) == entry {
+				count++
+			}
+		}
+		if count != 1 {
+			t.Errorf("entry %q appears %d times, want 1", entry, count)
+		}
+	}
+}
+
+func TestEnsureRailyardIgnore_PreservesExisting(t *testing.T) {
+	dir := t.TempDir()
+	cmd := exec.Command("git", "init")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %s: %v", out, err)
+	}
+
+	// Write existing entries to the exclude file.
+	excludePath := filepath.Join(dir, ".git", "info", "exclude")
+	os.MkdirAll(filepath.Dir(excludePath), 0755)
+	existing := "node_modules/\n.mcp.json\n"
+	if err := os.WriteFile(excludePath, []byte(existing), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := EnsureRailyardIgnore(dir); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data, err := os.ReadFile(excludePath)
+	if err != nil {
+		t.Fatalf("read exclude: %v", err)
+	}
+	content := string(data)
+
+	// .mcp.json was already present — should not be duplicated.
+	count := 0
+	for _, line := range strings.Split(content, "\n") {
+		if strings.TrimSpace(line) == ".mcp.json" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf(".mcp.json appears %d times, want 1", count)
+	}
+	// node_modules/ should still be there.
+	if !strings.Contains(content, "node_modules/") {
+		t.Error("existing entry node_modules/ was lost")
+	}
+	// Other railyard entries should be added.
+	if !strings.Contains(content, ".claude") {
+		t.Error("missing .claude entry")
+	}
+}

@@ -221,7 +221,7 @@ func (w *logWriter) Flush() error {
 		return nil
 	}
 
-	content := redactSecrets(w.buf.String())
+	content := RedactSecrets(w.buf.String())
 	w.buf.Reset()
 
 	log := models.AgentLog{
@@ -267,8 +267,8 @@ var secretPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(\w+):([^@\s]{8,})@[a-zA-Z0-9.]`), // user:password@host in DSNs
 }
 
-// redactSecrets strips known secret patterns from log content before storage.
-func redactSecrets(content string) string {
+// RedactSecrets strips known secret patterns from log content before storage.
+func RedactSecrets(content string) string {
 	for _, pat := range secretPatterns {
 		content = pat.ReplaceAllString(content, "[REDACTED]")
 	}

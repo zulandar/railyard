@@ -76,7 +76,10 @@ func handleRetryMerge(db *gorm.DB, msg models.Message, logger *slog.Logger) {
 
 	logger.Info("Action retry-merge: setting car back to done", "car", msg.CarID, "reason", msg.Body)
 
-	if err := db.Model(&models.Car{}).Where("id = ?", msg.CarID).Update("status", "done").Error; err != nil {
+	if err := db.Model(&models.Car{}).Where("id = ?", msg.CarID).Updates(map[string]interface{}{
+		"status":         "done",
+		"blocked_reason": "",
+	}).Error; err != nil {
 		logger.Error("Action retry-merge: update car failed", "car", msg.CarID, "error", err)
 		return
 	}
@@ -151,7 +154,10 @@ func handleUnblockCar(db *gorm.DB, msg models.Message, logger *slog.Logger) {
 
 	logger.Info("Action unblock-car: unblocking car", "car", msg.CarID, "reason", msg.Body)
 
-	if err := db.Model(&models.Car{}).Where("id = ?", msg.CarID).Update("status", "open").Error; err != nil {
+	if err := db.Model(&models.Car{}).Where("id = ?", msg.CarID).Updates(map[string]interface{}{
+		"status":         "open",
+		"blocked_reason": "",
+	}).Error; err != nil {
 		logger.Error("Action unblock-car: update car failed", "car", msg.CarID, "error", err)
 		return
 	}

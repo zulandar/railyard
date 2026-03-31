@@ -2003,3 +2003,144 @@ func TestGitMu_SerializesAccess(t *testing.T) {
 		t.Fatal("goroutine should have acquired lock after unlock")
 	}
 }
+
+func TestSwitch_TestFailure_SetsBlockedReason(t *testing.T) {
+	repoDir, _, run := initTestRepoWithRemote(t)
+
+	// Create a feature branch with a commit.
+	run(repoDir, "git", "checkout", "-b", "ry/alice/backend/car-br-tf")
+	run(repoDir, "git", "commit", "--allow-empty", "-m", "feature work")
+	run(repoDir, "git", "checkout", "main")
+
+	db := testDB(t)
+	db.Create(&models.Car{
+		ID:     "car-br-tf",
+		Title:  "Test failure blocked reason",
+		Track:  "backend",
+		Branch: "ry/alice/backend/car-br-tf",
+		Status: "done",
+	})
+
+	result, err := Switch(db, "car-br-tf", SwitchOpts{
+		RepoDir:     repoDir,
+		TestCommand: "exit 1", // force test failure
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.TestsPassed {
+		t.Fatal("expected tests to fail")
+	}
+	if result.FailureCategory != SwitchFailTest {
+		t.Errorf("FailureCategory = %q, want %q", result.FailureCategory, SwitchFailTest)
+	}
+
+	// Verify the car's BlockedReason was set.
+	var car models.Car
+	if err := db.First(&car, "id = ?", "car-br-tf").Error; err != nil {
+		t.Fatalf("load car: %v", err)
+	}
+	if car.Status != "blocked" {
+		t.Errorf("status = %q, want %q", car.Status, "blocked")
+	}
+	if car.BlockedReason != models.BlockedReasonTestFailed {
+		t.Errorf("BlockedReason = %q, want %q", car.BlockedReason, models.BlockedReasonTestFailed)
+	}
+}
+
+func TestUnblockDeps_TestFailedCar_TransitionsToDone(t *testing.T) {
+	db := testDB(t)
+
+	// Car A depends on Car B. Car A was blocked due to test failure.
+	db.Create(&models.Car{
+		ID:            "car-tfd-a",
+		Status:        "blocked",
+		BlockedReason: models.BlockedReasonTestFailed,
+		Track:         "backend",
+		Branch:        "ry/alice/backend/car-tfd-a",
+		Assignee:      "eng-1",
+	})
+	db.Create(&models.Car{ID: "car-tfd-b", Status: "merged", Track: "backend"})
+	db.Create(&models.CarDep{CarID: "car-tfd-a", BlockedBy: "car-tfd-b"})
+
+	unblocked, err := UnblockDeps(db, "car-tfd-b")
+	if err != nil {
+		t.Fatalf("UnblockDeps error: %v", err)
+	}
+	if len(unblocked) != 1 {
+		t.Fatalf("expected 1 unblocked car, got %d", len(unblocked))
+	}
+
+	// Verify the car transitioned to "done" (not "open").
+	var car models.Car
+	if err := db.First(&car, "id = ?", "car-tfd-a").Error; err != nil {
+		t.Fatalf("load car: %v", err)
+	}
+	if car.Status != "done" {
+		t.Errorf("status = %q, want %q", car.Status, "done")
+	}
+	if car.BlockedReason != "" {
+		t.Errorf("BlockedReason = %q, want empty (cleared)", car.BlockedReason)
+	}
+}
+
+func TestUnblockDeps_DependencyBlockedCar_TransitionsToOpen(t *testing.T) {
+	db := testDB(t)
+
+	// Car A depends on Car B. Car A was blocked due to dependency (no BlockedReason).
+	db.Create(&models.Car{
+		ID:     "car-dep-a",
+		Status: "blocked",
+		Track:  "backend",
+	})
+	db.Create(&models.Car{ID: "car-dep-b", Status: "merged", Track: "backend"})
+	db.Create(&models.CarDep{CarID: "car-dep-a", BlockedBy: "car-dep-b"})
+
+	unblocked, err := UnblockDeps(db, "car-dep-b")
+	if err != nil {
+		t.Fatalf("UnblockDeps error: %v", err)
+	}
+	if len(unblocked) != 1 {
+		t.Fatalf("expected 1 unblocked car, got %d", len(unblocked))
+	}
+
+	var car models.Car
+	if err := db.First(&car, "id = ?", "car-dep-a").Error; err != nil {
+		t.Fatalf("load car: %v", err)
+	}
+	if car.Status != "open" {
+		t.Errorf("status = %q, want %q", car.Status, "open")
+	}
+}
+
+func TestUnblockDeps_StalledCar_TransitionsToOpen(t *testing.T) {
+	db := testDB(t)
+
+	db.Create(&models.Car{
+		ID:            "car-stall-a",
+		Status:        "blocked",
+		BlockedReason: models.BlockedReasonStalled,
+		Track:         "backend",
+	})
+	db.Create(&models.Car{ID: "car-stall-b", Status: "merged", Track: "backend"})
+	db.Create(&models.CarDep{CarID: "car-stall-a", BlockedBy: "car-stall-b"})
+
+	unblocked, err := UnblockDeps(db, "car-stall-b")
+	if err != nil {
+		t.Fatalf("UnblockDeps error: %v", err)
+	}
+	if len(unblocked) != 1 {
+		t.Fatalf("expected 1 unblocked car, got %d", len(unblocked))
+	}
+
+	var car models.Car
+	if err := db.First(&car, "id = ?", "car-stall-a").Error; err != nil {
+		t.Fatalf("load car: %v", err)
+	}
+	if car.Status != "open" {
+		t.Errorf("status = %q, want %q", car.Status, "open")
+	}
+	if car.BlockedReason != "" {
+		t.Errorf("BlockedReason = %q, want empty (cleared)", car.BlockedReason)
+	}
+}
