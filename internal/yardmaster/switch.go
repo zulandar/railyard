@@ -377,15 +377,33 @@ func UnblockDeps(db *gorm.DB, carID string) ([]models.Car, error) {
 		}
 
 		if otherBlockers == 0 {
-			// No other blockers — unblock this car (only if it's actually blocked).
+			// Load the car to check BlockedReason before deciding target status.
+			var b models.Car
+			if err := db.First(&b, "id = ?", dep.CarID).Error; err != nil {
+				continue
+			}
+			if b.Status != "blocked" {
+				continue
+			}
+
+			// Test-failure blocks transition to "done" so the merge pipeline
+			// retries (the dependency that caused the failure is now merged).
+			// All other blocks transition to "open" for fresh engine work.
+			targetStatus := "open"
+			if b.BlockedReason == models.BlockedReasonTestFailed {
+				targetStatus = "done"
+			}
+
 			result := db.Model(&models.Car{}).Where("id = ? AND status = ?", dep.CarID, "blocked").
-				Update("status", "open")
+				Updates(map[string]interface{}{
+					"status":         targetStatus,
+					"blocked_reason": "",
+				})
 
 			if result.RowsAffected > 0 {
-				var b models.Car
-				if err := db.First(&b, "id = ?", dep.CarID).Error; err == nil {
-					unblocked = append(unblocked, b)
-				}
+				b.Status = targetStatus
+				b.BlockedReason = ""
+				unblocked = append(unblocked, b)
 			}
 		}
 	}
