@@ -416,6 +416,10 @@ agent_provider: claude                  # AI CLI provider (claude, codex, gemini
 # default_acceptance: "Tests pass, code reviewed"  # Default acceptance criteria for Dispatch
 # require_pr: true                      # Create draft PRs instead of direct merge to main
 
+# yardmaster:
+#   auto_merge_on_approval: false        # Auto-merge APPROVED PRs via gh CLI
+#   rework_label: "railyard: rework"     # GitHub label that triggers rework on pr_open PRs
+
 database:
   host: 127.0.0.1
   port: 3306
@@ -468,7 +472,7 @@ tracks:
 3. Each engine works on an isolated git branch (`ry/{owner}/{track}/{car-id}`)
 4. If CocoIndex is configured, each engine gets an MCP server for semantic code search — the overlay index tracks files changed on the engine's branch so search results are always current
 5. When an agent finishes, it calls `ry complete` — the engine daemon picks up the next car
-6. **Yardmaster** monitors for stalls (no stdout, repeated errors, excessive /clear cycles), runs tests on completed branches, and merges them back to main via `ry switch`
+6. **Yardmaster** monitors for stalls (no stdout, repeated errors, excessive /clear cycles), runs tests on completed branches, and merges them back to main via `ry switch`. When `require_pr: true`, it creates draft PRs and monitors for review feedback — formal GitHub reviews, new inline comments from reviewers, or a configurable rework label (default: `railyard: rework`) — then reopens the car for an engine to address the feedback
 7. All state lives in MySQL — fully queryable and auditable
 
 ## CI/CD
