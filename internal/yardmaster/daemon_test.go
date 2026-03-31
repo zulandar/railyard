@@ -2509,3 +2509,141 @@ func TestHandlePrOpenCars_ConflictingAndApproved(t *testing.T) {
 		t.Errorf("status = %q, want %q", c.Status, "pr_open")
 	}
 }
+
+func TestReopenCarWithFeedback_SetsStatusOpen(t *testing.T) {
+	db := testDB(t)
+	now := time.Now()
+	db.Create(&models.Car{
+		ID:          "car-reopen1",
+		Branch:      "ry/backend/car-reopen1",
+		Status:      "pr_open",
+		Assignee:    "eng-001",
+		CompletedAt: &now,
+	})
+
+	viewer := &mockPRViewer{
+		inlineComments: []prInlineComment{
+			{Path: "main.go", Line: 10, Body: "Fix this", Author: "reviewer"},
+		},
+	}
+
+	var buf bytes.Buffer
+	logger := testLogger(&buf)
+	reopenCarWithFeedback(db, viewer, models.Car{ID: "car-reopen1", Branch: "ry/backend/car-reopen1"}, nil, logger)
+
+	var c models.Car
+	db.First(&c, "id = ?", "car-reopen1")
+	if c.Status != "open" {
+		t.Errorf("status = %q, want %q", c.Status, "open")
+	}
+	if c.Assignee != "" {
+		t.Errorf("assignee = %q, want empty", c.Assignee)
+	}
+}
+
+func TestReopenCarWithFeedback_PreservesCompletedAt(t *testing.T) {
+	db := testDB(t)
+	now := time.Now()
+	db.Create(&models.Car{
+		ID:          "car-reopen2",
+		Branch:      "ry/backend/car-reopen2",
+		Status:      "pr_open",
+		CompletedAt: &now,
+	})
+
+	viewer := &mockPRViewer{}
+	var buf bytes.Buffer
+	logger := testLogger(&buf)
+	reopenCarWithFeedback(db, viewer, models.Car{ID: "car-reopen2", Branch: "ry/backend/car-reopen2"}, nil, logger)
+
+	var c models.Car
+	db.First(&c, "id = ?", "car-reopen2")
+	if c.CompletedAt == nil {
+		t.Error("CompletedAt should be preserved for isRevision detection")
+	}
+}
+
+func TestReopenCarWithFeedback_FetchCommentsError_StillReopens(t *testing.T) {
+	db := testDB(t)
+	db.Create(&models.Car{
+		ID:     "car-reopen3",
+		Branch: "ry/backend/car-reopen3",
+		Status: "pr_open",
+	})
+
+	viewer := &mockPRViewer{fetchErr: fmt.Errorf("gh api failed")}
+	var buf bytes.Buffer
+	logger := testLogger(&buf)
+	reopenCarWithFeedback(db, viewer, models.Car{ID: "car-reopen3", Branch: "ry/backend/car-reopen3"}, nil, logger)
+
+	var c models.Car
+	db.First(&c, "id = ?", "car-reopen3")
+	if c.Status != "open" {
+		t.Errorf("status = %q, want %q", c.Status, "open")
+	}
+}
+
+func TestReopenCarWithFeedback_ProgressNoteFormat(t *testing.T) {
+	db := testDB(t)
+	db.Create(&models.Car{
+		ID:     "car-reopen4",
+		Branch: "ry/backend/car-reopen4",
+		Status: "pr_open",
+	})
+
+	viewer := &mockPRViewer{
+		inlineComments: []prInlineComment{
+			{Path: "main.go", Line: 42, Body: "Use errgroup", Author: "alice"},
+		},
+		convComments: []prConversationComment{
+			{Body: "Looks good otherwise", Author: "alice"},
+		},
+	}
+
+	var buf bytes.Buffer
+	logger := testLogger(&buf)
+	reviews := []prReview{{Body: "Needs work", Author: "alice"}}
+	reopenCarWithFeedback(db, viewer, models.Car{ID: "car-reopen4", Branch: "ry/backend/car-reopen4"}, reviews, logger)
+
+	var notes []models.CarProgress
+	db.Where("car_id = ?", "car-reopen4").Find(&notes)
+	if len(notes) == 0 {
+		t.Fatal("expected progress note")
+	}
+	note := notes[0].Note
+	if !strings.Contains(note, "main.go") {
+		t.Errorf("note should contain file path, got:\n%s", note)
+	}
+	if !strings.Contains(note, "@alice") {
+		t.Errorf("note should contain author attribution, got:\n%s", note)
+	}
+	if !strings.Contains(note, "Needs work") {
+		t.Errorf("note should contain review body, got:\n%s", note)
+	}
+}
+
+func TestReopenCarWithFeedback_EmptyComments(t *testing.T) {
+	db := testDB(t)
+	db.Create(&models.Car{
+		ID:     "car-reopen5",
+		Branch: "ry/backend/car-reopen5",
+		Status: "pr_open",
+	})
+
+	viewer := &mockPRViewer{}
+	var buf bytes.Buffer
+	logger := testLogger(&buf)
+	reopenCarWithFeedback(db, viewer, models.Car{ID: "car-reopen5", Branch: "ry/backend/car-reopen5"}, nil, logger)
+
+	var c models.Car
+	db.First(&c, "id = ?", "car-reopen5")
+	if c.Status != "open" {
+		t.Errorf("status = %q, want %q", c.Status, "open")
+	}
+
+	var notes []models.CarProgress
+	db.Where("car_id = ?", "car-reopen5").Find(&notes)
+	if len(notes) == 0 {
+		t.Fatal("expected progress note even with empty comments")
+	}
+}

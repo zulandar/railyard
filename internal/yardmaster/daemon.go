@@ -1315,27 +1315,32 @@ func handlePrOpenCars(db *gorm.DB, viewer PRViewer, autoMerge bool, repoDir, ymD
 			runPostMerge(db, c, logger)
 
 		case status.ReviewDecision == "CHANGES_REQUESTED":
-			if err := db.Model(&models.Car{}).Where("id = ?", c.ID).Updates(map[string]interface{}{
-				"status":   "open",
-				"assignee": "",
-			}).Error; err != nil {
-				logger.Error("Update car to open", "car", c.ID, "error", err)
-				continue
-			}
-
-			// Fetch inline and conversation comments for richer feedback.
-			inline, conversation, fetchErr := viewer.FetchComments(c.Branch)
-			if fetchErr != nil {
-				logger.Warn("Fetch comments error", "car", c.ID, "error", fetchErr)
-			}
-
-			note := formatReviewNote(status.Reviews, inline, conversation)
-			writeProgressNote(db, c.ID, "yardmaster", note)
+			reopenCarWithFeedback(db, viewer, c, status.Reviews, logger)
 			logger.Info("PR changes requested", "car", c.ID, "transition", "pr_open->open")
 		}
 	}
 
 	return nil
+}
+
+// reopenCarWithFeedback transitions a pr_open car back to open with review feedback
+// as a progress note. CompletedAt is preserved so engines detect isRevision=true.
+func reopenCarWithFeedback(db *gorm.DB, viewer PRViewer, c models.Car, reviews []prReview, logger *slog.Logger) {
+	if err := db.Model(&models.Car{}).Where("id = ?", c.ID).Updates(map[string]interface{}{
+		"status":   "open",
+		"assignee": "",
+	}).Error; err != nil {
+		logger.Error("Update car to open", "car", c.ID, "error", err)
+		return
+	}
+
+	inline, conversation, fetchErr := viewer.FetchComments(c.Branch)
+	if fetchErr != nil {
+		logger.Warn("Fetch comments error", "car", c.ID, "error", fetchErr)
+	}
+
+	note := formatReviewNote(reviews, inline, conversation)
+	writeProgressNote(db, c.ID, "yardmaster", note)
 }
 
 // formatReviewNote builds a structured progress note from all PR feedback types.
