@@ -2648,6 +2648,191 @@ func TestReopenCarWithFeedback_EmptyComments(t *testing.T) {
 	}
 }
 
+func TestHandlePrOpenCars_ReworkLabel(t *testing.T) {
+	db := testDB(t)
+	db.Create(&models.Car{
+		ID:     "car-label1",
+		Branch: "ry/backend/car-label1",
+		Status: "pr_open",
+		Track:  "backend",
+	})
+
+	viewer := &mockPRViewer{
+		state:  "OPEN",
+		labels: []string{"railyard: rework"},
+		inlineComments: []prInlineComment{
+			{Path: "main.go", Line: 5, Body: "Fix this", Author: "reviewer"},
+		},
+	}
+
+	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
+	var buf bytes.Buffer
+	logger := testLogger(&buf)
+	err := handlePrOpenCars(db, viewer, false, "", "", cfg, logger)
+	if err != nil {
+		t.Fatalf("handlePrOpenCars: %v", err)
+	}
+
+	var c models.Car
+	db.First(&c, "id = ?", "car-label1")
+	if c.Status != "open" {
+		t.Errorf("status = %q, want %q", c.Status, "open")
+	}
+	if !viewer.removeLabelCalled {
+		t.Error("expected RemoveLabel to be called")
+	}
+	if viewer.removedLabel != "railyard: rework" {
+		t.Errorf("removedLabel = %q, want %q", viewer.removedLabel, "railyard: rework")
+	}
+}
+
+func TestHandlePrOpenCars_ReworkLabelCustom(t *testing.T) {
+	db := testDB(t)
+	db.Create(&models.Car{
+		ID:     "car-label2",
+		Branch: "ry/backend/car-label2",
+		Status: "pr_open",
+		Track:  "backend",
+	})
+
+	viewer := &mockPRViewer{
+		state:  "OPEN",
+		labels: []string{"needs-rework"},
+	}
+
+	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
+	cfg.Yardmaster.ReworkLabel = "needs-rework"
+	var buf bytes.Buffer
+	logger := testLogger(&buf)
+	err := handlePrOpenCars(db, viewer, false, "", "", cfg, logger)
+	if err != nil {
+		t.Fatalf("handlePrOpenCars: %v", err)
+	}
+
+	var c models.Car
+	db.First(&c, "id = ?", "car-label2")
+	if c.Status != "open" {
+		t.Errorf("status = %q, want %q", c.Status, "open")
+	}
+}
+
+func TestHandlePrOpenCars_NoReworkLabel(t *testing.T) {
+	db := testDB(t)
+	db.Create(&models.Car{
+		ID:     "car-label3",
+		Branch: "ry/backend/car-label3",
+		Status: "pr_open",
+		Track:  "backend",
+	})
+
+	viewer := &mockPRViewer{
+		state:  "OPEN",
+		labels: []string{"bug", "enhancement"},
+	}
+
+	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
+	var buf bytes.Buffer
+	logger := testLogger(&buf)
+	err := handlePrOpenCars(db, viewer, false, "", "", cfg, logger)
+	if err != nil {
+		t.Fatalf("handlePrOpenCars: %v", err)
+	}
+
+	var c models.Car
+	db.First(&c, "id = ?", "car-label3")
+	if c.Status != "pr_open" {
+		t.Errorf("status = %q, want %q", c.Status, "pr_open")
+	}
+}
+
+func TestHandlePrOpenCars_ReworkLabelCaseExact(t *testing.T) {
+	db := testDB(t)
+	db.Create(&models.Car{
+		ID:     "car-label4",
+		Branch: "ry/backend/car-label4",
+		Status: "pr_open",
+		Track:  "backend",
+	})
+
+	viewer := &mockPRViewer{
+		state:  "OPEN",
+		labels: []string{"Railyard: Rework"},
+	}
+
+	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
+	var buf bytes.Buffer
+	logger := testLogger(&buf)
+	err := handlePrOpenCars(db, viewer, false, "", "", cfg, logger)
+	if err != nil {
+		t.Fatalf("handlePrOpenCars: %v", err)
+	}
+
+	var c models.Car
+	db.First(&c, "id = ?", "car-label4")
+	if c.Status != "pr_open" {
+		t.Errorf("status = %q, want %q (case mismatch should not trigger)", c.Status, "pr_open")
+	}
+}
+
+func TestHandlePrOpenCars_RemoveLabelFailureNonFatal(t *testing.T) {
+	db := testDB(t)
+	db.Create(&models.Car{
+		ID:     "car-label5",
+		Branch: "ry/backend/car-label5",
+		Status: "pr_open",
+		Track:  "backend",
+	})
+
+	viewer := &mockPRViewer{
+		state:          "OPEN",
+		labels:         []string{"railyard: rework"},
+		removeLabelErr: fmt.Errorf("gh api error"),
+	}
+
+	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
+	var buf bytes.Buffer
+	logger := testLogger(&buf)
+	err := handlePrOpenCars(db, viewer, false, "", "", cfg, logger)
+	if err != nil {
+		t.Fatalf("handlePrOpenCars: %v", err)
+	}
+
+	var c models.Car
+	db.First(&c, "id = ?", "car-label5")
+	if c.Status != "open" {
+		t.Errorf("status = %q, want %q (should reopen even if label removal fails)", c.Status, "open")
+	}
+}
+
+func TestHandlePrOpenCars_ReworkLabelOnClosedPR(t *testing.T) {
+	db := testDB(t)
+	db.Create(&models.Car{
+		ID:     "car-label6",
+		Branch: "ry/backend/car-label6",
+		Status: "pr_open",
+		Track:  "backend",
+	})
+
+	viewer := &mockPRViewer{
+		state:  "CLOSED",
+		labels: []string{"railyard: rework"},
+	}
+
+	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
+	var buf bytes.Buffer
+	logger := testLogger(&buf)
+	err := handlePrOpenCars(db, viewer, false, "", "", cfg, logger)
+	if err != nil {
+		t.Fatalf("handlePrOpenCars: %v", err)
+	}
+
+	var c models.Car
+	db.First(&c, "id = ?", "car-label6")
+	if c.Status != "cancelled" {
+		t.Errorf("status = %q, want %q (CLOSED should take priority over label)", c.Status, "cancelled")
+	}
+}
+
 func TestHasReworkLabel_Match(t *testing.T) {
 	labels := []string{"bug", "railyard: rework", "enhancement"}
 	if !hasReworkLabel(labels, "railyard: rework") {

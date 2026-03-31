@@ -1317,6 +1317,13 @@ func handlePrOpenCars(db *gorm.DB, viewer PRViewer, autoMerge bool, repoDir, ymD
 		case status.ReviewDecision == "CHANGES_REQUESTED":
 			reopenCarWithFeedback(db, viewer, c, status.Reviews, logger)
 			logger.Info("PR changes requested", "car", c.ID, "transition", "pr_open->open")
+
+		case status.State == "OPEN" && cfg != nil && hasReworkLabel(status.Labels, cfg.Yardmaster.ReworkLabel):
+			reopenCarWithFeedback(db, viewer, c, nil, logger)
+			if err := viewer.RemoveLabel(c.Branch, cfg.Yardmaster.ReworkLabel); err != nil {
+				logger.Warn("Remove rework label", "car", c.ID, "error", err)
+			}
+			logger.Info("PR rework label detected", "car", c.ID, "transition", "pr_open->open")
 		}
 	}
 
