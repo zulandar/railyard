@@ -1323,6 +1323,16 @@ func handlePrOpenCars(db *gorm.DB, viewer PRViewer, autoMerge bool, repoDir, ymD
 	return nil
 }
 
+// hasReworkLabel checks whether the given label is present in the PR's label list.
+func hasReworkLabel(labels []string, reworkLabel string) bool {
+	for _, l := range labels {
+		if l == reworkLabel {
+			return true
+		}
+	}
+	return false
+}
+
 // reopenCarWithFeedback transitions a pr_open car back to open with review feedback
 // as a progress note. CompletedAt is preserved so engines detect isRevision=true.
 func reopenCarWithFeedback(db *gorm.DB, viewer PRViewer, c models.Car, reviews []prReview, logger *slog.Logger) {

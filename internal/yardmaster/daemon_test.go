@@ -2647,3 +2647,30 @@ func TestReopenCarWithFeedback_EmptyComments(t *testing.T) {
 		t.Fatal("expected progress note even with empty comments")
 	}
 }
+
+func TestHasReworkLabel_Match(t *testing.T) {
+	labels := []string{"bug", "railyard: rework", "enhancement"}
+	if !hasReworkLabel(labels, "railyard: rework") {
+		t.Error("expected true for matching label")
+	}
+}
+
+func TestHasReworkLabel_NoMatch(t *testing.T) {
+	labels := []string{"bug", "enhancement"}
+	if hasReworkLabel(labels, "railyard: rework") {
+		t.Error("expected false when label not present")
+	}
+}
+
+func TestHasReworkLabel_CaseExact(t *testing.T) {
+	labels := []string{"Railyard: Rework"}
+	if hasReworkLabel(labels, "railyard: rework") {
+		t.Error("expected false — matching should be case-exact")
+	}
+}
+
+func TestHasReworkLabel_EmptyLabels(t *testing.T) {
+	if hasReworkLabel(nil, "railyard: rework") {
+		t.Error("expected false for nil labels")
+	}
+}
