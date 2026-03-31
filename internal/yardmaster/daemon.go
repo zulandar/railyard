@@ -1324,6 +1324,19 @@ func handlePrOpenCars(db *gorm.DB, viewer PRViewer, autoMerge bool, repoDir, ymD
 				logger.Warn("Remove rework label", "car", c.ID, "error", err)
 			}
 			logger.Info("PR rework label detected", "car", c.ID, "transition", "pr_open->open")
+
+		case status.State == "OPEN" && status.ReviewDecision != "APPROVED":
+			count, countErr := viewer.CountNonAuthorInlineComments(c.Branch)
+			if countErr != nil {
+				logger.Warn("Count inline comments", "car", c.ID, "error", countErr)
+				continue
+			}
+			if count > c.LastPRCommentCount {
+				reopenCarWithFeedback(db, viewer, c, nil, logger)
+				logger.Info("PR new inline comments detected", "car", c.ID,
+					"old_count", c.LastPRCommentCount, "new_count", count,
+					"transition", "pr_open->open")
+			}
 		}
 	}
 

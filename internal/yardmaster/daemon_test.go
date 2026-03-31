@@ -2859,3 +2859,269 @@ func TestHasReworkLabel_EmptyLabels(t *testing.T) {
 		t.Error("expected false for nil labels")
 	}
 }
+
+func TestHandlePrOpenCars_NewInlineComments(t *testing.T) {
+	db := testDB(t)
+	db.Create(&models.Car{
+		ID:                 "car-cmt1",
+		Branch:             "ry/backend/car-cmt1",
+		Status:             "pr_open",
+		Track:              "backend",
+		LastPRCommentCount: 0,
+	})
+
+	viewer := &mockPRViewer{
+		state:              "OPEN",
+		inlineCommentCount: 2,
+		inlineComments: []prInlineComment{
+			{Path: "main.go", Line: 10, Body: "Fix this", Author: "reviewer"},
+			{Path: "main.go", Line: 20, Body: "And this", Author: "reviewer"},
+		},
+	}
+
+	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
+	var buf bytes.Buffer
+	logger := testLogger(&buf)
+	err := handlePrOpenCars(db, viewer, false, "", "", cfg, logger)
+	if err != nil {
+		t.Fatalf("handlePrOpenCars: %v", err)
+	}
+
+	var c models.Car
+	db.First(&c, "id = ?", "car-cmt1")
+	if c.Status != "open" {
+		t.Errorf("status = %q, want %q", c.Status, "open")
+	}
+
+	var notes []models.CarProgress
+	db.Where("car_id = ?", "car-cmt1").Find(&notes)
+	if len(notes) == 0 {
+		t.Error("expected progress note with review comments")
+	}
+}
+
+func TestHandlePrOpenCars_NoNewComments(t *testing.T) {
+	db := testDB(t)
+	db.Create(&models.Car{
+		ID:                 "car-cmt2",
+		Branch:             "ry/backend/car-cmt2",
+		Status:             "pr_open",
+		Track:              "backend",
+		LastPRCommentCount: 3,
+	})
+
+	viewer := &mockPRViewer{
+		state:              "OPEN",
+		inlineCommentCount: 3,
+	}
+
+	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
+	var buf bytes.Buffer
+	logger := testLogger(&buf)
+	err := handlePrOpenCars(db, viewer, false, "", "", cfg, logger)
+	if err != nil {
+		t.Fatalf("handlePrOpenCars: %v", err)
+	}
+
+	var c models.Car
+	db.First(&c, "id = ?", "car-cmt2")
+	if c.Status != "pr_open" {
+		t.Errorf("status = %q, want %q", c.Status, "pr_open")
+	}
+}
+
+func TestHandlePrOpenCars_CommentsIgnoredWhenApproved(t *testing.T) {
+	db := testDB(t)
+	db.Create(&models.Car{
+		ID:                 "car-cmt3",
+		Branch:             "ry/backend/car-cmt3",
+		Status:             "pr_open",
+		Track:              "backend",
+		LastPRCommentCount: 0,
+	})
+
+	viewer := &mockPRViewer{
+		state:              "OPEN",
+		reviewDecision:     "APPROVED",
+		inlineCommentCount: 5,
+	}
+
+	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
+	var buf bytes.Buffer
+	logger := testLogger(&buf)
+	err := handlePrOpenCars(db, viewer, false, "", "", cfg, logger)
+	if err != nil {
+		t.Fatalf("handlePrOpenCars: %v", err)
+	}
+
+	var c models.Car
+	db.First(&c, "id = ?", "car-cmt3")
+	if c.Status != "pr_open" {
+		t.Errorf("status = %q, want %q (approved PR should not be reopened by comments)", c.Status, "pr_open")
+	}
+}
+
+func TestHandlePrOpenCars_InlineCountDecreasesNoTrigger(t *testing.T) {
+	db := testDB(t)
+	db.Create(&models.Car{
+		ID:                 "car-cmt4",
+		Branch:             "ry/backend/car-cmt4",
+		Status:             "pr_open",
+		Track:              "backend",
+		LastPRCommentCount: 5,
+	})
+
+	viewer := &mockPRViewer{
+		state:              "OPEN",
+		inlineCommentCount: 3,
+	}
+
+	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
+	var buf bytes.Buffer
+	logger := testLogger(&buf)
+	err := handlePrOpenCars(db, viewer, false, "", "", cfg, logger)
+	if err != nil {
+		t.Fatalf("handlePrOpenCars: %v", err)
+	}
+
+	var c models.Car
+	db.First(&c, "id = ?", "car-cmt4")
+	if c.Status != "pr_open" {
+		t.Errorf("status = %q, want %q (decreased count should not trigger)", c.Status, "pr_open")
+	}
+}
+
+func TestHandlePrOpenCars_CountErrorSkipsCar(t *testing.T) {
+	db := testDB(t)
+	db.Create(&models.Car{
+		ID:                 "car-cmt5a",
+		Branch:             "ry/backend/car-cmt5a",
+		Status:             "pr_open",
+		Track:              "backend",
+		LastPRCommentCount: 0,
+	})
+	db.Create(&models.Car{
+		ID:                 "car-cmt5b",
+		Branch:             "ry/backend/car-cmt5b",
+		Status:             "pr_open",
+		Track:              "backend",
+		LastPRCommentCount: 0,
+	})
+
+	viewer := &mockPRViewer{
+		state:    "OPEN",
+		countErr: fmt.Errorf("gh api failed"),
+	}
+
+	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
+	var buf bytes.Buffer
+	logger := testLogger(&buf)
+	err := handlePrOpenCars(db, viewer, false, "", "", cfg, logger)
+	if err != nil {
+		t.Fatalf("handlePrOpenCars: %v", err)
+	}
+
+	var c1, c2 models.Car
+	db.First(&c1, "id = ?", "car-cmt5a")
+	db.First(&c2, "id = ?", "car-cmt5b")
+	if c1.Status != "pr_open" {
+		t.Errorf("car-cmt5a status = %q, want %q", c1.Status, "pr_open")
+	}
+	if c2.Status != "pr_open" {
+		t.Errorf("car-cmt5b status = %q, want %q", c2.Status, "pr_open")
+	}
+}
+
+func TestHandlePrOpenCars_ZeroToZeroNoTrigger(t *testing.T) {
+	db := testDB(t)
+	db.Create(&models.Car{
+		ID:                 "car-cmt6",
+		Branch:             "ry/backend/car-cmt6",
+		Status:             "pr_open",
+		Track:              "backend",
+		LastPRCommentCount: 0,
+	})
+
+	viewer := &mockPRViewer{
+		state:              "OPEN",
+		inlineCommentCount: 0,
+	}
+
+	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
+	var buf bytes.Buffer
+	logger := testLogger(&buf)
+	err := handlePrOpenCars(db, viewer, false, "", "", cfg, logger)
+	if err != nil {
+		t.Fatalf("handlePrOpenCars: %v", err)
+	}
+
+	var c models.Car
+	db.First(&c, "id = ?", "car-cmt6")
+	if c.Status != "pr_open" {
+		t.Errorf("status = %q, want %q", c.Status, "pr_open")
+	}
+}
+
+func TestHandlePrOpenCars_MultiplePrOpenCars(t *testing.T) {
+	db := testDB(t)
+	db.Create(&models.Car{ID: "car-cmt7a", Branch: "ry/backend/car-cmt7a", Status: "pr_open", Track: "backend", LastPRCommentCount: 0})
+	db.Create(&models.Car{ID: "car-cmt7b", Branch: "ry/backend/car-cmt7b", Status: "pr_open", Track: "backend", LastPRCommentCount: 5})
+	db.Create(&models.Car{ID: "car-cmt7c", Branch: "ry/backend/car-cmt7c", Status: "pr_open", Track: "backend", LastPRCommentCount: 0})
+
+	viewer := &mockPRViewer{
+		state:              "OPEN",
+		inlineCommentCount: 2,
+	}
+
+	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
+	var buf bytes.Buffer
+	logger := testLogger(&buf)
+	err := handlePrOpenCars(db, viewer, false, "", "", cfg, logger)
+	if err != nil {
+		t.Fatalf("handlePrOpenCars: %v", err)
+	}
+
+	var ca, cb, cc models.Car
+	db.First(&ca, "id = ?", "car-cmt7a")
+	db.First(&cb, "id = ?", "car-cmt7b")
+	db.First(&cc, "id = ?", "car-cmt7c")
+	if ca.Status != "open" {
+		t.Errorf("car-cmt7a status = %q, want open (new comments)", ca.Status)
+	}
+	if cb.Status != "pr_open" {
+		t.Errorf("car-cmt7b status = %q, want pr_open (count decreased)", cb.Status)
+	}
+	if cc.Status != "open" {
+		t.Errorf("car-cmt7c status = %q, want open (new comments)", cc.Status)
+	}
+}
+
+func TestHandlePrOpenCars_CommentCountResetOnReentry(t *testing.T) {
+	db := testDB(t)
+	db.Create(&models.Car{
+		ID:                 "car-reentry1",
+		Branch:             "ry/backend/car-reentry1",
+		Status:             "pr_open",
+		Track:              "backend",
+		LastPRCommentCount: 2,
+	})
+
+	viewer := &mockPRViewer{
+		state:              "OPEN",
+		inlineCommentCount: 4,
+	}
+
+	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
+	var buf bytes.Buffer
+	logger := testLogger(&buf)
+	err := handlePrOpenCars(db, viewer, false, "", "", cfg, logger)
+	if err != nil {
+		t.Fatalf("handlePrOpenCars: %v", err)
+	}
+
+	var c models.Car
+	db.First(&c, "id = ?", "car-reentry1")
+	if c.Status != "open" {
+		t.Errorf("status = %q, want %q (new comments since last snapshot)", c.Status, "open")
+	}
+}
