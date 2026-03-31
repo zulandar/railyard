@@ -104,12 +104,22 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 		Branch: car.Branch,
 	}
 
+	slog.Info("Switch: starting merge pipeline",
+		"car", carID,
+		"branch", car.Branch,
+		"base_branch", baseBranch,
+		"assignee", car.Assignee,
+		"skip_tests", car.SkipTests,
+	)
+
 	// Fetch the branch.
 	if err := gitFetch(opts.RepoDir); err != nil {
 		result.FailureCategory = SwitchFailFetch
 		result.Error = fmt.Errorf("fetch: %w", err)
 		return result, result.Error
 	}
+
+	slog.Debug("Switch: fetch complete", "car", carID)
 
 	// Detach the engine worktree so the branch can be checked out.
 	// Engine worktrees live under the primary repo, not the yardmaster worktree.
@@ -133,6 +143,14 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSec)*time.Second)
 		defer cancel()
 
+		slog.Info("Switch: running tests",
+			"car", carID,
+			"branch", car.Branch,
+			"test_command", opts.TestCommand,
+			"pre_test_command", opts.PreTestCommand,
+			"timeout_sec", timeoutSec,
+		)
+
 		testOutput, testErr := runTests(ctx, opts.RepoDir, car.Branch, baseBranch, opts.PreTestCommand, opts.TestCommand)
 		result.TestOutput = testOutput
 
@@ -144,6 +162,12 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 			} else {
 				result.FailureCategory = classifyTestFailure(testErr, testOutput)
 			}
+
+			slog.Warn("Switch: tests failed",
+				"car", carID,
+				"category", result.FailureCategory,
+				"error", testErr,
+			)
 
 			if result.FailureCategory == SwitchFailInfra {
 				// Infrastructure failure — set merge-failed, escalate to human.
@@ -179,6 +203,7 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 		}
 
 		result.TestsPassed = true
+		slog.Info("Switch: tests passed", "car", carID)
 	}
 
 	if opts.DryRun {
@@ -188,6 +213,11 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 	// If the branch has no unique diff vs main (e.g. a dependent car's merge
 	// already included this branch's commits), skip the merge.
 	if isBranchMerged(opts.RepoDir, car.Branch, baseBranch) {
+		slog.Info("Switch: branch already merged (ancestor of base)",
+			"car", carID,
+			"branch", car.Branch,
+			"base_branch", baseBranch,
+		)
 		deleteRemoteBranch(opts.RepoDir, car.Branch)
 		result.Merged = true
 		result.AlreadyMerged = true
@@ -248,6 +278,11 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 
 		result.PRCreated = true
 		result.PRUrl = prURL
+		slog.Info("Switch: draft PR created",
+			"car", carID,
+			"branch", car.Branch,
+			"pr_url", prURL,
+		)
 
 		// Mark car as pr_open — not merged yet, waiting for human review.
 		now := time.Now()
@@ -308,6 +343,11 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 	deleteRemoteBranch(opts.RepoDir, car.Branch)
 
 	result.Merged = true
+	slog.Info("Switch: merged and pushed",
+		"car", carID,
+		"branch", car.Branch,
+		"base_branch", baseBranch,
+	)
 
 	// Mark car as merged — push succeeded, safe to update status.
 	now := time.Now()

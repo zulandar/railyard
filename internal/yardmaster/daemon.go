@@ -480,14 +480,21 @@ func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, r
 			continue
 		}
 
-		logger.Info("Car completed, switching", "car", c.ID, "title", c.Title)
-
 		// Reset the yardmaster worktree to the car's base branch before each
 		// switch so we start from a clean state.
 		baseBranch := c.BaseBranch
 		if baseBranch == "" {
 			baseBranch = "main"
 		}
+
+		logger.Info("Car completed, switching",
+			"car", c.ID,
+			"title", c.Title,
+			"branch", c.Branch,
+			"base_branch", baseBranch,
+			"track", c.Track,
+			"assignee", c.Assignee,
+		)
 		if ymDir != repoDir {
 			if err := engine.SyncWorktreeToBranch(ymDir, baseBranch, repoDir); err != nil {
 				logger.Warn("Reset yardmaster worktree", "car", c.ID, "error", err)
