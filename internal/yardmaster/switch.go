@@ -552,16 +552,20 @@ func truncateOutput(output string, maxLen int) string {
 func runTests(ctx context.Context, repoDir, branch, baseBranch, preTestCommand, testCommand string) (string, error) {
 	// Discard any uncommitted changes before switching branches.
 	gitCleanWorkingTree(repoDir)
+	slog.Debug("runTests: cleaned working tree", "branch", branch)
 
 	// Checkout the branch (worktree-safe: fall back to detached HEAD).
+	checkoutMethod := "direct"
 	checkout := exec.Command("git", "checkout", branch)
 	checkout.Dir = repoDir
 	if out, err := checkout.CombinedOutput(); err != nil {
 		// Fallback: detach at origin/<branch> (handles worktree collision).
+		checkoutMethod = "detached-origin"
 		detach := exec.Command("git", "checkout", "--detach", "origin/"+branch)
 		detach.Dir = repoDir
 		if dOut, dErr := detach.CombinedOutput(); dErr != nil {
 			// Last resort: detach at local branch ref.
+			checkoutMethod = "detached-local"
 			last := exec.Command("git", "checkout", "--detach", branch)
 			last.Dir = repoDir
 			if lOut, lErr := last.CombinedOutput(); lErr != nil {
@@ -570,9 +574,11 @@ func runTests(ctx context.Context, repoDir, branch, baseBranch, preTestCommand, 
 			}
 		}
 	}
+	slog.Debug("runTests: checked out branch", "branch", branch, "method", checkoutMethod)
 
 	// Run pre-test command if configured (e.g. "go mod vendor", "npm install").
 	if preTestCommand != "" {
+		slog.Debug("runTests: running pre-test command", "command", preTestCommand)
 		preCmd := exec.CommandContext(ctx, "sh", "-c", preTestCommand)
 		preCmd.Dir = repoDir
 		if out, err := preCmd.CombinedOutput(); err != nil {
@@ -585,6 +591,7 @@ func runTests(ctx context.Context, repoDir, branch, baseBranch, preTestCommand, 
 			}
 			return string(out), fmt.Errorf("pre-test command failed: %w", err)
 		}
+		slog.Debug("runTests: pre-test command succeeded")
 	}
 
 	// Run the track's configured test command.
@@ -593,6 +600,7 @@ func runTests(ctx context.Context, repoDir, branch, baseBranch, preTestCommand, 
 		checkoutBase(repoDir, baseBranch)
 		return "", nil
 	}
+	slog.Debug("runTests: executing test command", "command", testCommand)
 	testCmd := exec.CommandContext(ctx, "sh", "-c", testCommand)
 	testCmd.Dir = repoDir
 
@@ -601,6 +609,7 @@ func runTests(ctx context.Context, repoDir, branch, baseBranch, preTestCommand, 
 
 	// Return to base branch regardless.
 	checkoutBase(repoDir, baseBranch)
+	slog.Debug("runTests: returned to base branch", "base_branch", baseBranch)
 
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
@@ -609,6 +618,7 @@ func runTests(ctx context.Context, repoDir, branch, baseBranch, preTestCommand, 
 		// Check for "no tests" patterns — treat as pass.
 		for _, pat := range noTestPatterns {
 			if strings.Contains(output, pat) {
+				slog.Debug("runTests: no-test pattern matched, treating as pass", "pattern", pat)
 				return output, nil
 			}
 		}

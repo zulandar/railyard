@@ -672,8 +672,11 @@ func reconcileStaleCars(db *gorm.DB, repoDir string, logger *slog.Logger) error 
 	}
 
 	if len(activeCars) == 0 {
+		slog.Debug("reconcileStaleCars: no active cars with branches")
 		return nil
 	}
+
+	slog.Debug("reconcileStaleCars: checking active cars", "count", len(activeCars))
 
 	// Group cars by base branch.
 	carsByBase := make(map[string][]models.Car)
@@ -693,6 +696,11 @@ func reconcileStaleCars(db *gorm.DB, repoDir string, logger *slog.Logger) error 
 			logger.Warn("Reconcile: skip base", "base", base, "error", err)
 			continue
 		}
+		slog.Debug("reconcileStaleCars: checking base branch",
+			"base", base,
+			"cars_on_base", len(cars),
+			"merged_branches_found", len(mergedBranches),
+		)
 
 		for _, c := range cars {
 			if mergedBranches[c.Branch] {
@@ -916,6 +924,12 @@ func maybeSwitchEscalate(ctx context.Context, db *gorm.DB, cfg *config.Config, c
 
 	failures := countRecentSwitchFailures(db, carID)
 	if failures < maxFailures {
+		slog.Debug("maybeSwitchEscalate: below threshold, not escalating",
+			"car", carID,
+			"failures", failures,
+			"max_failures", maxFailures,
+			"category", cat,
+		)
 		return
 	}
 

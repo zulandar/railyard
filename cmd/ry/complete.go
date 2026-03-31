@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"time"
@@ -58,8 +59,15 @@ func runComplete(cmd *cobra.Command, configPath, carID, summary string) error {
 		return fmt.Errorf("complete rejected: cannot verify commits ahead of %s: %w", baseBranch, cErr)
 	}
 	if count == 0 {
+		slog.Warn("ry complete: rejected, zero commits ahead", "car", carID, "base_branch", baseBranch)
 		return fmt.Errorf("complete rejected: branch has zero commits ahead of %s — you must commit your work before completing", baseBranch)
 	}
+
+	slog.Info("ry complete: marking car done",
+		"car", carID,
+		"commits_ahead", count,
+		"base_branch", baseBranch,
+	)
 
 	// Transition to done.
 	if err := car.Update(gormDB, carID, map[string]interface{}{
@@ -67,6 +75,8 @@ func runComplete(cmd *cobra.Command, configPath, carID, summary string) error {
 	}); err != nil {
 		return fmt.Errorf("complete car %s: %w", carID, err)
 	}
+
+	slog.Info("ry complete: car marked done", "car", carID, "summary", summary)
 
 	// Write final progress note.
 	if err := gormDB.Create(&models.CarProgress{

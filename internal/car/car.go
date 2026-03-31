@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/zulandar/railyard/internal/models"
@@ -183,6 +184,8 @@ func Update(db *gorm.DB, id string, updates map[string]interface{}) error {
 		return fmt.Errorf("car: get %s for update: %w", id, err)
 	}
 
+	oldStatus := car.Status
+
 	if newStatus, ok := updates["status"].(string); ok {
 		if !isValidTransition(car.Status, newStatus) {
 			valid := ValidTransitions[car.Status]
@@ -201,6 +204,11 @@ func Update(db *gorm.DB, id string, updates map[string]interface{}) error {
 	if err := db.Model(&models.Car{}).Where("id = ?", id).Updates(updates).Error; err != nil {
 		return fmt.Errorf("car: update %s: %w", id, err)
 	}
+
+	if newStatus, ok := updates["status"].(string); ok {
+		slog.Info("car: status transition", "car", id, "from", oldStatus, "to", newStatus)
+	}
+
 	return nil
 }
 
