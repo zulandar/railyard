@@ -1005,6 +1005,7 @@ type prStatus struct {
 	ReviewDecision string // APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED, ""
 	Mergeable      string // MERGEABLE, CONFLICTING, UNKNOWN
 	Reviews        []prReview
+	Labels         []string // label names on the PR
 }
 
 // PRViewer abstracts GitHub PR status lookups and merge operations for testability.
@@ -1012,6 +1013,8 @@ type PRViewer interface {
 	ViewPR(branch string) (*prStatus, error)
 	FetchComments(branch string) ([]prInlineComment, []prConversationComment, error)
 	MergePR(branch string) error
+	CountNonAuthorInlineComments(branch string) (int, error)
+	RemoveLabel(branch, label string) error
 }
 
 // ghPRViewer implements PRViewer using the gh CLI.
@@ -1021,7 +1024,7 @@ type ghPRViewer struct {
 
 func (g *ghPRViewer) ViewPR(branch string) (*prStatus, error) {
 	cmd := exec.Command("gh", "pr", "view", branch,
-		"--json", "state,reviewDecision,reviews,mergeable")
+		"--json", "state,reviewDecision,reviews,mergeable,labels")
 	cmd.Dir = g.repoDir
 	out, err := cmd.Output()
 	if err != nil {
@@ -1038,6 +1041,9 @@ func (g *ghPRViewer) ViewPR(branch string) (*prStatus, error) {
 				Login string `json:"login"`
 			} `json:"author"`
 		} `json:"reviews"`
+		Labels []struct {
+			Name string `json:"name"`
+		} `json:"labels"`
 	}
 	if err := json.Unmarshal(out, &result); err != nil {
 		return nil, fmt.Errorf("parse gh pr view: %w", err)
@@ -1050,6 +1056,9 @@ func (g *ghPRViewer) ViewPR(branch string) (*prStatus, error) {
 	}
 	for _, r := range result.Reviews {
 		ps.Reviews = append(ps.Reviews, prReview{Body: r.Body, Author: r.Author.Login})
+	}
+	for _, l := range result.Labels {
+		ps.Labels = append(ps.Labels, l.Name)
 	}
 	return ps, nil
 }
@@ -1103,6 +1112,63 @@ func (g *ghPRViewer) FetchComments(branch string) ([]prInlineComment, []prConver
 	}
 
 	return inline, conversation, nil
+}
+
+func (g *ghPRViewer) CountNonAuthorInlineComments(branch string) (int, error) {
+	// Step 1: Get PR number and author.
+	cmd := exec.Command("gh", "pr", "view", branch,
+		"--json", "number,author")
+	cmd.Dir = g.repoDir
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, fmt.Errorf("gh pr view %s: %w", branch, err)
+	}
+
+	var prData struct {
+		Number int `json:"number"`
+		Author struct {
+			Login string `json:"login"`
+		} `json:"author"`
+	}
+	if err := json.Unmarshal(out, &prData); err != nil {
+		return 0, fmt.Errorf("parse gh pr view: %w", err)
+	}
+
+	// Step 2: Fetch inline review comments via REST API.
+	apiPath := fmt.Sprintf("repos/{owner}/{repo}/pulls/%d/comments", prData.Number)
+	cmd2 := exec.Command("gh", "api", apiPath)
+	cmd2.Dir = g.repoDir
+	out2, err := cmd2.Output()
+	if err != nil {
+		return 0, fmt.Errorf("gh api %s: %w", apiPath, err)
+	}
+
+	var comments []struct {
+		User struct {
+			Login string `json:"login"`
+		} `json:"user"`
+	}
+	if err := json.Unmarshal(out2, &comments); err != nil {
+		return 0, fmt.Errorf("parse inline comments: %w", err)
+	}
+
+	count := 0
+	for _, c := range comments {
+		if c.User.Login != prData.Author.Login {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func (g *ghPRViewer) RemoveLabel(branch, label string) error {
+	cmd := exec.Command("gh", "pr", "edit", branch, "--remove-label", label)
+	cmd.Dir = g.repoDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("gh pr edit --remove-label %s: %s: %w", label, string(out), err)
+	}
+	return nil
 }
 
 // parseInlineComments parses the JSON response from the GitHub pulls/comments API.

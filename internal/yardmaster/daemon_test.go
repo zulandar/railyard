@@ -1825,16 +1825,22 @@ func TestHandleCompletedCars_EpicWithPendingChildren_StaysDone(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 type mockPRViewer struct {
-	reviewDecision string
-	state          string
-	mergeable      string
-	reviews        []prReview
-	inlineComments []prInlineComment
-	convComments   []prConversationComment
-	fetchErr       error
-	err            error
-	mergeErr       error
-	mergeCalled    bool
+	reviewDecision     string
+	state              string
+	mergeable          string
+	reviews            []prReview
+	labels             []string
+	inlineComments     []prInlineComment
+	convComments       []prConversationComment
+	fetchErr           error
+	err                error
+	mergeErr           error
+	mergeCalled        bool
+	inlineCommentCount int
+	countErr           error
+	removeLabelCalled  bool
+	removedLabel       string
+	removeLabelErr     error
 }
 
 func (m *mockPRViewer) ViewPR(branch string) (*prStatus, error) {
@@ -1846,6 +1852,7 @@ func (m *mockPRViewer) ViewPR(branch string) (*prStatus, error) {
 		ReviewDecision: m.reviewDecision,
 		Mergeable:      m.mergeable,
 		Reviews:        m.reviews,
+		Labels:         m.labels,
 	}, nil
 }
 
@@ -1856,6 +1863,16 @@ func (m *mockPRViewer) FetchComments(branch string) ([]prInlineComment, []prConv
 func (m *mockPRViewer) MergePR(branch string) error {
 	m.mergeCalled = true
 	return m.mergeErr
+}
+
+func (m *mockPRViewer) CountNonAuthorInlineComments(branch string) (int, error) {
+	return m.inlineCommentCount, m.countErr
+}
+
+func (m *mockPRViewer) RemoveLabel(branch, label string) error {
+	m.removeLabelCalled = true
+	m.removedLabel = label
+	return m.removeLabelErr
 }
 
 func TestViewPR_IncludesMergeable(t *testing.T) {
