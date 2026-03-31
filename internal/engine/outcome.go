@@ -31,8 +31,8 @@ func HandleCompletion(db *gorm.DB, car *models.Car, engine *models.Engine, opts 
 		return fmt.Errorf("engine: repoDir is required")
 	}
 
-	// Best-effort push — ry complete already pushed, but re-push in case
-	// the agent committed additional changes after ry complete returned.
+	// Idempotent re-push — ry complete already pushed the branch before
+	// setting status to done. This is a no-op safety net, not a primary push.
 	if car.Branch != "" {
 		if err := PushBranch(opts.RepoDir, car.Branch); err != nil {
 			slog.Warn("engine: completion re-push failed (non-fatal, ry complete already pushed)",

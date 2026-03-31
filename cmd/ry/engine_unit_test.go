@@ -310,6 +310,7 @@ func TestEngine_CompletionPushFailure_NonFatal(t *testing.T) {
 
 	// HandleCompletion re-push will fail (bad repoDir), but this is non-fatal
 	// because ry complete already pushed the branch before setting status to done.
+	// No post-complete commits are possible — ry complete is Claude's final action.
 	var eng models.Engine
 	gormDB.First(&eng, "id = ?", "eng-pf1")
 	var car models.Car
