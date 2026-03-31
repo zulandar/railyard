@@ -16,7 +16,6 @@ permissions:
 jobs:
   test:
     name: Test
-    needs: [lint, helm-lint]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -48,7 +47,6 @@ jobs:
 
   govulncheck:
     name: Vulnerability Check
-    needs: [lint, helm-lint]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -191,7 +189,6 @@ jobs:
 
   docker-build:
     name: Docker Build Smoke Test
-    needs: [lint, helm-lint]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -203,5 +200,5 @@ jobs:
       - name: Build ry binary
         run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o ry ./cmd/ry/
 
-      - name: Build Docker image (claude)
-        run: docker build --build-arg AGENT_PROVIDER=claude -f Dockerfile.engine .
+      - name: Build Docker image (claude, no cocoindex)
+        run: docker build --build-arg AGENT_PROVIDER=claude --build-arg COCOINDEX_BASE=without-cocoindex -f Dockerfile.engine .

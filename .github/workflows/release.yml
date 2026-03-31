@@ -30,7 +30,6 @@ jobs:
 
   test:
     name: Test
-    needs: [lint]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -44,7 +43,6 @@ jobs:
 
   helm-validate:
     name: Helm Validate
-    needs: [lint]
     runs-on: ubuntu-latest
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -141,7 +139,7 @@ jobs:
 
   release:
     name: Release
-    needs: [test, helm-validate]
+    needs: [lint, test, helm-validate]
     runs-on: ubuntu-latest
     strategy:
       matrix:

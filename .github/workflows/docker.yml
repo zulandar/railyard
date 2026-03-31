@@ -32,6 +32,14 @@ jobs:
             -X main.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             -o ry ./cmd/ry/
 
+      # Upload ry binary so provider jobs don't rebuild it (~30s each).
+      - name: Upload ry binary
+        uses: actions/upload-artifact@v6
+        with:
+          name: ry-binary
+          path: ry
+          retention-days: 1
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -66,17 +74,14 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: actions/setup-go@v6
+      # Download pre-built ry binary from build-base (avoids ~30s Go build per provider).
+      - name: Download ry binary
+        uses: actions/download-artifact@v7
         with:
-          go-version-file: go.mod
+          name: ry-binary
 
-      - name: Build ry binary
-        run: |
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "\
-            -X main.Version=${GITHUB_REF_NAME#v} \
-            -X main.Commit=$(git rev-parse --short HEAD) \
-            -X main.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            -o ry ./cmd/ry/
+      - name: Make ry executable
+        run: chmod +x ry
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
