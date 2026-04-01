@@ -1,0 +1,8 @@
+owner: alice
+repo: git@github.com:org/myapp.git
+tracks:
+  - name: backend
+    language: go
+
+inspect:
+  enabled: true

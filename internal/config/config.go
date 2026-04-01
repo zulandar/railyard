@@ -29,6 +29,7 @@ type Config struct {
 	Notifications     NotificationsConfig `yaml:"notifications"`
 	CocoIndex         CocoIndexConfig     `yaml:"cocoindex"`
 	Bull              BullConfig          `yaml:"bull"`
+	Inspect           InspectConfig       `yaml:"inspect"`
 	Telegraph         TelegraphConfig     `yaml:"telegraph"`
 	Kubernetes        KubernetesConfig    `yaml:"kubernetes"`
 	AgentProvider     string              `yaml:"agent_provider"`
@@ -165,6 +166,28 @@ type BullConfig struct {
 	AgentProvider   string             `yaml:"agent_provider"`
 	Comments        BullCommentsConfig `yaml:"comments"`
 	Labels          BullLabelsConfig   `yaml:"labels"`
+}
+
+// InspectLabelsConfig defines the GitHub labels Inspection Pit uses.
+type InspectLabelsConfig struct {
+	InProgress string `yaml:"in_progress"`
+	Reviewed   string `yaml:"reviewed"`
+	ReReview   string `yaml:"re_review"`
+}
+
+// InspectConfig holds settings for the Inspection Pit PR review daemon.
+type InspectConfig struct {
+	Enabled          bool                `yaml:"enabled"`
+	AppID            int64               `yaml:"app_id"`
+	PrivateKeyPath   string              `yaml:"private_key_path"`
+	InstallationID   int64               `yaml:"installation_id"`
+	PollIntervalSec  int                 `yaml:"poll_interval_sec"`
+	AgentProvider    string              `yaml:"agent_provider"`
+	DeepReview       bool                `yaml:"deep_review"`
+	ReviewTimeoutSec int                 `yaml:"review_timeout_sec"`
+	MaxDiffLines     int                 `yaml:"max_diff_lines"`
+	HealthPort       int                 `yaml:"health_port"`
+	Labels           InspectLabelsConfig `yaml:"labels"`
 }
 
 // TelegraphConfig holds settings for the Telegraph chat bridge.
@@ -410,6 +433,34 @@ func (c *Config) applyDefaults() {
 			c.Bull.Labels.Ignore = "bull: ignore"
 		}
 	}
+	// Inspect defaults — only apply when inspect is enabled.
+	if c.Inspect.Enabled {
+		c.Inspect.PrivateKeyPath = resolveEnvVars(c.Inspect.PrivateKeyPath)
+		if c.Inspect.PollIntervalSec == 0 {
+			c.Inspect.PollIntervalSec = 60
+		}
+		if c.Inspect.ReviewTimeoutSec == 0 {
+			c.Inspect.ReviewTimeoutSec = 300
+		}
+		if c.Inspect.MaxDiffLines == 0 {
+			c.Inspect.MaxDiffLines = 10000
+		}
+		if c.Inspect.HealthPort == 0 {
+			c.Inspect.HealthPort = 8082
+		}
+		if c.Inspect.AgentProvider == "" {
+			c.Inspect.AgentProvider = c.AgentProvider
+		}
+		if c.Inspect.Labels.InProgress == "" {
+			c.Inspect.Labels.InProgress = "inspect: in-progress"
+		}
+		if c.Inspect.Labels.Reviewed == "" {
+			c.Inspect.Labels.Reviewed = "inspect: reviewed"
+		}
+		if c.Inspect.Labels.ReReview == "" {
+			c.Inspect.Labels.ReReview = "inspect: re-review"
+		}
+	}
 	// Telegraph defaults — only apply when telegraph section is present (platform set).
 	if c.Telegraph.Platform != "" {
 		if c.Telegraph.DispatchLock.HeartbeatIntervalSec == 0 {
@@ -496,6 +547,16 @@ func (c *Config) validate() error {
 			// valid
 		default:
 			errs = append(errs, fmt.Sprintf("bull.triage_mode %q is not supported (use standard or full)", c.Bull.TriageMode))
+		}
+	}
+	// Inspect validation (only when enabled).
+	if c.Inspect.Enabled {
+		hasApp := c.Inspect.AppID != 0 && c.Inspect.PrivateKeyPath != "" && c.Inspect.InstallationID != 0
+		partialApp := (c.Inspect.AppID != 0 || c.Inspect.PrivateKeyPath != "" || c.Inspect.InstallationID != 0) && !hasApp
+		if partialApp {
+			errs = append(errs, "inspect: GitHub App auth requires all three fields: app_id, private_key_path, and installation_id")
+		} else if !hasApp {
+			errs = append(errs, "inspect: GitHub App authentication is required; set app_id, private_key_path, and installation_id")
 		}
 	}
 	// Telegraph validation (only when platform is configured).
