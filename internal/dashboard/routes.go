@@ -10,8 +10,23 @@ import (
 	"gorm.io/gorm"
 )
 
+// pageData injects ProjectName from the Gin context into a gin.H map so the
+// nav bar badge renders on every page without touching each handler.
+func pageData(c *gin.Context, data gin.H) gin.H {
+	if name, ok := c.Get("ProjectName"); ok {
+		data["ProjectName"] = name
+	}
+	return data
+}
+
 // registerRoutes sets up all dashboard routes on the Gin router.
-func registerRoutes(router *gin.Engine, db *gorm.DB) {
+func registerRoutes(router *gin.Engine, db *gorm.DB, projectName string) {
+	// Inject project name into every request context so pageData() can pick it up.
+	router.Use(func(c *gin.Context) {
+		c.Set("ProjectName", projectName)
+		c.Next()
+	})
+
 	// Embedded static assets (served from assets/ subdir of the embed.FS).
 	staticFS, _ := fs.Sub(assetsFS, "assets")
 	router.StaticFS("/static", http.FS(staticFS))
@@ -91,7 +106,7 @@ func handleIndex(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		data := dashboardData(db)
 		data["NavPath"] = c.Request.URL.Path
-		c.HTML(http.StatusOK, "layout.html", data)
+		c.HTML(http.StatusOK, "layout.html", pageData(c, data))
 	}
 }
 
@@ -146,7 +161,7 @@ func handleCarList(db *gorm.DB) gin.HandlerFunc {
 
 		result := CarList(db, track, status, carType, parentID)
 
-		c.HTML(http.StatusOK, "cars.html", gin.H{
+		c.HTML(http.StatusOK, "cars.html", pageData(c, gin.H{
 			"Cars":         result.Cars,
 			"Tracks":       result.Tracks,
 			"Statuses":     result.Statuses,
@@ -155,7 +170,7 @@ func handleCarList(db *gorm.DB) gin.HandlerFunc {
 			"ActiveStatus": status,
 			"ActiveType":   carType,
 			"NavPath":      c.Request.URL.Path,
-		})
+		}))
 	}
 }
 
@@ -164,19 +179,19 @@ func handleCarDetail(db *gorm.DB) gin.HandlerFunc {
 		id := c.Param("id")
 		detail, err := GetCarDetail(db, id)
 		if err != nil {
-			c.HTML(http.StatusNotFound, "layout.html", gin.H{
+			c.HTML(http.StatusNotFound, "layout.html", pageData(c, gin.H{
 				"Error":   fmt.Sprintf("Car not found: %s", id),
 				"NavPath": c.Request.URL.Path,
-			})
+			}))
 			return
 		}
 
 		graph := DependencyGraph(db, id)
-		c.HTML(http.StatusOK, "car_detail.html", gin.H{
+		c.HTML(http.StatusOK, "car_detail.html", pageData(c, gin.H{
 			"Car":     detail,
 			"Graph":   graph,
 			"NavPath": c.Request.URL.Path,
-		})
+		}))
 	}
 }
 
@@ -185,20 +200,20 @@ func handleEngineDetail(db *gorm.DB) gin.HandlerFunc {
 		id := c.Param("id")
 		engine, err := GetEngineDetail(db, id)
 		if err != nil {
-			c.HTML(http.StatusNotFound, "layout.html", gin.H{
+			c.HTML(http.StatusNotFound, "layout.html", pageData(c, gin.H{
 				"Error":   fmt.Sprintf("Engine not found: %s", id),
 				"NavPath": c.Request.URL.Path,
-			})
+			}))
 			return
 		}
 
 		activity := GetEngineActivity(db, id)
 
-		c.HTML(http.StatusOK, "engine_detail.html", gin.H{
+		c.HTML(http.StatusOK, "engine_detail.html", pageData(c, gin.H{
 			"Engine":   engine,
 			"Activity": activity,
 			"NavPath":  c.Request.URL.Path,
-		})
+		}))
 	}
 }
 
@@ -218,7 +233,7 @@ func handleMessages(db *gorm.DB) gin.HandlerFunc {
 		// Get pending escalations separately for the top section.
 		escalations, _ := RecentEscalations(db)
 
-		c.HTML(http.StatusOK, "messages.html", gin.H{
+		c.HTML(http.StatusOK, "messages.html", pageData(c, gin.H{
 			"Messages":       result.Messages,
 			"Agents":         result.Agents,
 			"Priorities":     result.Priorities,
@@ -227,7 +242,7 @@ func handleMessages(db *gorm.DB) gin.HandlerFunc {
 			"ActivePriority": priority,
 			"ActiveUnacked":  unacked,
 			"NavPath":        c.Request.URL.Path,
-		})
+		}))
 	}
 }
 
@@ -244,7 +259,7 @@ func handleSessionList(db *gorm.DB) gin.HandlerFunc {
 		}
 		result := SessionList(db, filters)
 
-		c.HTML(http.StatusOK, "sessions.html", gin.H{
+		c.HTML(http.StatusOK, "sessions.html", pageData(c, gin.H{
 			"Sessions":     result.Sessions,
 			"Sources":      result.Sources,
 			"Statuses":     result.Statuses,
@@ -253,7 +268,7 @@ func handleSessionList(db *gorm.DB) gin.HandlerFunc {
 			"ActiveStatus": status,
 			"ActiveUser":   user,
 			"NavPath":      c.Request.URL.Path,
-		})
+		}))
 	}
 }
 
@@ -262,17 +277,17 @@ func handleSessionDetail(db *gorm.DB) gin.HandlerFunc {
 		id := c.Param("id")
 		detail, err := GetSessionDetail(db, id)
 		if err != nil {
-			c.HTML(http.StatusNotFound, "layout.html", gin.H{
+			c.HTML(http.StatusNotFound, "layout.html", pageData(c, gin.H{
 				"Error":   fmt.Sprintf("Session not found: %s", id),
 				"NavPath": c.Request.URL.Path,
-			})
+			}))
 			return
 		}
 
-		c.HTML(http.StatusOK, "session_detail.html", gin.H{
+		c.HTML(http.StatusOK, "session_detail.html", pageData(c, gin.H{
 			"Session": detail,
 			"NavPath": c.Request.URL.Path,
-		})
+		}))
 	}
 }
 
@@ -291,7 +306,7 @@ func handleLogs(db *gorm.DB) gin.HandlerFunc {
 		tokenResult := TokenUsageSummary(db)
 		cycleResult := CycleUsageSummary(db)
 
-		c.HTML(http.StatusOK, "logs.html", gin.H{
+		c.HTML(http.StatusOK, "logs.html", pageData(c, gin.H{
 			"Logs":             logResult.Logs,
 			"Engines":          logResult.Engines,
 			"Cars":             logResult.Cars,
@@ -308,6 +323,6 @@ func handleLogs(db *gorm.DB) gin.HandlerFunc {
 			"ActiveCar":        carID,
 			"ActiveDirection":  direction,
 			"NavPath":          c.Request.URL.Path,
-		})
+		}))
 	}
 }

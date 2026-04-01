@@ -8,7 +8,7 @@
 {{define "page_nav"}}
 <nav>
     <div class="container">
-        <span class="brand">Railyard</span>
+        <span class="brand">Railyard{{if .ProjectName}} <span class="badge badge-project">{{.ProjectName}}</span>{{end}}</span>
         <a href="/" {{if eq .NavPath "/"}}class="active"{{end}}>Dashboard</a>
         <a href="/cars" {{if hasPrefix .NavPath "/cars"}}class="active"{{end}}>Cars</a>
         <a href="/messages" {{if hasPrefix .NavPath "/messages"}}class="active"{{end}}>Messages</a>

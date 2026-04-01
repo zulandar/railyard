@@ -37,7 +37,8 @@ nav {
     margin-bottom: 1.5rem;
 }
 nav .container { display: flex; align-items: center; gap: 1.5rem; }
-nav .brand { font-weight: 600; font-size: 1.1rem; color: var(--text); }
+nav .brand { font-weight: 600; font-size: 1.1rem; color: var(--text); display: flex; align-items: center; gap: 0.5rem; }
+.badge-project { background: rgba(88, 166, 255, 0.15); color: var(--accent); }
 nav a { color: var(--text-muted); font-size: 0.9rem; }
 nav a:hover { color: var(--text); text-decoration: none; }
 nav a.active { color: var(--text); font-weight: 600; }

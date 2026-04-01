@@ -16,12 +16,13 @@ import (
 
 // StartOpts holds configuration for the dashboard server.
 type StartOpts struct {
-	DB        *gorm.DB
-	Port      int
-	Out       io.Writer
-	TLSCert   string          // path to TLS certificate file (optional)
-	TLSKey    string          // path to TLS private key file (optional)
-	RateLimit RateLimitConfig // per-IP rate limiting (optional)
+	DB          *gorm.DB
+	Port        int
+	Out         io.Writer
+	TLSCert     string          // path to TLS certificate file (optional)
+	TLSKey      string          // path to TLS private key file (optional)
+	RateLimit   RateLimitConfig // per-IP rate limiting (optional)
+	ProjectName string          // project name displayed in the nav bar badge (optional)
 }
 
 // Start launches the dashboard HTTP server. It blocks until ctx is cancelled,
@@ -48,7 +49,7 @@ func Start(ctx context.Context, opts StartOpts) error {
 	router.SetHTMLTemplate(tmpl)
 
 	// Register routes.
-	registerRoutes(router, opts.DB)
+	registerRoutes(router, opts.DB, opts.ProjectName)
 
 	addr := fmt.Sprintf(":%d", opts.Port)
 	srv := &http.Server{

@@ -31,7 +31,7 @@ func testRouter() *gin.Engine {
 
 	// Use a simple HTML template to avoid template parse errors.
 	router.SetHTMLTemplate(mustParseTemplates())
-	registerRoutes(router, nil)
+	registerRoutes(router, nil, "")
 	return router
 }
 
@@ -288,7 +288,7 @@ func TestRateLimiting_Enforcement(t *testing.T) {
 	router := gin.New()
 	router.Use(rateLimiter(RateLimitConfig{Enabled: true, RequestsPerMinute: 5}))
 	router.SetHTMLTemplate(mustParseTemplates())
-	registerRoutes(router, nil)
+	registerRoutes(router, nil, "")
 
 	// Exhaust the limit.
 	for i := range 5 {

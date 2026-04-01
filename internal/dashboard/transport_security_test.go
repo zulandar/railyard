@@ -27,7 +27,7 @@ func testRouterWithSecurityHeaders() *gin.Engine {
 	router.Use(securityHeaders())
 
 	router.SetHTMLTemplate(mustParseTemplates())
-	registerRoutes(router, nil)
+	registerRoutes(router, nil, "")
 	return router
 }
 

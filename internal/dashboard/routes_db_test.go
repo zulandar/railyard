@@ -29,7 +29,7 @@ func setupDBRouter(t *testing.T) (*gorm.DB, string, func()) {
 		t.Fatalf("parse templates: %v", err)
 	}
 	router.SetHTMLTemplate(tmpl)
-	registerRoutes(router, db)
+	registerRoutes(router, db, "testproject")
 
 	port := findFreePort()
 	srv := &http.Server{Addr: fmt.Sprintf(":%d", port), Handler: router}

@@ -46,11 +46,13 @@ func runDashboard(cmd *cobra.Command, configPath string, port int, tlsCert, tlsK
 	// Retry DB connection to tolerate the database starting up (e.g. in K8s
 	// where the dashboard pod may start before the database is ready).
 	var gormDB *gorm.DB
+	var projectName string
 	const maxRetries = 30
 	for i := range maxRetries {
-		_, db, err := connectFromConfig(configPath)
+		cfg, db, err := connectFromConfig(configPath)
 		if err == nil {
 			gormDB = db
+			projectName = cfg.Project
 			break
 		}
 		// Config load errors are permanent — don't retry.
@@ -76,11 +78,12 @@ func runDashboard(cmd *cobra.Command, configPath string, port int, tlsCert, tlsK
 	}()
 
 	return dashboard.Start(ctx, dashboard.StartOpts{
-		DB:      gormDB,
-		Port:    port,
-		Out:     cmd.OutOrStdout(),
-		TLSCert: tlsCert,
-		TLSKey:  tlsKey,
+		DB:          gormDB,
+		Port:        port,
+		Out:         cmd.OutOrStdout(),
+		TLSCert:     tlsCert,
+		TLSKey:      tlsKey,
+		ProjectName: projectName,
 		RateLimit: dashboard.RateLimitConfig{
 			Enabled:           rateLimitEnabled,
 			RequestsPerMinute: rateLimitRPM,

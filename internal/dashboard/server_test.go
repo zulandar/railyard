@@ -28,7 +28,7 @@ func TestStart_ShutdownWithTimeout(t *testing.T) {
 		t.Fatalf("parse templates: %v", err)
 	}
 	router.SetHTMLTemplate(tmpl)
-	registerRoutes(router, nil)
+	registerRoutes(router, nil, "")
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -193,7 +193,7 @@ func startTestServer(ctx context.Context, port int) error {
 	router.SetHTMLTemplate(tmpl)
 
 	// Register routes with nil DB — static routes don't need it.
-	registerRoutes(router, nil)
+	registerRoutes(router, nil, "")
 
 	srv := &http.Server{
 		Addr:    fmt.Sprintf(":%d", port),
