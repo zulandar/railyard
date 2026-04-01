@@ -340,7 +340,7 @@ func TestReconcileStaleCars_PerBaseBranch(t *testing.T) {
 
 	var buf bytes.Buffer
 	logger := testLogger(&buf)
-	if err := reconcileStaleCars(db, repoDir, false, logger); err != nil {
+	if err := reconcileStaleCars(db, repoDir, false, nil, logger); err != nil {
 		t.Fatalf("reconcileStaleCars: %v", err)
 	}
 
@@ -417,7 +417,7 @@ func TestReconcileStaleCars_PrOpenMergedBranch(t *testing.T) {
 
 	var buf bytes.Buffer
 	logger := testLogger(&buf)
-	if err := reconcileStaleCars(db, repoDir, false, logger); err != nil {
+	if err := reconcileStaleCars(db, repoDir, false, nil, logger); err != nil {
 		t.Fatalf("reconcileStaleCars: %v", err)
 	}
 
@@ -478,7 +478,7 @@ func TestReconcileStaleCars_ZeroCommitBranch(t *testing.T) {
 
 	var buf bytes.Buffer
 	logger := testLogger(&buf)
-	if err := reconcileStaleCars(db, repoDir, false, logger); err != nil {
+	if err := reconcileStaleCars(db, repoDir, false, nil, logger); err != nil {
 		t.Fatalf("reconcileStaleCars: %v", err)
 	}
 
@@ -504,9 +504,9 @@ func TestReconcileStaleCars_ZeroCommitBranch(t *testing.T) {
 }
 
 // TestReconcileStaleCars_RequirePR_NoMergedPR verifies that when requirePR is
-// true, a branch that is git-merged but has no merged PR on GitHub is NOT
+// true, a branch that is git-merged but has a non-merged PR on GitHub is NOT
 // transitioned to "merged". This prevents false merges when commits land in
-// main via a dependent car's merge but the car's own PR was never created.
+// main via a dependent car's merge but the car's own PR was never merged.
 func TestReconcileStaleCars_RequirePR_NoMergedPR(t *testing.T) {
 	bareDir := t.TempDir()
 	parentDir := t.TempDir()
@@ -542,20 +542,130 @@ func TestReconcileStaleCars_RequirePR_NoMergedPR(t *testing.T) {
 	var buf bytes.Buffer
 	logger := testLogger(&buf)
 
-	// With requirePR=true and no GitHub remote, isPRMerged returns false.
-	if err := reconcileStaleCars(db, repoDir, true, logger); err != nil {
+	// Mock viewer returns OPEN (not MERGED) — car should NOT transition.
+	viewer := &mockPRViewer{state: "OPEN"}
+	if err := reconcileStaleCars(db, repoDir, true, viewer, logger); err != nil {
 		t.Fatalf("reconcileStaleCars: %v", err)
 	}
 
 	var c models.Car
 	db.First(&c, "id = ?", "car-nopr")
 	if c.Status != "in_progress" {
-		t.Errorf("car-nopr status = %q, want %q (no merged PR should block transition)", c.Status, "in_progress")
+		t.Errorf("car-nopr status = %q, want %q (non-merged PR should block transition)", c.Status, "in_progress")
 	}
 
 	output := buf.String()
-	if !strings.Contains(output, "no merged PR found") {
-		t.Errorf("expected warning about no merged PR in output: %s", output)
+	if !strings.Contains(output, "PR not merged") {
+		t.Errorf("expected warning about PR not merged in output: %s", output)
+	}
+}
+
+// TestReconcileStaleCars_RequirePR_MergedPR verifies that when requirePR is
+// true and the PR is MERGED, the car IS transitioned to "merged".
+func TestReconcileStaleCars_RequirePR_MergedPR(t *testing.T) {
+	bareDir := t.TempDir()
+	parentDir := t.TempDir()
+
+	run := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("%v in %s failed: %s: %v", args, dir, out, err)
+		}
+	}
+
+	run(bareDir, "git", "init", "--bare", "-b", "main")
+	run(parentDir, "git", "clone", bareDir, "repo")
+	repoDir := filepath.Join(parentDir, "repo")
+	run(repoDir, "git", "config", "user.email", "test@test.com")
+	run(repoDir, "git", "config", "user.name", "test")
+	run(repoDir, "git", "commit", "--allow-empty", "-m", "init")
+	run(repoDir, "git", "push", "origin", "main")
+
+	// Branch merged into main via --no-ff (has unique commits).
+	run(repoDir, "git", "checkout", "-b", "ry/backend/car-merged")
+	run(repoDir, "git", "commit", "--allow-empty", "-m", "car-merged work")
+	run(repoDir, "git", "checkout", "main")
+	run(repoDir, "git", "merge", "--no-ff", "ry/backend/car-merged", "-m", "merge car-merged")
+	run(repoDir, "git", "push", "origin", "main")
+
+	db := testDB(t)
+	db.Create(&models.Car{ID: "car-merged", Branch: "ry/backend/car-merged", BaseBranch: "main", Status: "in_progress", Track: "backend"})
+
+	var buf bytes.Buffer
+	logger := testLogger(&buf)
+
+	// Mock viewer returns MERGED — car should transition.
+	viewer := &mockPRViewer{state: "MERGED"}
+	if err := reconcileStaleCars(db, repoDir, true, viewer, logger); err != nil {
+		t.Fatalf("reconcileStaleCars: %v", err)
+	}
+
+	var c models.Car
+	db.First(&c, "id = ?", "car-merged")
+	if c.Status != "merged" {
+		t.Errorf("car-merged status = %q, want %q", c.Status, "merged")
+	}
+}
+
+// TestReconcileStaleCars_RequirePR_APIError verifies that when ViewPR returns
+// an error (API outage, auth failure), the car is NOT transitioned and the log
+// message distinguishes this from "PR not merged".
+func TestReconcileStaleCars_RequirePR_APIError(t *testing.T) {
+	bareDir := t.TempDir()
+	parentDir := t.TempDir()
+
+	run := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("%v in %s failed: %s: %v", args, dir, out, err)
+		}
+	}
+
+	run(bareDir, "git", "init", "--bare", "-b", "main")
+	run(parentDir, "git", "clone", bareDir, "repo")
+	repoDir := filepath.Join(parentDir, "repo")
+	run(repoDir, "git", "config", "user.email", "test@test.com")
+	run(repoDir, "git", "config", "user.name", "test")
+	run(repoDir, "git", "commit", "--allow-empty", "-m", "init")
+	run(repoDir, "git", "push", "origin", "main")
+
+	// Branch merged into main via --no-ff (has unique commits).
+	run(repoDir, "git", "checkout", "-b", "ry/backend/car-apierr")
+	run(repoDir, "git", "commit", "--allow-empty", "-m", "car-apierr work")
+	run(repoDir, "git", "checkout", "main")
+	run(repoDir, "git", "merge", "--no-ff", "ry/backend/car-apierr", "-m", "merge car-apierr")
+	run(repoDir, "git", "push", "origin", "main")
+
+	db := testDB(t)
+	db.Create(&models.Car{ID: "car-apierr", Branch: "ry/backend/car-apierr", BaseBranch: "main", Status: "in_progress", Track: "backend"})
+
+	var buf bytes.Buffer
+	logger := testLogger(&buf)
+
+	// Mock viewer returns an error (simulates API outage).
+	viewer := &mockPRViewer{err: fmt.Errorf("gh auth token expired")}
+	if err := reconcileStaleCars(db, repoDir, true, viewer, logger); err != nil {
+		t.Fatalf("reconcileStaleCars: %v", err)
+	}
+
+	var c models.Car
+	db.First(&c, "id = ?", "car-apierr")
+	if c.Status != "in_progress" {
+		t.Errorf("car-apierr status = %q, want %q (API error should not transition)", c.Status, "in_progress")
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "could not verify PR state") {
+		t.Errorf("expected warning about PR state verification failure in output: %s", output)
+	}
+	if strings.Contains(output, "PR not merged") {
+		t.Errorf("API error should NOT produce 'PR not merged' message: %s", output)
 	}
 }
 
