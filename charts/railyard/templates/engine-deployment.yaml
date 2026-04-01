@@ -18,6 +18,8 @@ spec:
       railyard.dev/track: {{ .name }}
   template:
     metadata:
+      annotations:
+        {{- include "railyard.configChecksum" $ | nindent 8 }}
       labels:
         {{- include "railyard.selectorLabels" $ | nindent 8 }}
         app.kubernetes.io/component: engine

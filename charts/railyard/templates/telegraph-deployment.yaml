@@ -14,6 +14,8 @@ spec:
       app.kubernetes.io/component: telegraph
   template:
     metadata:
+      annotations:
+        {{- include "railyard.configChecksum" . | nindent 8 }}
       labels:
         {{- include "railyard.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: telegraph

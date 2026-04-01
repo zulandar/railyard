@@ -13,6 +13,8 @@ spec:
       app.kubernetes.io/component: dispatch
   template:
     metadata:
+      annotations:
+        {{- include "railyard.configChecksum" . | nindent 8 }}
       labels:
         {{- include "railyard.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: dispatch

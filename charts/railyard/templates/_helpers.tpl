@@ -84,6 +84,15 @@ Usage: include "railyard.trackImage" (dict "track" . "global" $)
 {{- end }}
 
 {{/*
+Config checksum annotation — forces pod rollout when the configmap changes.
+Include in pod template metadata.annotations for any deployment that mounts
+the railyard-config configmap.
+*/}}
+{{- define "railyard.configChecksum" -}}
+checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+{{- end }}
+
+{{/*
 Database host — auto-derived when internal, otherwise from values.
 */}}
 {{- define "railyard.dbHost" -}}
