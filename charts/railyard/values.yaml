@@ -331,6 +331,38 @@ bull:
     ignore: "bull: ignore"
 
 # ---------------------------------------------------------------------------
+# Inspection Pit (automated PR code review)
+# ---------------------------------------------------------------------------
+inspect:
+  enabled: false
+  replicas: 1
+  resources: {}
+  # -- Poll interval in seconds for checking PRs ready for review.
+  pollIntervalSec: 60
+  # -- Agent provider for AI review (defaults to global agentProvider).
+  agentProvider: ""
+  # -- Enable deep review with CocoIndex semantic search context.
+  deepReview: false
+  # -- Seconds before yardmaster considers a review stale and resets the car.
+  reviewTimeoutSec: 300
+  # -- Maximum diff lines before truncation.
+  maxDiffLines: 10000
+  # -- Port for /healthz and /readyz probes.
+  healthPort: 8082
+  # -- GitHub App authentication (required when enabled).
+  appID: 0
+  installationID: 0
+  # -- Name of a Kubernetes Secret containing the GitHub App private key PEM file.
+  privateKeySecret: ""
+  # -- Key within privateKeySecret that holds the PEM data.
+  privateKeySecretKey: "private-key.pem"
+  # -- Custom label names (defaults shown).
+  labels:
+    inProgress: "inspect: in-progress"
+    reviewed: "inspect: reviewed"
+    reReview: "inspect: re-review"
+
+# ---------------------------------------------------------------------------
 # Network policies
 # ---------------------------------------------------------------------------
 networkPolicy:
