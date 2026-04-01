@@ -14,7 +14,7 @@ type ReviewContext struct {
 	PRTitle       string
 	Diff          string
 	Files         []FileContext
-	CodeContext string
+	CodeContext   string
 	TrackName     string
 	TrackLanguage string
 	Conventions   map[string]interface{}

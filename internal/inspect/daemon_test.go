@@ -17,8 +17,8 @@ import (
 type mockClient struct {
 	mu sync.Mutex
 
-	prs   []*github.PullRequest
-	files []*github.CommitFile
+	prs           []*github.PullRequest
+	files         []*github.CommitFile
 	fileContents  map[string]string // path -> content
 	prState       string
 	prMerged      bool
