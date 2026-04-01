@@ -340,7 +340,7 @@ func TestReconcileStaleCars_PerBaseBranch(t *testing.T) {
 
 	var buf bytes.Buffer
 	logger := testLogger(&buf)
-	if err := reconcileStaleCars(db, repoDir, logger); err != nil {
+	if err := reconcileStaleCars(db, repoDir, false, logger); err != nil {
 		t.Fatalf("reconcileStaleCars: %v", err)
 	}
 
@@ -417,7 +417,7 @@ func TestReconcileStaleCars_PrOpenMergedBranch(t *testing.T) {
 
 	var buf bytes.Buffer
 	logger := testLogger(&buf)
-	if err := reconcileStaleCars(db, repoDir, logger); err != nil {
+	if err := reconcileStaleCars(db, repoDir, false, logger); err != nil {
 		t.Fatalf("reconcileStaleCars: %v", err)
 	}
 
@@ -478,7 +478,7 @@ func TestReconcileStaleCars_ZeroCommitBranch(t *testing.T) {
 
 	var buf bytes.Buffer
 	logger := testLogger(&buf)
-	if err := reconcileStaleCars(db, repoDir, logger); err != nil {
+	if err := reconcileStaleCars(db, repoDir, false, logger); err != nil {
 		t.Fatalf("reconcileStaleCars: %v", err)
 	}
 
@@ -500,6 +500,62 @@ func TestReconcileStaleCars_ZeroCommitBranch(t *testing.T) {
 	output := buf.String()
 	if !strings.Contains(output, "zero-commit branch") {
 		t.Errorf("expected warning about zero-commit branch in output: %s", output)
+	}
+}
+
+// TestReconcileStaleCars_RequirePR_NoMergedPR verifies that when requirePR is
+// true, a branch that is git-merged but has no merged PR on GitHub is NOT
+// transitioned to "merged". This prevents false merges when commits land in
+// main via a dependent car's merge but the car's own PR was never created.
+func TestReconcileStaleCars_RequirePR_NoMergedPR(t *testing.T) {
+	bareDir := t.TempDir()
+	parentDir := t.TempDir()
+
+	run := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("%v in %s failed: %s: %v", args, dir, out, err)
+		}
+	}
+
+	run(bareDir, "git", "init", "--bare", "-b", "main")
+	run(parentDir, "git", "clone", bareDir, "repo")
+	repoDir := filepath.Join(parentDir, "repo")
+	run(repoDir, "git", "config", "user.email", "test@test.com")
+	run(repoDir, "git", "config", "user.name", "test")
+	run(repoDir, "git", "commit", "--allow-empty", "-m", "init")
+	run(repoDir, "git", "push", "origin", "main")
+
+	// Branch merged into main via --no-ff (has unique commits).
+	run(repoDir, "git", "checkout", "-b", "ry/backend/car-nopr")
+	run(repoDir, "git", "commit", "--allow-empty", "-m", "car-nopr work")
+	run(repoDir, "git", "checkout", "main")
+	run(repoDir, "git", "merge", "--no-ff", "ry/backend/car-nopr", "-m", "merge car-nopr")
+	run(repoDir, "git", "push", "origin", "main")
+
+	db := testDB(t)
+	db.Create(&models.Car{ID: "car-nopr", Branch: "ry/backend/car-nopr", BaseBranch: "main", Status: "in_progress", Track: "backend"})
+
+	var buf bytes.Buffer
+	logger := testLogger(&buf)
+
+	// With requirePR=true and no GitHub remote, isPRMerged returns false.
+	if err := reconcileStaleCars(db, repoDir, true, logger); err != nil {
+		t.Fatalf("reconcileStaleCars: %v", err)
+	}
+
+	var c models.Car
+	db.First(&c, "id = ?", "car-nopr")
+	if c.Status != "in_progress" {
+		t.Errorf("car-nopr status = %q, want %q (no merged PR should block transition)", c.Status, "in_progress")
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "no merged PR found") {
+		t.Errorf("expected warning about no merged PR in output: %s", output)
 	}
 }
 

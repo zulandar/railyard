@@ -172,7 +172,7 @@ func RunDaemon(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath,
 
 			// Phase 5: Reconcile stale cars whose branches are already merged.
 			timePhase("reconcile", func() {
-				if err := reconcileStaleCars(db, repoDir, logger); err != nil {
+				if err := reconcileStaleCars(db, repoDir, cfg.RequirePR, logger); err != nil {
 					logger.Error("Reconcile error", "error", err)
 				}
 			})
@@ -665,7 +665,7 @@ func sweepOpenEpics(db *gorm.DB, logger *slog.Logger) error {
 // remote truth) to avoid false positives from local-only merges that were
 // never pushed. Cars are grouped by base branch so each group is checked
 // against the correct target.
-func reconcileStaleCars(db *gorm.DB, repoDir string, logger *slog.Logger) error {
+func reconcileStaleCars(db *gorm.DB, repoDir string, requirePR bool, logger *slog.Logger) error {
 	// Fetch first to get current remote state.
 	if err := gitFetch(repoDir); err != nil {
 		return fmt.Errorf("reconcile fetch: %w", err)
@@ -720,6 +720,18 @@ func reconcileStaleCars(db *gorm.DB, repoDir string, logger *slog.Logger) error 
 						"car", c.ID, "branch", c.Branch, "base", base)
 					continue
 				}
+
+				// When PRs are required, only transition to merged if a merged
+				// PR actually exists on GitHub. Without this check, git ancestry
+				// alone can cause a false "merged" transition (e.g. a dependent
+				// car's merge pulled the commits into main but this car's PR was
+				// never created or merged).
+				if requirePR && !isPRMerged(repoDir, c.Branch) {
+					logger.Warn("Reconcile: branch merged in git but no merged PR found, skipping",
+						"car", c.ID, "branch", c.Branch, "base", base)
+					continue
+				}
+
 				logger.Info("Car state transition", "car", c.ID, "title", c.Title, "transition", "reconciled->merged", "branch", c.Branch, "base", base)
 				if err := db.Model(&models.Car{}).Where("id = ?", c.ID).Updates(map[string]interface{}{
 					"status":       "merged",
@@ -816,6 +828,25 @@ func branchHasUniqueCommits(repoDir, branch, baseBranch string) bool {
 		}
 	}
 	return true // tip was on a side branch = has unique work
+}
+
+// isPRMerged checks whether a merged PR exists on GitHub for the given branch.
+// Returns false on any error (no PR, open PR, API failure) — safe default to
+// prevent false "merged" transitions.
+func isPRMerged(repoDir, branch string) bool {
+	cmd := exec.Command("gh", "pr", "view", branch, "--json", "state")
+	cmd.Dir = repoDir
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	var result struct {
+		State string `json:"state"`
+	}
+	if err := json.Unmarshal(out, &result); err != nil {
+		return false
+	}
+	return result.State == "MERGED"
 }
 
 // handleEscalateResult acts on the decision returned by Claude escalation.
