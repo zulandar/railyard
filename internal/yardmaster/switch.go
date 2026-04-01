@@ -190,9 +190,13 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 				}).Error; dbErr != nil {
 					slog.Error("update car to merge-failed", "car", carID, "error", dbErr)
 				}
+				msg := fmt.Sprintf("Infrastructure test failure for car %s (%s) on branch %s:\n%s",
+					carID, car.Track, car.Branch, truncateOutput(testOutput, 500))
+				if hint := infraHint(testOutput, opts.PreTestCommand); hint != "" {
+					msg += "\n\n" + hint
+				}
 				messaging.Send(db, "yardmaster", "human", "infra-test-failure",
-					fmt.Sprintf("Infrastructure test failure for car %s (%s) on branch %s:\n%s",
-						carID, car.Track, car.Branch, truncateOutput(testOutput, 500)),
+					msg,
 					messaging.SendOpts{CarID: carID, Priority: "urgent"},
 				)
 			} else {
@@ -613,6 +617,26 @@ func classifyTestFailure(err error, output string) SwitchFailureCategory {
 	}
 
 	return SwitchFailTest
+}
+
+// infraHint returns an actionable suggestion when an infrastructure failure
+// looks like a missing dependency and no pre_test_command is configured.
+// Returns empty string when no hint applies.
+func infraHint(output, preTestCommand string) string {
+	if preTestCommand != "" {
+		return ""
+	}
+	lower := strings.ToLower(output)
+	missingDep := strings.Contains(lower, "not found") ||
+		strings.Contains(lower, "not installed") ||
+		strings.Contains(lower, "module not found") ||
+		strings.Contains(lower, "no such module")
+	if !missingDep {
+		return ""
+	}
+	return "Hint: the test command failed because a required tool is not installed in the engine container. " +
+		"Add preTestCommand (e.g. \"npm install\") to this track's Helm values or railyard.yaml " +
+		"to install project dependencies before tests run."
 }
 
 // truncateOutput returns at most maxLen bytes of output, appending a

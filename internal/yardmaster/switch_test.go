@@ -145,6 +145,33 @@ func TestSwitchFailInfra_Constant(t *testing.T) {
 	}
 }
 
+func TestInfraHint(t *testing.T) {
+	tests := []struct {
+		name           string
+		output         string
+		preTestCommand string
+		wantHint       bool
+	}{
+		{"missing tool no pretest", "sh: 1: vitest: not found", "", true},
+		{"not installed no pretest", "Error: jest is not installed", "", true},
+		{"module not found no pretest", "Error: Module not found: vitest", "", true},
+		{"missing tool with pretest", "sh: 1: vitest: not found", "npm install", false},
+		{"unrelated infra failure", "permission denied", "", false},
+		{"connection refused", "ECONNREFUSED 127.0.0.1:3306", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			hint := infraHint(tt.output, tt.preTestCommand)
+			if tt.wantHint && hint == "" {
+				t.Error("expected hint, got empty string")
+			}
+			if !tt.wantHint && hint != "" {
+				t.Errorf("expected no hint, got %q", hint)
+			}
+		})
+	}
+}
+
 // --- UnblockDeps validation tests ---
 
 func TestUnblockDeps_NilDB(t *testing.T) {
