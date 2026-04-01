@@ -69,8 +69,8 @@ func newInspectReviewCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "review <pr-number>",
-		Short: "Run one-shot review on a single PR",
-		Long:  "Fetches the specified PR and runs the full review pipeline (fetch diff, AI review, post comments).",
+		Short: "Run one-shot review on a single PR (stub)",
+		Long:  "One-shot review mode — validates config and PR number. Full single-PR review pipeline is not yet implemented; use the daemon for automated reviews.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runInspectReview(cmd, configPath, args[0])

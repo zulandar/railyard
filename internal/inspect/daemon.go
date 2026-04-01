@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/go-github/v68/github"
@@ -16,7 +17,6 @@ const defaultInspectPollInterval = 60 * time.Second
 // DaemonClient combines all GitHub operations the inspect daemon needs.
 type DaemonClient interface {
 	ListReviewablePRs(ctx context.Context) ([]*github.PullRequest, error)
-	GetPRDiff(ctx context.Context, number int) (string, error)
 	ListPRFiles(ctx context.Context, number int) ([]*github.CommitFile, error)
 	GetFileContent(ctx context.Context, path, ref string) (string, error)
 	GetPRState(ctx context.Context, number int) (state string, merged bool, err error)
@@ -25,7 +25,7 @@ type DaemonClient interface {
 	AddLabel(ctx context.Context, number int, label string) error
 	RemoveLabel(ctx context.Context, number int, label string) error
 	PRHasLabel(ctx context.Context, number int, label string) (bool, error)
-	CountNonBotComments(ctx context.Context, number int, botLogin string) (int, error)
+	CountTotalComments(ctx context.Context, number int, botLogin string) (int, error)
 	EnsureLabels(ctx context.Context, labels config.InspectLabelsConfig) error
 }
 
@@ -216,14 +216,6 @@ func reviewOnePR(
 		}
 	}
 
-	// Fetch diff.
-	diff, err := client.GetPRDiff(ctx, prNum)
-	if err != nil {
-		logger.Error("inspect: get diff", "pr", prNum, "error", err)
-		releaseWithCleanup(ctx, client, store, logger, car.ID, prNum, labels)
-		return
-	}
-
 	// List PR files and build DiffFiles.
 	prFiles, err := client.ListPRFiles(ctx, prNum)
 	if err != nil {
@@ -276,11 +268,20 @@ func reviewOnePR(
 		}
 	}
 
-	// Build review prompt using the full unified diff.
+	// Build the diff from truncated files only, not the full unified diff.
+	// This ensures max_diff_lines actually limits the prompt payload.
+	var truncatedDiff strings.Builder
+	for _, df := range truncResult.Files {
+		if df.Diff != "" {
+			truncatedDiff.WriteString(df.Diff)
+			truncatedDiff.WriteByte('\n')
+		}
+	}
+
 	reviewCtx := ReviewContext{
 		PRNumber:      prNum,
 		PRTitle:       pr.GetTitle(),
-		Diff:          diff,
+		Diff:          truncatedDiff.String(),
 		Files:         fileContexts,
 		TrackName:     trackName,
 		TrackLanguage: trackLanguage,
@@ -364,7 +365,7 @@ func reviewOnePR(
 	// Count non-bot comments for tracking.
 	commentCount := 0
 	if opts.BotLogin != "" {
-		commentCount, err = client.CountNonBotComments(ctx, prNum, opts.BotLogin)
+		commentCount, err = client.CountTotalComments(ctx, prNum, opts.BotLogin)
 		if err != nil {
 			logger.Warn("inspect: count comments", "pr", prNum, "error", err)
 		}

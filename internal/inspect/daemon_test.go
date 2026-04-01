@@ -17,9 +17,8 @@ import (
 type mockClient struct {
 	mu sync.Mutex
 
-	prs           []*github.PullRequest
-	diff          string
-	files         []*github.CommitFile
+	prs   []*github.PullRequest
+	files []*github.CommitFile
 	fileContents  map[string]string // path -> content
 	prState       string
 	prMerged      bool
@@ -42,12 +41,6 @@ func (m *mockClient) ListReviewablePRs(_ context.Context) ([]*github.PullRequest
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.prs, nil
-}
-
-func (m *mockClient) GetPRDiff(_ context.Context, _ int) (string, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.diff, nil
 }
 
 func (m *mockClient) ListPRFiles(_ context.Context, _ int) ([]*github.CommitFile, error) {
@@ -112,7 +105,7 @@ func (m *mockClient) PRHasLabel(_ context.Context, number int, label string) (bo
 	return m.labelsByPR[number][label], nil
 }
 
-func (m *mockClient) CountNonBotComments(_ context.Context, _ int, _ string) (int, error) {
+func (m *mockClient) CountTotalComments(_ context.Context, _ int, _ string) (int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.commentCount, nil
@@ -214,7 +207,6 @@ func TestRunDaemon_SingleCycle(t *testing.T) {
 			Title: github.Ptr("Test PR"),
 		},
 	}
-	client.diff = "diff --git a/main.go b/main.go\n"
 	client.files = []*github.CommitFile{
 		{
 			Filename: github.Ptr("main.go"),

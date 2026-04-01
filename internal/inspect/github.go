@@ -48,6 +48,16 @@ func NewGitHubClient(owner, repo string, cfg config.InspectConfig) (*GitHubClien
 	}, nil
 }
 
+// GetBotLogin returns the authenticated bot's login name (e.g. "my-app[bot]").
+func (g *GitHubClient) GetBotLogin(ctx context.Context) (string, error) {
+	user, resp, err := g.client.Users.Get(ctx, "")
+	if err != nil {
+		return "", fmt.Errorf("inspect: get authenticated user: %w", err)
+	}
+	g.waitIfRateLimited(resp)
+	return user.GetLogin(), nil
+}
+
 // ListReviewablePRs returns open, non-draft pull requests with pagination.
 func (g *GitHubClient) ListReviewablePRs(ctx context.Context) ([]*github.PullRequest, error) {
 	opts := &github.PullRequestListOptions{
@@ -293,21 +303,48 @@ func (g *GitHubClient) RemoveLabel(ctx context.Context, number int, label string
 
 // CountNonBotComments counts inline review comments on a PR that were not
 // authored by botLogin.
-func (g *GitHubClient) CountNonBotComments(ctx context.Context, number int, botLogin string) (int, error) {
-	opts := &github.PullRequestListCommentsOptions{
+// CountTotalComments returns the total number of comments on a PR (conversation
+// + inline review comments), matching the same counting method used by
+// yardmaster's CountComments. Bot-authored comments are excluded so that
+// Inspection Pit's own comments don't inflate LastPRCommentCount.
+func (g *GitHubClient) CountTotalComments(ctx context.Context, number int, botLogin string) (int, error) {
+	count := 0
+
+	// Step 1: Count conversation (issue) comments, excluding bot.
+	issueOpts := &github.IssueListCommentsOptions{
 		ListOptions: github.ListOptions{PerPage: 100},
 	}
-	count := 0
 	for {
-		comments, resp, err := g.client.PullRequests.ListComments(ctx, g.owner, g.repo, number, opts)
+		comments, resp, err := g.client.Issues.ListComments(ctx, g.owner, g.repo, number, issueOpts)
+		if err != nil {
+			return 0, fmt.Errorf("inspect: list conversation comments on PR #%d: %w", number, err)
+		}
+		for _, c := range comments {
+			if c.GetUser().GetLogin() != botLogin {
+				count++
+			}
+		}
+		g.waitIfRateLimited(resp)
+		if resp.NextPage == 0 {
+			break
+		}
+		issueOpts.Page = resp.NextPage
+	}
+
+	// Step 2: Count inline review comments, excluding bot.
+	reviewOpts := &github.PullRequestListCommentsOptions{
+		ListOptions: github.ListOptions{PerPage: 100},
+	}
+	for {
+		comments, resp, err := g.client.PullRequests.ListComments(ctx, g.owner, g.repo, number, reviewOpts)
 		if err != nil {
 			if _, ok := g.handleRateLimitError(resp, err); ok {
-				comments, resp, err = g.client.PullRequests.ListComments(ctx, g.owner, g.repo, number, opts)
+				comments, resp, err = g.client.PullRequests.ListComments(ctx, g.owner, g.repo, number, reviewOpts)
 				if err != nil {
-					return 0, fmt.Errorf("inspect: count comments on PR #%d retry: %w", number, err)
+					return 0, fmt.Errorf("inspect: count inline comments on PR #%d retry: %w", number, err)
 				}
 			} else {
-				return 0, fmt.Errorf("inspect: count comments on PR #%d: %w", number, err)
+				return 0, fmt.Errorf("inspect: count inline comments on PR #%d: %w", number, err)
 			}
 		}
 		for _, c := range comments {
@@ -319,8 +356,9 @@ func (g *GitHubClient) CountNonBotComments(ctx context.Context, number int, botL
 		if resp.NextPage == 0 {
 			break
 		}
-		opts.Page = resp.NextPage
+		reviewOpts.Page = resp.NextPage
 	}
+
 	return count, nil
 }
 

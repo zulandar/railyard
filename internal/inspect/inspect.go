@@ -51,6 +51,14 @@ func Start(ctx context.Context, opts StartOpts) error {
 		return fmt.Errorf("inspect: create AI provider: %w", err)
 	}
 
+	// Resolve bot login for comment filtering and review dismissal.
+	botLogin, err := ghClient.GetBotLogin(ctx)
+	if err != nil {
+		logger.Warn("inspect: could not resolve bot login, comment counting will be inaccurate", "error", err)
+	} else {
+		logger.Info("inspect: resolved bot login", "login", botLogin)
+	}
+
 	// Get replica ID from hostname.
 	replicaID, err := os.Hostname()
 	if err != nil {
@@ -66,6 +74,7 @@ func Start(ctx context.Context, opts StartOpts) error {
 		ReplicaID:    replicaID,
 		PollInterval: pollInterval,
 		AI:           ai,
+		BotLogin:     botLogin,
 		Logger:       logger,
 	})
 }

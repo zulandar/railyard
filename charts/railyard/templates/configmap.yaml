@@ -106,6 +106,26 @@ data:
       {{- end }}
     {{- end }}
 
+    {{- if .Values.inspect.enabled }}
+    inspect:
+      enabled: true
+      app_id: {{ .Values.inspect.appID }}
+      private_key_path: /etc/railyard-keys/inspect-app.pem
+      installation_id: {{ .Values.inspect.installationID }}
+      poll_interval_sec: {{ .Values.inspect.pollIntervalSec | default 60 }}
+      {{- if .Values.inspect.agentProvider }}
+      agent_provider: {{ .Values.inspect.agentProvider | quote }}
+      {{- end }}
+      deep_review: {{ .Values.inspect.deepReview | default false }}
+      review_timeout_sec: {{ .Values.inspect.reviewTimeoutSec | default 300 }}
+      max_diff_lines: {{ .Values.inspect.maxDiffLines | default 10000 }}
+      health_port: {{ .Values.inspect.healthPort | default 8082 }}
+      labels:
+        in_progress: {{ .Values.inspect.labels.inProgress | quote }}
+        reviewed: {{ .Values.inspect.labels.reviewed | quote }}
+        re_review: {{ .Values.inspect.labels.reReview | quote }}
+    {{- end }}
+
     {{- if .Values.bull.enabled }}
     bull:
       enabled: true
