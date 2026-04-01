@@ -3305,3 +3305,99 @@ func TestHandlePrOpenCars_AllTriggersInOneBatch(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// handlePrReviewCars tests
+// ---------------------------------------------------------------------------
+
+func TestHandlePrReviewCars_StaleReview(t *testing.T) {
+	db := testDB(t)
+
+	// Create a car with status pr_review and updated_at 10 minutes ago.
+	db.Create(&models.Car{
+		ID:       "car-stale1",
+		Status:   "pr_review",
+		Track:    "backend",
+		Branch:   "ry/backend/car-stale1",
+		Assignee: "inspect-pod-1",
+	})
+	tenMinAgo := time.Now().Add(-10 * time.Minute)
+	db.Model(&models.Car{}).Where("id = ?", "car-stale1").Update("updated_at", tenMinAgo)
+
+	viewer := &mockPRViewer{}
+
+	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
+	cfg.Inspect.Enabled = true
+	cfg.Inspect.ReviewTimeoutSec = 300
+	cfg.Inspect.Labels.InProgress = "inspect: in-progress"
+
+	var buf bytes.Buffer
+	logger := testLogger(&buf)
+
+	handlePrReviewCars(db, viewer, cfg, logger)
+
+	var c models.Car
+	db.First(&c, "id = ?", "car-stale1")
+	if c.Status != "pr_open" {
+		t.Errorf("status = %q, want %q", c.Status, "pr_open")
+	}
+	if c.Assignee != "" {
+		t.Errorf("assignee = %q, want empty", c.Assignee)
+	}
+	if !viewer.removeLabelCalled {
+		t.Error("expected RemoveLabel to be called")
+	}
+	if viewer.removedLabel != "inspect: in-progress" {
+		t.Errorf("removedLabel = %q, want %q", viewer.removedLabel, "inspect: in-progress")
+	}
+}
+
+func TestHandlePrReviewCars_NotStaleYet(t *testing.T) {
+	db := testDB(t)
+
+	// Create a car with status pr_review, freshly updated (now).
+	db.Create(&models.Car{
+		ID:       "car-fresh1",
+		Status:   "pr_review",
+		Track:    "backend",
+		Branch:   "ry/backend/car-fresh1",
+		Assignee: "inspect-pod-2",
+	})
+
+	viewer := &mockPRViewer{}
+
+	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
+	cfg.Inspect.Enabled = true
+	cfg.Inspect.ReviewTimeoutSec = 300
+	cfg.Inspect.Labels.InProgress = "inspect: in-progress"
+
+	var buf bytes.Buffer
+	logger := testLogger(&buf)
+
+	handlePrReviewCars(db, viewer, cfg, logger)
+
+	var c models.Car
+	db.First(&c, "id = ?", "car-fresh1")
+	if c.Status != "pr_review" {
+		t.Errorf("status = %q, want %q", c.Status, "pr_review")
+	}
+	if c.Assignee != "inspect-pod-2" {
+		t.Errorf("assignee = %q, want %q", c.Assignee, "inspect-pod-2")
+	}
+	if viewer.removeLabelCalled {
+		t.Error("did not expect RemoveLabel to be called")
+	}
+}
+
+func TestHandlePrReviewCars_DisabledInspect(t *testing.T) {
+	db := testDB(t)
+
+	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
+	cfg.Inspect.Enabled = false
+
+	var buf bytes.Buffer
+	logger := testLogger(&buf)
+
+	// Should return immediately without panic or DB queries.
+	handlePrReviewCars(db, nil, cfg, logger)
+}
