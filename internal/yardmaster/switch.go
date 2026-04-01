@@ -784,10 +784,30 @@ func gitCleanWorkingTree(repoDir string) {
 // empty diff means every change on the branch is already present in baseBranch —
 // either because a dependent car's merge pulled them in, or because the branch
 // was truly merged.
+//
+// Refs are resolved to origin/ first so the check uses the latest remote state
+// rather than a potentially stale local branch (git fetch updates origin/ refs
+// but does not advance local branches).
 func isBranchMerged(repoDir, branch, baseBranch string) bool {
-	cmd := exec.Command("git", "diff", "--quiet", baseBranch+"..."+branch)
+	baseRef := resolveOriginRef(repoDir, baseBranch)
+	branchRef := resolveOriginRef(repoDir, branch)
+
+	cmd := exec.Command("git", "diff", "--quiet", baseRef+"..."+branchRef)
 	cmd.Dir = repoDir
 	return cmd.Run() == nil
+}
+
+// resolveOriginRef returns "origin/<ref>" if it exists, otherwise falls back
+// to the bare <ref>. This ensures we compare against freshly-fetched remote
+// state rather than a stale local branch.
+func resolveOriginRef(repoDir, ref string) string {
+	originRef := "origin/" + ref
+	cmd := exec.Command("git", "rev-parse", "--verify", originRef)
+	cmd.Dir = repoDir
+	if _, err := cmd.CombinedOutput(); err != nil {
+		return ref
+	}
+	return originRef
 }
 
 // gitMerge merges the branch into the base branch.
