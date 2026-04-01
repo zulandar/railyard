@@ -38,7 +38,7 @@ func TestBuildReviewPrompt_DeepReview(t *testing.T) {
 		PRNumber:    10,
 		PRTitle:     "Fix bug",
 		Diff:        "some diff",
-		CodeContext:  "This function handles authentication tokens",
+		CodeContext: "This function handles authentication tokens",
 	}
 
 	prompt := BuildReviewPrompt(ctx)

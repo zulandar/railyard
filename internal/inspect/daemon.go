@@ -340,12 +340,7 @@ func reviewOnePR(
 	// Convert ReviewComment[] to InlineComment[] for the GitHub client.
 	inlineComments := make([]InlineComment, 0, len(result.Comments))
 	for _, c := range result.Comments {
-		inlineComments = append(inlineComments, InlineComment{
-			Path: c.Path,
-			Line: c.Line,
-			Side: c.Side,
-			Body: c.Body,
-		})
+		inlineComments = append(inlineComments, InlineComment(c))
 	}
 
 	// Submit the review.
