@@ -3,6 +3,7 @@ package dashboard
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -105,6 +106,9 @@ func TrackSummary(db *gorm.DB) ([]TrackStatusCount, error) {
 	for _, tc := range trackMap {
 		result = append(result, *tc)
 	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Track < result[j].Track
+	})
 	return result, nil
 }
 
