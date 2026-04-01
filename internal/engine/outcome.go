@@ -31,6 +31,20 @@ func HandleCompletion(db *gorm.DB, car *models.Car, engine *models.Engine, opts 
 		return fmt.Errorf("engine: repoDir is required")
 	}
 
+	// Safety net: commit any uncommitted work the agent left behind.
+	// HandleClearCycle already does this for /clear exits; we need the same
+	// guard here because a zero-commit branch that slips past ry complete
+	// would otherwise lose the agent's file changes when the worktree is
+	// cleaned up.
+	if car.Branch != "" && opts.RepoDir != "" {
+		msg := fmt.Sprintf("railyard: auto-commit uncommitted work (completion %s)", car.ID)
+		if committed, acErr := AutoCommitIfDirty(opts.RepoDir, msg); acErr != nil {
+			slog.Warn("engine: completion auto-commit warning (non-fatal)", "car", car.ID, "error", acErr)
+		} else if committed {
+			slog.Info("engine: auto-committed uncommitted changes at completion", "car", car.ID, "branch", car.Branch)
+		}
+	}
+
 	// Idempotent re-push — ry complete already pushed the branch before
 	// setting status to done. This is a no-op safety net, not a primary push.
 	if car.Branch != "" {

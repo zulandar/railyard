@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -54,6 +55,14 @@ func runComplete(cmd *cobra.Command, configPath, carID, summary string) error {
 	if wdErr != nil {
 		return fmt.Errorf("complete rejected: cannot determine working directory: %w", wdErr)
 	}
+
+	// Fetch origin so origin/<baseBranch> is current. Without this, a stale
+	// origin/main can make main's own recent commits look like branch work,
+	// letting a zero-commit branch slip past the guard.
+	fetch := exec.Command("git", "fetch", "origin")
+	fetch.Dir = cwd
+	fetch.CombinedOutput() // best-effort; CommitsAheadOfBase falls back to local ref
+
 	count, cErr := engine.CommitsAheadOfBase(cwd, baseBranch)
 	if cErr != nil {
 		return fmt.Errorf("complete rejected: cannot verify commits ahead of %s: %w", baseBranch, cErr)
