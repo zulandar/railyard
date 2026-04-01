@@ -1099,15 +1099,16 @@ func TestCompletedToday_WithData(t *testing.T) {
 	yesterday := midnight.Add(-1 * time.Hour) // 11pm yesterday — always before midnight
 
 	db.Create(&models.Car{ID: "car-1", Title: "T1", Track: "backend", Status: "done", Type: "task", CompletedAt: &today})
-	db.Create(&models.Car{ID: "car-2", Title: "T2", Track: "backend", Status: "done", Type: "task", CompletedAt: &today})
+	db.Create(&models.Car{ID: "car-2", Title: "T2", Track: "backend", Status: "merged", Type: "task", CompletedAt: &today})
+	db.Create(&models.Car{ID: "car-5", Title: "T5", Track: "backend", Status: "pr_open", Type: "task", CompletedAt: &today})
 	// Completed yesterday - should be excluded.
 	db.Create(&models.Car{ID: "car-3", Title: "T3", Track: "backend", Status: "done", Type: "task", CompletedAt: &yesterday})
 	// Not done - should be excluded.
 	db.Create(&models.Car{ID: "car-4", Title: "T4", Track: "backend", Status: "open", Type: "task"})
 
 	count := CompletedToday(db)
-	if count != 2 {
-		t.Errorf("count = %d, want 2", count)
+	if count != 3 {
+		t.Errorf("count = %d, want 3", count)
 	}
 }
 

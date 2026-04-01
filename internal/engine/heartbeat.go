@@ -31,9 +31,16 @@ func StartHeartbeat(ctx context.Context, db *gorm.DB, engineID string, interval 
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
+				now := time.Now()
 				result := db.Model(&models.Engine{}).
 					Where("id = ?", engineID).
-					Update("last_activity", time.Now())
+					Update("last_activity", now)
+
+				// Self-heal: if status was set to "dead" (e.g. race during
+				// rolling restart), recover to "idle" since we're clearly alive.
+				db.Model(&models.Engine{}).
+					Where("id = ? AND status = ?", engineID, StatusDead).
+					Update("status", StatusIdle)
 
 				if result.Error != nil {
 					errCh <- fmt.Errorf("engine: heartbeat %s: %w", engineID, result.Error)

@@ -964,7 +964,8 @@ type DashboardStats struct {
 	TotalTokens    int64
 }
 
-// CompletedToday returns the count of cars completed (status=done) since midnight today.
+// CompletedToday returns the count of cars completed since midnight today.
+// A car is "completed" when it reaches done, merged, or pr_open status.
 func CompletedToday(db *gorm.DB) int64 {
 	if db == nil {
 		return 0
@@ -973,7 +974,7 @@ func CompletedToday(db *gorm.DB) int64 {
 	midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	var count int64
 	db.Model(&models.Car{}).
-		Where("status = ? AND completed_at >= ?", "done", midnight).
+		Where("status IN ? AND completed_at >= ?", []string{"done", "merged", "pr_open"}, midnight).
 		Count(&count)
 	return count
 }

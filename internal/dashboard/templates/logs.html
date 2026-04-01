@@ -141,7 +141,7 @@
             <td><a href="/engines/{{.EngineID}}">{{truncate .EngineID 16}}</a></td>
             <td>{{if .CarID}}<a href="/cars/{{.CarID}}">{{truncate .CarID 16}}</a>{{else}}—{{end}}</td>
             <td><span class="badge badge-{{.Direction}}">{{.Direction}}</span></td>
-            <td title="{{.Content}}">{{truncate .Content 60}}</td>
+            <td>{{expandable .Content 60}}</td>
             <td>{{.OutputTokens}}</td>
             <td>{{if .LatencyMs}}{{.LatencyMs}}ms{{else}}—{{end}}</td>
             <td>{{if .Model}}{{.Model}}{{else}}—{{end}}</td>

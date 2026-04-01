@@ -155,7 +155,7 @@
                     <td>{{if .EngineID}}<a href="/engines/{{.EngineID}}">{{.EngineID}}</a>{{else}}—{{end}}</td>
                     <td>{{.Duration}}</td>
                     <td>{{.FilesChanged}}</td>
-                    <td>{{truncate .Note 60}}</td>
+                    <td>{{expandable .Note 60}}</td>
                     <td>{{if .CommitHash}}<code>{{truncate .CommitHash 7}}</code>{{else}}—{{end}}</td>
                 </tr>
             {{end}}
@@ -251,7 +251,7 @@
             <tr>
                 <td>{{.Cycle}}</td>
                 <td>{{if .EngineID}}<a href="/engines/{{.EngineID}}">{{.EngineID}}</a>{{else}}—{{end}}</td>
-                <td>{{truncate .Note 80}}</td>
+                <td>{{expandable .Note 80}}</td>
                 <td>{{if .CommitHash}}<code>{{truncate .CommitHash 7}}</code>{{else}}—{{end}}</td>
                 <td>{{timeAgo .CreatedAt}}</td>
             </tr>

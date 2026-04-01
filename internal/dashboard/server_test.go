@@ -3,6 +3,7 @@ package dashboard
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -240,6 +241,70 @@ func TestStaticAssets_CSS(t *testing.T) {
 
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+}
+
+func TestStaticAssets_AutosubmitJS(t *testing.T) {
+	baseURL, cleanup := setupTestRouter(t)
+	defer cleanup()
+
+	resp, err := http.Get(baseURL + "/static/autosubmit.js")
+	if err != nil {
+		t.Fatalf("GET /static/autosubmit.js: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+}
+
+func TestCarsPage_IncludesAutosubmitScript(t *testing.T) {
+	baseURL, cleanup := setupTestRouter(t)
+	defer cleanup()
+
+	resp, err := http.Get(baseURL + "/cars")
+	if err != nil {
+		t.Fatalf("GET /cars: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "autosubmit.js") {
+		t.Error("/cars page should include autosubmit.js script")
+	}
+}
+
+func TestExpandable_Short(t *testing.T) {
+	got := string(Expandable("hello", 10))
+	if got != "hello" {
+		t.Errorf("short string: got %q, want %q", got, "hello")
+	}
+}
+
+func TestExpandable_Long(t *testing.T) {
+	got := string(Expandable("this is a very long string that should be truncated", 20))
+	if !strings.Contains(got, "<details") {
+		t.Error("long string should wrap in <details> element")
+	}
+	if !strings.Contains(got, "<summary>") {
+		t.Error("long string should have <summary> with truncated text")
+	}
+	if !strings.Contains(got, "this is a very long string that should be truncated") {
+		t.Error("long string should contain full text in expanded view")
+	}
+	if !strings.Contains(got, "...") {
+		t.Error("summary should contain truncated text with ellipsis")
+	}
+}
+
+func TestExpandable_HTMLEscaping(t *testing.T) {
+	got := string(Expandable("<script>alert('xss')</script> and more text to exceed limit", 20))
+	if strings.Contains(got, "<script>") {
+		t.Error("expandable should HTML-escape content")
+	}
+	if !strings.Contains(got, "&lt;script&gt;") {
+		t.Error("expandable should contain escaped HTML")
 	}
 }
 

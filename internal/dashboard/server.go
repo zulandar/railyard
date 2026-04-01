@@ -95,12 +95,13 @@ func Start(ctx context.Context, opts StartOpts) error {
 // templateFuncs returns the FuncMap used by dashboard templates.
 func templateFuncs() template.FuncMap {
 	return template.FuncMap{
-		"timeAgo":   TimeAgo,
-		"truncate":  Truncate,
-		"deref":     DerefTime,
-		"commaFmt":  CommaFmt,
-		"dollars":   Dollars,
-		"hasPrefix": func(s, prefix string) bool { return strings.HasPrefix(s, prefix) },
+		"timeAgo":    TimeAgo,
+		"truncate":   Truncate,
+		"expandable": Expandable,
+		"deref":      DerefTime,
+		"commaFmt":   CommaFmt,
+		"dollars":    Dollars,
+		"hasPrefix":  func(s, prefix string) bool { return strings.HasPrefix(s, prefix) },
 		"percent": func(done, total int) int {
 			if total == 0 {
 				return 0
@@ -108,6 +109,21 @@ func templateFuncs() template.FuncMap {
 			return int(float64(done) / float64(total) * 100)
 		},
 	}
+}
+
+// Expandable renders a string that is truncated inline but expandable via a
+// native <details> element when it exceeds maxLen. Short strings are returned
+// as-is.
+func Expandable(s string, maxLen int) template.HTML {
+	if len(s) <= maxLen {
+		return template.HTML(template.HTMLEscapeString(s))
+	}
+	short := template.HTMLEscapeString(Truncate(s, maxLen))
+	full := template.HTMLEscapeString(s)
+	return template.HTML(fmt.Sprintf(
+		`<details class="expandable"><summary>%s</summary><p>%s</p></details>`,
+		short, full,
+	))
 }
 
 // Truncate shortens a string to maxLen characters, appending "..." if truncated.
