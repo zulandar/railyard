@@ -2,7 +2,6 @@ package engine
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
@@ -13,20 +12,16 @@ import (
 	"gorm.io/gorm/logger"
 )
 
-var heartbeatTestSeq int
-
 func heartbeatTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	heartbeatTestSeq++
-	// Use a unique shared-cache in-memory DB per test so the heartbeat
-	// goroutine can see writes from the test goroutine.
-	dsn := fmt.Sprintf("file:hbtest%d?mode=memory&cache=shared", heartbeatTestSeq)
-	gormDB, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
+	gormDB, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	if err != nil {
 		t.Fatalf("open test db: %v", err)
 	}
+	sqlDB, _ := gormDB.DB()
+	sqlDB.SetMaxOpenConns(1)
 	if err := db.AutoMigrate(gormDB); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -55,27 +50,26 @@ func TestHeartbeat_SelfHealFromDead(t *testing.T) {
 
 	errCh := StartHeartbeat(ctx, gormDB, "eng-test", 50*time.Millisecond)
 
-	// Wait for at least one heartbeat tick.
-	time.Sleep(200 * time.Millisecond)
+	// Poll for the expected state instead of fixed sleep.
+	deadline := time.After(2 * time.Second)
+	tick := time.NewTicker(25 * time.Millisecond)
+	defer tick.Stop()
 
-	// Check if heartbeat errored.
-	select {
-	case err := <-errCh:
-		t.Fatalf("heartbeat error: %v", err)
-	default:
-	}
-
-	// Verify the engine status was self-healed to idle.
-	var eng models.Engine
-	gormDB.Where("id = ?", "eng-test").First(&eng)
-
-	if eng.Status != StatusIdle {
-		t.Errorf("status = %q, want %q (heartbeat should self-heal from dead)", eng.Status, StatusIdle)
-	}
-
-	// Verify last_activity was updated.
-	if time.Since(eng.LastActivity) > 2*time.Second {
-		t.Error("last_activity should be recent after heartbeat")
+	for {
+		select {
+		case err := <-errCh:
+			t.Fatalf("heartbeat error: %v", err)
+		case <-deadline:
+			var eng models.Engine
+			gormDB.Where("id = ?", "eng-test").First(&eng)
+			t.Fatalf("timed out waiting for self-heal: status=%q", eng.Status)
+		case <-tick.C:
+			var eng models.Engine
+			gormDB.Where("id = ?", "eng-test").First(&eng)
+			if eng.Status == StatusIdle && time.Since(eng.LastActivity) < 2*time.Second {
+				return // success
+			}
+		}
 	}
 }
 
@@ -98,12 +92,25 @@ func TestHeartbeat_DoesNotOverwriteWorking(t *testing.T) {
 
 	StartHeartbeat(ctx, gormDB, "eng-work", 50*time.Millisecond)
 
-	time.Sleep(200 * time.Millisecond)
+	// Poll until last_activity is updated (proves heartbeat ran), then check status.
+	deadline := time.After(2 * time.Second)
+	tick := time.NewTicker(25 * time.Millisecond)
+	defer tick.Stop()
 
-	var eng models.Engine
-	gormDB.Where("id = ?", "eng-work").First(&eng)
-
-	if eng.Status != StatusWorking {
-		t.Errorf("status = %q, want %q (heartbeat should not overwrite working status)", eng.Status, StatusWorking)
+	for {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for heartbeat to update last_activity")
+		case <-tick.C:
+			var eng models.Engine
+			gormDB.Where("id = ?", "eng-work").First(&eng)
+			if time.Since(eng.LastActivity) < 1*time.Second {
+				// Heartbeat ran — verify it didn't overwrite working status.
+				if eng.Status != StatusWorking {
+					t.Errorf("status = %q, want %q (heartbeat should not overwrite working status)", eng.Status, StatusWorking)
+				}
+				return
+			}
+		}
 	}
 }
