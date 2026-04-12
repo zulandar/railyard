@@ -2087,3 +2087,131 @@ yardmaster:
 		t.Errorf("Yardmaster.RevisedLabel = %q, want %q", cfg.Yardmaster.RevisedLabel, "custom: revised")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Inspect config tests
+// ---------------------------------------------------------------------------
+
+func TestInspectConfig_Valid(t *testing.T) {
+	cfg, err := Load("testdata/valid_inspect.yaml")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	ins := cfg.Inspect
+	if !ins.Enabled {
+		t.Error("Inspect.Enabled = false, want true")
+	}
+	if ins.AppID != 123456 {
+		t.Errorf("Inspect.AppID = %d, want 123456", ins.AppID)
+	}
+	if ins.InstallationID != 78901234 {
+		t.Errorf("Inspect.InstallationID = %d, want 78901234", ins.InstallationID)
+	}
+	if ins.PrivateKeyPath != "/secrets/key.pem" {
+		t.Errorf("Inspect.PrivateKeyPath = %q, want /secrets/key.pem", ins.PrivateKeyPath)
+	}
+	if ins.PollIntervalSec != 120 {
+		t.Errorf("Inspect.PollIntervalSec = %d, want 120", ins.PollIntervalSec)
+	}
+	if ins.AgentProvider != "claude" {
+		t.Errorf("Inspect.AgentProvider = %q, want claude", ins.AgentProvider)
+	}
+	if !ins.DeepReview {
+		t.Error("Inspect.DeepReview = false, want true")
+	}
+	if ins.ReviewTimeoutSec != 600 {
+		t.Errorf("Inspect.ReviewTimeoutSec = %d, want 600", ins.ReviewTimeoutSec)
+	}
+	if ins.MaxDiffLines != 5000 {
+		t.Errorf("Inspect.MaxDiffLines = %d, want 5000", ins.MaxDiffLines)
+	}
+	if ins.HealthPort != 9090 {
+		t.Errorf("Inspect.HealthPort = %d, want 9090", ins.HealthPort)
+	}
+	if ins.Labels.InProgress != "custom: reviewing" {
+		t.Errorf("Inspect.Labels.InProgress = %q, want %q", ins.Labels.InProgress, "custom: reviewing")
+	}
+	if ins.Labels.Reviewed != "custom: reviewed" {
+		t.Errorf("Inspect.Labels.Reviewed = %q, want %q", ins.Labels.Reviewed, "custom: reviewed")
+	}
+	if ins.Labels.ReReview != "custom: re-review" {
+		t.Errorf("Inspect.Labels.ReReview = %q, want %q", ins.Labels.ReReview, "custom: re-review")
+	}
+}
+
+func TestInspectConfig_Defaults(t *testing.T) {
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+tracks:
+  - name: backend
+    language: go
+inspect:
+  enabled: true
+  app_id: 111
+  private_key_path: /key.pem
+  installation_id: 222
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	ins := cfg.Inspect
+	if ins.PollIntervalSec != 60 {
+		t.Errorf("Inspect.PollIntervalSec = %d, want 60 (default)", ins.PollIntervalSec)
+	}
+	if ins.ReviewTimeoutSec != 300 {
+		t.Errorf("Inspect.ReviewTimeoutSec = %d, want 300 (default)", ins.ReviewTimeoutSec)
+	}
+	if ins.MaxDiffLines != 10000 {
+		t.Errorf("Inspect.MaxDiffLines = %d, want 10000 (default)", ins.MaxDiffLines)
+	}
+	if ins.HealthPort != 8082 {
+		t.Errorf("Inspect.HealthPort = %d, want 8082 (default)", ins.HealthPort)
+	}
+	if ins.AgentProvider != "claude" {
+		t.Errorf("Inspect.AgentProvider = %q, want claude (inherited from global)", ins.AgentProvider)
+	}
+	if ins.Labels.InProgress != "inspect: in-progress" {
+		t.Errorf("Inspect.Labels.InProgress = %q, want %q (default)", ins.Labels.InProgress, "inspect: in-progress")
+	}
+	if ins.Labels.Reviewed != "inspect: reviewed" {
+		t.Errorf("Inspect.Labels.Reviewed = %q, want %q (default)", ins.Labels.Reviewed, "inspect: reviewed")
+	}
+	if ins.Labels.ReReview != "inspect: re-review" {
+		t.Errorf("Inspect.Labels.ReReview = %q, want %q (default)", ins.Labels.ReReview, "inspect: re-review")
+	}
+}
+
+func TestInspectConfig_ValidationMissingAuth(t *testing.T) {
+	_, err := Load("testdata/invalid_inspect_no_app.yaml")
+	if err == nil {
+		t.Fatal("expected error for inspect config with no auth credentials")
+	}
+	if !strings.Contains(err.Error(), "inspect") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "inspect")
+	}
+	if !strings.Contains(err.Error(), "GitHub App authentication is required") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "GitHub App authentication is required")
+	}
+}
+
+func TestInspectConfig_ValidationPartialAuth(t *testing.T) {
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+tracks:
+  - name: backend
+    language: go
+inspect:
+  enabled: true
+  app_id: 12345
+`
+	_, err := Parse([]byte(yaml))
+	if err == nil {
+		t.Fatal("expected error for partial inspect auth credentials")
+	}
+	if !strings.Contains(err.Error(), "inspect: GitHub App auth requires all three fields") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "inspect: GitHub App auth requires all three fields")
+	}
+}

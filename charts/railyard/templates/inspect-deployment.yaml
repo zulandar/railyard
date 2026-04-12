@@ -1,0 +1,92 @@
+{{- if .Values.inspect.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "railyard.fullname" . }}-inspect
+  labels:
+    {{- include "railyard.labels" . | nindent 4 }}
+    app.kubernetes.io/component: inspect
+spec:
+  replicas: {{ .Values.inspect.replicas }}
+  selector:
+    matchLabels:
+      {{- include "railyard.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: inspect
+  template:
+    metadata:
+      labels:
+        {{- include "railyard.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: inspect
+    spec:
+      serviceAccountName: {{ include "railyard.serviceAccountName" . }}
+      {{- if .Values.imagePullSecret }}
+      imagePullSecrets:
+        - name: {{ .Values.imagePullSecret }}
+      {{- end }}
+      containers:
+        - name: inspect
+          image: {{ include "railyard.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["tini", "--", "ry"]
+          args: ["inspect", "-c", "/etc/railyard/railyard.yaml"]
+          env:
+            {{- if .Values.logLevel }}
+            - name: LOG_LEVEL
+              value: {{ .Values.logLevel | quote }}
+            {{- end }}
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "railyard.fullname" . }}-db
+                  key: db-password
+            - name: PGVECTOR_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "railyard.fullname" . }}-db
+                  key: pgvector-password
+            {{- include "railyard.authExtraEnv" . | nindent 12 }}
+          envFrom:
+            {{- include "railyard.authEnvFrom" . | nindent 12 }}
+          ports:
+            - name: health
+              containerPort: {{ .Values.inspect.healthPort | default 8082 }}
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          volumeMounts:
+            - name: config
+              mountPath: /etc/railyard
+              readOnly: true
+            {{- include "railyard.authVolumeMounts" . | nindent 12 }}
+            {{- if .Values.inspect.privateKeySecret }}
+            - name: inspect-app-pem
+              mountPath: /etc/railyard-keys/github-app.pem
+              subPath: {{ .Values.inspect.privateKeySecretKey | default "private-key.pem" }}
+              readOnly: true
+            {{- end }}
+          {{- with .Values.inspect.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "railyard.fullname" . }}-config
+            defaultMode: 0644
+        {{- include "railyard.authVolumes" . | nindent 8 }}
+        {{- if .Values.inspect.privateKeySecret }}
+        - name: inspect-app-pem
+          secret:
+            secretName: {{ .Values.inspect.privateKeySecret }}
+        {{- end }}
+{{- end }}

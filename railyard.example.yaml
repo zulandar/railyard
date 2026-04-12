@@ -297,3 +297,27 @@ tracks:
 #     in_progress: "bull: in progress"    # Applied when car is claimed by engine (default)
 #     fix_merged: "bull: fix merged"      # Applied when car's branch is merged (default)
 #     ignore: "bull: ignore"              # Applied to rejected issues / manually ignored (default)
+
+# ---------------------------------------------------------------------------
+# Inspection Pit — Automated PR code review (optional)
+# ---------------------------------------------------------------------------
+#
+# Inspection Pit automatically reviews pull requests using AI.
+# It posts inline review comments via the GitHub PR review API.
+# Requires GitHub App authentication (no PAT support).
+#
+# inspect:
+#   enabled: true
+#   app_id: ${INSPECT_APP_ID}
+#   installation_id: ${INSPECT_INSTALLATION_ID}
+#   private_key_path: /secrets/inspect-private-key.pem
+#   poll_interval_sec: 60               # How often to poll for reviewable PRs (default: 60)
+#   agent_provider: claude              # Override global agent_provider (default: global)
+#   deep_review: false                  # Enable CocoIndex semantic search context
+#   review_timeout_sec: 300             # Stale review threshold for yardmaster cleanup
+#   max_diff_lines: 10000               # Truncate diffs exceeding this line count
+#   health_port: 8082                   # Port for /healthz and /readyz k8s probes
+#   labels:
+#     in_progress: "inspect: in-progress"
+#     reviewed: "inspect: reviewed"
+#     re_review: "inspect: re-review"

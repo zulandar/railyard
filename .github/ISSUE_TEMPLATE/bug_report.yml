@@ -41,6 +41,7 @@ body:
         - Switch / Merge
         - PR Review Detection
         - Bull (Issue Triage)
+        - Inspection Pit
         - Telegraph (Chat Bridge)
         - Dashboard
         - CLI (ry)

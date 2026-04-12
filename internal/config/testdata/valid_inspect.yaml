@@ -1,0 +1,21 @@
+owner: alice
+repo: git@github.com:org/myapp.git
+tracks:
+  - name: backend
+    language: go
+
+inspect:
+  enabled: true
+  app_id: 123456
+  installation_id: 78901234
+  private_key_path: /secrets/key.pem
+  poll_interval_sec: 120
+  agent_provider: claude
+  deep_review: true
+  review_timeout_sec: 600
+  max_diff_lines: 5000
+  health_port: 9090
+  labels:
+    in_progress: "custom: reviewing"
+    reviewed: "custom: reviewed"
+    re_review: "custom: re-review"

@@ -191,6 +191,12 @@ func RunDaemon(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath,
 				}
 			})
 
+			// Phase 5c: Clean up stale pr_review cars.
+			timePhase("stale-review-cleanup", func() {
+				prViewer := &ghPRViewer{repoDir: repoDir}
+				handlePrReviewCars(db, prViewer, cfg, logger)
+			})
+
 			// Phase 6: Rebalance idle engines to busy tracks.
 			timePhase("rebalance", func() {
 				if err := rebalanceEngines(db, cfg, configPath, rbState, logger); err != nil {
@@ -1509,4 +1515,50 @@ func truncateSwitchLog(s string, n int) string {
 		return s
 	}
 	return "..." + s[len(s)-n:]
+}
+
+// handlePrReviewCars detects cars stuck in pr_review status longer than the
+// configured timeout and resets them to pr_open. This cleans up after Inspection
+// Pit replicas that crash mid-review.
+func handlePrReviewCars(db *gorm.DB, viewer PRViewer, cfg *config.Config, logger *slog.Logger) {
+	if cfg == nil || !cfg.Inspect.Enabled {
+		return
+	}
+
+	timeout := time.Duration(cfg.Inspect.ReviewTimeoutSec) * time.Second
+	if timeout <= 0 {
+		timeout = 300 * time.Second
+	}
+
+	var staleCars []models.Car
+	cutoff := time.Now().Add(-timeout)
+	if err := db.Where("status = ? AND updated_at < ?", "pr_review", cutoff).
+		Find(&staleCars).Error; err != nil {
+		logger.Error("List stale pr_review cars", "error", err)
+		return
+	}
+
+	for _, c := range staleCars {
+		logger.Warn("Stale inspect review detected",
+			"car", c.ID,
+			"branch", c.Branch,
+			"assignee", c.Assignee,
+			"stuck_seconds", int(time.Since(c.UpdatedAt).Seconds()),
+		)
+
+		if err := db.Model(&models.Car{}).Where("id = ?", c.ID).Updates(map[string]interface{}{
+			"status":   "pr_open",
+			"assignee": "",
+		}).Error; err != nil {
+			logger.Error("Reset stale pr_review car", "car", c.ID, "error", err)
+			continue
+		}
+
+		// Best-effort: remove in-progress label.
+		if viewer != nil && c.Branch != "" {
+			if err := viewer.RemoveLabel(c.Branch, cfg.Inspect.Labels.InProgress); err != nil {
+				logger.Warn("Remove inspect in-progress label (stale cleanup)", "car", c.ID, "error", err)
+			}
+		}
+	}
 }
