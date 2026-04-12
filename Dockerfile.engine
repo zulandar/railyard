@@ -41,8 +41,8 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
   && apt-get update && apt-get install -y --no-install-recommends gh \
   && rm -rf /var/lib/apt/lists/*
 
-# ── Go 1.26.1 (permanent runtime install for backend track tests) ──────────
-RUN curl -fsSL https://go.dev/dl/go1.26.1.linux-amd64.tar.gz | tar -C /usr/local -xzf -
+# ── Go 1.26.2 (permanent runtime install for backend track tests) ──────────
+RUN curl -fsSL https://go.dev/dl/go1.26.2.linux-amd64.tar.gz | tar -C /usr/local -xzf -
 ENV PATH="/usr/local/go/bin:${PATH}"
 
 # ── Railyard binary (pre-built in CI) ───────────────────────────────────────
