@@ -29,6 +29,7 @@ Each developer runs their own Railyard instance against the same repo. Agents wo
 - **Natural-Language Dispatch** — describe what you want in plain English; the Dispatch planner decomposes it into dependency-ordered cars
 - **Telegraph Chat Bridge** — connect Railyard to Slack or Discord for commands, event notifications, and dispatch via @mention
 - **Bull GitHub Triage** — an issue-triage daemon that polls GitHub Issues, applies AI triage, creates cars, and syncs status via labels
+- **Inspection Pit PR Review** — an AI-powered daemon that automatically reviews pull requests, posting inline comments via the GitHub PR review API
 - **P0–P4 Priority Model** — enterprise priority levels with type-based defaults (bug→P1, task→P2) and priority-aware engine scheduling
 - **Kubernetes-Ready** — a Helm chart deploys all components as pods with auto-scaling, TLS, RBAC, and multi-project isolation
 - **Context Cycling** — engines detect /clear cycles and stalls, preserve progress notes, and hand off context cleanly between cycles
@@ -45,6 +46,7 @@ Each developer runs their own Railyard instance against the same repo. Agents wo
 | **Switch** | Merging a completed car's branch back to main |
 | **Telegraph** | Chat bridge — connects Railyard to Slack or Discord for commands, events, and dispatch via chat |
 | **Bull** | GitHub issue triage daemon — polls issues, applies AI triage, creates cars, syncs labels |
+| **Inspection Pit** | Automated PR review daemon — polls PRs, runs AI review, posts inline comments via GitHub review API |
 | **Overlay** | Per-engine semantic index of changed files for context-aware search |
 
 ## Architecture
@@ -286,6 +288,17 @@ ry bull triage 42 -c railyard.yaml    # One-shot triage
 
 See [Bull Setup Guide](docs/bull-setup.md) for configuration and label scheme.
 
+### Inspection Pit (Automated PR Review)
+
+Inspection Pit is a poll-based daemon that automatically reviews pull requests using AI. It claims PRs via the database to avoid duplicate work across replicas, fetches the diff plus full file context, sends it to an AI provider for review, and posts a single GitHub PR review with inline comments. Authentication is via GitHub App (no PAT support).
+
+```bash
+ry inspect -c railyard.yaml          # Start the Inspection Pit daemon
+ry inspect review <pr-number>        # One-shot review (stub — use the daemon for automated reviews)
+```
+
+Inspection Pit is configured under the `inspect:` section of `railyard.yaml` (see [`railyard.example.yaml`](railyard.example.yaml) for the full template). Required fields: `app_id`, `installation_id`, `private_key_path`. Optional tuning: `poll_interval_sec`, `agent_provider`, `deep_review`, `review_timeout_sec`, `max_diff_lines`, `health_port`, and label overrides.
+
 ### Kubernetes Deployment
 
 Railyard can run on Kubernetes using the provided Helm chart. Instead of tmux sessions, engines run as Kubernetes pods with auto-scaling, TLS-secured database connections, and multi-project isolation.
@@ -494,20 +507,24 @@ git push origin vX.Y.Z
 ```
 cmd/ry/              CLI entry point (Cobra commands)
 internal/
+  audit/             Structured audit event logging for administrative actions
+  bull/              Bull GitHub issue triage daemon: polling, filtering, AI triage, label sync
   car/               Car CRUD, dependencies, ready detection
   config/            YAML config loading and validation
+  dashboard/         Web dashboard server: routes, SSE updates, templates, rate limiting
   db/                MySQL/GORM connection and migrations
   dispatch/          Dispatch planner agent (decomposition)
   engine/            Engine daemon: claim, spawn, stall detection, outcomes, overlay
     providers/       AI CLI provider implementations (Claude, Codex, Gemini, OpenCode, Copilot)
+  inspect/           Inspection Pit PR review daemon: GitHub App auth, AI review, inline comments
+  logutil/           Structured logging helpers (slog level/handler/timestamp)
   messaging/         Agent-to-agent message passing via DB
   models/            GORM models (Car, Engine, Message, Track, etc.)
   orchestration/     tmux session management, start/stop/scale/status
-  yardmaster/        Yardmaster supervisor: health checks, switch/merge
   telegraph/         Telegraph chat bridge: adapters, routing, watcher, digests
     slack/           Slack Socket Mode adapter
     discord/         Discord Gateway adapter
-  bull/              Bull GitHub issue triage daemon: polling, filtering, AI triage, label sync
+  yardmaster/        Yardmaster supervisor: health checks, switch/merge
 cocoindex/           Python-based semantic search (CocoIndex + pgvector)
   overlay.py         Per-engine overlay indexer (build, cleanup, status)
   mcp_server.py      MCP server for dual-table semantic search
