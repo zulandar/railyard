@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "railyard",
+  "project_id": "2cf45ccb-5611-4c8d-8be7-7183f54f90f2"
+}

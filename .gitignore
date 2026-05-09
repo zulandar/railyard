@@ -5,7 +5,6 @@ railyard.yaml
 .mysql/
 .mysqlcfg/
 .mcp.json
-.beads/
 beads_railyard/
 docs/plans/
 .worktrees/
@@ -22,3 +21,12 @@ minikube-values.yaml
 *.pfx
 *.secret
 credentials.json
+
+.beads/*
+!.beads/config.yaml
+!.beads/metadata.json
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
