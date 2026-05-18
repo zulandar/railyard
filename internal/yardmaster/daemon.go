@@ -151,7 +151,7 @@ func RunDaemon(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath,
 
 			// Phase 3: Handle completed cars.
 			timePhase("completed-cars", func() {
-				if err := handleCompletedCars(ctx, db, cfg, repoDir, ymDir, &escWg, escTracker, escSem, logger); err != nil {
+				if err := handleCompletedCars(ctx, db, cfg, configPath, repoDir, ymDir, &escWg, escTracker, escSem, logger); err != nil {
 					logger.Error("Completed cars error", "error", err)
 				}
 			})
@@ -434,7 +434,7 @@ func handleStaleEngines(db *gorm.DB, cfg *config.Config, configPath string, logg
 // Switch() marks cars as "merged" after successful merge, so they won't reappear.
 // ymDir is the yardmaster worktree where switch operations happen; repoDir is
 // the primary repo (used for engine worktree detachment).
-func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, repoDir, ymDir string, escWg *sync.WaitGroup, escTracker *EscalationTracker, escSem chan struct{}, logger *slog.Logger) error {
+func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath, repoDir, ymDir string, escWg *sync.WaitGroup, escTracker *EscalationTracker, escSem chan struct{}, logger *slog.Logger) error {
 	cars, err := car.List(db, car.ListFilters{Status: "done"})
 	if err != nil {
 		return err
@@ -538,6 +538,7 @@ func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, r
 			SwitchTimeoutSec: cfg.Stall.SwitchTimeoutSec,
 			CommentCounter:   commentCounter,
 			RevisedLabel:     cfg.Yardmaster.RevisedLabel,
+			ConfigPath:       configPath,
 		})
 
 		// Handle any failure — write a categorized progress note and check

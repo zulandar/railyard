@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zulandar/railyard/internal/config"
 	"github.com/zulandar/railyard/internal/messaging"
 	"github.com/zulandar/railyard/internal/models"
 	"gorm.io/gorm"
@@ -35,6 +36,7 @@ type SwitchOpts struct {
 	SwitchTimeoutSec int                              // max seconds for runTests (default 600 if 0)
 	CommentCounter   func(branch string) (int, error) // nil-safe; returns non-author comment count (inline + conversation) for pr_open snapshot
 	RevisedLabel     string                           // label to apply after a revision pushes to an existing PR (e.g. "railyard: revised")
+	ConfigPath       string                           // path to railyard.yaml; re-read at PR-open time so current track config (e.g. Playwright) wins over dispatch-time config
 
 	// PR operation hooks — nil defaults to the gh-CLI implementations.
 	// Injectable for testing the RequirePR logic without a real GitHub remote.
@@ -317,7 +319,7 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 		var prURL string
 		if existsErr == nil && existingURL != "" {
 			// PR exists — update body with latest progress notes.
-			prBody := buildPRBody(db, &car, opts.RepoDir, baseBranch)
+			prBody := buildPRBody(db, &car, opts.RepoDir, baseBranch, opts.ConfigPath)
 			if updErr := updateBody(opts.RepoDir, car.Branch, prBody); updErr != nil {
 				slog.Warn("Update PR body failed", "car", carID, "error", updErr)
 			}
@@ -339,7 +341,7 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 				"car", carID, "branch", car.Branch, "pr_url", prURL)
 		} else {
 			// No existing PR — create a new draft.
-			prBody := buildPRBody(db, &car, opts.RepoDir, baseBranch)
+			prBody := buildPRBody(db, &car, opts.RepoDir, baseBranch, opts.ConfigPath)
 			var createErr error
 			prURL, createErr = createDraft(opts.RepoDir, car.Title, prBody, car.Branch)
 			if createErr != nil {
@@ -1143,7 +1145,10 @@ func gitPushBranch(repoDir, branch string) error {
 }
 
 // buildPRBody assembles a rich PR description from the car record and progress notes.
-func buildPRBody(db *gorm.DB, car *models.Car, repoDir, baseBranch string) string {
+// configPath, when non-empty, is re-read at PR-open time so the current track config
+// (e.g. Playwright) wins over the dispatch-time config. A missing or invalid file is
+// treated as "no playwright section" (silent, non-fatal).
+func buildPRBody(db *gorm.DB, car *models.Car, repoDir, baseBranch, configPath string) string {
 	var b strings.Builder
 
 	// Summary.
@@ -1194,6 +1199,14 @@ func buildPRBody(db *gorm.DB, car *models.Car, repoDir, baseBranch string) strin
 		b.WriteString("\n")
 	}
 
+	// Playwright Demo section — appended only when the resolved track has
+	// playwright.enabled=true at PR-open time. We re-read railyard.yaml here
+	// so config changes between dispatch and PR-open take effect (current
+	// config wins). Missing/invalid config => silent skip.
+	if section := buildPlaywrightSection(car, configPath); section != "" {
+		b.WriteString(section)
+	}
+
 	// Metadata footer.
 	b.WriteString("---\n")
 	b.WriteString(fmt.Sprintf("Car: %s | Track: %s | Priority: P%d", car.ID, car.Track, car.Priority))
@@ -1202,6 +1215,42 @@ func buildPRBody(db *gorm.DB, car *models.Car, repoDir, baseBranch string) strin
 	}
 	b.WriteString(fmt.Sprintf(" | Branch: %s\n", car.Branch))
 
+	return b.String()
+}
+
+// buildPlaywrightSection returns the rendered "Playwright Demo" markdown
+// section for the car's track, or an empty string when the section should be
+// omitted (no configPath, config load fails, track missing, no playwright
+// block, or playwright.enabled=false).
+//
+// The config is re-read from disk at PR-open time so changes between dispatch
+// and PR-open take effect — current config wins.
+func buildPlaywrightSection(car *models.Car, configPath string) string {
+	if car == nil || configPath == "" {
+		return ""
+	}
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		slog.Debug("buildPlaywrightSection: config load failed; omitting section",
+			"car", car.ID, "config_path", configPath, "error", err)
+		return ""
+	}
+	var pw *models.PlaywrightConfig
+	for i := range cfg.Tracks {
+		if cfg.Tracks[i].Name == car.Track {
+			pw = cfg.Tracks[i].Playwright
+			break
+		}
+	}
+	if pw == nil || !pw.Enabled {
+		return ""
+	}
+	specPath := filepath.Join(pw.SpecPath, strings.ReplaceAll(pw.Filename, "{car_id}", car.ID))
+
+	var b strings.Builder
+	b.WriteString("## 📹 Playwright Demo\n\n")
+	b.WriteString(fmt.Sprintf("A demo spec has been added at `%s`.\n", specPath))
+	b.WriteString("Once CI completes, the recording is available on the workflow run for this PR.\n\n")
 	return b.String()
 }
 

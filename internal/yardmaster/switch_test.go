@@ -393,7 +393,7 @@ func TestBuildPRBody_FullCar(t *testing.T) {
 		Note:     "Added test coverage for all token states",
 	})
 
-	body := buildPRBody(db, &c, "/nonexistent", "main") // repoDir doesn't matter — git diff will fail gracefully
+	body := buildPRBody(db, &c, "/nonexistent", "main", "") // repoDir doesn't matter — git diff will fail gracefully
 
 	// Summary section.
 	if !strings.Contains(body, "## Summary") {
@@ -456,7 +456,7 @@ func TestBuildPRBody_MinimalCar(t *testing.T) {
 	}
 	db.Create(&c)
 
-	body := buildPRBody(db, &c, "/nonexistent", "main")
+	body := buildPRBody(db, &c, "/nonexistent", "main", "")
 
 	// Should use title as summary when description is empty.
 	if !strings.Contains(body, "Fix typo") {
@@ -499,12 +499,177 @@ func TestBuildPRBody_NilDB(t *testing.T) {
 	}
 
 	// Should not panic with nil DB — just no progress section.
-	body := buildPRBody(nil, &c, "/nonexistent", "main")
+	body := buildPRBody(nil, &c, "/nonexistent", "main", "")
 	if !strings.Contains(body, "## Summary") {
 		t.Error("missing Summary section")
 	}
 	if strings.Contains(body, "## Progress") {
 		t.Error("should not have progress with nil db")
+	}
+}
+
+// --- buildPRBody Playwright section tests ---
+
+// writeYAMLConfig writes a railyard.yaml at a temp path and returns its absolute path.
+func writeYAMLConfig(t *testing.T, body string) string {
+	t.Helper()
+	dir := t.TempDir()
+	p := filepath.Join(dir, "railyard.yaml")
+	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+		t.Fatalf("write yaml: %v", err)
+	}
+	return p
+}
+
+func TestBuildPRBody_Playwright_EnabledTrackIncludesSection(t *testing.T) {
+	db := testDB(t)
+	c := models.Car{
+		ID:       "car-pw1",
+		Title:    "Add login flow",
+		Track:    "frontend",
+		Branch:   "ry/alice/frontend/car-pw1",
+		Priority: 1,
+	}
+	db.Create(&c)
+
+	yaml := `owner: alice
+repo: git@github.com:org/app.git
+tracks:
+  - name: frontend
+    language: typescript
+    playwright:
+      enabled: true
+      spec_path: tests/pr-demos
+      filename: "{car_id}.spec.ts"
+`
+	configPath := writeYAMLConfig(t, yaml)
+
+	body := buildPRBody(db, &c, "/nonexistent", "main", configPath)
+
+	if !strings.Contains(body, "## 📹 Playwright Demo") {
+		t.Errorf("missing Playwright Demo heading; body=\n%s", body)
+	}
+	expectedPath := "tests/pr-demos/car-pw1.spec.ts"
+	if !strings.Contains(body, "`"+expectedPath+"`") {
+		t.Errorf("missing/wrong spec path; want backticked %q in body=\n%s", expectedPath, body)
+	}
+	if !strings.Contains(body, "Once CI completes, the recording is available on the workflow run for this PR.") {
+		t.Errorf("missing CI line; body=\n%s", body)
+	}
+}
+
+func TestBuildPRBody_Playwright_DisabledTrackOmitsSection(t *testing.T) {
+	db := testDB(t)
+	c := models.Car{
+		ID:     "car-pw2",
+		Title:  "Other work",
+		Track:  "frontend",
+		Branch: "ry/alice/frontend/car-pw2",
+	}
+	db.Create(&c)
+
+	yaml := `owner: alice
+repo: git@github.com:org/app.git
+tracks:
+  - name: frontend
+    language: typescript
+    playwright:
+      enabled: false
+      spec_path: tests/pr-demos
+`
+	configPath := writeYAMLConfig(t, yaml)
+
+	body := buildPRBody(db, &c, "/nonexistent", "main", configPath)
+
+	if strings.Contains(body, "Playwright Demo") {
+		t.Errorf("disabled track should not include Playwright section; body=\n%s", body)
+	}
+}
+
+func TestBuildPRBody_Playwright_NoPlaywrightBlockOmitsSection(t *testing.T) {
+	db := testDB(t)
+	c := models.Car{
+		ID:     "car-pw3",
+		Title:  "Other work",
+		Track:  "backend",
+		Branch: "ry/alice/backend/car-pw3",
+	}
+	db.Create(&c)
+
+	yaml := `owner: alice
+repo: git@github.com:org/app.git
+tracks:
+  - name: backend
+    language: go
+`
+	configPath := writeYAMLConfig(t, yaml)
+
+	bodyWithConfig := buildPRBody(db, &c, "/nonexistent", "main", configPath)
+	bodyNoConfig := buildPRBody(db, &c, "/nonexistent", "main", "")
+
+	if strings.Contains(bodyWithConfig, "Playwright Demo") {
+		t.Errorf("track without playwright block should not include section; body=\n%s", bodyWithConfig)
+	}
+	// Body should otherwise be identical to the no-config baseline — the
+	// playwright section is the only thing configPath should influence.
+	if bodyWithConfig != bodyNoConfig {
+		t.Errorf("body differs between configPath=\"\" and configPath=<track without playwright>:\n--- with config ---\n%s\n--- no config ---\n%s",
+			bodyWithConfig, bodyNoConfig)
+	}
+}
+
+func TestBuildPRBody_Playwright_ConfigChangedBetweenDispatchAndPROpen(t *testing.T) {
+	// Simulates the design-spec case: at dispatch time, playwright was OFF
+	// (or absent). Between dispatch and PR-open, ops enables playwright in
+	// railyard.yaml. PR-open re-reads the file, so the current config wins
+	// and the section IS rendered.
+	db := testDB(t)
+	c := models.Car{
+		ID:     "car-pw4",
+		Title:  "Feature with late-enabled demo",
+		Track:  "frontend",
+		Branch: "ry/alice/frontend/car-pw4",
+	}
+	db.Create(&c)
+
+	// Dispatch-time config: no playwright.
+	dispatchYAML := `owner: alice
+repo: git@github.com:org/app.git
+tracks:
+  - name: frontend
+    language: typescript
+`
+	configPath := writeYAMLConfig(t, dispatchYAML)
+
+	// First render — dispatch-time config: no section.
+	bodyDispatch := buildPRBody(db, &c, "/nonexistent", "main", configPath)
+	if strings.Contains(bodyDispatch, "Playwright Demo") {
+		t.Fatalf("dispatch-time render should not have section; body=\n%s", bodyDispatch)
+	}
+
+	// Replace the file in-place between dispatch and PR-open. PR-open-time
+	// config wins.
+	prOpenYAML := `owner: alice
+repo: git@github.com:org/app.git
+tracks:
+  - name: frontend
+    language: typescript
+    playwright:
+      enabled: true
+      spec_path: tests/pr-demos
+      filename: "{car_id}.spec.ts"
+`
+	if err := os.WriteFile(configPath, []byte(prOpenYAML), 0o600); err != nil {
+		t.Fatalf("rewrite yaml: %v", err)
+	}
+
+	bodyPROpen := buildPRBody(db, &c, "/nonexistent", "main", configPath)
+	if !strings.Contains(bodyPROpen, "## 📹 Playwright Demo") {
+		t.Errorf("PR-open-time render should include section after config update; body=\n%s", bodyPROpen)
+	}
+	expectedPath := "tests/pr-demos/car-pw4.spec.ts"
+	if !strings.Contains(bodyPROpen, "`"+expectedPath+"`") {
+		t.Errorf("PR-open-time render should use updated spec path %q; body=\n%s", expectedPath, bodyPROpen)
 	}
 }
 
