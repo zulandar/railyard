@@ -1878,7 +1878,7 @@ func TestHandleCompletedCars_SkipsEpicAndMarkesMerged(t *testing.T) {
 	var buf bytes.Buffer
 	logger := testLogger(&buf)
 	// repoDir and ymDir don't matter — the epic should never reach Switch().
-	err := handleCompletedCars(context.Background(), db, cfg, "/nonexistent", "/nonexistent", &sync.WaitGroup{}, nil, make(chan struct{}, 3), logger)
+	err := handleCompletedCars(context.Background(), db, cfg, "", "/nonexistent", "/nonexistent", &sync.WaitGroup{}, nil, make(chan struct{}, 3), logger)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1924,7 +1924,7 @@ func TestHandleCompletedCars_EpicCountError_LogsAndContinues(t *testing.T) {
 
 	var buf bytes.Buffer
 	logger := testLogger(&buf)
-	err := handleCompletedCars(context.Background(), db, cfg, "/nonexistent", "/nonexistent", &sync.WaitGroup{}, nil, make(chan struct{}, 3), logger)
+	err := handleCompletedCars(context.Background(), db, cfg, "", "/nonexistent", "/nonexistent", &sync.WaitGroup{}, nil, make(chan struct{}, 3), logger)
 	// The function should return the error from car.List (which also queries cars table).
 	if err == nil {
 		// If it doesn't error on car.List, it should at least not panic.
@@ -1973,7 +1973,7 @@ func TestHandleCompletedCars_EpicWithPendingChildren_StaysDone(t *testing.T) {
 
 	var buf bytes.Buffer
 	logger := testLogger(&buf)
-	err := handleCompletedCars(context.Background(), db, cfg, "/nonexistent", "/nonexistent", &sync.WaitGroup{}, nil, make(chan struct{}, 3), logger)
+	err := handleCompletedCars(context.Background(), db, cfg, "", "/nonexistent", "/nonexistent", &sync.WaitGroup{}, nil, make(chan struct{}, 3), logger)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2170,7 +2170,7 @@ func TestHandleCompletedCars_SortsByPriorityThenCreatedAt(t *testing.T) {
 
 	var buf bytes.Buffer
 	logger := testLogger(&buf)
-	err := handleCompletedCars(context.Background(), db, cfg, "/nonexistent", "/nonexistent", &sync.WaitGroup{}, nil, make(chan struct{}, 3), logger)
+	err := handleCompletedCars(context.Background(), db, cfg, "", "/nonexistent", "/nonexistent", &sync.WaitGroup{}, nil, make(chan struct{}, 3), logger)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

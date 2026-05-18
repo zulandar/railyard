@@ -128,6 +128,7 @@ func runSwitch(cmd *cobra.Command, configPath, carID string, dryRun bool) error 
 		DryRun:         dryRun,
 		PreTestCommand: preTestCommand,
 		TestCommand:    testCommand,
+		ConfigPath:     configPath,
 	})
 	if err != nil {
 		return err

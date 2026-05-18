@@ -202,6 +202,18 @@ tracks:
   #   conventions:
   #     framework: "Next.js 15"
   #     styling: "Tailwind CSS"
+  #   # Playwright PR demo (opt-in, per-track). When enabled, the engine prompt
+  #   # instructs the agent to commit a Playwright spec that demonstrates the
+  #   # user-visible behavior of its change, and the PR body links to it.
+  #   # Railyard does NOT run Playwright itself — your project's own CI is
+  #   # expected to execute the spec (with video recording on) and surface the
+  #   # recording artifact. Railyard's scope is limited to the engine prompt
+  #   # instruction and the PR-body pointer.
+  #   # playwright:
+  #   #   enabled: true                              # gate the feature on this track
+  #   #   spec_path: "tests/pr-demos"                # directory where engines write new spec files (required when enabled)
+  #   #   filename: "{car_id}.spec.ts"               # naming pattern; {car_id} is substituted at dispatch time (default: "{car_id}.spec.ts")
+  #   #   template: "tests/pr-demos/_template.spec.ts" # optional starter spec; when set, the prompt tells the engine to start from it
 
   # - name: api
   #   language: python

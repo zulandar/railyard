@@ -1,0 +1,10 @@
+owner: bob
+repo: git@github.com:org/app.git
+tracks:
+  - name: infra
+    language: mixed
+    playwright:
+      enabled: true
+      spec_path: tests/e2e
+      filename: "{car_id}.spec.ts"
+      template: "tests/e2e/_template.spec.ts"

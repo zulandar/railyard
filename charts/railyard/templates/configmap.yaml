@@ -59,6 +59,19 @@ data:
         {{- if .agentProvider }}
         agent_provider: {{ .agentProvider | quote }}
         {{- end }}
+        {{- if .playwright }}
+        playwright:
+          enabled: {{ .playwright.enabled | default false }}
+          {{- if .playwright.specPath }}
+          spec_path: {{ .playwright.specPath | quote }}
+          {{- end }}
+          {{- if .playwright.filename }}
+          filename: {{ .playwright.filename | quote }}
+          {{- end }}
+          {{- if .playwright.template }}
+          template: {{ .playwright.template | quote }}
+          {{- end }}
+        {{- end }}
     {{- end }}
 
     stall:

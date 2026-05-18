@@ -30,6 +30,7 @@ Each developer runs their own Railyard instance against the same repo. Agents wo
 - **Telegraph Chat Bridge** — connect Railyard to Slack or Discord for commands, event notifications, and dispatch via @mention
 - **Bull GitHub Triage** — an issue-triage daemon that polls GitHub Issues, applies AI triage, creates cars, and syncs status via labels
 - **Inspection Pit PR Review** — an AI-powered daemon that automatically reviews pull requests, posting inline comments via the GitHub PR review API
+- **Playwright PR Demo** — opt-in, per-track: instructs frontend engines to commit a Playwright spec demonstrating their change, with a pointer in the draft PR body for reviewers
 - **P0–P4 Priority Model** — enterprise priority levels with type-based defaults (bug→P1, task→P2) and priority-aware engine scheduling
 - **Kubernetes-Ready** — a Helm chart deploys all components as pods with auto-scaling, TLS, RBAC, and multi-project isolation
 - **Context Cycling** — engines detect /clear cycles and stalls, preserve progress notes, and hand off context cleanly between cycles
@@ -298,6 +299,24 @@ ry inspect review <pr-number>        # One-shot review (stub — use the daemon 
 ```
 
 Inspection Pit is configured under the `inspect:` section of `railyard.yaml` (see [`railyard.example.yaml`](railyard.example.yaml) for the full template). Required fields: `app_id`, `installation_id`, `private_key_path`. Optional tuning: `poll_interval_sec`, `agent_provider`, `deep_review`, `review_timeout_sec`, `max_diff_lines`, `health_port`, and label overrides.
+
+### Playwright PR Demo (Frontend UI Evidence)
+
+An opt-in, per-track feature: when enabled, the engine prompt instructs the agent to commit a Playwright spec demonstrating the user-visible behavior of its change, and Yardmaster's draft PR body gains a pointer to the spec file. The project's own CI is expected to run the spec (with video recording on) and surface the recording — Railyard does not run Playwright itself.
+
+Enable per track in `railyard.yaml`:
+
+```yaml
+tracks:
+  - name: frontend
+    language: typescript
+    playwright:
+      enabled: true
+      spec_path: "tests/pr-demos"
+      template: "tests/pr-demos/_template.spec.ts"  # optional
+```
+
+See [Playwright PR Demo Setup Guide](docs/playwright-pr-demo.md) for the full schema, helm/k8s equivalents, CI responsibilities, and known limitations.
 
 ### Kubernetes Deployment
 
