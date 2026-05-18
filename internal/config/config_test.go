@@ -457,11 +457,8 @@ func TestLoad_PlaywrightFixture(t *testing.T) {
 	if pw.Filename != "{car_id}.spec.ts" {
 		t.Errorf("Playwright.Filename = %q, want %q", pw.Filename, "{car_id}.spec.ts")
 	}
-	if pw.Template == "" {
-		t.Error("Playwright.Template is empty, want non-empty template body")
-	}
-	if !strings.Contains(pw.Template, "@playwright/test") {
-		t.Errorf("Playwright.Template = %q, want it to contain %q", pw.Template, "@playwright/test")
+	if pw.Template != "tests/e2e/_template.spec.ts" {
+		t.Errorf("Playwright.Template = %q, want %q", pw.Template, "tests/e2e/_template.spec.ts")
 	}
 }
 

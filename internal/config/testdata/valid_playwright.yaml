@@ -7,10 +7,4 @@ tracks:
       enabled: true
       spec_path: tests/e2e
       filename: "{car_id}.spec.ts"
-      template: |
-        import { test, expect } from '@playwright/test';
-
-        test('{car_id}', async ({ page }) => {
-          await page.goto('/');
-          await expect(page).toHaveTitle(/.*/);
-        });
+      template: "tests/e2e/_template.spec.ts"
