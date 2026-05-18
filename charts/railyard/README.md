@@ -114,6 +114,10 @@ helm install railyard ./charts/railyard \
 | `tracks[].preTestCommand` | Command to run before tests (e.g., setup, migrations) | `""` |
 | `tracks[].image.repository` | Custom container image for this track's engine pods | (global image) |
 | `tracks[].image.tag` | Image tag for the custom track image | (global tag) |
+| `tracks[].playwright.enabled` | Enable the Playwright PR Demo feature on this track. See [Playwright PR Demo Setup Guide](../../docs/playwright-pr-demo.md). | `false` |
+| `tracks[].playwright.specPath` | Directory (relative to repo root) where engines write new spec files. Required when `enabled: true`. | `""` |
+| `tracks[].playwright.filename` | Naming pattern for new specs. `{car_id}` substituted at dispatch time. | `{car_id}.spec.ts` |
+| `tracks[].playwright.template` | Optional path to a starter spec the engine copies from. Bullet only renders when the file exists in the engine's worktree. | `""` |
 
 ### Engine
 
