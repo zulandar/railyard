@@ -386,6 +386,12 @@ func TestLoad_MinimalFixture(t *testing.T) {
 	if cfg.Database.Port != 3306 {
 		t.Errorf("Database.Port = %d, want default %d", cfg.Database.Port, 3306)
 	}
+	// Tracks without a playwright block should leave Playwright nil.
+	for i, tr := range cfg.Tracks {
+		if tr.Playwright != nil {
+			t.Errorf("Tracks[%d].Playwright = %+v, want nil", i, tr.Playwright)
+		}
+	}
 }
 
 func TestLoad_MissingOwnerFixture(t *testing.T) {
@@ -425,6 +431,74 @@ func TestLoad_InvalidYAMLFixture(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "config: parse:") {
 		t.Errorf("error = %q, want to contain %q", err.Error(), "config: parse:")
+	}
+}
+
+func TestLoad_PlaywrightFixture(t *testing.T) {
+	cfg, err := Load("testdata/valid_playwright.yaml")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cfg.Tracks) == 0 {
+		t.Fatal("expected at least one track")
+	}
+	pw := cfg.Tracks[0].Playwright
+	if pw == nil {
+		t.Fatal("Tracks[0].Playwright = nil, want non-nil")
+	}
+	if !pw.Enabled {
+		t.Error("Playwright.Enabled = false, want true")
+	}
+	if pw.SpecPath != "tests/e2e" {
+		t.Errorf("Playwright.SpecPath = %q, want %q", pw.SpecPath, "tests/e2e")
+	}
+	// Filename is explicit in the fixture — should match the fixture value,
+	// not be overwritten by the default.
+	if pw.Filename != "{car_id}.spec.ts" {
+		t.Errorf("Playwright.Filename = %q, want %q", pw.Filename, "{car_id}.spec.ts")
+	}
+	if pw.Template == "" {
+		t.Error("Playwright.Template is empty, want non-empty template body")
+	}
+	if !strings.Contains(pw.Template, "@playwright/test") {
+		t.Errorf("Playwright.Template = %q, want it to contain %q", pw.Template, "@playwright/test")
+	}
+}
+
+func TestLoad_PlaywrightMinimalFixture(t *testing.T) {
+	cfg, err := Load("testdata/valid_playwright_minimal.yaml")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cfg.Tracks) == 0 {
+		t.Fatal("expected at least one track")
+	}
+	pw := cfg.Tracks[0].Playwright
+	if pw == nil {
+		t.Fatal("Tracks[0].Playwright = nil, want non-nil")
+	}
+	if !pw.Enabled {
+		t.Error("Playwright.Enabled = false, want true")
+	}
+	if pw.SpecPath != "tests/e2e" {
+		t.Errorf("Playwright.SpecPath = %q, want %q", pw.SpecPath, "tests/e2e")
+	}
+	// Filename is omitted in the fixture — applyDefaults should fill it in.
+	if pw.Filename != "{car_id}.spec.ts" {
+		t.Errorf("Playwright.Filename = %q, want default %q", pw.Filename, "{car_id}.spec.ts")
+	}
+	if pw.Template != "" {
+		t.Errorf("Playwright.Template = %q, want empty string", pw.Template)
+	}
+}
+
+func TestLoad_PlaywrightNoPathFixture(t *testing.T) {
+	_, err := Load("testdata/invalid_playwright_no_path.yaml")
+	if err == nil {
+		t.Fatal("expected error for playwright config with enabled=true but no spec_path")
+	}
+	if !strings.Contains(err.Error(), "playwright.enabled but missing spec_path") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "playwright.enabled but missing spec_path")
 	}
 }
 
