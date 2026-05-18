@@ -3,6 +3,8 @@ package engine
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -19,6 +21,8 @@ type ContextInput struct {
 	Messages      []models.Message
 	RecentCommits []string // pre-fetched "git log --oneline" lines
 	EngineID      string   // engine identifier, used for co-author trailer
+	RepoDir       string   // path to the engine's workdir/repo, used to check
+	// for the existence of a Playwright template file.
 }
 
 // RenderContext produces the full markdown prompt injected into engine sessions.
@@ -40,8 +44,61 @@ func RenderContext(input ContextInput) (string, error) {
 	writeProgress(&w, input.Progress)
 	writeMessages(&w, input.Messages)
 	writeRecentCommits(&w, input.RecentCommits)
+	if section := playwrightSection(resolvePlaywrightConfig(input.Track, input.Config), input.Car.ID, input.RepoDir); section != "" {
+		w.WriteString(section)
+	}
 	writeInstructions(&w, input.EngineID, input.Car.BaseBranch)
 	return w.String(), nil
+}
+
+// resolvePlaywrightConfig returns the live PlaywrightConfig for the given
+// track from the supplied Config (matched by Name), or nil if not found.
+// Track.Playwright on a DB-loaded *models.Track is always nil (gorm:"-"), so
+// the runtime config is the source of truth.
+func resolvePlaywrightConfig(track *models.Track, cfg *config.Config) *models.PlaywrightConfig {
+	if track == nil || cfg == nil {
+		return nil
+	}
+	for i := range cfg.Tracks {
+		if cfg.Tracks[i].Name == track.Name {
+			return cfg.Tracks[i].Playwright
+		}
+	}
+	return nil
+}
+
+// playwrightSection renders the "Required: Playwright PR Demo" markdown section
+// for engines working on a Playwright-enabled track. Returns "" when pw is nil
+// or disabled so callers can omit the section without trailing blank lines.
+//
+// The "Start from the template at" bullet is conditional: it is included only
+// when Template is non-empty AND a file exists at filepath.Join(repoDir,
+// Template). This avoids pointing engines at a template that does not exist
+// in their workdir.
+func playwrightSection(pw *models.PlaywrightConfig, carID, repoDir string) string {
+	if pw == nil || !pw.Enabled {
+		return ""
+	}
+
+	filename := strings.ReplaceAll(pw.Filename, "{car_id}", carID)
+	specPath := filepath.Join(pw.SpecPath, filename)
+
+	var b strings.Builder
+	b.WriteString("## Required: Playwright PR Demo\n\n")
+	b.WriteString("This track requires a Playwright spec that demonstrates the user-visible\n")
+	b.WriteString("behavior of your change. This is part of acceptance — your work is not\n")
+	b.WriteString("complete without it.\n\n")
+	fmt.Fprintf(&b, "- Write a NEW spec at: %s\n", specPath)
+	b.WriteString("- Exercise the change end-to-end through the UI as a real user would\n")
+	b.WriteString("- Use existing page objects/fixtures/base URL config where present\n")
+	if pw.Template != "" && repoDir != "" {
+		if _, err := os.Stat(filepath.Join(repoDir, pw.Template)); err == nil {
+			fmt.Fprintf(&b, "- Start from the template at %s\n", pw.Template)
+		}
+	}
+	b.WriteString("- Project CI will run this spec on the PR with video recording; the\n")
+	b.WriteString("  recording is the artifact reviewers will check\n\n")
+	return b.String()
 }
 
 func writeHeader(w *strings.Builder, track *models.Track, cfg *config.Config) {

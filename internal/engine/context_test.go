@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -547,5 +549,192 @@ func TestWriteUserContent_MessageBody(t *testing.T) {
 	count := strings.Count(out, "<user-content>")
 	if count < 4 {
 		t.Errorf("expected at least 4 <user-content> delimiters (desc, design, acceptance, msg body), got %d", count)
+	}
+}
+
+// --- Playwright section tests ---
+
+const playwrightHeader = "## Required: Playwright PR Demo"
+const playwrightTemplateBullet = "- Start from the template at "
+
+func TestPlaywrightSection_NilConfig(t *testing.T) {
+	got := playwrightSection(nil, "car-001", t.TempDir())
+	if got != "" {
+		t.Errorf("expected empty section for nil config, got %q", got)
+	}
+}
+
+func TestPlaywrightSection_Disabled(t *testing.T) {
+	pw := &models.PlaywrightConfig{
+		Enabled:  false,
+		SpecPath: "tests/pr-demos",
+		Filename: "{car_id}.spec.ts",
+	}
+	got := playwrightSection(pw, "car-001", t.TempDir())
+	if got != "" {
+		t.Errorf("expected empty section when disabled, got %q", got)
+	}
+}
+
+func TestPlaywrightSection_EnabledNoTemplate(t *testing.T) {
+	pw := &models.PlaywrightConfig{
+		Enabled:  true,
+		SpecPath: "tests/pr-demos",
+		Filename: "{car_id}.spec.ts",
+	}
+	got := playwrightSection(pw, "car-001", t.TempDir())
+	if !strings.Contains(got, playwrightHeader) {
+		t.Errorf("missing header in:\n%s", got)
+	}
+	wantSpec := "- Write a NEW spec at: " + filepath.Join("tests/pr-demos", "car-001.spec.ts")
+	if !strings.Contains(got, wantSpec) {
+		t.Errorf("missing %q in:\n%s", wantSpec, got)
+	}
+	if strings.Contains(got, playwrightTemplateBullet) {
+		t.Errorf("template bullet should be omitted when Template is empty; got:\n%s", got)
+	}
+	// Sanity: the other static bullets are present.
+	for _, want := range []string{
+		"Exercise the change end-to-end through the UI",
+		"existing page objects/fixtures/base URL config",
+		"Project CI will run this spec on the PR with video recording",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
+	}
+}
+
+func TestPlaywrightSection_EnabledTemplateExists(t *testing.T) {
+	repoDir := t.TempDir()
+	templateRel := filepath.Join("tests", "pr-demos", "_template.spec.ts")
+	templateAbs := filepath.Join(repoDir, templateRel)
+	if err := os.MkdirAll(filepath.Dir(templateAbs), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(templateAbs, []byte("// template"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	pw := &models.PlaywrightConfig{
+		Enabled:  true,
+		SpecPath: "tests/pr-demos",
+		Filename: "{car_id}.spec.ts",
+		Template: templateRel,
+	}
+	got := playwrightSection(pw, "car-001", repoDir)
+	wantBullet := playwrightTemplateBullet + templateRel
+	if !strings.Contains(got, wantBullet) {
+		t.Errorf("missing template bullet %q in:\n%s", wantBullet, got)
+	}
+}
+
+func TestPlaywrightSection_EnabledTemplateMissing(t *testing.T) {
+	repoDir := t.TempDir() // empty — template file does not exist
+	pw := &models.PlaywrightConfig{
+		Enabled:  true,
+		SpecPath: "tests/pr-demos",
+		Filename: "{car_id}.spec.ts",
+		Template: "tests/pr-demos/_template.spec.ts",
+	}
+	got := playwrightSection(pw, "car-001", repoDir)
+	if !strings.Contains(got, playwrightHeader) {
+		t.Errorf("expected section to render even when template missing; got:\n%s", got)
+	}
+	if strings.Contains(got, playwrightTemplateBullet) {
+		t.Errorf("template bullet should be omitted when file does not exist; got:\n%s", got)
+	}
+}
+
+func TestRenderContext_PlaywrightEnabled(t *testing.T) {
+	input := makeInput()
+	input.Config.Tracks = []config.TrackConfig{
+		{
+			Name: "backend",
+			Playwright: &models.PlaywrightConfig{
+				Enabled:  true,
+				SpecPath: "tests/pr-demos",
+				Filename: "{car_id}.spec.ts",
+			},
+		},
+	}
+	out, err := RenderContext(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, playwrightHeader) {
+		t.Error("expected Playwright section in output when enabled")
+	}
+	wantSpec := filepath.Join("tests/pr-demos", "car-001.spec.ts")
+	if !strings.Contains(out, wantSpec) {
+		t.Errorf("expected substituted spec path %q in output", wantSpec)
+	}
+
+	// The section must appear AFTER the recent-commits / context sections
+	// and BEFORE the closing instructions.
+	pwIdx := strings.Index(out, playwrightHeader)
+	gitIdx := strings.Index(out, "## Git Workflow — CRITICAL")
+	carIdx := strings.Index(out, "## Your Current Car")
+	if pwIdx == -1 {
+		t.Fatal("missing playwright section")
+	}
+	if !(carIdx < pwIdx && pwIdx < gitIdx) {
+		t.Errorf("playwright section out of order: car=%d pw=%d git=%d", carIdx, pwIdx, gitIdx)
+	}
+}
+
+func TestRenderContext_PlaywrightDisabledByteIdentical(t *testing.T) {
+	// Output with no Playwright config at all and with a disabled
+	// Playwright config must be byte-identical to each other. This
+	// guards against stray whitespace when the section is empty.
+	baseInput := makeInput()
+	baseOut, err := RenderContext(baseInput)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	disabledInput := makeInput()
+	disabledInput.Config.Tracks = []config.TrackConfig{
+		{
+			Name: "backend",
+			Playwright: &models.PlaywrightConfig{
+				Enabled:  false,
+				SpecPath: "tests/pr-demos",
+				Filename: "{car_id}.spec.ts",
+			},
+		},
+	}
+	disabledOut, err := RenderContext(disabledInput)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if baseOut != disabledOut {
+		t.Errorf("disabled Playwright output diverges from no-Playwright output\nbase len=%d disabled len=%d", len(baseOut), len(disabledOut))
+	}
+	if strings.Contains(disabledOut, playwrightHeader) {
+		t.Error("disabled Playwright must not emit the section header")
+	}
+}
+
+func TestRenderContext_PlaywrightNoMatchingTrack(t *testing.T) {
+	// Playwright is configured for a different track — should be ignored.
+	input := makeInput()
+	input.Config.Tracks = []config.TrackConfig{
+		{
+			Name: "frontend",
+			Playwright: &models.PlaywrightConfig{
+				Enabled:  true,
+				SpecPath: "tests/pr-demos",
+				Filename: "{car_id}.spec.ts",
+			},
+		},
+	}
+	out, err := RenderContext(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, playwrightHeader) {
+		t.Error("expected no Playwright section when configured track does not match input.Track.Name")
 	}
 }

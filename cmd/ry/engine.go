@@ -290,6 +290,7 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 			Messages:      messages,
 			RecentCommits: commits,
 			EngineID:      eng.ID,
+			RepoDir:       workDir,
 		})
 		if err != nil {
 			logger.Error("Render context error", "error", err)
