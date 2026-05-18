@@ -1,0 +1,16 @@
+owner: bob
+repo: git@github.com:org/app.git
+tracks:
+  - name: infra
+    language: mixed
+    playwright:
+      enabled: true
+      spec_path: tests/e2e
+      filename: "{car_id}.spec.ts"
+      template: |
+        import { test, expect } from '@playwright/test';
+
+        test('{car_id}', async ({ page }) => {
+          await page.goto('/');
+          await expect(page).toHaveTitle(/.*/);
+        });

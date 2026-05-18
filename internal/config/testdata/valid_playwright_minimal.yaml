@@ -1,0 +1,8 @@
+owner: bob
+repo: git@github.com:org/app.git
+tracks:
+  - name: infra
+    language: mixed
+    playwright:
+      enabled: true
+      spec_path: tests/e2e
