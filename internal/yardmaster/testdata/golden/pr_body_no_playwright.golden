@@ -1,0 +1,11 @@
+## Summary
+Implement the login flow described in the design doc.
+
+## Acceptance Criteria
+User can log in with valid credentials and is redirected to the dashboard.
+
+## Design Notes
+Reuse the existing auth client; no new dependencies.
+
+---
+Car: car-golden01 | Track: frontend | Priority: P1 | Engine: eng-golden01 | Branch: ry/alice/frontend/car-golden01
