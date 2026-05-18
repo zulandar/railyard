@@ -187,6 +187,17 @@ tracks:
     maxReplicas: 3
     language: go
     testCommand: "go test ./..."
+    # Playwright PR demo (opt-in, per-track). When enabled, the engine prompt
+    # instructs the agent to commit a Playwright spec demonstrating the
+    # user-visible behavior of its change, and the PR body links to it.
+    # Railyard does NOT run Playwright itself — your project's own CI is
+    # expected to execute the spec (with video recording) and surface the
+    # recording artifact.
+    # playwright:
+    #   enabled: true                              # gate the feature on this track
+    #   specPath: "tests/pr-demos"                 # directory where engines write specs (required when enabled)
+    #   filename: "{car_id}.spec.ts"               # naming pattern; {car_id} substituted at dispatch time
+    #   template: "tests/pr-demos/_template.spec.ts" # optional starter spec; when set, prompt tells engine to start from it
 
 # ---------------------------------------------------------------------------
 # Engine pods
