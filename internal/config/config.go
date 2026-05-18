@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/zulandar/railyard/internal/models"
 )
 
 var envVarRe = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
@@ -129,14 +131,15 @@ type ScalingConfig struct {
 
 // TrackConfig defines an area of concern within the repo.
 type TrackConfig struct {
-	Name           string                 `yaml:"name"`
-	Language       string                 `yaml:"language"`
-	FilePatterns   []string               `yaml:"file_patterns"`
-	EngineSlots    int                    `yaml:"engine_slots"`
-	PreTestCommand string                 `yaml:"pre_test_command"`
-	TestCommand    string                 `yaml:"test_command"`
-	Conventions    map[string]interface{} `yaml:"conventions"`
-	AgentProvider  string                 `yaml:"agent_provider"`
+	Name           string                   `yaml:"name"`
+	Language       string                   `yaml:"language"`
+	FilePatterns   []string                 `yaml:"file_patterns"`
+	EngineSlots    int                      `yaml:"engine_slots"`
+	PreTestCommand string                   `yaml:"pre_test_command"`
+	TestCommand    string                   `yaml:"test_command"`
+	Conventions    map[string]interface{}   `yaml:"conventions"`
+	AgentProvider  string                   `yaml:"agent_provider"`
+	Playwright     *models.PlaywrightConfig `yaml:"playwright,omitempty"`
 }
 
 // BullCommentsConfig controls Bull's issue commenting behavior.
@@ -371,6 +374,12 @@ func (c *Config) applyDefaults() {
 		if c.Tracks[i].AgentProvider == "" {
 			c.Tracks[i].AgentProvider = c.AgentProvider
 		}
+		// Playwright defaults — only apply when the block is present and enabled.
+		if pw := c.Tracks[i].Playwright; pw != nil && pw.Enabled {
+			if pw.Filename == "" {
+				pw.Filename = "{car_id}.spec.ts"
+			}
+		}
 	}
 	// Kubernetes defaults — only apply when kubernetes section is present.
 	if c.Kubernetes.Namespace != "" || c.Kubernetes.Image != "" {
@@ -521,6 +530,14 @@ func (c *Config) validate() error {
 		}
 		if t.Language == "" {
 			errs = append(errs, fmt.Sprintf("tracks[%d].language is required", i))
+		}
+		// Playwright validation — only when the block is present and enabled.
+		// Template is preserved as-written and not validated for existence here
+		// (the file may not yet exist at config-load time).
+		if t.Playwright != nil && t.Playwright.Enabled {
+			if t.Playwright.SpecPath == "" {
+				errs = append(errs, fmt.Sprintf("track %q has playwright.enabled but missing spec_path", t.Name))
+			}
 		}
 	}
 	// Kubernetes validation (only when namespace or image is set).
