@@ -2,6 +2,7 @@ package pluginhost
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -44,6 +45,10 @@ func (h *Host) Names() []string {
 //
 // Each plugin sees a per-plugin Host wrapper so [Host.Logger] returns a
 // logger scoped to that plugin's name.
+//
+// Per spec §4 boot observability, each plugin emits an INFO log line at
+// init begin ("plugin <name>: init"). Init failures log at WARN with the
+// message "plugin <name>: init failed — skipped (<reason>)".
 func (h *Host) Init(ctx context.Context) {
 	h.mu.Lock()
 	plugins := append([]plugin.Plugin(nil), h.plugins...)
@@ -53,9 +58,12 @@ func (h *Host) Init(ctx context.Context) {
 	for _, p := range plugins {
 		name := p.Name()
 		logger := slog.Default().With(slog.String("plugin", name))
-		logger.Info("plugin init")
+		logger.Info("plugin " + name + ": init")
 		if err := p.Init(ctx, h.hostFor(name)); err != nil {
-			logger.Warn("init failed — skipped", slog.String("error", err.Error()))
+			logger.Warn(
+				"plugin "+name+": init failed — skipped ("+err.Error()+")",
+				slog.String("error", err.Error()),
+			)
 			continue
 		}
 		survivors = append(survivors, p)
@@ -69,6 +77,12 @@ func (h *Host) Init(ctx context.Context) {
 // Start calls each surviving plugin's Start in registration order. A
 // plugin whose Start errors is logged at WARN but kept in the set —
 // failed Start is observable but doesn't unwind already-started plugins.
+//
+// Per spec §4, on successful Start the host emits an INFO log line of the
+// form "plugin <name>: started (N daemons, M subscriptions)". Counts are
+// measured AFTER Plugin.Start returned, so any daemons or subscriptions
+// registered from within Start are reflected. Subscriptions registered
+// after Start (rare) are tracked but won't appear in this log line.
 func (h *Host) Start(ctx context.Context) {
 	h.mu.Lock()
 	plugins := append([]plugin.Plugin(nil), h.plugins...)
@@ -78,10 +92,17 @@ func (h *Host) Start(ctx context.Context) {
 		name := p.Name()
 		logger := slog.Default().With(slog.String("plugin", name))
 		if err := p.Start(ctx); err != nil {
-			logger.Warn("start failed", slog.String("error", err.Error()))
+			logger.Warn("plugin "+name+": start failed",
+				slog.String("error", err.Error()))
 			continue
 		}
-		logger.Info("plugin started")
+		daemons, subs := h.countsFor(name)
+		logger.Info(
+			fmt.Sprintf("plugin %s: started (%d daemons, %d subscriptions)",
+				name, daemons, subs),
+			slog.Int("daemons", daemons),
+			slog.Int("subscriptions", subs),
+		)
 	}
 }
 
@@ -123,12 +144,13 @@ func (h *Host) Stop(parent context.Context) {
 		select {
 		case err := <-done:
 			if err != nil {
-				logger.Warn("plugin stop returned error", slog.String("error", err.Error()))
+				logger.Warn("plugin "+name+": stop returned error",
+					slog.String("error", err.Error()))
 			} else {
-				logger.Info("plugin stopped")
+				logger.Info("plugin " + name + ": stopped")
 			}
 		case <-ctx.Done():
-			logger.Warn("plugin stop drain timeout exceeded — abandoned",
+			logger.Warn("plugin "+name+": stop drain timeout exceeded — abandoned",
 				slog.Duration("timeout", stopDrainTimeout))
 		}
 

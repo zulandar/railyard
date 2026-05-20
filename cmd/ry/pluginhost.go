@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/zulandar/railyard/internal/car"
@@ -16,6 +18,35 @@ import (
 	"github.com/zulandar/railyard/pkg/plugin"
 	"gorm.io/gorm"
 )
+
+// logBootSummary emits a single INFO log line describing which plugins
+// survived Init and reached Start. The format mirrors spec §4 boot
+// observability:
+//
+//	loaded plugins: trainmaster, audit-log
+//
+// When no plugins are running (either none registered or every Init
+// failed) the line reads "loaded plugins: (none)". Plugin names are
+// reported in registration order — the same order Init/Start walked.
+//
+// This is intentionally a single line, not one-per-plugin: per-plugin
+// lifecycle logs (init / started / stopped) are emitted by
+// internal/pluginhost. The boot summary is a complementary one-glance
+// check that operators see at startup.
+func logBootSummary(logger *slog.Logger, host *pluginhost.Host) {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	names := host.Names()
+	if len(names) == 0 {
+		logger.Info("loaded plugins: (none)")
+		return
+	}
+	logger.Info(
+		"loaded plugins: "+strings.Join(names, ", "),
+		slog.Any("plugins", names),
+	)
+}
 
 // buildPluginHost constructs the plugin host and registers every plugin that
 // called [plugin.Register] at init time. The returned host has NOT had its

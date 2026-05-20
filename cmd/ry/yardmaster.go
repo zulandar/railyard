@@ -66,6 +66,7 @@ func runYardmaster(cmd *cobra.Command, configPath, logLevel string) error {
 	host := buildPluginHost(cfg, gormDB, bus)
 	host.Init(ctx)
 	host.Start(ctx)
+	logBootSummary(logger, host)
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)

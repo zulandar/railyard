@@ -108,6 +108,14 @@ type Host struct {
 	// during plugin Stop). See daemon.go.
 	daemons map[string][]*daemonState
 
+	// subscriptions is the per-plugin live subscription count. Incremented
+	// when a plugin (via [pluginView.Subscribe]) registers a handler;
+	// decremented when the returned Unsubscribe is invoked. Used by the
+	// per-plugin "started" boot log line to report `(N daemons, M
+	// subscriptions)` per spec §4. Negative counts are clamped to zero —
+	// double-unsubscribe is documented as safe and must not skew the gauge.
+	subscriptions map[string]int
+
 	// daemonCtx is the root context every daemon's per-plugin context
 	// derives from. Lazily initialised on the first RunDaemon call so
 	// hosts that never register daemons stay cheap. daemonCancel is its
@@ -139,6 +147,19 @@ func (v *pluginView) Logger() *slog.Logger {
 // only ever see a *pluginView, so this override is what gets called.
 func (v *pluginView) RunDaemon(name string, fn plugin.DaemonFunc) {
 	v.Host.runDaemonFor(v.name, name, fn)
+}
+
+// Subscribe overrides Host.Subscribe so the host can track which plugin
+// owns each subscription. Mirrors the [pluginView.RunDaemon] override:
+// the bare *Host.Subscribe stays in place (so the compile-time
+// plugin.Host assertion holds) but only tracks at the empty plugin name;
+// real plugins always reach Subscribe through this view.
+//
+// The returned Unsubscribe wraps the underlying bus unsubscribe so the
+// per-plugin counter is decremented exactly once even if the caller
+// invokes Unsubscribe multiple times (the SDK documents that as safe).
+func (v *pluginView) Subscribe(topic plugin.EventType, handler plugin.EventHandler) plugin.Unsubscribe {
+	return v.Host.subscribeFor(v.name, topic, handler)
 }
 
 // Compile-time assertion that *Host implements plugin.Host. Catches
@@ -221,16 +242,82 @@ func (h *Host) RunDaemon(name string, fn plugin.DaemonFunc) {
 
 // Subscribe delegates to the underlying events bus. The wrapper converts
 // the bus's untyped payload into the typed (EventType, any) signature the
-// SDK exposes.
+// SDK exposes. In practice plugins always call Subscribe through a
+// [pluginView], whose override forwards to subscribeFor with the
+// registered plugin's name; this bare-*Host signature exists to satisfy
+// the plugin.Host compile-time assertion and tracks under the empty
+// plugin name (matching the bare-*Host RunDaemon behaviour).
 func (h *Host) Subscribe(topic plugin.EventType, handler plugin.EventHandler) plugin.Unsubscribe {
+	return h.subscribeFor("", topic, handler)
+}
+
+// subscribeFor is the per-plugin-tracked Subscribe implementation. It
+// wraps the underlying events.Bus subscription with a counter increment
+// on attach and a once-only decrement on unsubscribe. The counter is the
+// source of truth for the "M subscriptions" field in the per-plugin
+// "started" log line.
+//
+// A nil bus is tolerated (matches the pre-existing Host.Subscribe
+// contract) — counter bookkeeping still runs so tests without a wired
+// bus exercise the tracking path.
+func (h *Host) subscribeFor(pluginName string, topic plugin.EventType, handler plugin.EventHandler) plugin.Unsubscribe {
+	h.incrSubscription(pluginName)
+
+	// once guards the decrement so double-unsubscribe (documented safe by
+	// the SDK) does not double-count.
+	var once sync.Once
+	decrement := func() {
+		once.Do(func() {
+			h.decrSubscription(pluginName)
+		})
+	}
+
 	if h.deps.Bus == nil {
-		// No bus wired — return a no-op unsubscribe so plugin code stays
-		// correct even in stripped-down test contexts.
-		return func() {}
+		// No bus wired — return a no-op unsubscribe that still releases
+		// the per-plugin counter so the tracking layer stays balanced
+		// across plugin lifecycles in test contexts that omit a bus.
+		return func() {
+			decrement()
+		}
 	}
 	wrapper := func(payload any) {
 		handler(topic, payload)
 	}
-	unsub := h.deps.Bus.Subscribe(string(topic), wrapper)
-	return plugin.Unsubscribe(unsub)
+	busUnsub := h.deps.Bus.Subscribe(string(topic), wrapper)
+	return func() {
+		busUnsub()
+		decrement()
+	}
+}
+
+// incrSubscription bumps the per-plugin live subscription gauge.
+func (h *Host) incrSubscription(pluginName string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.subscriptions == nil {
+		h.subscriptions = make(map[string]int)
+	}
+	h.subscriptions[pluginName]++
+}
+
+// decrSubscription decrements the per-plugin live subscription gauge.
+// Clamps at zero so a misbehaving caller can't drive the counter negative.
+func (h *Host) decrSubscription(pluginName string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.subscriptions == nil {
+		return
+	}
+	if h.subscriptions[pluginName] > 0 {
+		h.subscriptions[pluginName]--
+	}
+}
+
+// countsFor returns the live (daemons, subscriptions) gauge pair for the
+// named plugin. Used by [Host.Start] to populate the "started" log line.
+// Safe for concurrent use.
+func (h *Host) countsFor(pluginName string) (daemons, subscriptions int) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return len(h.daemons[pluginName]), h.subscriptions[pluginName]
 }
