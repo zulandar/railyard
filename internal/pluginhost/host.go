@@ -8,11 +8,11 @@
 // other internal subsystems (e.g. car update functions, scale paths) are
 // reached via small typed function fields supplied through [Dependencies].
 //
-// This package implements beads railyard-3q8.3.1, .3.2, and .3.3 — the
-// Host struct, lifecycle/registry, snapshot, and command surfaces. The
-// fully-featured panic-recovering, drain-managed daemon manager is the
-// scope of a follow-up bead (.3.4); [Host.RunDaemon] is currently a
-// minimal placeholder so the [plugin.Host] interface remains satisfied.
+// This package implements beads railyard-3q8.3.1, .3.2, .3.3, and .3.4 —
+// the Host struct, lifecycle/registry, snapshot, command, and daemon
+// management surfaces. The daemon manager (panic recovery, per-plugin
+// context cancellation, 5s drain bound, 3-strike lifetime restart budget,
+// per-daemon structured logging) lives in daemon.go.
 package pluginhost
 
 import (
@@ -97,10 +97,23 @@ type Host struct {
 	// once in NewHost.
 	allowed map[string]commandBinding
 
-	// Plugin lifecycle state. mu guards plugins and pluginCmds.
+	// Plugin lifecycle state. mu guards plugins, pluginCmds, daemons,
+	// daemonCtx, and daemonCancel.
 	mu         sync.Mutex
 	plugins    []plugin.Plugin
 	pluginCmds map[string]plugin.CommandHandler // plugin-registered commands
+
+	// daemons maps plugin name to its currently-supervised daemons. An
+	// entry is appended on RunDaemon and removed on cancelDaemons (called
+	// during plugin Stop). See daemon.go.
+	daemons map[string][]*daemonState
+
+	// daemonCtx is the root context every daemon's per-plugin context
+	// derives from. Lazily initialised on the first RunDaemon call so
+	// hosts that never register daemons stay cheap. daemonCancel is its
+	// CancelFunc; calling it fans out cancellation to every daemon.
+	daemonCtx    context.Context
+	daemonCancel context.CancelFunc
 }
 
 // pluginView is a per-plugin wrapper that satisfies [plugin.Host]. It
@@ -117,6 +130,15 @@ type pluginView struct {
 // logger. All other Host methods are inherited via embedding.
 func (v *pluginView) Logger() *slog.Logger {
 	return slog.Default().With(slog.String("plugin", v.name))
+}
+
+// RunDaemon overrides Host.RunDaemon so the host knows which plugin
+// registered the daemon. The bare *Host.RunDaemon still exists (to keep
+// the plugin.Host compile-time assertion satisfied) but is unscoped and
+// records the daemon under an empty plugin name; in practice plugins
+// only ever see a *pluginView, so this override is what gets called.
+func (v *pluginView) RunDaemon(name string, fn plugin.DaemonFunc) {
+	v.Host.runDaemonFor(v.name, name, fn)
 }
 
 // Compile-time assertion that *Host implements plugin.Host. Catches
@@ -188,18 +210,13 @@ func (h *Host) hostFor(name string) plugin.Host {
 	return &pluginView{Host: h, name: name}
 }
 
-// RunDaemon is the placeholder implementation for the daemon manager.
-//
-// TODO(railyard-3q8.3.4): replace with a panic-recovering, drain-managed
-// implementation that supports the 5s drain timeout, 3-strike restart
-// bound, and per-daemon structured logging called out in spec §8.
+// RunDaemon registers a managed daemon under an empty plugin name. In
+// production plugins always call through a [pluginView] (see hostFor),
+// whose RunDaemon override forwards to runDaemonFor with the correct
+// plugin name. The bare-*Host signature exists so *Host continues to
+// satisfy plugin.Host (compile-time assertion below).
 func (h *Host) RunDaemon(name string, fn plugin.DaemonFunc) {
-	logger := h.Logger().With(slog.String("daemon", name))
-	go func() {
-		if err := fn(context.Background()); err != nil {
-			logger.Warn("daemon exited with error", slog.String("error", err.Error()))
-		}
-	}()
+	h.runDaemonFor("", name, fn)
 }
 
 // Subscribe delegates to the underlying events bus. The wrapper converts

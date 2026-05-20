@@ -89,6 +89,15 @@ func (h *Host) Start(ctx context.Context) {
 // is wrapped in a 5-second per-plugin context (spec §4). A plugin that
 // ignores cancellation past the timeout is abandoned; the host returns
 // and core shutdown continues regardless.
+//
+// Daemon shutdown semantics: before calling Plugin.Stop the host cancels
+// every daemon registered by that plugin. The plugin's Stop and its
+// daemons then drain CONCURRENTLY inside a single shared 5-second budget.
+// This is the combined reading of spec §4 (per-plugin Stop drain = 5s)
+// and spec §8 (per-daemon drain = 5s): the per-daemon drain bound and
+// the per-plugin Stop bound are the same 5s window, not stacked. After
+// the window expires any remaining daemons (and the plugin's Stop, if
+// still running) are abandoned with a WARN log.
 func (h *Host) Stop(parent context.Context) {
 	h.mu.Lock()
 	plugins := append([]plugin.Plugin(nil), h.plugins...)
@@ -100,6 +109,13 @@ func (h *Host) Stop(parent context.Context) {
 		logger := slog.Default().With(slog.String("plugin", name))
 
 		ctx, cancel := context.WithTimeout(parent, stopDrainTimeout)
+
+		// Cancel daemons FIRST so they see ctx.Done before the plugin's
+		// Stop runs. cancelDaemons returns the slice so we can join on it
+		// once Plugin.Stop returns (or the budget expires). Cancellation
+		// itself is non-blocking — the join is what consumes the budget.
+		daemonStates := h.cancelDaemons(name)
+
 		done := make(chan error, 1)
 		go func() {
 			done <- p.Stop(ctx)
@@ -115,6 +131,24 @@ func (h *Host) Stop(parent context.Context) {
 			logger.Warn("plugin stop drain timeout exceeded — abandoned",
 				slog.Duration("timeout", stopDrainTimeout))
 		}
+
+		// Join on daemons using whatever remains of the per-plugin
+		// budget. joinDaemons returns when every daemon's done channel
+		// closes OR when ctx is cancelled (deadline expired or cancel()
+		// below). Daemons that miss the deadline are abandoned with a
+		// WARN log.
+		joinDaemons(ctx, daemonStates)
+
 		cancel()
 	}
+
+	// Belt-and-suspenders: cancel the root daemon context so any daemons
+	// registered after the snapshot above (or under an empty plugin name)
+	// also shut down. Held until last so per-plugin cancellation runs
+	// first and gets its proper logging.
+	h.mu.Lock()
+	if h.daemonCancel != nil {
+		h.daemonCancel()
+	}
+	h.mu.Unlock()
 }
