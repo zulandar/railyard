@@ -304,6 +304,24 @@ zero-value `yaml.Node` (Kind == 0); the plugin's `Init` handles that
 case and applies its own defaults. The OSS binary tolerates the unknown
 key — it logs at DEBUG when it sees one.
 
+### 2.6 Working version in this repo
+
+A compiling version of the plugin package above lives at
+[`examples/plugins/hello/`](../../examples/plugins/hello/). It is its
+own Go module with a `replace` directive pointing at the in-tree
+railyard source, so it builds against the current SDK with no external
+release. The verification test in
+`cmd/ry/example_plugin_build_test.go` runs `go build ./...` from that
+directory on every CI run, so this example stays current with the SDK —
+if `pkg/plugin` ever changes in a way that breaks the documented
+listing above, CI fails until the guide and the example are brought
+back in sync.
+
+That example is a plugin package only (no `cmd/ry-hello/main.go`). The
+entry-point limitation in §2.4 is real until the public re-entry bead
+lands; once it does, the example will grow a tiny `main.go` and the
+verification test will build the full binary.
+
 That's the full plugin. The rest of this guide explains what each piece
 does and how to extend it.
 
