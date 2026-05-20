@@ -1,4 +1,4 @@
-// Package main — OSS non-regression smoke test.
+// Package cli — OSS non-regression smoke test.
 //
 // This file is the load-bearing contract that the OSS `ry` binary
 // behaves identically to a pre-plugin-system railyard build. Every
@@ -20,7 +20,7 @@
 // Tests that shell out to the go toolchain follow the pattern in
 // pkg/plugin/import_test.go: they Skip when `go` isn't on PATH and
 // they bound the build with exec.CommandContext.
-package main
+package cli
 
 import (
 	"bytes"

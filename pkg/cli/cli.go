@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"fmt"
@@ -68,6 +68,21 @@ func execute(cmd *cobra.Command) int {
 	return 0
 }
 
-func main() {
+// Run executes the railyard CLI and exits the process with the
+// appropriate status code. It mirrors what cmd/ry/main.go did before the
+// pkg/cli extraction.
+//
+// Enterprise binaries that side-effect import plugins call this from
+// their own main() function:
+//
+//	package main
+//
+//	import (
+//	    _ "github.com/your-org/railyard-enterprise/plugins/<name>"
+//	    "github.com/zulandar/railyard/pkg/cli"
+//	)
+//
+//	func main() { cli.Run() }
+func Run() {
 	os.Exit(execute(newRootCmd()))
 }

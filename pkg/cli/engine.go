@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"context"
@@ -133,7 +133,7 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 	// Construct an event bus for this engine pod. Plugin lifecycle is NOT
 	// started here — engine pods are per-track Kubernetes workloads, and
 	// plugin daemons that need yard-wide visibility live in the yardmaster
-	// pod (see cmd/ry/yardmaster.go). The bus alone is enough to let
+	// pod (see pkg/cli/yardmaster.go). The bus alone is enough to let
 	// in-process subscribers (today: none in pod mode) observe events;
 	// publishing to a bus with no subscribers is a no-op.
 	bus := events.NewBusWithLogger(logger)

@@ -1,4 +1,4 @@
-// Package main — verification that the documented hello-world plugin
+// Package cli — verification that the documented hello-world plugin
 // at examples/plugins/hello/ still compiles against the current SDK.
 //
 // This test is the regression contract for docs/plugins/authoring.md §2:
@@ -7,7 +7,7 @@
 // stale. The example directory is a sibling Go module with its own
 // go.mod + replace directive, so we shell out to `go build` exactly the
 // way a plugin author would.
-package main
+package cli
 
 import (
 	"bytes"
