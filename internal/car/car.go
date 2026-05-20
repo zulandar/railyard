@@ -9,9 +9,22 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/zulandar/railyard/internal/events"
 	"github.com/zulandar/railyard/internal/models"
+	"github.com/zulandar/railyard/pkg/plugin"
 	"gorm.io/gorm"
 )
+
+// publish is a nil-safe forwarder to the event bus. Callers that do not have
+// a bus (existing call sites and tests) get a no-op; this preserves the
+// "publishing to a nil bus is a no-op" contract from the plugin system spec
+// (§6.3) and keeps existing tests green without modification.
+func publish(bus events.Bus, topic plugin.EventType, payload any) {
+	if bus == nil {
+		return
+	}
+	bus.Publish(string(topic), payload)
+}
 
 // CreateOpts holds parameters for creating a new car.
 type CreateOpts struct {
@@ -73,7 +86,18 @@ func ComputeBranch(branchPrefix, track, id string) string {
 }
 
 // Create creates a new car with an auto-generated ID.
+// Equivalent to CreateWithBus(db, nil, opts) — no events are published.
 func Create(db *gorm.DB, opts CreateOpts) (*models.Car, error) {
+	return CreateWithBus(db, nil, opts)
+}
+
+// CreateWithBus creates a new car and, on success, publishes a [plugin.CarCreated]
+// event to bus. Passing a nil bus is equivalent to [Create].
+//
+// The publish happens AFTER the DB write commits so subscribers see consistent
+// state. Per spec §6.3 ("publishing to a nil bus is a no-op"), existing call
+// sites that use [Create] continue to work unchanged.
+func CreateWithBus(db *gorm.DB, bus events.Bus, opts CreateOpts) (*models.Car, error) {
 	if opts.Title == "" {
 		return nil, fmt.Errorf("car: title is required")
 	}
@@ -132,6 +156,14 @@ func Create(db *gorm.DB, opts CreateOpts) (*models.Car, error) {
 		return nil, fmt.Errorf("car: create: %w", err)
 	}
 
+	publish(bus, plugin.CarCreated, plugin.CarCreatedEvent{
+		CarID:       car.ID,
+		Track:       car.Track,
+		Type:        car.Type,
+		Priority:    car.Priority,
+		RequestedBy: car.RequestedBy,
+	})
+
 	return &car, nil
 }
 
@@ -175,7 +207,24 @@ func List(db *gorm.DB, filters ListFilters) ([]models.Car, error) {
 }
 
 // Update modifies car fields. Status transitions are validated against ValidTransitions.
+// Equivalent to UpdateWithBus(db, nil, id, updates) — no events are published.
 func Update(db *gorm.DB, id string, updates map[string]interface{}) error {
+	return UpdateWithBus(db, nil, id, updates)
+}
+
+// UpdateWithBus modifies car fields and, after a successful status transition,
+// publishes the corresponding lifecycle events to bus. Passing a nil bus is
+// equivalent to [Update].
+//
+// Events emitted (only when status actually changes and the DB write commits):
+//   - [plugin.CarStatusChanged] on every status transition (always)
+//   - [plugin.CarClaimed] when the new status is "claimed"
+//   - [plugin.CarMerged] when the new status is "merged"
+//   - [plugin.MergeFailed] when the new status is "merge-failed"
+//
+// Publishes happen AFTER the DB commit so subscribers see consistent state,
+// and at most once per transition.
+func UpdateWithBus(db *gorm.DB, bus events.Bus, id string, updates map[string]interface{}) error {
 	var car models.Car
 	if err := db.Where("id = ?", id).First(&car).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -207,6 +256,46 @@ func Update(db *gorm.DB, id string, updates map[string]interface{}) error {
 
 	if newStatus, ok := updates["status"].(string); ok {
 		slog.Info("car: status transition", "car", id, "from", oldStatus, "to", newStatus)
+
+		// Publish only if the status actually changed. Defensive — Update's
+		// transition validator already rejects no-op transitions for known
+		// statuses, but pinning this here keeps the contract explicit.
+		if newStatus != oldStatus {
+			publish(bus, plugin.CarStatusChanged, plugin.CarStatusChangedEvent{
+				CarID:     id,
+				OldStatus: oldStatus,
+				NewStatus: newStatus,
+			})
+
+			switch newStatus {
+			case "claimed":
+				// Engine ID is the new assignee, supplied alongside the status
+				// in the same updates map. If absent (caller bug), publish with
+				// an empty EngineID rather than silently dropping the event.
+				engineID, _ := updates["assignee"].(string)
+				publish(bus, plugin.CarClaimed, plugin.CarClaimedEvent{
+					CarID:    id,
+					EngineID: engineID,
+				})
+			case "merged":
+				// Branch is captured from the pre-update Car snapshot — the
+				// branch itself isn't part of the merge transition so the
+				// pre-update value is correct.
+				publish(bus, plugin.CarMerged, plugin.CarMergedEvent{
+					CarID:  id,
+					Branch: car.Branch,
+				})
+			case "merge-failed":
+				// Reason may be carried in updates["blocked_reason"] (engine
+				// reports the failure via this field) or absent. Either way,
+				// publish — subscribers can correlate with logs.
+				reason, _ := updates["blocked_reason"].(string)
+				publish(bus, plugin.MergeFailed, plugin.MergeFailedEvent{
+					CarID:  id,
+					Reason: reason,
+				})
+			}
+		}
 	}
 
 	return nil
@@ -264,7 +353,15 @@ func ChildrenSummary(db *gorm.DB, parentID string) ([]StatusCount, error) {
 // Publish transitions a car from draft to open. If recursive is true and the
 // car is an epic, all draft children are also published. Returns the count of
 // cars published.
+// Equivalent to PublishWithBus(db, nil, id, recursive) — no events are published.
 func Publish(db *gorm.DB, id string, recursive bool) (int, error) {
+	return PublishWithBus(db, nil, id, recursive)
+}
+
+// PublishWithBus transitions a car (and, optionally, its draft children) from
+// draft to open and emits one [plugin.CarStatusChanged] event per actual
+// transition. Passing a nil bus is equivalent to [Publish].
+func PublishWithBus(db *gorm.DB, bus events.Bus, id string, recursive bool) (int, error) {
 	var c models.Car
 	if err := db.Where("id = ?", id).First(&c).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -281,6 +378,11 @@ func Publish(db *gorm.DB, id string, recursive bool) (int, error) {
 			return 0, fmt.Errorf("car: publish %s: %w", id, err)
 		}
 		count++
+		publish(bus, plugin.CarStatusChanged, plugin.CarStatusChangedEvent{
+			CarID:     id,
+			OldStatus: "draft",
+			NewStatus: "open",
+		})
 	}
 
 	// Recursively publish draft children.
@@ -290,7 +392,7 @@ func Publish(db *gorm.DB, id string, recursive bool) (int, error) {
 			return count, fmt.Errorf("car: list draft children of %s: %w", id, err)
 		}
 		for _, child := range children {
-			n, err := Publish(db, child.ID, true)
+			n, err := PublishWithBus(db, bus, child.ID, true)
 			if err != nil {
 				return count, err
 			}
