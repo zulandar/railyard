@@ -7,8 +7,20 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/zulandar/railyard/internal/events"
+	"github.com/zulandar/railyard/pkg/plugin"
 	"gorm.io/gorm"
 )
+
+// publish is a nil-safe forwarder to the event bus. Mirrors the helper used
+// by internal/car and internal/yardmaster so pause/resume route handlers can
+// emit events without a bus reference branching every call site.
+func publish(bus events.Bus, topic plugin.EventType, payload any) {
+	if bus == nil {
+		return
+	}
+	bus.Publish(string(topic), payload)
+}
 
 // pageData injects ProjectName from the Gin context into a gin.H map so the
 // nav bar badge renders on every page without touching each handler.
@@ -19,8 +31,16 @@ func pageData(c *gin.Context, data gin.H) gin.H {
 	return data
 }
 
-// registerRoutes sets up all dashboard routes on the Gin router.
+// registerRoutes is a thin wrapper around [registerRoutesWithBus] that passes
+// a nil bus. Existing test callers keep this 3-argument form.
 func registerRoutes(router *gin.Engine, db *gorm.DB, projectName string) {
+	registerRoutesWithBus(router, db, projectName, nil)
+}
+
+// registerRoutesWithBus sets up all dashboard routes on the Gin router. When
+// bus is non-nil, pause/resume routes publish [plugin.YardPaused] /
+// [plugin.YardResumed] after the new state is committed to the DB.
+func registerRoutesWithBus(router *gin.Engine, db *gorm.DB, projectName string, bus events.Bus) {
 	// Inject project name into every request context so pageData() can pick it up.
 	router.Use(func(c *gin.Context) {
 		c.Set("ProjectName", projectName)
@@ -51,6 +71,13 @@ func registerRoutes(router *gin.Engine, db *gorm.DB, projectName string) {
 
 	// SSE endpoint for real-time escalation alerts.
 	router.GET("/api/events", handleSSE(db))
+
+	// Yard pause / resume — server-side state managed via the dashboard.
+	// These are POST endpoints so they cannot be triggered by a stray GET
+	// (browser refresh, prefetch, etc.) and persist the new yard state to
+	// the railyard_configs row before publishing to subscribers.
+	router.POST("/api/yard/pause", handlePauseYard(db, bus))
+	router.POST("/api/yard/resume", handleResumeYard(db, bus))
 }
 
 // dashboardData gathers all data needed for the dashboard page.
@@ -324,5 +351,71 @@ func handleLogs(db *gorm.DB) gin.HandlerFunc {
 			"ActiveDirection":  direction,
 			"NavPath":          c.Request.URL.Path,
 		}))
+	}
+}
+
+// pauseRequest is the JSON body accepted by the pause/resume endpoints. Both
+// fields are optional; an empty reason is fine. Form-encoded bodies with the
+// same "reason" key are also accepted via gin's binding.
+type pauseRequest struct {
+	Reason string `json:"reason" form:"reason"`
+}
+
+// handlePauseYard persists the paused state to the railyard_configs row and,
+// on success, publishes [plugin.YardPaused] to the event bus.
+//
+// The handler is tolerant of missing/empty bodies — callers can simply POST
+// without a body to pause without a reason. Persistence is intentionally a
+// best-effort row read-modify-write: if the row is missing the handler still
+// returns 200 with status="paused" since there is no operational difference
+// without a config row. The publish happens AFTER the DB write commits.
+func handlePauseYard(db *gorm.DB, bus events.Bus) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req pauseRequest
+		// ShouldBind tolerates empty bodies (returns nil for both JSON and form).
+		_ = c.ShouldBind(&req)
+
+		if err := SetYardPaused(db, true, req.Reason); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"status": "error",
+				"error":  err.Error(),
+			})
+			return
+		}
+
+		publish(bus, plugin.YardPaused, plugin.YardPausedEvent{
+			Reason: req.Reason,
+		})
+
+		c.JSON(http.StatusOK, gin.H{
+			"status": "paused",
+			"reason": req.Reason,
+		})
+	}
+}
+
+// handleResumeYard clears the paused state and publishes [plugin.YardResumed]
+// after the DB write commits. Mirrors [handlePauseYard].
+func handleResumeYard(db *gorm.DB, bus events.Bus) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req pauseRequest
+		_ = c.ShouldBind(&req)
+
+		if err := SetYardPaused(db, false, req.Reason); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"status": "error",
+				"error":  err.Error(),
+			})
+			return
+		}
+
+		publish(bus, plugin.YardResumed, plugin.YardResumedEvent{
+			Reason: req.Reason,
+		})
+
+		c.JSON(http.StatusOK, gin.H{
+			"status": "resumed",
+			"reason": req.Reason,
+		})
 	}
 }

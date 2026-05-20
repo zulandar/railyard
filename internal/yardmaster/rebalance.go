@@ -8,8 +8,10 @@ import (
 
 	"github.com/zulandar/railyard/internal/config"
 	"github.com/zulandar/railyard/internal/engine"
+	"github.com/zulandar/railyard/internal/events"
 	"github.com/zulandar/railyard/internal/models"
 	"github.com/zulandar/railyard/internal/orchestration"
+	"github.com/zulandar/railyard/pkg/plugin"
 	"gorm.io/gorm"
 )
 
@@ -40,6 +42,13 @@ type trackMetrics struct {
 // them to tracks with a backlog. At most 1 engine is moved per deficit track
 // per cycle.
 func rebalanceEngines(db *gorm.DB, cfg *config.Config, configPath string, state *rebalanceState, logger *slog.Logger) error {
+	return rebalanceEnginesWithBus(db, cfg, configPath, state, logger, nil)
+}
+
+// rebalanceEnginesWithBus is the bus-aware variant of [rebalanceEngines]. When
+// bus is non-nil and an engine move succeeds, publishes a
+// [plugin.YardmasterAction] event with ActionType="rebalance".
+func rebalanceEnginesWithBus(db *gorm.DB, cfg *config.Config, configPath string, state *rebalanceState, logger *slog.Logger, bus events.Bus) error {
 	now := time.Now()
 
 	// Cooldown guard.
@@ -138,6 +147,14 @@ func rebalanceEngines(db *gorm.DB, cfg *config.Config, configPath string, state 
 		}
 
 		logger.Info("Rebalanced engine", "from", donor, "to", dt.name)
+
+		// Surface the rebalance to plugin subscribers. TargetID is the
+		// receiver track since that is the entity gaining capacity. ActionType
+		// matches the spec's "rebalance" label.
+		publish(bus, plugin.YardmasterAction, plugin.YardmasterActionEvent{
+			TargetID:   dt.name,
+			ActionType: "rebalance",
+		})
 
 		// Update cooldowns.
 		state.lastTrackMoveAt[donor] = now
