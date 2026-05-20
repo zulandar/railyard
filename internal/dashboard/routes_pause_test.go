@@ -2,7 +2,9 @@ package dashboard
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/zulandar/railyard/internal/events"
+	"github.com/zulandar/railyard/internal/models"
 	"github.com/zulandar/railyard/pkg/plugin"
 	"gorm.io/gorm"
 )
@@ -339,5 +342,36 @@ func TestGetYardPaused_NoRow(t *testing.T) {
 	paused, reason := GetYardPaused(db)
 	if paused || reason != "" {
 		t.Errorf("no row should yield zero value; got paused=%v reason=%q", paused, reason)
+	}
+}
+
+// TestSetYardPaused_PropagatesTransientErrors guards against the regression
+// where any First() error was treated as "no row yet" — a transient DB error
+// (context cancellation, connection blip, schema mismatch, etc.) would have
+// triggered a spurious Owner="dashboard" insert and masked the real failure.
+func TestSetYardPaused_PropagatesTransientErrors(t *testing.T) {
+	db := testDB(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // pre-cancel so First() returns context.Canceled, not ErrRecordNotFound
+
+	err := SetYardPaused(db.WithContext(ctx), true, "should-not-write")
+	if err == nil {
+		t.Fatal("expected error from cancelled context; got nil")
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("transient error masked as ErrRecordNotFound: %v", err)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled wrapped, got %v", err)
+	}
+
+	// And — critically — no fallback row was inserted.
+	var count int64
+	if cerr := db.Model(&models.RailyardConfig{}).Count(&count).Error; cerr != nil {
+		t.Fatalf("count: %v", cerr)
+	}
+	if count != 0 {
+		t.Errorf("expected 0 rows after transient-error path, got %d (spurious insert)", count)
 	}
 }

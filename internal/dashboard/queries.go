@@ -2,7 +2,9 @@ package dashboard
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"time"
@@ -1498,12 +1500,18 @@ type yardSettings struct {
 
 // GetYardPaused returns the current paused flag and reason. A nil db returns
 // the zero value. A missing or unparseable row is treated as not paused.
+// Transient DB errors (anything other than gorm.ErrRecordNotFound) are logged
+// at WARN so operators can spot a degraded database that would otherwise
+// silently render the yard as "running".
 func GetYardPaused(db *gorm.DB) (paused bool, reason string) {
 	if db == nil {
 		return false, ""
 	}
 	var rc models.RailyardConfig
 	if err := db.First(&rc).Error; err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			slog.Default().Warn("dashboard: GetYardPaused query failed", "error", err)
+		}
 		return false, ""
 	}
 	if rc.Settings == "" {
@@ -1532,11 +1540,13 @@ func SetYardPaused(db *gorm.DB, paused bool, reason string) error {
 	var rc models.RailyardConfig
 	err := db.First(&rc).Error
 	if err != nil {
-		// No row yet — create a minimal one. Owner must be unique so we use a
-		// reserved value; if a real seed later writes for this owner it can
-		// overwrite via the normal SeedConfig path (which preserves Settings
-		// won't happen — but this is a non-issue because the dashboard
-		// fallback row is only created when no row existed at all).
+		// Only treat a genuine "no row yet" as the fallback-create case;
+		// any other error (context cancellation, connection blip, schema
+		// mismatch, etc.) must propagate so we don't insert a spurious
+		// Owner="dashboard" row and mask the underlying failure.
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("dashboard: read config row: %w", err)
+		}
 		rc = models.RailyardConfig{
 			Owner:    "dashboard",
 			RepoURL:  "",
