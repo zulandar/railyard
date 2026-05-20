@@ -15,9 +15,11 @@ import (
 	"github.com/zulandar/railyard/internal/car"
 	"github.com/zulandar/railyard/internal/config"
 	"github.com/zulandar/railyard/internal/engine"
+	"github.com/zulandar/railyard/internal/events"
 	"github.com/zulandar/railyard/internal/messaging"
 	"github.com/zulandar/railyard/internal/models"
 	"github.com/zulandar/railyard/internal/orchestration"
+	"github.com/zulandar/railyard/pkg/plugin"
 	"gorm.io/gorm"
 )
 
@@ -28,10 +30,20 @@ const (
 	maxTestFailures     = 2 // deprecated: use cfg.Stall.MaxSwitchFailures instead
 )
 
-// RunDaemon runs the yardmaster daemon loop. It registers the yardmaster in the
-// engines table, starts a heartbeat, and loops through inbox processing, stale
-// engine detection, completed car switching, and blocked car unblocking.
+// RunDaemon is a thin wrapper around [RunDaemonWithBus] that passes a nil
+// bus. Existing callers (cmd/ry, tests) use this form unchanged.
 func RunDaemon(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath, repoDir string, pollInterval time.Duration, logger *slog.Logger) error {
+	return RunDaemonWithBus(ctx, db, cfg, configPath, repoDir, pollInterval, logger, nil)
+}
+
+// RunDaemonWithBus runs the yardmaster daemon loop. It registers the yardmaster
+// in the engines table, starts a heartbeat, and loops through inbox processing,
+// stale engine detection, completed car switching, and blocked car unblocking.
+//
+// bus, when non-nil, receives plugin lifecycle events (YardmasterAction,
+// CarMerged, MergeFailed) — see spec §6.3. Passing nil disables publishing and
+// matches the behavior of the OSS binary that does not configure plugins.
+func RunDaemonWithBus(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath, repoDir string, pollInterval time.Duration, logger *slog.Logger, bus events.Bus) error {
 	if db == nil {
 		return fmt.Errorf("yardmaster: db is required")
 	}
@@ -133,7 +145,7 @@ func RunDaemon(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath,
 			var shouldDrain bool
 			timePhase("inbox", func() {
 				var pErr error
-				shouldDrain, pErr = processInbox(ctx, db, cfg, configPath, repoDir, startedAt, &escWg, escTracker, escSem, logger)
+				shouldDrain, pErr = processInboxWithBus(ctx, db, cfg, configPath, repoDir, startedAt, &escWg, escTracker, escSem, logger, bus)
 				if pErr != nil {
 					logger.Error("Inbox error", "error", pErr)
 				}
@@ -144,14 +156,14 @@ func RunDaemon(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath,
 
 			// Phase 2: Handle stale engines.
 			timePhase("stale-engines", func() {
-				if err := handleStaleEngines(db, cfg, configPath, logger); err != nil {
+				if err := handleStaleEnginesWithBus(db, cfg, configPath, logger, bus); err != nil {
 					logger.Error("Stale engines error", "error", err)
 				}
 			})
 
 			// Phase 3: Handle completed cars.
 			timePhase("completed-cars", func() {
-				if err := handleCompletedCars(ctx, db, cfg, configPath, repoDir, ymDir, &escWg, escTracker, escSem, logger); err != nil {
+				if err := handleCompletedCarsWithBus(ctx, db, cfg, configPath, repoDir, ymDir, &escWg, escTracker, escSem, logger, bus); err != nil {
 					logger.Error("Completed cars error", "error", err)
 				}
 			})
@@ -199,7 +211,7 @@ func RunDaemon(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath,
 
 			// Phase 6: Rebalance idle engines to busy tracks.
 			timePhase("rebalance", func() {
-				if err := rebalanceEngines(db, cfg, configPath, rbState, logger); err != nil {
+				if err := rebalanceEnginesWithBus(db, cfg, configPath, rbState, logger, bus); err != nil {
 					logger.Error("Rebalance error", "error", err)
 				}
 			})
@@ -253,6 +265,13 @@ func registerYardmaster(db *gorm.DB, providerName string) error {
 // startedAt is when this yardmaster instance started; drain messages older than
 // this are stale leftovers from a previous shutdown and are silently acked.
 func processInbox(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath, repoDir string, startedAt time.Time, escWg *sync.WaitGroup, escTracker *EscalationTracker, escSem chan struct{}, logger *slog.Logger) (draining bool, err error) {
+	return processInboxWithBus(ctx, db, cfg, configPath, repoDir, startedAt, escWg, escTracker, escSem, logger, nil)
+}
+
+// processInboxWithBus is the bus-aware variant of [processInbox]. Existing
+// tests call processInbox (which forwards a nil bus); the daemon loop uses
+// this form so action sites can publish [plugin.YardmasterAction].
+func processInboxWithBus(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath, repoDir string, startedAt time.Time, escWg *sync.WaitGroup, escTracker *EscalationTracker, escSem chan struct{}, logger *slog.Logger, bus events.Bus) (draining bool, err error) {
 	msgs, err := messaging.Inbox(db, YardmasterID)
 	if err != nil {
 		return false, err
@@ -298,6 +317,10 @@ func processInbox(ctx context.Context, db *gorm.DB, cfg *config.Config, configPa
 					logger.Error("Failed to restart stalled engine", "engine", msg.FromAgent, "error", err)
 				} else {
 					logger.Info("Restarted stalled engine", "engine", msg.FromAgent)
+					publish(bus, plugin.YardmasterAction, plugin.YardmasterActionEvent{
+						TargetID:   msg.FromAgent,
+						ActionType: "restart-engine",
+					})
 				}
 			}
 			ackMsg(db, msg, logger)
@@ -309,6 +332,10 @@ func processInbox(ctx context.Context, db *gorm.DB, cfg *config.Config, configPa
 				ackMsg(db, msg, logger)
 				continue
 			}
+			publish(bus, plugin.YardmasterAction, plugin.YardmasterActionEvent{
+				TargetID:   msg.CarID,
+				ActionType: "escalate",
+			})
 			escSem <- struct{}{} // acquire semaphore
 			escWg.Add(1)
 			go func(m models.Message) {
@@ -335,27 +362,27 @@ func processInbox(ctx context.Context, db *gorm.DB, cfg *config.Config, configPa
 			ackMsg(db, msg, logger)
 
 		case subject == "restart-engine":
-			handleRestartEngine(ctx, db, cfg, configPath, msg, logger)
+			handleRestartEngineWithBus(ctx, db, cfg, configPath, msg, logger, bus)
 			ackMsg(db, msg, logger)
 
 		case subject == "retry-merge":
-			handleRetryMerge(db, msg, logger)
+			handleRetryMergeWithBus(db, msg, logger, bus)
 			ackMsg(db, msg, logger)
 
 		case subject == "requeue-car":
-			handleRequeueCar(db, msg, logger)
+			handleRequeueCarWithBus(db, msg, logger, bus)
 			ackMsg(db, msg, logger)
 
 		case subject == "nudge-engine":
-			handleNudgeEngine(db, msg, logger)
+			handleNudgeEngineWithBus(db, msg, logger, bus)
 			ackMsg(db, msg, logger)
 
 		case subject == "unblock-car":
-			handleUnblockCar(db, msg, logger)
+			handleUnblockCarWithBus(db, msg, logger, bus)
 			ackMsg(db, msg, logger)
 
 		case subject == "close-epic":
-			handleCloseEpic(db, msg, logger)
+			handleCloseEpicWithBus(db, msg, logger, bus)
 			ackMsg(db, msg, logger)
 
 		case subject == "reassignment" || subject == "deps-unblocked" || subject == "epic-closed":
@@ -387,9 +414,18 @@ func ackMsg(db *gorm.DB, msg models.Message, logger *slog.Logger) {
 	}
 }
 
-// handleStaleEngines detects engines with stale heartbeats, reassigns their cars,
-// and restarts the engines.
+// handleStaleEngines is a thin wrapper around [handleStaleEnginesWithBus] that
+// passes a nil bus. Existing tests call this form.
 func handleStaleEngines(db *gorm.DB, cfg *config.Config, configPath string, logger *slog.Logger) error {
+	return handleStaleEnginesWithBus(db, cfg, configPath, logger, nil)
+}
+
+// handleStaleEnginesWithBus detects engines with stale heartbeats, reassigns
+// their cars, and restarts the engines.
+//
+// When bus is non-nil and a reassign or restart succeeds, publishes a
+// [plugin.YardmasterAction] event (ActionType="reassign" or "restart-engine").
+func handleStaleEnginesWithBus(db *gorm.DB, cfg *config.Config, configPath string, logger *slog.Logger, bus events.Bus) error {
 	threshold := DefaultStaleThreshold
 	if cfg.Stall.StaleEngineThresholdSec > 0 {
 		threshold = time.Duration(cfg.Stall.StaleEngineThresholdSec) * time.Second
@@ -413,6 +449,11 @@ func handleStaleEngines(db *gorm.DB, cfg *config.Config, configPath string, logg
 			logger.Warn("Engine deregistered as stale", "engine", eng.ID, "car", eng.CurrentCar)
 			if err := ReassignCar(db, eng.CurrentCar, eng.ID, "stale heartbeat"); err != nil {
 				logger.Error("Reassign car from stale engine", "car", eng.CurrentCar, "engine", eng.ID, "error", err)
+			} else {
+				publish(bus, plugin.YardmasterAction, plugin.YardmasterActionEvent{
+					TargetID:   eng.CurrentCar,
+					ActionType: "reassign",
+				})
 			}
 		} else {
 			logger.Warn("Engine deregistered as stale", "engine", eng.ID, "status", "idle")
@@ -424,17 +465,32 @@ func handleStaleEngines(db *gorm.DB, cfg *config.Config, configPath string, logg
 		// Restart the engine to spawn a replacement on the same track.
 		if err := orchestration.RestartEngine(db, cfg, configPath, eng.ID, nil); err != nil {
 			logger.Error("Failed to restart engine", "engine", eng.ID, "error", err)
+		} else {
+			publish(bus, plugin.YardmasterAction, plugin.YardmasterActionEvent{
+				TargetID:   eng.ID,
+				ActionType: "restart-engine",
+			})
 		}
 	}
 
 	return nil
 }
 
-// handleCompletedCars finds cars with status "done" and runs the switch flow.
+// handleCompletedCars is a thin wrapper around [handleCompletedCarsWithBus]
+// that passes a nil bus. Existing tests call this form.
+func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath, repoDir, ymDir string, escWg *sync.WaitGroup, escTracker *EscalationTracker, escSem chan struct{}, logger *slog.Logger) error {
+	return handleCompletedCarsWithBus(ctx, db, cfg, configPath, repoDir, ymDir, escWg, escTracker, escSem, logger, nil)
+}
+
+// handleCompletedCarsWithBus finds cars with status "done" and runs the switch flow.
 // Switch() marks cars as "merged" after successful merge, so they won't reappear.
 // ymDir is the yardmaster worktree where switch operations happen; repoDir is
 // the primary repo (used for engine worktree detachment).
-func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath, repoDir, ymDir string, escWg *sync.WaitGroup, escTracker *EscalationTracker, escSem chan struct{}, logger *slog.Logger) error {
+//
+// When bus is non-nil, [plugin.YardmasterAction] (ActionType="merge") fires
+// per car prior to the switch call, and [plugin.CarMerged] / [plugin.MergeFailed]
+// fire from inside [Switch] / [maybeSwitchEscalate].
+func handleCompletedCarsWithBus(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath, repoDir, ymDir string, escWg *sync.WaitGroup, escTracker *EscalationTracker, escSem chan struct{}, logger *slog.Logger, bus events.Bus) error {
 	cars, err := car.List(db, car.ListFilters{Status: "done"})
 	if err != nil {
 		return err
@@ -528,6 +584,14 @@ func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, c
 			commentCounter = (&ghPRViewer{repoDir: repoDir}).CountComments
 		}
 
+		// Announce the merge action site BEFORE the switch runs so subscribers
+		// see the intent even when the operation fails. The Switch call itself
+		// then publishes CarMerged / MergeFailed per outcome.
+		publish(bus, plugin.YardmasterAction, plugin.YardmasterActionEvent{
+			TargetID:   c.ID,
+			ActionType: "merge",
+		})
+
 		result, err := Switch(db, c.ID, SwitchOpts{
 			RepoDir:          ymDir,
 			PrimaryRepoDir:   repoDir,
@@ -539,6 +603,7 @@ func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, c
 			CommentCounter:   commentCounter,
 			RevisedLabel:     cfg.Yardmaster.RevisedLabel,
 			ConfigPath:       configPath,
+			Bus:              bus,
 		})
 
 		// Handle any failure — write a categorized progress note and check
@@ -563,7 +628,7 @@ func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, c
 			if result != nil {
 				conflictDetails = result.ConflictDetails
 			}
-			maybeSwitchEscalate(ctx, db, cfg, c.ID, failCategory, err, conflictDetails, escWg, escTracker, escSem, logger)
+			maybeSwitchEscalateWithBus(ctx, db, cfg, c.ID, failCategory, err, conflictDetails, escWg, escTracker, escSem, logger, bus)
 			continue
 		}
 
@@ -574,7 +639,7 @@ func handleCompletedCars(ctx context.Context, db *gorm.DB, cfg *config.Config, c
 				note += "\n" + result.ConflictDetails
 			}
 			writeProgressNote(db, c.ID, YardmasterID, note)
-			maybeSwitchEscalate(ctx, db, cfg, c.ID, failCategory, result.Error, result.ConflictDetails, escWg, escTracker, escSem, logger)
+			maybeSwitchEscalateWithBus(ctx, db, cfg, c.ID, failCategory, result.Error, result.ConflictDetails, escWg, escTracker, escSem, logger, bus)
 		}
 
 		if result.PRCreated {
@@ -918,9 +983,20 @@ func switchFailureReason(cat SwitchFailureCategory) string {
 	}
 }
 
-// maybeSwitchEscalate checks whether a car has exceeded the switch failure
-// threshold and, if so, escalates to Claude with the failure category.
+// maybeSwitchEscalate is a thin wrapper around [maybeSwitchEscalateWithBus]
+// that passes a nil bus. Existing tests call this form.
 func maybeSwitchEscalate(ctx context.Context, db *gorm.DB, cfg *config.Config, carID string, cat SwitchFailureCategory, switchErr error, conflictDetails string, escWg *sync.WaitGroup, escTracker *EscalationTracker, escSem chan struct{}, logger *slog.Logger) {
+	maybeSwitchEscalateWithBus(ctx, db, cfg, carID, cat, switchErr, conflictDetails, escWg, escTracker, escSem, logger, nil)
+}
+
+// maybeSwitchEscalateWithBus checks whether a car has exceeded the switch failure
+// threshold and, if so, escalates to Claude with the failure category.
+//
+// When bus is non-nil and the car is moved to "merge-failed" (either by
+// infrastructure-failure shortcut or by exceeding MaxSwitchFailures),
+// publishes [plugin.MergeFailed] plus a [plugin.YardmasterAction] escalate
+// event.
+func maybeSwitchEscalateWithBus(ctx context.Context, db *gorm.DB, cfg *config.Config, carID string, cat SwitchFailureCategory, switchErr error, conflictDetails string, escWg *sync.WaitGroup, escTracker *EscalationTracker, escSem chan struct{}, logger *slog.Logger, bus events.Bus) {
 	// Infrastructure failures escalate immediately — no threshold needed.
 	// The human message was already sent by Switch(); here we also escalate
 	// to Claude for a suggested action.
@@ -934,6 +1010,18 @@ func maybeSwitchEscalate(ctx context.Context, db *gorm.DB, cfg *config.Config, c
 			logger.Error("Update car to merge-failed (infra)", "car", carID, "error", err)
 		}
 		logger.Info("Car state transition", "car", carID, "transition", "done->merge-failed")
+
+		// The transition above moves the car into merge-failed. Surface this
+		// to subscribers as MergeFailed (the merge attempt is abandoned) plus
+		// an escalate YardmasterAction.
+		publish(bus, plugin.MergeFailed, plugin.MergeFailedEvent{
+			CarID:  carID,
+			Reason: fmt.Sprintf("%s: %v", reason, switchErr),
+		})
+		publish(bus, plugin.YardmasterAction, plugin.YardmasterActionEvent{
+			TargetID:   carID,
+			ActionType: "escalate",
+		})
 
 		escSem <- struct{}{} // acquire semaphore
 		escWg.Add(1)
@@ -986,6 +1074,17 @@ func maybeSwitchEscalate(ctx context.Context, db *gorm.DB, cfg *config.Config, c
 		logger.Error("Update car to merge-failed", "car", carID, "error", err)
 	}
 	logger.Info("Car state transition", "car", carID, "transition", "done->merge-failed")
+
+	// Repeated failures abandoned the merge attempt; publish MergeFailed plus
+	// an escalate action so plugins can react.
+	publish(bus, plugin.MergeFailed, plugin.MergeFailedEvent{
+		CarID:  carID,
+		Reason: fmt.Sprintf("%s: %v", reason, switchErr),
+	})
+	publish(bus, plugin.YardmasterAction, plugin.YardmasterActionEvent{
+		TargetID:   carID,
+		ActionType: "escalate",
+	})
 
 	escSem <- struct{}{} // acquire semaphore
 	escWg.Add(1)

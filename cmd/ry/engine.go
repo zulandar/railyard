@@ -20,6 +20,7 @@ import (
 	"github.com/zulandar/railyard/internal/db"
 	"github.com/zulandar/railyard/internal/engine"
 	_ "github.com/zulandar/railyard/internal/engine/providers" // register agent providers
+	"github.com/zulandar/railyard/internal/events"
 	"github.com/zulandar/railyard/internal/logutil"
 	"github.com/zulandar/railyard/internal/messaging"
 	"github.com/zulandar/railyard/internal/models"
@@ -129,8 +130,16 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 		providerName = "claude"
 	}
 
+	// Construct an event bus for this engine pod. Plugin lifecycle is NOT
+	// started here — engine pods are per-track Kubernetes workloads, and
+	// plugin daemons that need yard-wide visibility live in the yardmaster
+	// pod (see cmd/ry/yardmaster.go). The bus alone is enough to let
+	// in-process subscribers (today: none in pod mode) observe events;
+	// publishing to a bus with no subscribers is a no-op.
+	bus := events.NewBusWithLogger(logger)
+
 	// Register the engine.
-	eng, err := engine.Register(gormDB, engine.RegisterOpts{Track: track, Provider: providerName})
+	eng, err := engine.RegisterWithBus(gormDB, engine.RegisterOpts{Track: track, Provider: providerName}, bus)
 	if err != nil {
 		return fmt.Errorf("register engine: %w", err)
 	}
@@ -202,7 +211,7 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 			if err := engine.CleanupOverlay(eng.ID, cfg); err != nil {
 				logger.Warn("Overlay cleanup warning", "error", err)
 			}
-			if err := engine.Deregister(gormDB, eng.ID); err != nil {
+			if err := engine.DeregisterWithBus(gormDB, eng.ID, bus); err != nil {
 				logger.Error("Deregister error", "error", err)
 			}
 			if err := engine.RemoveWorktree(repoDir, eng.ID); err != nil {
@@ -431,7 +440,7 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 				stallAttrs = append(stallAttrs, "commits", stats.commits)
 			}
 			cycleLog.Warn("Stall detected", stallAttrs...)
-			if err := engine.HandleStall(gormDB, eng.ID, claimed.ID, outcome.stallReason, workDir, claimed.Branch); err != nil {
+			if err := engine.HandleStallWithBus(gormDB, eng.ID, claimed.ID, outcome.stallReason, workDir, claimed.Branch, bus); err != nil {
 				logger.Error("Stall handling error", "car", claimed.ID, "error", err)
 			}
 			// Clear current_car so the engine doesn't re-claim the now-blocked car.
@@ -459,7 +468,7 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 			if err := engine.CleanupOverlay(eng.ID, cfg); err != nil {
 				logger.Warn("Overlay cleanup warning", "error", err)
 			}
-			if err := engine.Deregister(gormDB, eng.ID); err != nil {
+			if err := engine.DeregisterWithBus(gormDB, eng.ID, bus); err != nil {
 				logger.Error("Deregister error", "error", err)
 			}
 			if err := engine.RemoveWorktree(repoDir, eng.ID); err != nil {

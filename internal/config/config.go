@@ -4,7 +4,9 @@ package config
 import (
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
+	"reflect"
 	"regexp"
 	"strings"
 
@@ -36,6 +38,16 @@ type Config struct {
 	Kubernetes        KubernetesConfig    `yaml:"kubernetes"`
 	AgentProvider     string              `yaml:"agent_provider"`
 	Yardmaster        YardmasterConfig    `yaml:"yardmaster"`
+
+	// PluginConfigs holds top-level YAML blocks whose keys are not part of the
+	// typed Config schema. Plugins read their own block (keyed by plugin name)
+	// and decode the yaml.Node into a plugin-defined struct. Nil when no
+	// unknown top-level keys are present in the loaded YAML.
+	//
+	// PluginConfigs is intentionally NOT tagged with a yaml struct tag — it is
+	// populated by the loader from leftover top-level keys, never directly
+	// unmarshaled.
+	PluginConfigs map[string]yaml.Node `yaml:"-"`
 }
 
 // YardmasterConfig holds settings for the yardmaster daemon.
@@ -275,6 +287,11 @@ func Load(path string) (*Config, error) {
 }
 
 // Parse unmarshals YAML bytes into a validated Config.
+//
+// Top-level keys that are not part of the typed Config schema (i.e. keys
+// owned by plugins) are stashed in Config.PluginConfigs for later retrieval
+// by the plugin host. Unknown keys are logged at DEBUG and do not fail the
+// load.
 func Parse(data []byte) (*Config, error) {
 	// Detect deprecated 'dolt:' key from pre-rename configs.
 	if err := checkDeprecatedKeys(data); err != nil {
@@ -285,11 +302,84 @@ func Parse(data []byte) (*Config, error) {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("config: parse: %w", err)
 	}
+
+	// Stash unknown top-level keys for plugin consumption. We parse the YAML
+	// a second time into a generic yaml.Node so we can walk the document's
+	// top-level mapping and identify keys the typed Config struct does not
+	// declare. This is purely additive — every existing validation behavior
+	// above is preserved.
+	if err := cfg.stashPluginConfigs(data); err != nil {
+		return nil, fmt.Errorf("config: parse: %w", err)
+	}
+
 	cfg.applyDefaults()
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
 	return &cfg, nil
+}
+
+// stashPluginConfigs walks the top-level YAML mapping and stores any keys
+// that aren't part of the typed Config struct into c.PluginConfigs. Unknown
+// keys are logged at DEBUG via slog so config typos still surface in dev.
+func (c *Config) stashPluginConfigs(data []byte) error {
+	var root yaml.Node
+	if err := yaml.Unmarshal(data, &root); err != nil {
+		// If the strict re-parse fails we silently bail — the primary
+		// unmarshal already succeeded, so there is no actionable error here.
+		return nil
+	}
+	// A document node wraps the actual content. An empty document has no
+	// content, which is valid (nothing to stash).
+	if root.Kind != yaml.DocumentNode || len(root.Content) == 0 {
+		return nil
+	}
+	top := root.Content[0]
+	if top.Kind != yaml.MappingNode {
+		return nil
+	}
+	known := knownTopLevelKeys()
+	logger := slog.Default()
+	// Mapping content alternates [key, value, key, value, ...].
+	for i := 0; i+1 < len(top.Content); i += 2 {
+		keyNode := top.Content[i]
+		valNode := top.Content[i+1]
+		if keyNode.Kind != yaml.ScalarNode {
+			continue
+		}
+		key := keyNode.Value
+		if known[key] {
+			continue
+		}
+		if c.PluginConfigs == nil {
+			c.PluginConfigs = make(map[string]yaml.Node)
+		}
+		c.PluginConfigs[key] = *valNode
+		logger.Debug(fmt.Sprintf("config: unknown top-level key %q ignored (plugin will not load)", key))
+	}
+	return nil
+}
+
+// knownTopLevelKeys returns the set of YAML keys the typed Config struct
+// declares. Built via reflection so the set stays in sync with the struct
+// definition.
+func knownTopLevelKeys() map[string]bool {
+	t := reflect.TypeOf(Config{})
+	out := make(map[string]bool, t.NumField())
+	for i := 0; i < t.NumField(); i++ {
+		tag := t.Field(i).Tag.Get("yaml")
+		if tag == "" || tag == "-" {
+			continue
+		}
+		// yaml tag may include options like ",omitempty" — keep only the name.
+		if idx := strings.Index(tag, ","); idx >= 0 {
+			tag = tag[:idx]
+		}
+		if tag != "" {
+			out[tag] = true
+		}
+	}
+	return out
 }
 
 // checkDeprecatedKeys inspects raw YAML for renamed top-level keys and

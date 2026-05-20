@@ -2,7 +2,9 @@ package dashboard
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"time"
@@ -1479,4 +1481,109 @@ func estimateTokenCost(model string, inputTokens, outputTokens int64) float64 {
 		outputRate = 15.0
 	}
 	return float64(inputTokens)/1_000_000*inputRate + float64(outputTokens)/1_000_000*outputRate
+}
+
+// --- Yard pause/resume state ---
+//
+// The paused flag is persisted into the existing RailyardConfig.Settings JSON
+// blob so we avoid adding new tables / columns. The row may be missing in
+// dev/test environments — the helpers below treat a missing row as
+// "not paused" and create a minimal row on first SetYardPaused write.
+
+// yardSettings is the shape we serialize into RailyardConfig.Settings. Unknown
+// fields from other writers are preserved by round-tripping through a
+// map[string]any (see SetYardPaused).
+type yardSettings struct {
+	Paused       bool   `json:"paused"`
+	PausedReason string `json:"paused_reason,omitempty"`
+}
+
+// GetYardPaused returns the current paused flag and reason. A nil db returns
+// the zero value. A missing or unparseable row is treated as not paused.
+// Transient DB errors (anything other than gorm.ErrRecordNotFound) are logged
+// at WARN so operators can spot a degraded database that would otherwise
+// silently render the yard as "running".
+func GetYardPaused(db *gorm.DB) (paused bool, reason string) {
+	if db == nil {
+		return false, ""
+	}
+	var rc models.RailyardConfig
+	if err := db.First(&rc).Error; err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			slog.Default().Warn("dashboard: GetYardPaused query failed", "error", err)
+		}
+		return false, ""
+	}
+	if rc.Settings == "" {
+		return false, ""
+	}
+	var s yardSettings
+	if err := json.Unmarshal([]byte(rc.Settings), &s); err != nil {
+		return false, ""
+	}
+	return s.Paused, s.PausedReason
+}
+
+// SetYardPaused persists the paused flag and reason into the
+// RailyardConfig.Settings JSON. Other keys already present in Settings are
+// preserved.
+//
+// If no RailyardConfig row exists yet, one is created with Owner="dashboard"
+// and an empty repo URL so the dashboard can manage yard state independently
+// of the db init seed path. This is a safe fallback for unit tests that only
+// run AutoMigrate.
+func SetYardPaused(db *gorm.DB, paused bool, reason string) error {
+	if db == nil {
+		return fmt.Errorf("dashboard: db is required")
+	}
+
+	var rc models.RailyardConfig
+	err := db.First(&rc).Error
+	if err != nil {
+		// Only treat a genuine "no row yet" as the fallback-create case;
+		// any other error (context cancellation, connection blip, schema
+		// mismatch, etc.) must propagate so we don't insert a spurious
+		// Owner="dashboard" row and mask the underlying failure.
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("dashboard: read config row: %w", err)
+		}
+		rc = models.RailyardConfig{
+			Owner:    "dashboard",
+			RepoURL:  "",
+			Mode:     "local",
+			Settings: "{}",
+		}
+		if createErr := db.Create(&rc).Error; createErr != nil {
+			return fmt.Errorf("dashboard: create config row: %w", createErr)
+		}
+	}
+
+	// Round-trip through map[string]any to preserve other Settings keys.
+	settings := map[string]any{}
+	if rc.Settings != "" {
+		if err := json.Unmarshal([]byte(rc.Settings), &settings); err != nil {
+			// Corrupted JSON — reset to a fresh map; safer than refusing to
+			// update yard state.
+			settings = map[string]any{}
+		}
+	}
+	settings["paused"] = paused
+	if paused {
+		// Only persist a reason when actively pausing — clearing on resume
+		// avoids stale "paused_reason" lingering after a resume.
+		settings["paused_reason"] = reason
+	} else {
+		delete(settings, "paused_reason")
+	}
+
+	data, err := json.Marshal(settings)
+	if err != nil {
+		return fmt.Errorf("dashboard: marshal settings: %w", err)
+	}
+	if err := db.Model(&models.RailyardConfig{}).
+		Where("id = ?", rc.ID).
+		Update("settings", string(data)).Error; err != nil {
+		return fmt.Errorf("dashboard: update settings: %w", err)
+	}
+	return nil
 }

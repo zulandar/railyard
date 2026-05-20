@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/zulandar/railyard/internal/config"
+	"github.com/zulandar/railyard/internal/events"
 	"gorm.io/gorm"
 )
 
@@ -19,6 +20,11 @@ type StartOpts struct {
 	RepoDir      string
 	PollInterval time.Duration // default 30s
 	Logger       *slog.Logger  // default slog.Default()
+	// Bus is the optional plugin event bus. When non-nil, the daemon publishes
+	// lifecycle events (YardmasterAction, CarMerged, MergeFailed) to it. A nil
+	// bus disables publishing — existing callers in cmd/ry/ that omit this
+	// field continue to work unchanged.
+	Bus events.Bus
 }
 
 // Start launches the yardmaster daemon loop. It validates options, then
@@ -43,5 +49,5 @@ func Start(ctx context.Context, opts StartOpts) error {
 		logger = slog.Default()
 	}
 
-	return RunDaemon(ctx, opts.DB, opts.Config, opts.ConfigPath, opts.RepoDir, opts.PollInterval, logger)
+	return RunDaemonWithBus(ctx, opts.DB, opts.Config, opts.ConfigPath, opts.RepoDir, opts.PollInterval, logger, opts.Bus)
 }

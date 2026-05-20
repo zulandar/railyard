@@ -497,6 +497,13 @@ tracks:
       styling: "Tailwind CSS"
 ```
 
+## Plugins
+
+Railyard exposes a compile-time plugin SDK for private integrations (for example, enterprise observability connectors). The OSS `ry` binary continues to build and run identically with zero plugins registered — a separate private repo can import railyard as a Go module and produce a custom binary that side-effect imports the plugins it wants.
+
+- **[Plugin authoring guide](docs/plugins/authoring.md)** — lifecycle, host API, configuration conventions, testing patterns, and the production checklist
+- **[Hello-world example](examples/plugins/hello/)** — minimal working plugin (subscribes to `CarCreated`, logs each event) verified on every CI run
+
 ## How It Works
 
 1. **Dispatch** decomposes your request into structured cars with dependencies — either via the CLI (`ry dispatch`) or chat (@mention the bot in Slack/Discord via Telegraph)

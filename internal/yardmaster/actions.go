@@ -7,16 +7,28 @@ import (
 	"time"
 
 	"github.com/zulandar/railyard/internal/config"
+	"github.com/zulandar/railyard/internal/events"
 	"github.com/zulandar/railyard/internal/messaging"
 	"github.com/zulandar/railyard/internal/models"
 	"github.com/zulandar/railyard/internal/orchestration"
+	"github.com/zulandar/railyard/pkg/plugin"
 	"gorm.io/gorm"
 )
 
-// handleRestartEngine restarts the engine assigned to the car in msg.CarID.
+// handleRestartEngine is a thin wrapper around [handleRestartEngineWithBus]
+// that passes a nil bus. Existing tests call this form; the daemon loop uses
+// the WithBus variant so it can publish [plugin.YardmasterAction].
+func handleRestartEngine(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath string, msg models.Message, logger *slog.Logger) {
+	handleRestartEngineWithBus(ctx, db, cfg, configPath, msg, logger, nil)
+}
+
+// handleRestartEngineWithBus restarts the engine assigned to the car in msg.CarID.
 // It looks up the engine via the car's assignee, reassigns the car back to the
 // pool, and launches a replacement engine on the same track.
-func handleRestartEngine(_ context.Context, db *gorm.DB, cfg *config.Config, configPath string, msg models.Message, logger *slog.Logger) {
+//
+// When bus is non-nil and the restart succeeds, publishes a
+// [plugin.YardmasterAction] event with ActionType="restart-engine".
+func handleRestartEngineWithBus(_ context.Context, db *gorm.DB, cfg *config.Config, configPath string, msg models.Message, logger *slog.Logger, bus events.Bus) {
 	if msg.CarID == "" {
 		logger.Info("Action restart-engine: no car-id provided, skipping")
 		return
@@ -40,13 +52,29 @@ func handleRestartEngine(_ context.Context, db *gorm.DB, cfg *config.Config, con
 	// Launch a replacement engine on the same track.
 	if err := orchestration.RestartEngine(db, cfg, configPath, eng.ID, nil); err != nil {
 		logger.Error("Action restart-engine: failed to restart", "engine", eng.ID, "error", err)
+		return
 	}
+
+	// Publish AFTER the DB updates land — subscribers see consistent state.
+	publish(bus, plugin.YardmasterAction, plugin.YardmasterActionEvent{
+		TargetID:   msg.CarID,
+		ActionType: "restart-engine",
+	})
 }
 
-// handleRetryMerge sets a blocked car's status back to "done" so the
+// handleRetryMerge is a thin wrapper around [handleRetryMergeWithBus] that
+// passes a nil bus. Existing tests call this form.
+func handleRetryMerge(db *gorm.DB, msg models.Message, logger *slog.Logger) {
+	handleRetryMergeWithBus(db, msg, logger, nil)
+}
+
+// handleRetryMergeWithBus sets a blocked car's status back to "done" so the
 // handleCompletedCars phase will pick it up and re-run the switch (merge) flow.
 // For epics, it calls TryCloseEpic since epics don't go through the merge flow.
-func handleRetryMerge(db *gorm.DB, msg models.Message, logger *slog.Logger) {
+//
+// When bus is non-nil, publishes a [plugin.YardmasterAction] event with
+// ActionType="retry-merge".
+func handleRetryMergeWithBus(db *gorm.DB, msg models.Message, logger *slog.Logger, bus events.Bus) {
 	if msg.CarID == "" {
 		logger.Info("Action retry-merge: no car-id provided, skipping")
 		return
@@ -65,6 +93,10 @@ func handleRetryMerge(db *gorm.DB, msg models.Message, logger *slog.Logger) {
 		if err := writeProgressNote(db, msg.CarID, "dispatch", fmt.Sprintf("Retry merge (epic auto-close attempted): %s", msg.Body)); err != nil {
 			logger.Error("Action retry-merge: progress note failed", "error", err)
 		}
+		publish(bus, plugin.YardmasterAction, plugin.YardmasterActionEvent{
+			TargetID:   msg.CarID,
+			ActionType: "retry-merge",
+		})
 		return
 	}
 
@@ -87,11 +119,25 @@ func handleRetryMerge(db *gorm.DB, msg models.Message, logger *slog.Logger) {
 	if err := writeProgressNote(db, msg.CarID, "dispatch", fmt.Sprintf("Retry merge requested: %s", msg.Body)); err != nil {
 		logger.Error("Action retry-merge: progress note failed", "error", err)
 	}
+
+	publish(bus, plugin.YardmasterAction, plugin.YardmasterActionEvent{
+		TargetID:   msg.CarID,
+		ActionType: "retry-merge",
+	})
 }
 
-// handleRequeueCar sets a car's status to "open" and clears the assignee,
-// making it available for any engine to claim from scratch.
+// handleRequeueCar is a thin wrapper around [handleRequeueCarWithBus] that
+// passes a nil bus. Existing tests call this form.
 func handleRequeueCar(db *gorm.DB, msg models.Message, logger *slog.Logger) {
+	handleRequeueCarWithBus(db, msg, logger, nil)
+}
+
+// handleRequeueCarWithBus sets a car's status to "open" and clears the assignee,
+// making it available for any engine to claim from scratch.
+//
+// When bus is non-nil, publishes a [plugin.YardmasterAction] event with
+// ActionType="requeue-car".
+func handleRequeueCarWithBus(db *gorm.DB, msg models.Message, logger *slog.Logger, bus events.Bus) {
 	if msg.CarID == "" {
 		logger.Info("Action requeue-car: no car-id provided, skipping")
 		return
@@ -110,11 +156,25 @@ func handleRequeueCar(db *gorm.DB, msg models.Message, logger *slog.Logger) {
 	if err := writeProgressNote(db, msg.CarID, "dispatch", fmt.Sprintf("Requeued: %s", msg.Body)); err != nil {
 		logger.Error("Action requeue-car: progress note failed", "error", err)
 	}
+
+	publish(bus, plugin.YardmasterAction, plugin.YardmasterActionEvent{
+		TargetID:   msg.CarID,
+		ActionType: "requeue-car",
+	})
 }
 
-// handleNudgeEngine forwards guidance from dispatch to the engine currently
-// working on the specified car.
+// handleNudgeEngine is a thin wrapper around [handleNudgeEngineWithBus] that
+// passes a nil bus. Existing tests call this form.
 func handleNudgeEngine(db *gorm.DB, msg models.Message, logger *slog.Logger) {
+	handleNudgeEngineWithBus(db, msg, logger, nil)
+}
+
+// handleNudgeEngineWithBus forwards guidance from dispatch to the engine currently
+// working on the specified car.
+//
+// When bus is non-nil, publishes a [plugin.YardmasterAction] event with
+// ActionType="nudge-engine".
+func handleNudgeEngineWithBus(db *gorm.DB, msg models.Message, logger *slog.Logger, bus events.Bus) {
 	if msg.CarID == "" {
 		logger.Info("Action nudge-engine: no car-id provided, skipping")
 		return
@@ -132,11 +192,26 @@ func handleNudgeEngine(db *gorm.DB, msg models.Message, logger *slog.Logger) {
 	if _, err := messaging.Send(db, YardmasterID, eng.ID, "guidance", msg.Body,
 		messaging.SendOpts{CarID: msg.CarID}); err != nil {
 		logger.Error("Action nudge-engine: send guidance failed", "engine", eng.ID, "error", err)
+		return
 	}
+
+	publish(bus, plugin.YardmasterAction, plugin.YardmasterActionEvent{
+		TargetID:   msg.CarID,
+		ActionType: "nudge-engine",
+	})
 }
 
-// handleUnblockCar transitions a blocked car back to "open" status.
+// handleUnblockCar is a thin wrapper around [handleUnblockCarWithBus] that
+// passes a nil bus. Existing tests call this form.
 func handleUnblockCar(db *gorm.DB, msg models.Message, logger *slog.Logger) {
+	handleUnblockCarWithBus(db, msg, logger, nil)
+}
+
+// handleUnblockCarWithBus transitions a blocked car back to "open" status.
+//
+// When bus is non-nil, publishes a [plugin.YardmasterAction] event with
+// ActionType="unblock-car".
+func handleUnblockCarWithBus(db *gorm.DB, msg models.Message, logger *slog.Logger, bus events.Bus) {
 	if msg.CarID == "" {
 		logger.Info("Action unblock-car: no car-id provided, skipping")
 		return
@@ -165,10 +240,25 @@ func handleUnblockCar(db *gorm.DB, msg models.Message, logger *slog.Logger) {
 	if err := writeProgressNote(db, msg.CarID, "dispatch", fmt.Sprintf("Manually unblocked: %s", msg.Body)); err != nil {
 		logger.Error("Action unblock-car: progress note failed", "error", err)
 	}
+
+	publish(bus, plugin.YardmasterAction, plugin.YardmasterActionEvent{
+		TargetID:   msg.CarID,
+		ActionType: "unblock-car",
+	})
 }
 
-// handleCloseEpic attempts to auto-close an epic whose children are all complete.
+// handleCloseEpic is a thin wrapper around [handleCloseEpicWithBus] that
+// passes a nil bus. Existing tests call this form.
 func handleCloseEpic(db *gorm.DB, msg models.Message, logger *slog.Logger) {
+	handleCloseEpicWithBus(db, msg, logger, nil)
+}
+
+// handleCloseEpicWithBus attempts to auto-close an epic whose children are all
+// complete.
+//
+// When bus is non-nil, publishes a [plugin.YardmasterAction] event with
+// ActionType="close-epic".
+func handleCloseEpicWithBus(db *gorm.DB, msg models.Message, logger *slog.Logger, bus events.Bus) {
 	if msg.CarID == "" {
 		logger.Info("Action close-epic: no car-id provided, skipping")
 		return
@@ -189,6 +279,11 @@ func handleCloseEpic(db *gorm.DB, msg models.Message, logger *slog.Logger) {
 	if err := writeProgressNote(db, msg.CarID, "dispatch", fmt.Sprintf("Close epic requested: %s", msg.Body)); err != nil {
 		logger.Error("Action close-epic: progress note failed", "error", err)
 	}
+
+	publish(bus, plugin.YardmasterAction, plugin.YardmasterActionEvent{
+		TargetID:   msg.CarID,
+		ActionType: "close-epic",
+	})
 }
 
 // writeProgressNote creates a CarProgress record documenting an action.

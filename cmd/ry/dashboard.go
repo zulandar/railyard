@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/zulandar/railyard/internal/dashboard"
+	"github.com/zulandar/railyard/internal/events"
 	"gorm.io/gorm"
 )
 
@@ -77,6 +78,15 @@ func runDashboard(cmd *cobra.Command, configPath string, port int, tlsCert, tlsK
 		cancel()
 	}()
 
+	// Construct an event bus for the dashboard pod. Plugin lifecycle is NOT
+	// started here — the dashboard runs as a standalone Kubernetes pod and
+	// any plugins that need to observe pause/resume events run in the
+	// yardmaster pod, which has its own bus. The bus passed in here lets
+	// the dashboard's pause/resume routes publish events that local
+	// in-process subscribers could consume; today there are none in pod
+	// mode, so publishes are no-ops.
+	bus := events.NewBus()
+
 	return dashboard.Start(ctx, dashboard.StartOpts{
 		DB:          gormDB,
 		Port:        port,
@@ -84,6 +94,7 @@ func runDashboard(cmd *cobra.Command, configPath string, port int, tlsCert, tlsK
 		TLSCert:     tlsCert,
 		TLSKey:      tlsKey,
 		ProjectName: projectName,
+		Bus:         bus,
 		RateLimit: dashboard.RateLimitConfig{
 			Enabled:           rateLimitEnabled,
 			RequestsPerMinute: rateLimitRPM,

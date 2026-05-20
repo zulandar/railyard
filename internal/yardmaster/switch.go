@@ -14,8 +14,10 @@ import (
 	"time"
 
 	"github.com/zulandar/railyard/internal/config"
+	"github.com/zulandar/railyard/internal/events"
 	"github.com/zulandar/railyard/internal/messaging"
 	"github.com/zulandar/railyard/internal/models"
+	"github.com/zulandar/railyard/pkg/plugin"
 	"gorm.io/gorm"
 )
 
@@ -46,6 +48,13 @@ type SwitchOpts struct {
 	UpdatePRBodyFn  func(repoDir, branch, body string) error
 	MarkPRReadyFn   func(repoDir, branch string) error
 	AddPRLabelFn    func(repoDir, branch, label string) error
+
+	// Bus is the optional plugin event bus. When non-nil, [Switch] publishes
+	// [plugin.CarMerged] on success and [plugin.MergeFailed] on failure paths
+	// (test failure, merge conflict, push failure, etc.) after the relevant
+	// DB transition commits. A nil bus disables publishing — existing callers
+	// (e.g. cmd/ry/ switch) that omit this field are unchanged.
+	Bus events.Bus
 }
 
 // SwitchFailureCategory categorizes Switch errors so the daemon can track and
@@ -130,6 +139,10 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 	if err := gitFetch(opts.RepoDir); err != nil {
 		result.FailureCategory = SwitchFailFetch
 		result.Error = fmt.Errorf("fetch: %w", err)
+		publish(opts.Bus, plugin.MergeFailed, plugin.MergeFailedEvent{
+			CarID:  carID,
+			Reason: result.Error.Error(),
+		})
 		return result, result.Error
 	}
 
@@ -192,6 +205,11 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 				}).Error; dbErr != nil {
 					slog.Error("update car to merge-failed", "car", carID, "error", dbErr)
 				}
+				// Publish AFTER the DB transition to merge-failed lands.
+				publish(opts.Bus, plugin.MergeFailed, plugin.MergeFailedEvent{
+					CarID:  carID,
+					Reason: fmt.Sprintf("infra-test-failure: %v", testErr),
+				})
 				msg := fmt.Sprintf("Infrastructure test failure for car %s (%s) on branch %s:\n%s",
 					carID, car.Track, car.Branch, truncateOutput(testOutput, 500))
 				if hint := infraHint(testOutput, opts.PreTestCommand); hint != "" {
@@ -248,6 +266,13 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 		}).Error; dbErr != nil {
 			slog.Error("update car to merged (already-ancestor)", "car", carID, "error", dbErr)
 		}
+
+		// Publish AFTER the DB transition to "merged" lands so subscribers
+		// see consistent state. This is the already-merged branch path.
+		publish(opts.Bus, plugin.CarMerged, plugin.CarMergedEvent{
+			CarID:  carID,
+			Branch: car.Branch,
+		})
 
 		// Run the same post-merge logic as a normal merge.
 		unblocked, ubErr := UnblockDeps(db, carID)
@@ -310,6 +335,10 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 		if err := pushBranch(opts.RepoDir, car.Branch); err != nil {
 			result.FailureCategory = SwitchFailPush
 			result.Error = fmt.Errorf("push branch: %w", err)
+			publish(opts.Bus, plugin.MergeFailed, plugin.MergeFailedEvent{
+				CarID:  carID,
+				Reason: result.Error.Error(),
+			})
 			return result, result.Error
 		}
 
@@ -347,6 +376,10 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 			if createErr != nil {
 				result.FailureCategory = SwitchFailPR
 				result.Error = fmt.Errorf("create PR: %w", createErr)
+				publish(opts.Bus, plugin.MergeFailed, plugin.MergeFailedEvent{
+					CarID:  carID,
+					Reason: result.Error.Error(),
+				})
 				return result, result.Error
 			}
 			slog.Info("Switch: draft PR created",
@@ -398,6 +431,10 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 				result.ConflictDetails = resolveErr.Error()
 			}
 			result.Error = fmt.Errorf("merge: %w", err)
+			publish(opts.Bus, plugin.MergeFailed, plugin.MergeFailedEvent{
+				CarID:  carID,
+				Reason: result.Error.Error(),
+			})
 			return result, result.Error
 		}
 		// Rebase succeeded — retry the merge (should be clean now).
@@ -410,6 +447,10 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 			}
 			gitMergeAbort(opts.RepoDir)
 			result.Error = fmt.Errorf("merge after rebase: %w", retryErr)
+			publish(opts.Bus, plugin.MergeFailed, plugin.MergeFailedEvent{
+				CarID:  carID,
+				Reason: result.Error.Error(),
+			})
 			return result, result.Error
 		}
 	}
@@ -422,6 +463,10 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 		gitResetToCommit(opts.RepoDir, preMergeHead)
 		result.FailureCategory = SwitchFailPush
 		result.Error = fmt.Errorf("push after merge: %w", err)
+		publish(opts.Bus, plugin.MergeFailed, plugin.MergeFailedEvent{
+			CarID:  carID,
+			Reason: result.Error.Error(),
+		})
 		return result, result.Error
 	}
 
@@ -448,6 +493,13 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 	}).Error; dbErr != nil {
 		slog.Error("update car to merged", "car", carID, "error", dbErr)
 	}
+
+	// Publish AFTER the DB transition to "merged" lands so subscribers see
+	// consistent state. Direct (non-PR) merge path.
+	publish(opts.Bus, plugin.CarMerged, plugin.CarMergedEvent{
+		CarID:  carID,
+		Branch: car.Branch,
+	})
 
 	// Unblock cross-track dependencies.
 	unblocked, ubErr := UnblockDeps(db, carID)

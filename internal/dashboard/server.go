@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/zulandar/railyard/internal/events"
 	"gorm.io/gorm"
 )
 
@@ -23,6 +24,11 @@ type StartOpts struct {
 	TLSKey      string          // path to TLS private key file (optional)
 	RateLimit   RateLimitConfig // per-IP rate limiting (optional)
 	ProjectName string          // project name displayed in the nav bar badge (optional)
+	// Bus is the optional plugin event bus. When non-nil, pause/resume routes
+	// publish [plugin.YardPaused] / [plugin.YardResumed] after the new state
+	// is committed to the DB. Existing callers that omit this field continue
+	// to work unchanged — publishing to a nil bus is a no-op per spec §6.3.
+	Bus events.Bus
 }
 
 // Start launches the dashboard HTTP server. It blocks until ctx is cancelled,
@@ -49,7 +55,7 @@ func Start(ctx context.Context, opts StartOpts) error {
 	router.SetHTMLTemplate(tmpl)
 
 	// Register routes.
-	registerRoutes(router, opts.DB, opts.ProjectName)
+	registerRoutesWithBus(router, opts.DB, opts.ProjectName, opts.Bus)
 
 	addr := fmt.Sprintf(":%d", opts.Port)
 	srv := &http.Server{

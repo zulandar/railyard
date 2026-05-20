@@ -7,8 +7,10 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/zulandar/railyard/internal/events"
 	"github.com/zulandar/railyard/internal/logutil"
 	"github.com/zulandar/railyard/internal/yardmaster"
 )
@@ -56,6 +58,16 @@ func runYardmaster(cmd *cobra.Command, configPath, logLevel string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Construct the event bus and plugin host BEFORE any subsystem starts so
+	// plugin Init runs before the yardmaster daemon claims state. The OSS
+	// binary registers zero plugins, so host.Init / host.Start / host.Stop
+	// are effective no-ops there.
+	bus := events.NewBusWithLogger(logger)
+	host := buildPluginHost(cfg, gormDB, bus)
+	host.Init(ctx)
+	host.Start(ctx)
+	logBootSummary(logger, host)
+
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
@@ -64,13 +76,24 @@ func runYardmaster(cmd *cobra.Command, configPath, logLevel string) error {
 		cancel()
 	}()
 
-	return yardmaster.Start(ctx, yardmaster.StartOpts{
+	startErr := yardmaster.Start(ctx, yardmaster.StartOpts{
 		ConfigPath: configPath,
 		Config:     cfg,
 		DB:         gormDB,
 		RepoDir:    repoDir,
 		Logger:     logger,
+		Bus:        bus,
 	})
+
+	// Stop plugins after the supervisor loop returns. host.Stop owns its own
+	// per-plugin 5-second drain bound (see internal/pluginhost.stopDrainTimeout);
+	// we give the parent context room to honor that without imposing a tighter
+	// outer deadline.
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	host.Stop(stopCtx)
+	stopCancel()
+
+	return startErr
 }
 
 func newSwitchCmd() *cobra.Command {
