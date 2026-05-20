@@ -43,17 +43,6 @@ func (l *lockedWriter) String() string {
 	return l.w.String()
 }
 
-// slog's text handler emits attribute values as Go-quoted strings, so a
-// substring like `subscriber "flood-sub"` shows up as `subscriber \"flood-sub\"`
-// inside the surrounding msg=... attribute. The constants here are kept in
-// that escaped form for direct strings.Contains matching against the rendered
-// log output.
-const (
-	warnDropFmt    = `events: dropped oldest event for subscriber \"%s\" on topic \"%s\"`
-	errorPanicFmt  = `events: subscriber \"%s\" panicked on topic \"%s\"`
-	errorDisabled  = `events: subscriber \"%s\" disabled after 3 consecutive panics`
-)
-
 func TestBus_DropOldestBackpressure(t *testing.T) {
 	bus, lw := newTestBus(t)
 	defer closeBus(t, bus)

@@ -6,7 +6,7 @@ package plugin
 // The plugin host converts EventType to its underlying string when
 // routing to the internal event bus.
 //
-// Topic to payload mapping
+// # Topic to payload mapping
 //
 // Every constant below is paired with exactly one typed payload struct.
 // Handlers registered via [Host.Subscribe] receive the payload as an

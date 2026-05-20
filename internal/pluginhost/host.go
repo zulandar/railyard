@@ -146,7 +146,7 @@ func (v *pluginView) Logger() *slog.Logger {
 // records the daemon under an empty plugin name; in practice plugins
 // only ever see a *pluginView, so this override is what gets called.
 func (v *pluginView) RunDaemon(name string, fn plugin.DaemonFunc) {
-	v.Host.runDaemonFor(v.name, name, fn)
+	v.runDaemonFor(v.name, name, fn)
 }
 
 // Subscribe overrides Host.Subscribe so the host can track which plugin
@@ -159,7 +159,7 @@ func (v *pluginView) RunDaemon(name string, fn plugin.DaemonFunc) {
 // per-plugin counter is decremented exactly once even if the caller
 // invokes Unsubscribe multiple times (the SDK documents that as safe).
 func (v *pluginView) Subscribe(topic plugin.EventType, handler plugin.EventHandler) plugin.Unsubscribe {
-	return v.Host.subscribeFor(v.name, topic, handler)
+	return v.subscribeFor(v.name, topic, handler)
 }
 
 // Compile-time assertion that *Host implements plugin.Host. Catches

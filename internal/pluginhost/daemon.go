@@ -248,4 +248,3 @@ func joinDaemons(parent context.Context, states []*daemonState) {
 		<-done
 	}
 }
-

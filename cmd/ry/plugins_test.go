@@ -18,10 +18,10 @@ type bootFakePlugin struct {
 	name string
 }
 
-func (p *bootFakePlugin) Name() string                                { return p.name }
+func (p *bootFakePlugin) Name() string                                  { return p.name }
 func (p *bootFakePlugin) Init(ctx context.Context, h plugin.Host) error { return nil }
-func (p *bootFakePlugin) Start(ctx context.Context) error              { return nil }
-func (p *bootFakePlugin) Stop(ctx context.Context) error               { return nil }
+func (p *bootFakePlugin) Start(ctx context.Context) error               { return nil }
+func (p *bootFakePlugin) Stop(ctx context.Context) error                { return nil }
 
 // TestPluginsListEmpty asserts the OSS-binary output: when no plugins are
 // linked into the binary, the command prints the friendly fallback line
