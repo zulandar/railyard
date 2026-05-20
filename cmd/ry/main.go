@@ -1,73 +1,9 @@
+// Package main is the OSS railyard binary. It delegates to pkg/cli,
+// where every subcommand and its dependencies live. Enterprise binaries
+// follow the same pattern: side-effect import their plugins and call
+// cli.Run().
 package main
 
-import (
-	"fmt"
-	"os"
+import "github.com/zulandar/railyard/pkg/cli"
 
-	"github.com/spf13/cobra"
-)
-
-// Version info set via ldflags at build time.
-var (
-	Version = "dev"
-	Commit  = "none"
-	Date    = "unknown"
-)
-
-func newRootCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "ry",
-		Short: "Railyard — multi-agent AI orchestration",
-		Long:  "Railyard coordinates coding agents across local machines and cloud VMs.",
-	}
-
-	cmd.AddCommand(newVersionCmd())
-	cmd.AddCommand(newDBCmd())
-	cmd.AddCommand(newCarCmd())
-	cmd.AddCommand(newEngineCmd())
-	cmd.AddCommand(newCompleteCmd())
-	cmd.AddCommand(newProgressCmd())
-	cmd.AddCommand(newMessageCmd())
-	cmd.AddCommand(newInboxCmd())
-	cmd.AddCommand(newDispatchCmd())
-	cmd.AddCommand(newYardmasterCmd())
-	cmd.AddCommand(newSwitchCmd())
-	cmd.AddCommand(newStartCmd())
-	cmd.AddCommand(newStopCmd())
-	cmd.AddCommand(newStatusCmd())
-	cmd.AddCommand(newLogsCmd())
-	cmd.AddCommand(newWatchCmd())
-	cmd.AddCommand(newDoctorCmd())
-	cmd.AddCommand(newDashboardCmd())
-	cmd.AddCommand(newCocoIndexCmd())
-	cmd.AddCommand(newOverlayCmd())
-	cmd.AddCommand(newGitIgnoreCmd())
-	cmd.AddCommand(newMigrateCmd())
-	cmd.AddCommand(newTelegraphCmd())
-	cmd.AddCommand(newBullCmd())
-	cmd.AddCommand(newInspectCmd())
-	cmd.AddCommand(newInitCmd())
-	cmd.AddCommand(newPluginsCmd())
-	return cmd
-}
-
-func newVersionCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "version",
-		Short: "Print version information",
-		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Fprintf(cmd.OutOrStdout(), "ry %s (commit: %s, built: %s)\n", Version, Commit, Date)
-		},
-	}
-}
-
-func execute(cmd *cobra.Command) int {
-	if err := cmd.Execute(); err != nil {
-		return 1
-	}
-	return 0
-}
-
-func main() {
-	os.Exit(execute(newRootCmd()))
-}
+func main() { cli.Run() }
