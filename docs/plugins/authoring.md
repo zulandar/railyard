@@ -214,65 +214,40 @@ through `go mod tidy`. The plugin does not import `yaml` explicitly —
 
 ### 2.4 `cmd/ry-hello/main.go`
 
-This is where the enterprise binary is assembled. **Read this carefully**
-— the limitation it describes is important.
-
-`cmd/ry/main.go` in this repo is `package main`. Go does not let an
-external package call into another `package main`. That means today an
-enterprise binary cannot do `import railyardmain "github.com/zulandar/railyard/cmd/ry"; railyardmain.Run()`.
-
-Two workarounds exist:
-
-1. **Fork `cmd/ry/main.go` into your enterprise binary.** Copy the file,
-   add your plugin side-effect imports above it, and rebuild. This is
-   what railyard-enterprise does today. It's a ~20-line file and it
-   only changes when railyard adds a top-level subcommand, which is
-   rare.
-2. **Wait for a `cmd/ry/cli.Run()` entry point.** A future bead will
-   extract a public re-entry function. When that lands, an enterprise
-   `main.go` will be ~5 lines: side-effect imports plus `ry.Run()`.
-
-Until that future bead lands, the hello-world enterprise binary's
-`main.go` looks like a copy of `cmd/ry/main.go` with one new import:
+The enterprise binary is ~5 lines. Side-effect import each plugin, then
+delegate to railyard's CLI:
 
 ```go
 package main
 
 import (
-    "fmt"
-    "os"
-
-    "github.com/spf13/cobra"
-
-    // Side-effect import: the package's init() calls plugin.Register.
     _ "github.com/example/railyard-hello"
+
+    "github.com/zulandar/railyard/pkg/cli"
 )
 
-// Version info — typically set via ldflags at build time.
-var (
-    Version = "dev"
-    Commit  = "none"
-    Date    = "unknown"
-)
-
-func main() {
-    // ... copy the existing newRootCmd() / execute() from cmd/ry/main.go ...
-    // The plugin host wiring (cmd/ry/pluginhost.go) is what actually walks
-    // plugin.Registered() at boot, so as long as your binary uses the same
-    // boot path the plugin will be picked up.
-    os.Exit(execute(newRootCmd()))
-}
-
-// Belt-and-suspenders so a future linter complaint about unused imports
-// at the package level is impossible.
-var _ = cobra.Command{}
-var _ = fmt.Sprintf
+func main() { cli.Run() }
 ```
 
-The mechanical answer: copy `cmd/ry/main.go` and `cmd/ry/pluginhost.go`,
-add your side-effect imports, and build with `go build -o ry-hello
-./cmd/ry-hello/`. That is verbose; a follow-up bead will eliminate the
-copying.
+`cli.Run()` is the public re-entry point exposed by
+`github.com/zulandar/railyard/pkg/cli`. It builds the same cobra root
+command the OSS `ry` binary uses, executes it, and exits with the
+appropriate status code. Every subcommand and the plugin host wiring
+live inside `pkg/cli`, so a custom binary that side-effect imports a
+plugin package and calls `cli.Run()` boots through the identical path
+as `ry` — `plugin.Registered()` is walked at startup and your plugin's
+`Init`/`Start` fire as documented in §3.
+
+If you need to override the `Version`, `Commit`, or `Date` strings shown
+by `ry version`, set the exported vars in `pkg/cli` at build time via
+`go build -ldflags`:
+
+```
+go build -ldflags "-X github.com/zulandar/railyard/pkg/cli.Version=1.2.3 \
+  -X github.com/zulandar/railyard/pkg/cli.Commit=$(git rev-parse HEAD) \
+  -X github.com/zulandar/railyard/pkg/cli.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  -o ry-hello ./cmd/ry-hello/
+```
 
 ### 2.5 `railyard.yaml`
 
@@ -311,16 +286,14 @@ A compiling version of the plugin package above lives at
 own Go module with a `replace` directive pointing at the in-tree
 railyard source, so it builds against the current SDK with no external
 release. The verification test in
-`cmd/ry/example_plugin_build_test.go` runs `go build ./...` from that
+`pkg/cli/example_plugin_build_test.go` runs `go build ./...` from that
 directory on every CI run, so this example stays current with the SDK —
 if `pkg/plugin` ever changes in a way that breaks the documented
 listing above, CI fails until the guide and the example are brought
 back in sync.
 
-That example is a plugin package only (no `cmd/ry-hello/main.go`). The
-entry-point limitation in §2.4 is real until the public re-entry bead
-lands; once it does, the example will grow a tiny `main.go` and the
-verification test will build the full binary.
+That example is a plugin package only (no `cmd/ry-hello/main.go`); the
+binary wiring is the five-line `cli.Run()` shim shown in §2.4.
 
 That's the full plugin. The rest of this guide explains what each piece
 does and how to extend it.
