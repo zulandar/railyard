@@ -37,7 +37,20 @@ type Config struct {
 	Telegraph         TelegraphConfig     `yaml:"telegraph"`
 	Kubernetes        KubernetesConfig    `yaml:"kubernetes"`
 	AgentProvider     string              `yaml:"agent_provider"`
-	Yardmaster        YardmasterConfig    `yaml:"yardmaster"`
+	// AgentModel selects a specific model for the configured agent provider.
+	// Unlike AgentProvider (which defaults to "claude"), AgentModel has no
+	// default — empty means "let the provider's CLI choose". The value
+	// cascades to BullConfig, InspectConfig, and each TrackConfig when those
+	// sections don't set their own. Each provider implementation decides how
+	// to apply the value (env var or CLI flag), or ignores it if unsupported.
+	AgentModel string `yaml:"agent_model"`
+	// AuthMethod mirrors the chart's `auth.method` value (api_key, oauth_token,
+	// bedrock, vertex, foundry, do_inference) when running in Kubernetes mode.
+	// The chart is responsible for injecting this into the application config;
+	// locally it is left unset. Used solely for startup validation — Go code
+	// does not switch behavior on this value.
+	AuthMethod string           `yaml:"auth_method"`
+	Yardmaster YardmasterConfig `yaml:"yardmaster"`
 
 	// PluginConfigs holds top-level YAML blocks whose keys are not part of the
 	// typed Config schema. Plugins read their own block (keyed by plugin name)
@@ -151,6 +164,7 @@ type TrackConfig struct {
 	TestCommand    string                   `yaml:"test_command"`
 	Conventions    map[string]interface{}   `yaml:"conventions"`
 	AgentProvider  string                   `yaml:"agent_provider"`
+	AgentModel     string                   `yaml:"agent_model"`
 	Playwright     *models.PlaywrightConfig `yaml:"playwright,omitempty"`
 }
 
@@ -179,6 +193,7 @@ type BullConfig struct {
 	PollIntervalSec int                `yaml:"poll_interval_sec"`
 	TriageMode      string             `yaml:"triage_mode"`
 	AgentProvider   string             `yaml:"agent_provider"`
+	AgentModel      string             `yaml:"agent_model"`
 	Comments        BullCommentsConfig `yaml:"comments"`
 	Labels          BullLabelsConfig   `yaml:"labels"`
 }
@@ -198,6 +213,7 @@ type InspectConfig struct {
 	InstallationID   int64               `yaml:"installation_id"`
 	PollIntervalSec  int                 `yaml:"poll_interval_sec"`
 	AgentProvider    string              `yaml:"agent_provider"`
+	AgentModel       string              `yaml:"agent_model"`
 	DeepReview       bool                `yaml:"deep_review"`
 	ReviewTimeoutSec int                 `yaml:"review_timeout_sec"`
 	MaxDiffLines     int                 `yaml:"max_diff_lines"`
@@ -457,12 +473,22 @@ func (c *Config) applyDefaults() {
 	if c.Bull.AgentProvider == "" {
 		c.Bull.AgentProvider = c.AgentProvider
 	}
+	// AgentModel inheritance cascade. Unlike AgentProvider (which defaults to
+	// "claude"), AgentModel has no default — empty at the top level stays
+	// empty. We only propagate a non-empty top-level value down to sub-configs
+	// that didn't set their own.
+	if c.Bull.AgentModel == "" {
+		c.Bull.AgentModel = c.AgentModel
+	}
 	for i := range c.Tracks {
 		if c.Tracks[i].EngineSlots == 0 {
 			c.Tracks[i].EngineSlots = 3
 		}
 		if c.Tracks[i].AgentProvider == "" {
 			c.Tracks[i].AgentProvider = c.AgentProvider
+		}
+		if c.Tracks[i].AgentModel == "" {
+			c.Tracks[i].AgentModel = c.AgentModel
 		}
 		// Playwright defaults — only apply when the block is present and enabled.
 		if pw := c.Tracks[i].Playwright; pw != nil && pw.Enabled {
@@ -550,6 +576,9 @@ func (c *Config) applyDefaults() {
 		if c.Inspect.AgentProvider == "" {
 			c.Inspect.AgentProvider = c.AgentProvider
 		}
+		if c.Inspect.AgentModel == "" {
+			c.Inspect.AgentModel = c.AgentModel
+		}
 		if c.Inspect.Labels.InProgress == "" {
 			c.Inspect.Labels.InProgress = "inspect: in-progress"
 		}
@@ -635,6 +664,16 @@ func (c *Config) validate() error {
 		if c.Kubernetes.Image == "" {
 			errs = append(errs, "kubernetes.image is required when kubernetes is configured")
 		}
+	}
+	// do_inference requires an explicit agent_model. The DO inference endpoint
+	// has no implicit default model, so a request without one will fail at
+	// runtime. We only enforce this in Kubernetes mode — local operators
+	// manage their own env vars and may have intentionally chosen a different
+	// routing path. The chart is responsible for injecting `auth_method` into
+	// the application config (see ADR 4 in docs/superpowers/specs/
+	// 2026-05-21-do-inference-design.md).
+	if c.IsKubernetesMode() && c.AuthMethod == "do_inference" && c.AgentModel == "" {
+		errs = append(errs, "agent_model is required when auth_method is do_inference (DO inference has no default model)")
 	}
 	// Bull validation (only when enabled).
 	if c.Bull.Enabled {
