@@ -82,6 +82,13 @@ repo: git@github.com:org/myproject.git
 #   agent_model: meta-llama/llama-3.3-70b-instruct:free
 #   agent_model: deepseek/deepseek-r1:free
 # See charts/railyard/README.md for the full OpenRouter operator guide.
+#
+# When using an OpenAI-compatible backend (auth.method: openai_compat in the
+# chart + agent_provider: codex), naming is backend-specific —
+#   DO Inference:      agent_model: gemma-4-31B-it
+#   OpenRouter:        agent_model: meta-llama/llama-3.3-70b-instruct:free
+#   Direct OpenAI:     agent_model: gpt-4
+# See charts/railyard/README.md for the full operator guide.
 
 # ---------------------------------------------------------------------------
 # Database connection (optional — defaults shown)
