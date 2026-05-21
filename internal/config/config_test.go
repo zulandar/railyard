@@ -1434,6 +1434,94 @@ tracks:
 	}
 }
 
+func TestParse_OpenAICompat_RequiresCodex(t *testing.T) {
+	// auth_method: openai_compat is only wired through the codex agent provider.
+	// Pairing it with agent_provider: claude must fail validation.
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+project: myapp
+auth_method: openai_compat
+agent_provider: claude
+agent_model: gemma-4-31B-it
+kubernetes:
+  namespace: railyard-myapp
+  image: ghcr.io/org/railyard-engine:latest
+tracks:
+  - name: backend
+    language: go
+`
+	_, err := Parse([]byte(yaml))
+	if err == nil {
+		t.Fatal("expected validation error for openai_compat + agent_provider=claude, got nil")
+	}
+	if !strings.Contains(err.Error(), "codex") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "codex")
+	}
+}
+
+func TestParse_OpenAICompat_AllowsCodex(t *testing.T) {
+	// Happy path: openai_compat + agent_provider=codex + agent_model set should
+	// validate cleanly in k8s mode.
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+project: myapp
+auth_method: openai_compat
+agent_provider: codex
+agent_model: gemma-4-31B-it
+kubernetes:
+  namespace: railyard-myapp
+  image: ghcr.io/org/railyard-engine:latest
+tracks:
+  - name: backend
+    language: go
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.AuthMethod != "openai_compat" {
+		t.Errorf("AuthMethod = %q, want %q", cfg.AuthMethod, "openai_compat")
+	}
+	if cfg.AgentProvider != "codex" {
+		t.Errorf("AgentProvider = %q, want %q", cfg.AgentProvider, "codex")
+	}
+	if cfg.AgentModel != "gemma-4-31B-it" {
+		t.Errorf("AgentModel = %q, want %q", cfg.AgentModel, "gemma-4-31B-it")
+	}
+}
+
+func TestParse_AgentModelValidation_K8sOpenAICompatMissingModel(t *testing.T) {
+	// In Kubernetes mode with auth_method: openai_compat, an empty agent_model
+	// must fail validation at startup — OpenAI-compat endpoints have no
+	// implicit default model. Verifies the parameterized formatting carries
+	// through for the third entry in MethodsRequiringAgentModel.
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+project: myapp
+auth_method: openai_compat
+agent_provider: codex
+kubernetes:
+  namespace: railyard-myapp
+  image: ghcr.io/org/railyard-engine:latest
+tracks:
+  - name: backend
+    language: go
+`
+	_, err := Parse([]byte(yaml))
+	if err == nil {
+		t.Fatal("expected validation error for k8s + openai_compat + empty agent_model, got nil")
+	}
+	if !strings.Contains(err.Error(), "agent_model") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "agent_model")
+	}
+	if !strings.Contains(err.Error(), "openai_compat") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "openai_compat")
+	}
+}
+
 func TestParse_AgentModelValidation_LocalSkipped(t *testing.T) {
 	// In local (non-k8s) mode, auth_method: do_inference + empty agent_model
 	// must NOT error — local operators manage their own env vars.
