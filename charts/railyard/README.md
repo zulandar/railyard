@@ -51,7 +51,7 @@ helm install railyard ./charts/railyard \
 
 | Value | Description | Default |
 |-------|-------------|---------|
-| `auth.method` | Auth method: `api_key`, `oauth_token`, `bedrock`, `vertex`, `foundry`, `do_inference`, `openrouter` | `api_key` |
+| `auth.method` | Auth method: `api_key`, `oauth_token`, `bedrock`, `vertex`, `foundry`, `do_inference`, `openrouter`, `openai_compat` | `api_key` |
 | `auth.existingSecret` | Use an existing Secret instead of creating one | `""` |
 | `auth.apiKey` | API key (for `api_key` method) | `""` |
 | `auth.oauthToken` | OAuth token from `claude setup-token` (for `oauth_token` method) | `""` |
@@ -65,6 +65,9 @@ helm install railyard ./charts/railyard \
 | `auth.foundry.endpoint` | Azure endpoint | `""` |
 | `auth.doInference.apiKey` | DigitalOcean model access key or PAT (for `do_inference` method) | `""` |
 | `auth.openrouter.apiKey` | OpenRouter API key (for `openrouter` method) | `""` |
+| `auth.openaiCompat.baseURL` | OpenAI-compatible endpoint URL (for `openai_compat` method, e.g. `https://inference.do-ai.run/v1`) | `""` |
+| `auth.openaiCompat.apiKey` | API key for the OpenAI-compatible backend (for `openai_compat` method) | `""` |
+| `auth.openaiCompat.providerName` | Optional codex provider key (defaults to `openai_compat`) | `""` |
 | `auth.githubToken` | GitHub PAT for PR operations (requires `requirePR`). Sets `GH_TOKEN` env var | `""` |
 | `auth.copilot.token` | GitHub PAT for Copilot CLI (overrides `githubToken` for Copilot) | `""` |
 | `auth.apiKeyHelper` | Command for dynamic key rotation | `""` |
@@ -439,6 +442,77 @@ The `agentModel` value renders as the top-level `agent_model` field in
 `railyard.yaml` and cascades to tracks/bull/inspect the same way as for any
 other auth method. See the commented `agent_model` block in
 `railyard.example.yaml` for the override pattern.
+
+### Install with an OpenAI-compatible backend (codex)
+
+`auth.method: openai_compat` routes the `codex` CLI to any OpenAI-compatible
+backend — DigitalOcean Inference's `/v1/chat/completions`, OpenRouter's
+OpenAI-compat endpoint, direct OpenAI, a local LM Studio, etc. — by injecting
+`OPENAI_API_KEY` and a `~/.codex/config.toml` ConfigMap into the engine pod
+that selects the backend's `base_url`. This unlocks non-Anthropic catalogs
+(Gemma, Llama, DeepSeek, Qwen, GPT, …) that the existing `do_inference` and
+`openrouter` methods cannot reach, since both of those speak the Anthropic
+Messages API and route the `claude` CLI only.
+
+Key facts:
+
+- **`engine.agentProvider: codex` is required.** The `claude` CLI cannot speak
+  OpenAI-compat, and opencode is currently broken on this path (tracked in
+  follow-up issue `railyard-tsm`). Startup config validation enforces this.
+- **`engine.agentModel` is required** — the chart and codex have no implicit
+  default model. Startup validation fails fast if it is missing.
+- **Naming is backend-specific** — railyard does not parse or translate model
+  names. Consult your backend's docs:
+  - DO Inference: bare names like `gemma-4-31B-it`
+  - OpenRouter: `provider/model[:variant]` like
+    `meta-llama/llama-3.3-70b-instruct:free`
+  - Direct OpenAI: bare names like `gpt-4`, `gpt-4o`
+- **codex `web_search` is disabled automatically.** codex enables web search
+  by default but most non-OpenAI backends reject the tool. The chart's
+  `codex-config.yaml` ConfigMap sets `web_search = "disabled"` for you; no
+  manual configuration needed.
+- **Per-key guardrails (recommended):** Configure model allowlists, provider
+  allowlists, and budget caps **on the backend's own dashboard per API key**
+  (DO's *Model Access Keys* page, OpenRouter's API key settings, etc.).
+  Railyard treats the key as opaque credentials.
+
+**Sample values — DO Inference + Gemma 4 free model:**
+
+```yaml
+git:
+  owner: myorg
+  repo: git@github.com:myorg/myrepo.git
+auth:
+  method: openai_compat
+  openaiCompat:
+    baseURL: "https://inference.do-ai.run/v1"
+    apiKey: "doo_v1_..."
+engine:
+  agentProvider: codex
+  agentModel: "gemma-4-31B-it"
+```
+
+**Sample values — OpenRouter + free Llama:**
+
+```yaml
+git:
+  owner: myorg
+  repo: git@github.com:myorg/myrepo.git
+auth:
+  method: openai_compat
+  openaiCompat:
+    baseURL: "https://openrouter.ai/api/v1"
+    apiKey: "sk-or-v1-..."
+engine:
+  agentProvider: codex
+  agentModel: "meta-llama/llama-3.3-70b-instruct:free"
+```
+
+**When to pick which method:** `do_inference` and `openrouter` remain the
+right choice when you want the `claude` CLI against an Anthropic-skin gateway
+(DO's `/v1/messages`, OpenRouter's Anthropic-compatible endpoint). Reach for
+`openai_compat` when you want non-Anthropic models — or direct OpenAI —
+through the `codex` CLI.
 
 ### ArgoCD Application
 

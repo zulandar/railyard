@@ -89,8 +89,9 @@ var KnownProviders = map[string]bool{
 // have no implicit default model — a request without one will fail at runtime.
 // Enforced in Kubernetes mode by Config.validate().
 var MethodsRequiringAgentModel = map[string]bool{
-	"do_inference": true,
-	"openrouter":   true,
+	"do_inference":  true,
+	"openrouter":    true,
+	"openai_compat": true,
 }
 
 // CocoIndexConfig holds settings for the CocoIndex semantic search integration.
@@ -681,6 +682,15 @@ func (c *Config) validate() error {
 		errs = append(errs, fmt.Sprintf(
 			"agent_model is required when auth_method is %s (no implicit default model)",
 			c.AuthMethod,
+		))
+	}
+	// auth_method=openai_compat is only wired through the codex agent provider.
+	// claude CLI cannot speak OpenAI-compat and opencode's provider is broken
+	// (see railyard-tsm), so any other agent_provider is a misconfiguration.
+	if c.AuthMethod == "openai_compat" && c.AgentProvider != "codex" {
+		errs = append(errs, fmt.Sprintf(
+			"auth_method=openai_compat requires agent_provider=codex (claude CLI cannot speak OpenAI-compat; opencode is broken — see railyard-tsm), got %q",
+			c.AgentProvider,
 		))
 	}
 	// Bull validation (only when enabled).

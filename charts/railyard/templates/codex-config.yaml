@@ -1,0 +1,16 @@
+{{- if eq .Values.auth.method "openai_compat" }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "railyard.fullname" . }}-codex-config
+  labels:
+    {{- include "railyard.labels" . | nindent 4 }}
+data:
+  config.toml: |
+    model_provider = "{{ default "openai_compat" .Values.auth.openaiCompat.providerName }}"
+    web_search = "disabled"
+    [model_providers.{{ default "openai_compat" .Values.auth.openaiCompat.providerName }}]
+    name = "OpenAI Compat Backend"
+    base_url = "{{ required "auth.openaiCompat.baseURL is required when auth.method is openai_compat" .Values.auth.openaiCompat.baseURL }}"
+    env_key = "OPENAI_API_KEY"
+{{- end }}

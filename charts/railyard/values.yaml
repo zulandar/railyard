@@ -133,8 +133,13 @@ cocoindex:
 #                  meta-llama/llama-3.3-70b-instruct:free).
 #                  Configure model/budget/provider guardrails per-key on the
 #                  OpenRouter dashboard.
+#   openai_compat - Any OpenAI-compatible backend (DO Inference, OpenRouter, direct OpenAI,
+#                  local LM Studio, etc.) via codex CLI. Requires agent_provider=codex
+#                  (claude CLI cannot speak OpenAI-compat) and agent_model set to a model
+#                  the backend supports. Each backend has its own naming convention —
+#                  consult the backend's docs.
 auth:
-  # -- Authentication method: api_key, oauth_token, bedrock, vertex, foundry, do_inference, openrouter.
+  # -- Authentication method: api_key, oauth_token, bedrock, vertex, foundry, do_inference, openrouter, openai_compat.
   method: api_key
   # -- Use an existing Secret instead of creating one. The Secret must contain
   # the appropriate keys for the chosen method (see auth-secret.yaml template).
@@ -170,6 +175,16 @@ auth:
   # provider allowlist, budget cap) configured on the OpenRouter dashboard.
   openrouter:
     apiKey: ""   # OpenRouter API key (sk-or-v1-...)
+  # -- OpenAI-compatible backend configuration (used when method=openai_compat).
+  # Requires the application config to set agent_provider=codex and agent_model.
+  # The chart writes a ConfigMap with the codex config.toml (see codex-config.yaml
+  # template — separate task railyard-gfx.2.3) so codex routes through this backend.
+  # Per-key guardrails (model allowlist, provider allowlist, budget cap) configured
+  # on the backend's own dashboard, not in railyard.
+  openaiCompat:
+    baseURL: ""           # e.g., https://inference.do-ai.run/v1, https://openrouter.ai/api/v1
+    apiKey: ""            # API key for the chosen backend
+    providerName: ""      # OPTIONAL: codex provider key (defaults to "openai_compat" in the configmap)
   # -- GitHub PAT for PR operations (require_pr mode). Needs repo scope.
   # Sets GH_TOKEN env var used by gh CLI for PR creation and review detection.
   githubToken: ""
