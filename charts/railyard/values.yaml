@@ -122,8 +122,12 @@ cocoindex:
 #   vertex       - Google Vertex AI: uses GOOGLE_APPLICATION_CREDENTIALS
 #                  (service account JSON) and CLOUD_ML_REGION.
 #   foundry      - Azure AI Foundry: uses AZURE_API_KEY and AZURE_ENDPOINT.
+#   do_inference - DigitalOcean Serverless Inference: routes the claude CLI
+#                  to https://inference.do-ai.run via ANTHROPIC_BASE_URL +
+#                  ANTHROPIC_API_KEY. Requires agent_model to be set in the
+#                  application config (no implicit default model).
 auth:
-  # -- Authentication method: api_key, oauth_token, bedrock, vertex, foundry.
+  # -- Authentication method: api_key, oauth_token, bedrock, vertex, foundry, do_inference.
   method: api_key
   # -- Use an existing Secret instead of creating one. The Secret must contain
   # the appropriate keys for the chosen method (see auth-secret.yaml template).
@@ -149,6 +153,10 @@ auth:
   foundry:
     apiKey: ""
     endpoint: ""
+  # -- DigitalOcean Serverless Inference configuration (used when method=do_inference).
+  # Requires the application config to set agent_model (no implicit default).
+  doInference:
+    apiKey: ""   # DO model access key or PAT
   # -- GitHub PAT for PR operations (require_pr mode). Needs repo scope.
   # Sets GH_TOKEN env var used by gh CLI for PR creation and review detection.
   githubToken: ""
