@@ -25,7 +25,9 @@ type RateLimitSignal struct {
 // Detection patterns. All are precompiled at package init.
 //
 // Anthropic native error shape:
-//   {"type":"error","error":{"type":"rate_limit_error",...}}
+//
+//	{"type":"error","error":{"type":"rate_limit_error",...}}
+//
 // We anchor on the JSON field name to avoid matching arbitrary occurrences
 // of the substring "rate_limit_error" outside an error object.
 var anthropicRateLimitRe = regexp.MustCompile(`"type"\s*:\s*"rate_limit_error"`)
@@ -42,9 +44,11 @@ var openRouterRateLimitedRe = regexp.MustCompile(`rate-limited`)
 var openRouterRetryAfterRe = regexp.MustCompile(`"retry_after_seconds"\s*:\s*(\d+)`)
 
 // Generic HTTP 429 status. Matches forms like:
-//   "HTTP 429 Too Many Requests"
-//   "HTTP/1.1 429"
-//   "status: 429"
+//
+//	"HTTP 429 Too Many Requests"
+//	"HTTP/1.1 429"
+//	"status: 429"
+//
 // Case-insensitive. The structural anchoring (HTTP-context word) avoids
 // matching incidental "429" occurrences (line numbers, port numbers, etc.).
 var httpStatus429Re = regexp.MustCompile(`(?i)\bHTTP(?:/\d\.\d)?\s+429\b|\bstatus\s*:\s*429\b`)
