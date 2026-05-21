@@ -51,7 +51,7 @@ helm install railyard ./charts/railyard \
 
 | Value | Description | Default |
 |-------|-------------|---------|
-| `auth.method` | Auth method: `api_key`, `oauth_token`, `bedrock`, `vertex`, `foundry`, `do_inference` | `api_key` |
+| `auth.method` | Auth method: `api_key`, `oauth_token`, `bedrock`, `vertex`, `foundry`, `do_inference`, `openrouter` | `api_key` |
 | `auth.existingSecret` | Use an existing Secret instead of creating one | `""` |
 | `auth.apiKey` | API key (for `api_key` method) | `""` |
 | `auth.oauthToken` | OAuth token from `claude setup-token` (for `oauth_token` method) | `""` |
@@ -64,6 +64,7 @@ helm install railyard ./charts/railyard \
 | `auth.foundry.apiKey` | Azure API key (for `foundry` method) | `""` |
 | `auth.foundry.endpoint` | Azure endpoint | `""` |
 | `auth.doInference.apiKey` | DigitalOcean model access key or PAT (for `do_inference` method) | `""` |
+| `auth.openrouter.apiKey` | OpenRouter API key (for `openrouter` method) | `""` |
 | `auth.githubToken` | GitHub PAT for PR operations (requires `requirePR`). Sets `GH_TOKEN` env var | `""` |
 | `auth.copilot.token` | GitHub PAT for Copilot CLI (overrides `githubToken` for Copilot) | `""` |
 | `auth.apiKeyHelper` | Command for dynamic key rotation | `""` |
@@ -384,6 +385,60 @@ If any step fails, the most common causes are: (a) `engine.agentModel` not set
 inference scope — pod logs will show a 401 from `inference.do-ai.run`; (c) the
 configured model name does not exist in DO's catalog — pod logs will show a
 4xx from the `/v1/messages` call.
+
+### Install with OpenRouter
+
+`auth.method: openrouter` routes the `claude` CLI to OpenRouter's unified
+inference gateway (`https://openrouter.ai/api`) by injecting
+`ANTHROPIC_BASE_URL` and `ANTHROPIC_API_KEY` into the engine pod. OpenRouter
+fronts ~100+ models from Anthropic, OpenAI, Google, Meta, DeepSeek, Mistral,
+Qwen, and others behind a single Anthropic-compatible endpoint. Like DO
+inference, OpenRouter has **no implicit default model** — every request must
+specify one — so `agent_model` is required at the application config layer
+(top-level in `railyard.yaml`). Startup validation fails if it is missing.
+
+See the [OpenRouter docs](https://openrouter.ai/docs) for the full model
+catalog and to obtain an API key.
+
+**Naming convention:** OpenRouter uses `provider/model[:variant]`. Set this
+exact string in `agent_model`; railyard does not parse or translate model
+names. Examples:
+
+- `anthropic/claude-sonnet-4.5` — Anthropic, paid
+- `meta-llama/llama-3.3-70b-instruct:free` — OSS Llama, free
+- `deepseek/deepseek-r1:free` — OSS reasoning model, free
+
+**Per-key guardrails (recommended):** Configure model allowlists, provider
+allowlists, and budget caps **on the OpenRouter dashboard per API key**, not
+in railyard config. Create a scoped key for each deployment (e.g. "free
+models only, $5/day cap") and railyard will treat the key as opaque
+credentials. This is intentionally not surfaced in the chart values — see
+ADR 3 in the OpenRouter design spec for the rationale.
+
+**Free models:** `:free` variants cost nothing and are useful for smoke
+testing the integration. They are rate-limited (typically ~10 requests/min,
+~50 requests/day) and not viable for production cars; use a paid model for
+real workloads.
+
+```yaml
+git:
+  owner: myorg
+  repo: git@github.com:myorg/myrepo.git
+auth:
+  method: openrouter
+  openrouter:
+    apiKey: "sk-or-v1-..."
+engine:
+  agentProvider: claude
+  # agent_model must be set in OpenRouter's provider/model[:variant] form.
+  # This surfaces in the rendered railyard.yaml as top-level agent_model.
+  agentModel: "meta-llama/llama-3.3-70b-instruct:free"
+```
+
+The `agentModel` value renders as the top-level `agent_model` field in
+`railyard.yaml` and cascades to tracks/bull/inspect the same way as for any
+other auth method. See the commented `agent_model` block in
+`railyard.example.yaml` for the override pattern.
 
 ### ArgoCD Application
 
