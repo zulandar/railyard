@@ -665,14 +665,21 @@ func (c *Config) validate() error {
 			errs = append(errs, "kubernetes.image is required when kubernetes is configured")
 		}
 	}
-	// do_inference requires an explicit agent_model. The DO inference endpoint
-	// has no implicit default model, so a request without one will fail at
-	// runtime. Enforced only in Kubernetes mode — local operators manage their
-	// own env vars and may have intentionally chosen a different routing path.
-	// The chart is responsible for injecting `auth_method` into the application
-	// config.
-	if c.IsKubernetesMode() && c.AuthMethod == "do_inference" && c.AgentModel == "" {
-		errs = append(errs, "agent_model is required when auth_method is do_inference (DO inference has no default model)")
+	// Certain auth methods require an explicit agent_model because their
+	// upstream endpoints have no implicit default model — a request without
+	// one will fail at runtime. Enforced only in Kubernetes mode — local
+	// operators manage their own env vars and may have intentionally chosen
+	// a different routing path. The chart is responsible for injecting
+	// `auth_method` into the application config.
+	methodsRequiringModel := map[string]bool{
+		"do_inference": true,
+		"openrouter":   true,
+	}
+	if c.IsKubernetesMode() && methodsRequiringModel[c.AuthMethod] && c.AgentModel == "" {
+		errs = append(errs, fmt.Sprintf(
+			"agent_model is required when auth_method is %s (no implicit default model)",
+			c.AuthMethod,
+		))
 	}
 	// Bull validation (only when enabled).
 	if c.Bull.Enabled {
