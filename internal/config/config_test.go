@@ -1379,6 +1379,61 @@ tracks:
 	}
 }
 
+func TestParse_AgentModelValidation_K8sOpenRouterMissingModel(t *testing.T) {
+	// In Kubernetes mode with auth_method: openrouter, an empty agent_model
+	// must fail validation at startup — OpenRouter has no implicit default
+	// model and a request without one will fail at runtime.
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+project: myapp
+auth_method: openrouter
+kubernetes:
+  namespace: railyard-myapp
+  image: ghcr.io/org/railyard-engine:latest
+tracks:
+  - name: backend
+    language: go
+`
+	_, err := Parse([]byte(yaml))
+	if err == nil {
+		t.Fatal("expected validation error for k8s + openrouter + empty agent_model, got nil")
+	}
+	if !strings.Contains(err.Error(), "agent_model") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "agent_model")
+	}
+	if !strings.Contains(err.Error(), "openrouter") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "openrouter")
+	}
+}
+
+func TestParse_AgentModelValidation_K8sOpenRouterWithModel(t *testing.T) {
+	// Happy path: k8s + openrouter + agent_model set should validate cleanly.
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+project: myapp
+auth_method: openrouter
+agent_model: anthropic/claude-sonnet-4.6
+kubernetes:
+  namespace: railyard-myapp
+  image: ghcr.io/org/railyard-engine:latest
+tracks:
+  - name: backend
+    language: go
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.AuthMethod != "openrouter" {
+		t.Errorf("AuthMethod = %q, want %q", cfg.AuthMethod, "openrouter")
+	}
+	if cfg.AgentModel != "anthropic/claude-sonnet-4.6" {
+		t.Errorf("AgentModel = %q, want %q", cfg.AgentModel, "anthropic/claude-sonnet-4.6")
+	}
+}
+
 func TestParse_AgentModelValidation_LocalSkipped(t *testing.T) {
 	// In local (non-k8s) mode, auth_method: do_inference + empty agent_model
 	// must NOT error — local operators manage their own env vars.

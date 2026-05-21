@@ -126,8 +126,15 @@ cocoindex:
 #                  to https://inference.do-ai.run via ANTHROPIC_BASE_URL +
 #                  ANTHROPIC_API_KEY. Requires agent_model to be set in the
 #                  application config (no implicit default model).
+#   openrouter   - OpenRouter.ai: routes the claude CLI to https://openrouter.ai/api
+#                  via ANTHROPIC_BASE_URL + ANTHROPIC_API_KEY. Requires agent_model
+#                  to be set using OpenRouter's provider/model[:variant] form
+#                  (e.g., anthropic/claude-sonnet-4.5,
+#                  meta-llama/llama-3.3-70b-instruct:free).
+#                  Configure model/budget/provider guardrails per-key on the
+#                  OpenRouter dashboard.
 auth:
-  # -- Authentication method: api_key, oauth_token, bedrock, vertex, foundry, do_inference.
+  # -- Authentication method: api_key, oauth_token, bedrock, vertex, foundry, do_inference, openrouter.
   method: api_key
   # -- Use an existing Secret instead of creating one. The Secret must contain
   # the appropriate keys for the chosen method (see auth-secret.yaml template).
@@ -157,6 +164,12 @@ auth:
   # Requires the application config to set agent_model (no implicit default).
   doInference:
     apiKey: ""   # DO model access key or PAT
+  # -- OpenRouter.ai configuration (used when method=openrouter).
+  # Requires the application config to set agent_model using OpenRouter's
+  # provider/model[:variant] form. Per-key guardrails (model allowlist,
+  # provider allowlist, budget cap) configured on the OpenRouter dashboard.
+  openrouter:
+    apiKey: ""   # OpenRouter API key (sk-or-v1-...)
   # -- GitHub PAT for PR operations (require_pr mode). Needs repo scope.
   # Sets GH_TOKEN env var used by gh CLI for PR creation and review detection.
   githubToken: ""

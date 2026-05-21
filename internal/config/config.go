@@ -45,7 +45,7 @@ type Config struct {
 	// to apply the value (env var or CLI flag), or ignores it if unsupported.
 	AgentModel string `yaml:"agent_model"`
 	// AuthMethod mirrors the chart's `auth.method` value (api_key, oauth_token,
-	// bedrock, vertex, foundry, do_inference) when running in Kubernetes mode.
+	// bedrock, vertex, foundry, do_inference, openrouter) when running in Kubernetes mode.
 	// The chart is responsible for injecting this into the application config;
 	// locally it is left unset. Used solely for startup validation — Go code
 	// does not switch behavior on this value.
@@ -83,6 +83,14 @@ var KnownProviders = map[string]bool{
 	"gemini":   true,
 	"codex":    true,
 	"copilot":  true,
+}
+
+// MethodsRequiringAgentModel is the set of auth methods whose upstream endpoints
+// have no implicit default model — a request without one will fail at runtime.
+// Enforced in Kubernetes mode by Config.validate().
+var MethodsRequiringAgentModel = map[string]bool{
+	"do_inference": true,
+	"openrouter":   true,
 }
 
 // CocoIndexConfig holds settings for the CocoIndex semantic search integration.
@@ -665,14 +673,15 @@ func (c *Config) validate() error {
 			errs = append(errs, "kubernetes.image is required when kubernetes is configured")
 		}
 	}
-	// do_inference requires an explicit agent_model. The DO inference endpoint
-	// has no implicit default model, so a request without one will fail at
-	// runtime. Enforced only in Kubernetes mode — local operators manage their
-	// own env vars and may have intentionally chosen a different routing path.
-	// The chart is responsible for injecting `auth_method` into the application
+	// Enforced only in Kubernetes mode — local operators manage their own env
+	// vars and may have intentionally chosen a different routing path. The
+	// chart is responsible for injecting `auth_method` into the application
 	// config.
-	if c.IsKubernetesMode() && c.AuthMethod == "do_inference" && c.AgentModel == "" {
-		errs = append(errs, "agent_model is required when auth_method is do_inference (DO inference has no default model)")
+	if c.IsKubernetesMode() && MethodsRequiringAgentModel[c.AuthMethod] && c.AgentModel == "" {
+		errs = append(errs, fmt.Sprintf(
+			"agent_model is required when auth_method is %s (no implicit default model)",
+			c.AuthMethod,
+		))
 	}
 	// Bull validation (only when enabled).
 	if c.Bull.Enabled {

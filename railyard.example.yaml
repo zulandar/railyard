@@ -75,6 +75,13 @@ repo: git@github.com:org/myproject.git
 # Required when auth.method is do_inference (DigitalOcean Serverless Inference has
 # no default model). For standard Anthropic API, leave unset to use the CLI default.
 # agent_model: anthropic-claude-4.6-sonnet
+#
+# When using OpenRouter (auth.method: openrouter in the chart), use the
+# provider/model[:variant] naming form. Examples:
+#   agent_model: anthropic/claude-sonnet-4.5
+#   agent_model: meta-llama/llama-3.3-70b-instruct:free
+#   agent_model: deepseek/deepseek-r1:free
+# See charts/railyard/README.md for the full OpenRouter operator guide.
 
 # ---------------------------------------------------------------------------
 # Database connection (optional — defaults shown)
