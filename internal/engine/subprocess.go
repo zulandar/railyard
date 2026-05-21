@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"os"
 	"os/exec"
 	"regexp"
 	"sync"
@@ -177,6 +178,10 @@ func buildCommand(ctx context.Context, opts SpawnOpts) (*exec.Cmd, context.Cance
 
 	if opts.WorkDir != "" {
 		cmd.Dir = opts.WorkDir
+	}
+
+	if opts.Model != "" {
+		cmd.Env = append(os.Environ(), "ANTHROPIC_MODEL="+opts.Model)
 	}
 
 	cmd.Cancel = func() error {

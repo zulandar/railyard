@@ -14,7 +14,7 @@ import (
 // the `model string` argument on interactive/prompt builders) rather than stored
 // on provider struct fields. Providers are registered as singletons at init();
 // mutating shared state would race between concurrent engines selecting
-// different models. See ADR 5 in the do-inference design doc.
+// different models.
 type AgentProvider interface {
 	// Name returns the provider identifier (e.g., "claude", "opencode").
 	Name() string
