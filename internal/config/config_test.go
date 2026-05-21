@@ -1403,7 +1403,7 @@ tracks:
 		t.Errorf("error = %q, want to contain %q", err.Error(), "agent_model")
 	}
 	if !strings.Contains(err.Error(), "openrouter") {
-		t.Errorf("error = %q, want to contain %q (proves parameterized %%s formatting works)", err.Error(), "openrouter")
+		t.Errorf("error = %q, want to contain %q", err.Error(), "openrouter")
 	}
 }
 

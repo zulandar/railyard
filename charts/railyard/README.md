@@ -412,8 +412,8 @@ names. Examples:
 allowlists, and budget caps **on the OpenRouter dashboard per API key**, not
 in railyard config. Create a scoped key for each deployment (e.g. "free
 models only, $5/day cap") and railyard will treat the key as opaque
-credentials. This is intentionally not surfaced in the chart values — see
-ADR 3 in the OpenRouter design spec for the rationale.
+credentials. Mirroring these controls in chart values would create two
+sources of truth; the dashboard is authoritative.
 
 **Free models:** `:free` variants cost nothing and are useful for smoke
 testing the integration. They are rate-limited (typically ~10 requests/min,
