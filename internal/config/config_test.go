@@ -1259,6 +1259,150 @@ tracks:
 }
 
 // ---------------------------------------------------------------------------
+// agent_model tests
+// ---------------------------------------------------------------------------
+
+func TestParse_AgentModelDefault(t *testing.T) {
+	// minimalYAML has no agent_model set — top-level should stay empty (no
+	// default), and the track should also stay empty after inheritance.
+	cfg, err := Parse([]byte(minimalYAML))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.AgentModel != "" {
+		t.Errorf("AgentModel = %q, want %q (no default)", cfg.AgentModel, "")
+	}
+	if cfg.Tracks[0].AgentModel != "" {
+		t.Errorf("Tracks[0].AgentModel = %q, want %q (inherited empty)", cfg.Tracks[0].AgentModel, "")
+	}
+}
+
+func TestParse_AgentModelGlobal(t *testing.T) {
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+agent_model: anthropic-claude-4.6-sonnet
+tracks:
+  - name: backend
+    language: go
+bull:
+  enabled: true
+  github_token: ghp_test
+inspect:
+  enabled: true
+  app_id: 111
+  private_key_path: /key.pem
+  installation_id: 222
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	const want = "anthropic-claude-4.6-sonnet"
+	if cfg.AgentModel != want {
+		t.Errorf("AgentModel = %q, want %q", cfg.AgentModel, want)
+	}
+	if cfg.Tracks[0].AgentModel != want {
+		t.Errorf("Tracks[0].AgentModel = %q, want %q (inherited from global)", cfg.Tracks[0].AgentModel, want)
+	}
+	if cfg.Bull.AgentModel != want {
+		t.Errorf("Bull.AgentModel = %q, want %q (inherited from global)", cfg.Bull.AgentModel, want)
+	}
+	if cfg.Inspect.AgentModel != want {
+		t.Errorf("Inspect.AgentModel = %q, want %q (inherited from global)", cfg.Inspect.AgentModel, want)
+	}
+}
+
+func TestParse_AgentModelPerSectionOverride(t *testing.T) {
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+agent_model: anthropic-claude-4.6-sonnet
+tracks:
+  - name: backend
+    language: go
+    agent_model: anthropic-claude-4.7-opus
+  - name: frontend
+    language: typescript
+bull:
+  enabled: true
+  github_token: ghp_test
+inspect:
+  enabled: true
+  app_id: 111
+  private_key_path: /key.pem
+  installation_id: 222
+  agent_model: anthropic-claude-4.7-opus
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Tracks[0].AgentModel != "anthropic-claude-4.7-opus" {
+		t.Errorf("Tracks[0].AgentModel = %q, want %q (per-track override)", cfg.Tracks[0].AgentModel, "anthropic-claude-4.7-opus")
+	}
+	if cfg.Tracks[1].AgentModel != "anthropic-claude-4.6-sonnet" {
+		t.Errorf("Tracks[1].AgentModel = %q, want %q (inherited from global)", cfg.Tracks[1].AgentModel, "anthropic-claude-4.6-sonnet")
+	}
+	if cfg.Inspect.AgentModel != "anthropic-claude-4.7-opus" {
+		t.Errorf("Inspect.AgentModel = %q, want %q (per-section override)", cfg.Inspect.AgentModel, "anthropic-claude-4.7-opus")
+	}
+	if cfg.Bull.AgentModel != "anthropic-claude-4.6-sonnet" {
+		t.Errorf("Bull.AgentModel = %q, want %q (inherited from global)", cfg.Bull.AgentModel, "anthropic-claude-4.6-sonnet")
+	}
+}
+
+func TestParse_AgentModelValidation_K8sDoInferenceMissingModel(t *testing.T) {
+	// In Kubernetes mode with auth_method: do_inference, an empty agent_model
+	// must fail validation at startup — DO inference has no default model.
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+project: myapp
+auth_method: do_inference
+kubernetes:
+  namespace: railyard-myapp
+  image: ghcr.io/org/railyard-engine:latest
+tracks:
+  - name: backend
+    language: go
+`
+	_, err := Parse([]byte(yaml))
+	if err == nil {
+		t.Fatal("expected validation error for k8s + do_inference + empty agent_model, got nil")
+	}
+	if !strings.Contains(err.Error(), "agent_model") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "agent_model")
+	}
+	if !strings.Contains(err.Error(), "do_inference") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "do_inference")
+	}
+}
+
+func TestParse_AgentModelValidation_LocalSkipped(t *testing.T) {
+	// In local (non-k8s) mode, auth_method: do_inference + empty agent_model
+	// must NOT error — local operators manage their own env vars.
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+auth_method: do_inference
+tracks:
+  - name: backend
+    language: go
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error in local mode: %v", err)
+	}
+	if cfg.AgentModel != "" {
+		t.Errorf("AgentModel = %q, want %q", cfg.AgentModel, "")
+	}
+	if cfg.AuthMethod != "do_inference" {
+		t.Errorf("AuthMethod = %q, want %q", cfg.AuthMethod, "do_inference")
+	}
+}
+
+// ---------------------------------------------------------------------------
 // TLS config tests
 // ---------------------------------------------------------------------------
 

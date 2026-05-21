@@ -348,6 +348,7 @@ func processInboxWithBus(ctx context.Context, db *gorm.DB, cfg *config.Config, c
 					Details:      m.Body,
 					DB:           db,
 					ProviderName: cfg.AgentProvider,
+					Model:        cfg.AgentModel,
 				})
 				if escErr != nil {
 					logger.Error("Escalation error", "error", escErr)
@@ -1034,6 +1035,7 @@ func maybeSwitchEscalateWithBus(ctx context.Context, db *gorm.DB, cfg *config.Co
 				Details:      fmt.Sprintf("Infrastructure test failure for car %s. The test command failed due to environment issues (missing dependencies, broken Docker, misconfigured commands), not code problems. Latest: %v", carID, switchErr),
 				DB:           db,
 				ProviderName: cfg.AgentProvider,
+				Model:        cfg.AgentModel,
 			})
 			if escErr != nil {
 				logger.Error("Escalation error", "car", carID, "error", escErr)
@@ -1097,6 +1099,7 @@ func maybeSwitchEscalateWithBus(ctx context.Context, db *gorm.DB, cfg *config.Co
 			Details:      fmt.Sprintf("Car %s has failed %d times. Latest: %v\n%s", carID, failCount, switchErr, conflictDetails),
 			DB:           db,
 			ProviderName: cfg.AgentProvider,
+			Model:        cfg.AgentModel,
 		})
 		if escErr != nil {
 			logger.Error("Escalation error", "car", carID, "error", escErr)

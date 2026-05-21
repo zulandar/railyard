@@ -71,6 +71,11 @@ repo: git@github.com:org/myproject.git
 # This sets the global default — individual tracks can override it.
 # agent_provider: claude
 
+# Optional: pin a specific model. Cascades to tracks/bull/inspect like agent_provider.
+# Required when auth.method is do_inference (DigitalOcean Serverless Inference has
+# no default model). For standard Anthropic API, leave unset to use the CLI default.
+# agent_model: anthropic-claude-4.6-sonnet
+
 # ---------------------------------------------------------------------------
 # Database connection (optional — defaults shown)
 # ---------------------------------------------------------------------------
@@ -188,6 +193,7 @@ tracks:
     engine_slots: 3
     test_command: "go test ./..."
     # agent_provider: claude    # override global provider for this track
+    # agent_model: anthropic-claude-opus-4.7   # optional per-track override
     conventions:
       style: "stdlib-first, no frameworks"
       test_framework: "stdlib table-driven"
@@ -199,6 +205,7 @@ tracks:
   #   pre_test_command: "npm install"
   #   test_command: "npm test"
   #   agent_provider: codex    # override global provider for this track
+  #   agent_model: anthropic-claude-opus-4.7   # optional per-track override
   #   conventions:
   #     framework: "Next.js 15"
   #     styling: "Tailwind CSS"
@@ -299,6 +306,7 @@ tracks:
 #   poll_interval_sec: 60               # How often to poll GitHub for new issues (default: 60)
 #   triage_mode: standard               # "standard" (heuristic + AI) or "full" (AI for all)
 #   agent_provider: claude              # override global agent_provider for triage (default: global)
+#   agent_model: anthropic-claude-4.6-sonnet   # optional override of global agent_model
 #   comments:
 #     enabled: true                     # Post comments on rejected issues (default: false)
 #     answer_questions: true            # Answer questions detected in issues (default: false)
@@ -325,6 +333,7 @@ tracks:
 #   private_key_path: /secrets/inspect-private-key.pem
 #   poll_interval_sec: 60               # How often to poll for reviewable PRs (default: 60)
 #   agent_provider: claude              # Override global agent_provider (default: global)
+#   agent_model: anthropic-claude-4.6-sonnet   # optional override of global agent_model
 #   deep_review: false                  # Enable CocoIndex semantic search context
 #   review_timeout_sec: 300             # Stale review threshold for yardmaster cleanup
 #   max_diff_lines: 10000               # Truncate diffs exceeding this line count

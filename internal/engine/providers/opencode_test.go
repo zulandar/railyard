@@ -103,3 +103,72 @@ func TestOpenCodeProvider_RegisteredViaInit(t *testing.T) {
 		t.Errorf("Name() = %q, want %q", got.Name(), "opencode")
 	}
 }
+
+func TestOpenCodeProvider_BuildCommand_ModelAddsFlag(t *testing.T) {
+	p := &OpenCodeProvider{}
+	cmd, cancel := p.BuildCommand(context.Background(), engine.SpawnOpts{
+		ContextPayload: "ctx",
+		Model:          "anthropic/claude-4.5-sonnet",
+	})
+	defer cancel()
+
+	if !argsContainSequence(cmd.Args, "--model", "anthropic/claude-4.5-sonnet") {
+		t.Errorf("expected --model anthropic/claude-4.5-sonnet in cmd.Args, got: %v", cmd.Args)
+	}
+}
+
+func TestOpenCodeProvider_BuildCommand_NoModelOmitsFlag(t *testing.T) {
+	p := &OpenCodeProvider{}
+	cmd, cancel := p.BuildCommand(context.Background(), engine.SpawnOpts{
+		ContextPayload: "ctx",
+	})
+	defer cancel()
+
+	for _, a := range cmd.Args {
+		if a == "--model" {
+			t.Errorf("expected no --model flag when Model empty, got args: %v", cmd.Args)
+		}
+	}
+}
+
+func TestOpenCodeProvider_BuildInteractiveCommand_ModelAddsFlag(t *testing.T) {
+	p := &OpenCodeProvider{}
+	cmd := p.BuildInteractiveCommand("sys", "/tmp/work", "openai/gpt-5")
+
+	if !argsContainSequence(cmd.Args, "--model", "openai/gpt-5") {
+		t.Errorf("expected --model openai/gpt-5 in cmd.Args, got: %v", cmd.Args)
+	}
+}
+
+func TestOpenCodeProvider_BuildInteractiveCommand_NoModelOmitsFlag(t *testing.T) {
+	p := &OpenCodeProvider{}
+	cmd := p.BuildInteractiveCommand("sys", "/tmp/work", "")
+
+	for _, a := range cmd.Args {
+		if a == "--model" {
+			t.Errorf("expected no --model flag when model empty, got args: %v", cmd.Args)
+		}
+	}
+}
+
+func TestOpenCodeProvider_BuildPromptCommand_ModelAddsFlag(t *testing.T) {
+	p := &OpenCodeProvider{}
+	cmd, cancel := p.BuildPromptCommand(context.Background(), "do thing", "anthropic/claude-4.5-sonnet")
+	defer cancel()
+
+	if !argsContainSequence(cmd.Args, "--model", "anthropic/claude-4.5-sonnet") {
+		t.Errorf("expected --model anthropic/claude-4.5-sonnet in cmd.Args, got: %v", cmd.Args)
+	}
+}
+
+func TestOpenCodeProvider_BuildPromptCommand_NoModelOmitsFlag(t *testing.T) {
+	p := &OpenCodeProvider{}
+	cmd, cancel := p.BuildPromptCommand(context.Background(), "do thing", "")
+	defer cancel()
+
+	for _, a := range cmd.Args {
+		if a == "--model" {
+			t.Errorf("expected no --model flag when model empty, got args: %v", cmd.Args)
+		}
+	}
+}

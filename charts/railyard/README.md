@@ -51,7 +51,7 @@ helm install railyard ./charts/railyard \
 
 | Value | Description | Default |
 |-------|-------------|---------|
-| `auth.method` | Auth method: `api_key`, `oauth_token`, `bedrock`, `vertex`, `foundry` | `api_key` |
+| `auth.method` | Auth method: `api_key`, `oauth_token`, `bedrock`, `vertex`, `foundry`, `do_inference` | `api_key` |
 | `auth.existingSecret` | Use an existing Secret instead of creating one | `""` |
 | `auth.apiKey` | API key (for `api_key` method) | `""` |
 | `auth.oauthToken` | OAuth token from `claude setup-token` (for `oauth_token` method) | `""` |
@@ -63,6 +63,7 @@ helm install railyard ./charts/railyard \
 | `auth.vertex.credentialsSecret` | Secret with service account JSON | `""` |
 | `auth.foundry.apiKey` | Azure API key (for `foundry` method) | `""` |
 | `auth.foundry.endpoint` | Azure endpoint | `""` |
+| `auth.doInference.apiKey` | DigitalOcean model access key or PAT (for `do_inference` method) | `""` |
 | `auth.githubToken` | GitHub PAT for PR operations (requires `requirePR`). Sets `GH_TOKEN` env var | `""` |
 | `auth.copilot.token` | GitHub PAT for Copilot CLI (overrides `githubToken` for Copilot) | `""` |
 | `auth.apiKeyHelper` | Command for dynamic key rotation | `""` |
@@ -287,6 +288,102 @@ dashboard:
     clientSecret: github-client-secret
     cookieSecret: random-cookie-secret
 ```
+
+### Install with DigitalOcean Serverless Inference
+
+`auth.method: do_inference` routes the `claude` CLI to DigitalOcean's
+multi-tenant inference endpoint (`https://inference.do-ai.run`) by injecting
+`ANTHROPIC_BASE_URL` and `ANTHROPIC_API_KEY` into the engine pod. Unlike the
+standard Anthropic API, DO has **no implicit default model** — every request
+must specify one — so `agent_model` is required at the application config
+layer (top-level in `railyard.yaml`). Startup validation fails if it is
+missing.
+
+See the [DigitalOcean Inference docs](https://docs.digitalocean.com/products/inference/)
+for the model catalog and to obtain an access key.
+
+```yaml
+git:
+  owner: myorg
+  repo: git@github.com:myorg/myrepo.git
+auth:
+  method: do_inference
+  doInference:
+    apiKey: "do_pat_or_model_access_key"
+engine:
+  agentProvider: claude
+  # agent_model must be set so DO knows which model to route to.
+  # This surfaces in the rendered railyard.yaml as top-level agent_model.
+  agentModel: "anthropic-claude-4.6-sonnet"
+```
+
+#### Verifying the install
+
+After installing with `auth.method: do_inference`, run through the following
+steps to confirm the integration is wired up correctly end-to-end. Substitute
+`<engine-pod>` with an actual engine pod name (e.g. `railyard-engine-backend-0`)
+and `<car-id>` with the ID returned from `ry car create`.
+
+1. **Confirm pod env contains DO base URL and key:**
+
+   ```bash
+   kubectl exec -n railyard <engine-pod> -- env | grep ANTHROPIC
+   ```
+
+   Expected: `ANTHROPIC_BASE_URL=https://inference.do-ai.run` and
+   `ANTHROPIC_API_KEY=<your-key>` are both present. `ANTHROPIC_MODEL` is
+   injected per-subprocess by the claude provider, not at the pod level.
+
+2. **Confirm the rendered ConfigMap carries `agent_model` and `auth_method`:**
+
+   ```bash
+   kubectl get configmap -n railyard railyard-config -o yaml \
+     | grep -E 'agent_model|auth_method'
+   ```
+
+   Expected: both keys appear with the values from `engine.agentModel` and
+   `auth.method`.
+
+3. **Spawn a trivial test car** (e.g. a typo fix in README) and watch it claim:
+
+   ```bash
+   ry car create --track backend --title "smoke: typo fix" \
+     --description "Fix a typo in README.md"
+   ry car list
+   ```
+
+   Expected: status transitions `queued → claimed → running` within one
+   dispatch poll interval.
+
+4. **Check engine logs for the model invocation:**
+
+   ```bash
+   kubectl logs -n railyard <engine-pod> --tail=200 | grep -iE 'model|anthropic'
+   ```
+
+   Expected: a log line shows the claude subprocess invoked with
+   `ANTHROPIC_MODEL=anthropic-claude-4.6-sonnet`. No "unknown model" or
+   "model is required" errors from DO.
+
+5. **Verify DO control panel records the request:** Visit
+   `https://cloud.digitalocean.com/` → **Inference → Usage**. Within ~60s of
+   the car claim, a request against `anthropic-claude-4.6-sonnet` with
+   non-zero token counts should appear.
+
+6. **Confirm the car completes:**
+
+   ```bash
+   ry car show <car-id>
+   ```
+
+   Expected: status moves to `done` (or `pr_open` if `requirePR=true`) with
+   non-zero `tokens_in`/`tokens_out`.
+
+If any step fails, the most common causes are: (a) `engine.agentModel` not set
+— startup validation will fail-fast with a clear error; (b) the DO key lacks
+inference scope — pod logs will show a 401 from `inference.do-ai.run`; (c) the
+configured model name does not exist in DO's catalog — pod logs will show a
+4xx from the `/v1/messages` call.
 
 ### ArgoCD Application
 

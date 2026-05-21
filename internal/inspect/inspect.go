@@ -46,7 +46,7 @@ func Start(ctx context.Context, opts StartOpts) error {
 	store := NewStore(opts.DB)
 
 	// Create AI provider from config.
-	ai, err := NewProviderAI(opts.Config.Inspect.AgentProvider)
+	ai, err := NewProviderAI(opts.Config.Inspect.AgentProvider, opts.Config.Inspect.AgentModel)
 	if err != nil {
 		return fmt.Errorf("inspect: create AI provider: %w", err)
 	}

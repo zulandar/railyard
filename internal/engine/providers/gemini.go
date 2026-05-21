@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"syscall"
 	"time"
@@ -17,6 +18,13 @@ import (
 // Initial prompts are passed via -p flag.
 // Output is plain text (no structured JSON), so token parsing returns empty stats.
 // Authentication: GEMINI_API_KEY or GOOGLE_API_KEY environment variable.
+//
+// Model selection is applied via the GEMINI_MODEL environment variable
+// (verified 2026-05-21 against gemini-cli docs and discussion #1824 at
+// github.com/google-gemini/gemini-cli). The CLI also supports a `--model`
+// flag, but the env var mirrors the claude provider's pattern and avoids
+// touching arg positions across three Build methods. Empty model leaves the
+// env var unset, preserving the CLI's default.
 type GeminiProvider struct {
 	Binary string // path to gemini binary; defaults to "gemini"
 }
@@ -42,6 +50,10 @@ func (p *GeminiProvider) BuildCommand(ctx context.Context, opts engine.SpawnOpts
 		cmd.Dir = opts.WorkDir
 	}
 
+	if opts.Model != "" {
+		cmd.Env = append(os.Environ(), "GEMINI_MODEL="+opts.Model)
+	}
+
 	cmd.Cancel = func() error {
 		return cmd.Process.Signal(syscall.SIGTERM)
 	}
@@ -50,7 +62,7 @@ func (p *GeminiProvider) BuildCommand(ctx context.Context, opts engine.SpawnOpts
 	return cmd, cancel
 }
 
-func (p *GeminiProvider) BuildInteractiveCommand(systemPrompt, workDir string) *exec.Cmd {
+func (p *GeminiProvider) BuildInteractiveCommand(systemPrompt, workDir, model string) *exec.Cmd {
 	binary := p.Binary
 	if binary == "" {
 		binary = "gemini"
@@ -63,16 +75,22 @@ func (p *GeminiProvider) BuildInteractiveCommand(systemPrompt, workDir string) *
 	if workDir != "" {
 		cmd.Dir = workDir
 	}
+	if model != "" {
+		cmd.Env = append(os.Environ(), "GEMINI_MODEL="+model)
+	}
 	return cmd
 }
 
-func (p *GeminiProvider) BuildPromptCommand(ctx context.Context, prompt string) (*exec.Cmd, context.CancelFunc) {
+func (p *GeminiProvider) BuildPromptCommand(ctx context.Context, prompt, model string) (*exec.Cmd, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(ctx)
 	binary := p.Binary
 	if binary == "" {
 		binary = "gemini"
 	}
 	cmd := exec.CommandContext(ctx, binary, "--yes", "--sandbox", "-p", prompt)
+	if model != "" {
+		cmd.Env = append(os.Environ(), "GEMINI_MODEL="+model)
+	}
 	return cmd, cancel
 }
 

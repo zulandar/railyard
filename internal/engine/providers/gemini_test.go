@@ -104,3 +104,66 @@ func TestGeminiProvider_RegisteredViaInit(t *testing.T) {
 		t.Errorf("Name() = %q, want %q", got.Name(), "gemini")
 	}
 }
+
+func TestGeminiProvider_BuildCommand_ModelSetsEnv(t *testing.T) {
+	p := &GeminiProvider{}
+	cmd, cancel := p.BuildCommand(context.Background(), engine.SpawnOpts{
+		ContextPayload: "ctx",
+		Model:          "gemini-2.5-pro",
+	})
+	defer cancel()
+
+	if !envHas(t, cmd.Env, "GEMINI_MODEL=gemini-2.5-pro") {
+		t.Errorf("expected GEMINI_MODEL=gemini-2.5-pro in cmd.Env, got: %v", cmd.Env)
+	}
+}
+
+func TestGeminiProvider_BuildCommand_NoModelLeavesEnvUnset(t *testing.T) {
+	p := &GeminiProvider{}
+	cmd, cancel := p.BuildCommand(context.Background(), engine.SpawnOpts{
+		ContextPayload: "ctx",
+	})
+	defer cancel()
+
+	if envHasPrefix(t, cmd.Env, "GEMINI_MODEL=") {
+		t.Errorf("expected no GEMINI_MODEL in cmd.Env when Model empty, got: %v", cmd.Env)
+	}
+}
+
+func TestGeminiProvider_BuildInteractiveCommand_ModelSetsEnv(t *testing.T) {
+	p := &GeminiProvider{}
+	cmd := p.BuildInteractiveCommand("sys", "/tmp/work", "gemini-2.5-flash")
+
+	if !envHas(t, cmd.Env, "GEMINI_MODEL=gemini-2.5-flash") {
+		t.Errorf("expected GEMINI_MODEL in cmd.Env, got: %v", cmd.Env)
+	}
+}
+
+func TestGeminiProvider_BuildInteractiveCommand_NoModelLeavesEnvUnset(t *testing.T) {
+	p := &GeminiProvider{}
+	cmd := p.BuildInteractiveCommand("sys", "/tmp/work", "")
+
+	if envHasPrefix(t, cmd.Env, "GEMINI_MODEL=") {
+		t.Errorf("expected no GEMINI_MODEL in cmd.Env, got: %v", cmd.Env)
+	}
+}
+
+func TestGeminiProvider_BuildPromptCommand_ModelSetsEnv(t *testing.T) {
+	p := &GeminiProvider{}
+	cmd, cancel := p.BuildPromptCommand(context.Background(), "do thing", "gemini-2.5-pro")
+	defer cancel()
+
+	if !envHas(t, cmd.Env, "GEMINI_MODEL=gemini-2.5-pro") {
+		t.Errorf("expected GEMINI_MODEL in cmd.Env, got: %v", cmd.Env)
+	}
+}
+
+func TestGeminiProvider_BuildPromptCommand_NoModelLeavesEnvUnset(t *testing.T) {
+	p := &GeminiProvider{}
+	cmd, cancel := p.BuildPromptCommand(context.Background(), "do thing", "")
+	defer cancel()
+
+	if envHasPrefix(t, cmd.Env, "GEMINI_MODEL=") {
+		t.Errorf("expected no GEMINI_MODEL in cmd.Env, got: %v", cmd.Env)
+	}
+}

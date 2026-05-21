@@ -352,6 +352,7 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 			ContextPayload: contextPayload,
 			WorkDir:        workDir,
 			ProviderName:   providerName,
+			Model:          trackCfg.AgentModel,
 		})
 		if err != nil {
 			logger.Error("Spawn error", "error", err)

@@ -17,6 +17,11 @@ import (
 // Initial prompts are passed via --prompt flag.
 // Output is plain text (no structured JSON), so token parsing returns empty stats.
 // Authentication depends on configured LLM backend (OPENAI_API_KEY, ANTHROPIC_API_KEY, etc.).
+//
+// Model selection is applied via the `--model` flag (verified 2026-05-21 against
+// the opencode docs at opencode.ai/docs/cli/). Per the docs, the value uses
+// `provider/model` form (e.g. `anthropic/claude-4.5-sonnet`); callers supplying
+// `Model` are expected to use that format. Empty model omits the flag.
 type OpenCodeProvider struct {
 	Binary string // path to opencode binary; defaults to "opencode"
 }
@@ -31,11 +36,15 @@ func (p *OpenCodeProvider) BuildCommand(ctx context.Context, opts engine.SpawnOp
 		binary = "opencode"
 	}
 
-	cmd := exec.CommandContext(ctx, binary,
+	args := []string{
 		"--non-interactive",
 		"--system-prompt", opts.ContextPayload,
 		"--prompt", "Begin working on your assigned car. Follow the instructions provided.",
-	)
+	}
+	if opts.Model != "" {
+		args = append(args, "--model", opts.Model)
+	}
+	cmd := exec.CommandContext(ctx, binary, args...)
 
 	if opts.WorkDir != "" {
 		cmd.Dir = opts.WorkDir
@@ -49,27 +58,33 @@ func (p *OpenCodeProvider) BuildCommand(ctx context.Context, opts engine.SpawnOp
 	return cmd, cancel
 }
 
-func (p *OpenCodeProvider) BuildInteractiveCommand(systemPrompt, workDir string) *exec.Cmd {
+func (p *OpenCodeProvider) BuildInteractiveCommand(systemPrompt, workDir, model string) *exec.Cmd {
 	binary := p.Binary
 	if binary == "" {
 		binary = "opencode"
 	}
-	cmd := exec.Command(binary,
-		"--system-prompt", systemPrompt,
-	)
+	args := []string{"--system-prompt", systemPrompt}
+	if model != "" {
+		args = append(args, "--model", model)
+	}
+	cmd := exec.Command(binary, args...)
 	if workDir != "" {
 		cmd.Dir = workDir
 	}
 	return cmd
 }
 
-func (p *OpenCodeProvider) BuildPromptCommand(ctx context.Context, prompt string) (*exec.Cmd, context.CancelFunc) {
+func (p *OpenCodeProvider) BuildPromptCommand(ctx context.Context, prompt, model string) (*exec.Cmd, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(ctx)
 	binary := p.Binary
 	if binary == "" {
 		binary = "opencode"
 	}
-	cmd := exec.CommandContext(ctx, binary, "--non-interactive", "--prompt", prompt)
+	args := []string{"--non-interactive", "--prompt", prompt}
+	if model != "" {
+		args = append(args, "--model", model)
+	}
+	cmd := exec.CommandContext(ctx, binary, args...)
 	return cmd, cancel
 }
 

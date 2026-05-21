@@ -14,6 +14,12 @@ data:
     default_branch: {{ .Values.git.defaultBranch | quote }}
     require_pr: {{ .Values.requirePR | default false }}
     agent_provider: {{ .Values.engine.agentProvider | quote }}
+    # auth_method mirrors auth.method so the Go validator can detect
+    # do_inference (and other chart-only auth methods) at startup.
+    auth_method: {{ .Values.auth.method | quote }}
+    {{- if .Values.engine.agentModel }}
+    agent_model: {{ .Values.engine.agentModel | quote }}
+    {{- end }}
     {{- if .Values.dashboardURL }}
     dashboard_url: {{ .Values.dashboardURL | quote }}
     {{- else if and .Values.dashboard.ingress.enabled .Values.dashboard.ingress.host }}
@@ -58,6 +64,9 @@ data:
         {{- end }}
         {{- if .agentProvider }}
         agent_provider: {{ .agentProvider | quote }}
+        {{- end }}
+        {{- if .agentModel }}
+        agent_model: {{ .agentModel | quote }}
         {{- end }}
         {{- if .playwright }}
         playwright:
@@ -128,6 +137,9 @@ data:
       poll_interval_sec: {{ .Values.inspect.pollIntervalSec | default 60 }}
       {{- if .Values.inspect.agentProvider }}
       agent_provider: {{ .Values.inspect.agentProvider | quote }}
+      {{- end }}
+      {{- if .Values.inspect.agentModel }}
+      agent_model: {{ .Values.inspect.agentModel | quote }}
       {{- end }}
       deep_review: {{ .Values.inspect.deepReview | default false }}
       review_timeout_sec: {{ .Values.inspect.reviewTimeoutSec | default 300 }}

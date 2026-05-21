@@ -3,22 +3,33 @@ package engine
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"sync"
 )
 
 // AgentProvider defines the interface for AI CLI tool integrations.
+//
+// Model selection is plumbed per-call (via `SpawnOpts.Model` for engine mode and
+// the `model string` argument on interactive/prompt builders) rather than stored
+// on provider struct fields. Providers are registered as singletons at init();
+// mutating shared state would race between concurrent engines selecting
+// different models.
 type AgentProvider interface {
 	// Name returns the provider identifier (e.g., "claude", "opencode").
 	Name() string
 	// BuildCommand constructs the exec.Cmd for the provider's CLI tool (engine mode).
+	// Honors opts.Model via a provider-appropriate mechanism (env var or flag).
 	BuildCommand(ctx context.Context, opts SpawnOpts) (*exec.Cmd, context.CancelFunc)
 	// BuildInteractiveCommand constructs an interactive CLI session (dispatch mode).
-	// The system prompt is appended to the agent's default behavior.
-	BuildInteractiveCommand(systemPrompt, workDir string) *exec.Cmd
+	// The system prompt is appended to the agent's default behavior. When `model`
+	// is non-empty, the provider applies it via its native mechanism; empty
+	// preserves the CLI's default model selection.
+	BuildInteractiveCommand(systemPrompt, workDir, model string) *exec.Cmd
 	// BuildPromptCommand constructs a one-shot CLI invocation (escalation mode).
 	// The prompt is sent as a single message and the agent exits after responding.
-	BuildPromptCommand(ctx context.Context, prompt string) (*exec.Cmd, context.CancelFunc)
+	// When `model` is non-empty, the provider applies it; empty preserves default.
+	BuildPromptCommand(ctx context.Context, prompt, model string) (*exec.Cmd, context.CancelFunc)
 	// ParseOutput extracts token usage statistics from the provider's output.
 	ParseOutput(content string) UsageStats
 	// ValidateBinary checks that the provider's CLI binary is available.
@@ -45,7 +56,7 @@ func (defaultClaudeProvider) BuildCommand(ctx context.Context, opts SpawnOpts) (
 	return buildCommand(ctx, opts)
 }
 
-func (defaultClaudeProvider) BuildInteractiveCommand(systemPrompt, workDir string) *exec.Cmd {
+func (defaultClaudeProvider) BuildInteractiveCommand(systemPrompt, workDir, model string) *exec.Cmd {
 	cmd := exec.Command("claude",
 		"--dangerously-skip-permissions",
 		"--append-system-prompt", systemPrompt,
@@ -53,12 +64,18 @@ func (defaultClaudeProvider) BuildInteractiveCommand(systemPrompt, workDir strin
 	if workDir != "" {
 		cmd.Dir = workDir
 	}
+	if model != "" {
+		cmd.Env = append(os.Environ(), "ANTHROPIC_MODEL="+model)
+	}
 	return cmd
 }
 
-func (defaultClaudeProvider) BuildPromptCommand(ctx context.Context, prompt string) (*exec.Cmd, context.CancelFunc) {
+func (defaultClaudeProvider) BuildPromptCommand(ctx context.Context, prompt, model string) (*exec.Cmd, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(ctx)
 	cmd := exec.CommandContext(ctx, "claude", "-p", prompt)
+	if model != "" {
+		cmd.Env = append(os.Environ(), "ANTHROPIC_MODEL="+model)
+	}
 	return cmd, cancel
 }
 

@@ -12,19 +12,22 @@ import (
 // by using BuildPromptCommand for one-shot prompt execution.
 type ProviderAI struct {
 	provider engine.AgentProvider
+	model    string
 }
 
 // NewProviderAI creates a TriageAI backed by the named agent provider.
-func NewProviderAI(providerName string) (*ProviderAI, error) {
+// The model argument is threaded through to the provider's BuildPromptCommand;
+// pass "" to use the provider's default model.
+func NewProviderAI(providerName, model string) (*ProviderAI, error) {
 	p, err := engine.GetProvider(providerName)
 	if err != nil {
 		return nil, fmt.Errorf("bull: %w", err)
 	}
-	return &ProviderAI{provider: p}, nil
+	return &ProviderAI{provider: p, model: model}, nil
 }
 
 func (a *ProviderAI) RunPrompt(ctx context.Context, prompt string) (string, error) {
-	cmd, cancel := a.provider.BuildPromptCommand(ctx, prompt)
+	cmd, cancel := a.provider.BuildPromptCommand(ctx, prompt, a.model)
 	defer cancel()
 
 	output, err := cmd.Output()
