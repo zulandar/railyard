@@ -24,6 +24,7 @@ type SpawnOpts struct {
 	WorkDir        string // working directory for the agent
 	ClaudeBinary   string // path to claude binary, default "claude" (legacy; prefer ProviderName)
 	ProviderName   string // agent provider name (e.g., "claude", "codex"); defaults to "claude"
+	Model          string // optional model identifier; consumed per-provider (env var or flag). Empty preserves CLI default.
 }
 
 // Session represents a running claude subprocess.

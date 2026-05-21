@@ -111,3 +111,111 @@ func TestCodexProvider_RegisteredViaInit(t *testing.T) {
 		t.Errorf("Name() = %q, want %q", got.Name(), "codex")
 	}
 }
+
+// argsContainSequence returns true if args contains [a, b] as consecutive entries.
+func argsContainSequence(args []string, a, b string) bool {
+	for i := 0; i < len(args)-1; i++ {
+		if args[i] == a && args[i+1] == b {
+			return true
+		}
+	}
+	return false
+}
+
+func TestCodexProvider_BuildCommand_ModelAddsFlag(t *testing.T) {
+	p := &CodexProvider{}
+	cmd, cancel := p.BuildCommand(context.Background(), engine.SpawnOpts{
+		ContextPayload: "ctx",
+		Model:          "gpt-5.4",
+	})
+	defer cancel()
+
+	if !argsContainSequence(cmd.Args, "--model", "gpt-5.4") {
+		t.Errorf("expected --model gpt-5.4 in cmd.Args, got: %v", cmd.Args)
+	}
+	// Per codex docs, --model must come AFTER the `exec` subcommand to apply.
+	// Verify ordering.
+	execIdx := -1
+	modelIdx := -1
+	for i, a := range cmd.Args {
+		if a == "exec" {
+			execIdx = i
+		}
+		if a == "--model" {
+			modelIdx = i
+		}
+	}
+	if execIdx == -1 || modelIdx == -1 || modelIdx < execIdx {
+		t.Errorf("--model should appear after `exec` subcommand; args: %v", cmd.Args)
+	}
+}
+
+func TestCodexProvider_BuildCommand_NoModelOmitsFlag(t *testing.T) {
+	p := &CodexProvider{}
+	cmd, cancel := p.BuildCommand(context.Background(), engine.SpawnOpts{
+		ContextPayload: "ctx",
+	})
+	defer cancel()
+
+	for _, a := range cmd.Args {
+		if a == "--model" {
+			t.Errorf("expected no --model flag when Model empty, got args: %v", cmd.Args)
+		}
+	}
+}
+
+func TestCodexProvider_BuildInteractiveCommand_ModelAddsFlag(t *testing.T) {
+	p := &CodexProvider{}
+	cmd := p.BuildInteractiveCommand("sys", "/tmp/work", "gpt-5.4")
+
+	if !argsContainSequence(cmd.Args, "--model", "gpt-5.4") {
+		t.Errorf("expected --model gpt-5.4 in cmd.Args, got: %v", cmd.Args)
+	}
+}
+
+func TestCodexProvider_BuildInteractiveCommand_NoModelOmitsFlag(t *testing.T) {
+	p := &CodexProvider{}
+	cmd := p.BuildInteractiveCommand("sys", "/tmp/work", "")
+
+	for _, a := range cmd.Args {
+		if a == "--model" {
+			t.Errorf("expected no --model flag when model empty, got args: %v", cmd.Args)
+		}
+	}
+}
+
+func TestCodexProvider_BuildPromptCommand_ModelAddsFlag(t *testing.T) {
+	p := &CodexProvider{}
+	cmd, cancel := p.BuildPromptCommand(context.Background(), "do thing", "gpt-5.4")
+	defer cancel()
+
+	if !argsContainSequence(cmd.Args, "--model", "gpt-5.4") {
+		t.Errorf("expected --model gpt-5.4 in cmd.Args, got: %v", cmd.Args)
+	}
+	// Ensure --model comes after `exec`.
+	execIdx := -1
+	modelIdx := -1
+	for i, a := range cmd.Args {
+		if a == "exec" {
+			execIdx = i
+		}
+		if a == "--model" {
+			modelIdx = i
+		}
+	}
+	if execIdx == -1 || modelIdx == -1 || modelIdx < execIdx {
+		t.Errorf("--model should appear after `exec` subcommand; args: %v", cmd.Args)
+	}
+}
+
+func TestCodexProvider_BuildPromptCommand_NoModelOmitsFlag(t *testing.T) {
+	p := &CodexProvider{}
+	cmd, cancel := p.BuildPromptCommand(context.Background(), "do thing", "")
+	defer cancel()
+
+	for _, a := range cmd.Args {
+		if a == "--model" {
+			t.Errorf("expected no --model flag when model empty, got args: %v", cmd.Args)
+		}
+	}
+}

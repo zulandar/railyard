@@ -128,3 +128,88 @@ func TestClaudeProvider_RegisteredViaInit(t *testing.T) {
 		t.Errorf("Name() = %q, want %q", got.Name(), "claude")
 	}
 }
+
+// envHas returns true if env contains an entry exactly equal to want.
+func envHas(t *testing.T, env []string, want string) bool {
+	t.Helper()
+	for _, e := range env {
+		if e == want {
+			return true
+		}
+	}
+	return false
+}
+
+// envHasPrefix returns true if env contains any entry with the given prefix.
+func envHasPrefix(t *testing.T, env []string, prefix string) bool {
+	t.Helper()
+	for _, e := range env {
+		if strings.HasPrefix(e, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestClaudeProvider_BuildCommand_ModelSetsEnv(t *testing.T) {
+	p := &ClaudeProvider{}
+	cmd, cancel := p.BuildCommand(context.Background(), engine.SpawnOpts{
+		ContextPayload: "ctx",
+		Model:          "claude-opus-4-7",
+	})
+	defer cancel()
+
+	if !envHas(t, cmd.Env, "ANTHROPIC_MODEL=claude-opus-4-7") {
+		t.Errorf("expected ANTHROPIC_MODEL=claude-opus-4-7 in cmd.Env, got: %v", cmd.Env)
+	}
+}
+
+func TestClaudeProvider_BuildCommand_NoModelLeavesEnvUnset(t *testing.T) {
+	p := &ClaudeProvider{}
+	cmd, cancel := p.BuildCommand(context.Background(), engine.SpawnOpts{
+		ContextPayload: "ctx",
+	})
+	defer cancel()
+
+	if envHasPrefix(t, cmd.Env, "ANTHROPIC_MODEL=") {
+		t.Errorf("expected ANTHROPIC_MODEL not present in cmd.Env when Model empty, got: %v", cmd.Env)
+	}
+}
+
+func TestClaudeProvider_BuildInteractiveCommand_ModelSetsEnv(t *testing.T) {
+	p := &ClaudeProvider{}
+	cmd := p.BuildInteractiveCommand("sys", "/tmp/work", "claude-sonnet-4-6")
+
+	if !envHas(t, cmd.Env, "ANTHROPIC_MODEL=claude-sonnet-4-6") {
+		t.Errorf("expected ANTHROPIC_MODEL in cmd.Env, got: %v", cmd.Env)
+	}
+}
+
+func TestClaudeProvider_BuildInteractiveCommand_NoModelLeavesEnvUnset(t *testing.T) {
+	p := &ClaudeProvider{}
+	cmd := p.BuildInteractiveCommand("sys", "/tmp/work", "")
+
+	if envHasPrefix(t, cmd.Env, "ANTHROPIC_MODEL=") {
+		t.Errorf("expected no ANTHROPIC_MODEL in cmd.Env, got: %v", cmd.Env)
+	}
+}
+
+func TestClaudeProvider_BuildPromptCommand_ModelSetsEnv(t *testing.T) {
+	p := &ClaudeProvider{}
+	cmd, cancel := p.BuildPromptCommand(context.Background(), "do thing", "claude-haiku-4-5")
+	defer cancel()
+
+	if !envHas(t, cmd.Env, "ANTHROPIC_MODEL=claude-haiku-4-5") {
+		t.Errorf("expected ANTHROPIC_MODEL in cmd.Env, got: %v", cmd.Env)
+	}
+}
+
+func TestClaudeProvider_BuildPromptCommand_NoModelLeavesEnvUnset(t *testing.T) {
+	p := &ClaudeProvider{}
+	cmd, cancel := p.BuildPromptCommand(context.Background(), "do thing", "")
+	defer cancel()
+
+	if envHasPrefix(t, cmd.Env, "ANTHROPIC_MODEL=") {
+		t.Errorf("expected no ANTHROPIC_MODEL in cmd.Env, got: %v", cmd.Env)
+	}
+}

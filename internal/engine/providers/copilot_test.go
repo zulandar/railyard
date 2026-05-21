@@ -1,13 +1,38 @@
 package providers
 
 import (
+	"bytes"
 	"context"
+	"log"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/zulandar/railyard/internal/engine"
 )
+
+// resetCopilotModelWarnOnce zeroes the package-level sync.Once so subsequent
+// tests observe the first-call warning behavior fresh.
+func resetCopilotModelWarnOnce(t *testing.T) {
+	t.Helper()
+	copilotModelWarnOnce = sync.Once{}
+}
+
+// captureLog redirects the default logger to a buffer for the test's duration.
+func captureLog(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	origOut := log.Writer()
+	origFlags := log.Flags()
+	log.SetOutput(&buf)
+	log.SetFlags(0)
+	t.Cleanup(func() {
+		log.SetOutput(origOut)
+		log.SetFlags(origFlags)
+	})
+	return &buf
+}
 
 func TestCopilotProvider_Name(t *testing.T) {
 	p := &CopilotProvider{}
@@ -78,7 +103,7 @@ func TestCopilotProvider_BuildCommand_Cancel(t *testing.T) {
 
 func TestCopilotProvider_BuildInteractiveCommand(t *testing.T) {
 	p := &CopilotProvider{}
-	cmd := p.BuildInteractiveCommand("my system prompt", "/tmp/work")
+	cmd := p.BuildInteractiveCommand("my system prompt", "/tmp/work", "")
 
 	if cmd.Args[0] != "copilot" {
 		t.Errorf("binary = %q, want %q", cmd.Args[0], "copilot")
@@ -100,7 +125,7 @@ func TestCopilotProvider_BuildInteractiveCommand(t *testing.T) {
 
 func TestCopilotProvider_BuildPromptCommand(t *testing.T) {
 	p := &CopilotProvider{}
-	cmd, cancel := p.BuildPromptCommand(context.Background(), "do something")
+	cmd, cancel := p.BuildPromptCommand(context.Background(), "do something", "")
 	defer cancel()
 
 	if cmd.Args[0] != "copilot" {
@@ -219,5 +244,95 @@ func TestCopilotProvider_RegisteredViaInit(t *testing.T) {
 	}
 	if got.Name() != "copilot" {
 		t.Errorf("Name() = %q, want %q", got.Name(), "copilot")
+	}
+}
+
+// TestCopilotProvider_Model_NoOp verifies the provider does NOT mutate the
+// constructed command (args / env apart from the GH_TOKEN handling) in
+// response to a non-empty model.
+func TestCopilotProvider_Model_NoOp(t *testing.T) {
+	resetCopilotModelWarnOnce(t)
+	_ = captureLog(t)
+
+	p := &CopilotProvider{}
+
+	cmd1, cancel1 := p.BuildCommand(context.Background(), engine.SpawnOpts{
+		ContextPayload: "ctx",
+		Model:          "gpt-4o",
+	})
+	defer cancel1()
+	for _, a := range cmd1.Args {
+		if a == "--model" || a == "-m" {
+			t.Errorf("expected no model flag in BuildCommand args, got: %v", cmd1.Args)
+		}
+	}
+
+	resetCopilotModelWarnOnce(t)
+	cmd2 := p.BuildInteractiveCommand("sys", "/tmp/work", "gpt-4o")
+	for _, a := range cmd2.Args {
+		if a == "--model" || a == "-m" {
+			t.Errorf("expected no model flag in BuildInteractiveCommand args, got: %v", cmd2.Args)
+		}
+	}
+
+	resetCopilotModelWarnOnce(t)
+	cmd3, cancel3 := p.BuildPromptCommand(context.Background(), "do thing", "gpt-4o")
+	defer cancel3()
+	for _, a := range cmd3.Args {
+		if a == "--model" || a == "-m" {
+			t.Errorf("expected no model flag in BuildPromptCommand args, got: %v", cmd3.Args)
+		}
+	}
+}
+
+func TestCopilotProvider_Model_WarnOnce(t *testing.T) {
+	resetCopilotModelWarnOnce(t)
+	buf := captureLog(t)
+	p := &CopilotProvider{}
+
+	_, cancel1 := p.BuildCommand(context.Background(), engine.SpawnOpts{
+		ContextPayload: "ctx",
+		Model:          "gpt-4o",
+	})
+	cancel1()
+
+	if !strings.Contains(buf.String(), "copilot provider doesn't support model selection") {
+		t.Errorf("expected warning log on first non-empty model, got: %q", buf.String())
+	}
+	if !strings.Contains(buf.String(), `agent_model="gpt-4o"`) {
+		t.Errorf("expected warning to include model name, got: %q", buf.String())
+	}
+
+	// Subsequent calls (any Build* method) with non-empty model must NOT re-log.
+	before := buf.String()
+	_ = p.BuildInteractiveCommand("sys", "/tmp/work", "gpt-4o")
+	_, cancel2 := p.BuildPromptCommand(context.Background(), "do thing", "gpt-4o")
+	cancel2()
+	_, cancel3 := p.BuildCommand(context.Background(), engine.SpawnOpts{
+		ContextPayload: "ctx",
+		Model:          "gpt-5",
+	})
+	cancel3()
+	if buf.String() != before {
+		t.Errorf("expected no additional warnings after first, got extra: %q", strings.TrimPrefix(buf.String(), before))
+	}
+}
+
+func TestCopilotProvider_Model_EmptyNoWarn(t *testing.T) {
+	resetCopilotModelWarnOnce(t)
+	buf := captureLog(t)
+	p := &CopilotProvider{}
+
+	_, cancel1 := p.BuildCommand(context.Background(), engine.SpawnOpts{
+		ContextPayload: "ctx",
+		// Model intentionally empty.
+	})
+	cancel1()
+	_ = p.BuildInteractiveCommand("sys", "/tmp/work", "")
+	_, cancel2 := p.BuildPromptCommand(context.Background(), "do thing", "")
+	cancel2()
+
+	if buf.String() != "" {
+		t.Errorf("expected no warnings for empty model, got: %q", buf.String())
 	}
 }

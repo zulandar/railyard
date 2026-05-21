@@ -69,7 +69,7 @@ func Start(opts StartOpts) error {
 	}
 
 	// Launch agent interactively — user attaches to tmux pane and converses.
-	cmd := provider.BuildInteractiveCommand(prompt, workDir)
+	cmd := provider.BuildInteractiveCommand(prompt, workDir, opts.Config.AgentModel)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -91,5 +91,7 @@ func BuildCommand(prompt string, providerName ...string) (*exec.Cmd, error) {
 	if err != nil {
 		return nil, fmt.Errorf("dispatch: resolve provider %q: %w", name, err)
 	}
-	return provider.BuildInteractiveCommand(prompt, ""), nil
+	// Model is not threaded through this test helper; callers wanting a model
+	// pinned should go through Start which reads it from Config.AgentModel.
+	return provider.BuildInteractiveCommand(prompt, "", ""), nil
 }

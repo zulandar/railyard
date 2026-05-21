@@ -68,6 +68,9 @@ type EscalateOpts struct {
 	Details      string
 	DB           *gorm.DB
 	ProviderName string // agent provider name; defaults to "claude"
+	// Model selects a specific model for the configured agent provider
+	// (e.g. "claude-opus-4-5"). Empty means use the provider's default.
+	Model string
 }
 
 // EscalateResult contains the agent's decision after escalation.
@@ -90,7 +93,7 @@ func EscalateToAgent(ctx context.Context, opts EscalateOpts) (*EscalateResult, e
 	}
 
 	prompt := buildEscalationPrompt(opts)
-	cmd, cancel := provider.BuildPromptCommand(ctx, prompt)
+	cmd, cancel := provider.BuildPromptCommand(ctx, prompt, opts.Model)
 	defer cancel()
 
 	output, err := cmd.Output()
