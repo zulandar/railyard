@@ -543,6 +543,97 @@ spec:
       - CreateNamespace=true
 ```
 
+## Rate limit handling
+
+When an engine subprocess hits a 429 from an upstream LLM provider (free-tier
+OpenRouter exhaustion, hourly Anthropic API limits, etc.), railyard used to
+mark the car as stalled and block it — requiring an operator to apply the
+`railyard: rework` label to recover. Railyard now recognizes upstream
+rate-limit errors as a distinct outcome and **pauses-and-retries** the engine
+subprocess before falling through to the stall path, so transient limits no
+longer cost the operator a manual rework.
+
+### What gets recognized
+
+- **Anthropic native** `rate_limit_error` — the Claude CLI talking direct to
+  the Anthropic API (any `auth.method` that ends up at `api.anthropic.com`)
+  and the do_inference Claude passthrough.
+- **OpenRouter wrapped 429** — `auth.method: openrouter` against any upstream
+  that returns OpenRouter's wrapped error shape (`{"code":429,...,
+  "metadata":{"raw":"...rate-limited..."}}`). Particularly common with free
+  `:free` model variants.
+- **Generic HTTP 429** with a `Retry-After` header — any backend that
+  surfaces these markers in CLI output (`HTTP 429`, `HTTP/1.1 429`,
+  `status: 429`).
+
+### How the retry behaves
+
+- **Honors `Retry-After`** when the upstream provides one (e.g. OpenRouter's
+  `retry_after_seconds` value).
+- **Falls back to exponential backoff with jitter** when no upstream wait is
+  available: 10s, 30s, 60s, 120s, 300s (with ±20% jitter to avoid concurrent
+  engines re-synchronizing on the same upstream).
+- **Caps each wait at `stall.rate_limit_max_wait_sec`** (default 300s).
+- **Caps consecutive retries at `stall.rate_limit_max_retries`** (default 3).
+- **After exhaustion**, the engine falls through to the existing stall path:
+  the car is blocked with reason `rate_limit_exhausted` and surfaces for
+  operator rework. This is intentional — it keeps the engine from looping
+  forever against a daily quota that won't clear in the current shift.
+
+### Tunable knobs
+
+| Knob | Default | When to tune |
+|------|---------|--------------|
+| `stall.rate_limit_max_retries` | `3` | Raise (5–10) for production tracks pinned to a paid Anthropic key with occasional spikes — work that's worth waiting for. Lower (1–2) if you'd rather fail fast and escalate to operator review. |
+| `stall.rate_limit_max_wait_sec` | `300` | Raise for backends with long cooldowns (some paid tiers expose multi-minute `Retry-After` values). The default 300s caps OpenRouter free-tier hourly resets at a reasonable ceiling. |
+| `tracks[].stall_stdout_timeout_sec` | `120` (global `stall.stdout_timeout_sec`) | Raise on tracks pinned to rate-limit-sensitive backends so the existing stall detector doesn't trip mid-retry-backoff. The retry loop terminates the subprocess between attempts, but cumulative delays on long Retry-After values can exceed the 120s default. |
+
+### What operators observe
+
+On detection, the engine emits an info-level log line via slog:
+
+```
+Rate limit hit, pausing before retry  car=<id> source=anthropic|openrouter|http wait=30s attempt=1 max=3
+```
+
+On retry exhaustion, a warn-level line precedes the standard stall handling:
+
+```
+Rate limit retries exhausted, treating as stall  car=<id> retries=3 source=<source>
+```
+
+The car is **not** blocked unless retries actually exhaust — the whole point
+is that work continues across transient limits. While retries are in flight,
+the engine pod stays attached to the car (no other engine will claim it).
+
+### What it does NOT do
+
+For operator-side honesty:
+
+- **Doesn't resume the agent's prior conversation across retries.** The
+  re-spawn uses the same initial context payload as the original attempt, not
+  the partial assistant turns from before the rate-limit hit. Tracked as
+  future work under the resume-from-prior-turns stretch in `railyard-qf1.4`.
+- **Doesn't share retry state across engine restarts.** Retry counts are
+  in-memory only. If the engine pod is killed (drain, OOM, node reboot)
+  mid-retry-backoff, the car becomes a fresh claim on the next cycle —
+  retries start from zero on the new pod.
+- **Doesn't differentiate "transient" from "exhausted" rate limits.** If you
+  hit a daily quota that won't clear for 23 hours, retries will exhaust and
+  the car will be stalled. This is correct behavior — operators should
+  intervene rather than have an engine pod sleep through the night.
+
+### Sample config snippet
+
+```yaml
+stall:
+  rate_limit_max_retries: 5       # default 3; raise for paid-tier production with occasional spikes
+  rate_limit_max_wait_sec: 180    # default 300; lower for "fail fast" tracks
+tracks:
+  - name: experimental
+    stall_stdout_timeout_sec: 600 # bump fuse for tracks pinned to rate-limit-sensitive backends
+```
+
 ## Upgrading
 
 ```bash
