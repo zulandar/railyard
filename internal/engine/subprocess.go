@@ -159,6 +159,16 @@ func (s *Session) Done() <-chan error {
 	return s.waitCh
 }
 
+// Cancel terminates the subprocess by cancelling its context (which sends
+// SIGTERM via the cmd.Cancel hook). Safe to call multiple times. Used by the
+// rate-limit retry loop to stop the current attempt before sleeping and
+// re-spawning.
+func (s *Session) Cancel() {
+	if s.cancel != nil {
+		s.cancel()
+	}
+}
+
 // buildCommand constructs the exec.Cmd for the claude CLI.
 func buildCommand(ctx context.Context, opts SpawnOpts) (*exec.Cmd, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(ctx)
