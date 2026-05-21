@@ -3,6 +3,19 @@
 **RELEASE MANDATORY**
 Make sure to tag the version within helm chart when performing a release. Anything tagged in github needs to be tagged for docker, and helm.
 
+## Code Search & File Structure (MANDATORY)
+
+**Always use the `railyard_codesearch` MCP server** for code search and project structure exploration. Do NOT use `grep`, `rg`, `find`, `ls -R`, or `Explore`/`general-purpose` agents for these tasks.
+
+- `mcp__railyard_codesearch__search_code` — search for symbols, identifiers, strings, or patterns across the codebase
+- `mcp__railyard_codesearch__get_project_structure` — get the file/directory layout
+
+**Why:** the index is rebuilt on every commit, so it stays live and authoritative — searches against it are faster and more accurate than ad-hoc shell traversal.
+
+**Freshness caveat:** the index reflects the **last commit**, not the working tree. For uncommitted edits, read the file directly (`Read`) or commit first. After a commit lands, the index is current again.
+
+**Exceptions** (use shell tools): operating on the working tree (uncommitted diffs, untracked files), filesystem metadata (sizes, perms, mtimes), or output of running processes.
+
 ## Pre-Commit: Lint and Format
 
 **Before every commit**, run these checks. Do NOT commit or push code that fails.
