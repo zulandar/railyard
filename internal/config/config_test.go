@@ -2681,3 +2681,50 @@ inspect:
 		t.Errorf("error = %q, want to contain %q", err.Error(), "inspect: GitHub App auth requires all three fields")
 	}
 }
+
+// TestParse_YardID verifies the dedicated `yard_id:` field is parsed into
+// Config.YardID. The field is independent of `project:` so two yards in
+// the same project can be told apart by plugins consuming
+// plugin.YardInfo.YardID.
+func TestParse_YardID(t *testing.T) {
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+project: myapp
+yard_id: myapp-prod
+tracks:
+  - name: backend
+    language: go
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.YardID != "myapp-prod" {
+		t.Errorf("YardID = %q, want %q", cfg.YardID, "myapp-prod")
+	}
+	if cfg.Project != "myapp" {
+		t.Errorf("Project = %q, want %q (should be unchanged)", cfg.Project, "myapp")
+	}
+}
+
+// TestParse_YardID_DefaultEmpty verifies YardID is empty when the
+// `yard_id:` key is absent. The pluginhost fallback to Project lives in
+// internal/pluginhost — at the config layer YardID stays empty.
+func TestParse_YardID_DefaultEmpty(t *testing.T) {
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+project: myapp
+tracks:
+  - name: backend
+    language: go
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.YardID != "" {
+		t.Errorf("YardID = %q, want empty string when yard_id key is absent", cfg.YardID)
+	}
+}
