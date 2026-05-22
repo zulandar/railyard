@@ -157,6 +157,14 @@ type Host struct {
 	// of the same name. Read/written under h.mu.
 	initFailures map[string]initFailure
 
+	// disabled retains plugins that ran successfully and were later
+	// permanently disabled by the supervisor (crash budget exhausted,
+	// peer-cred mismatch). The plugin is removed from h.launched at the
+	// same time to keep dispatch lookups clean; this map preserves the
+	// snapshot Status() reports as the "disabled" state. Populated by
+	// handlePermanentDisable. Read/written under h.mu.
+	disabled map[string]*disabledPlugin
+
 	// skipped retains plugins listed in cfg.Plugins.Enabled but not
 	// found in any plugins.d directory at Init time. Surfaced by
 	// Status() as the "skipped" state. Populated once during Init.
@@ -189,6 +197,7 @@ func NewHost(deps Dependencies) *Host {
 		shutdownCh:   make(chan struct{}),
 		clock:        time.Now,
 		initFailures: make(map[string]initFailure),
+		disabled:     make(map[string]*disabledPlugin),
 		// `skipped` starts nil; populated by Init when there are missing plugins.
 	}
 	// bootedAt MUST come from h.clock so tests that stub the clock can

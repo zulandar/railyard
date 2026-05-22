@@ -70,16 +70,10 @@ type launchedPlugin struct {
 	subMu      sync.Mutex
 	subCancels []context.CancelFunc
 
-	// disabled is true once a fatal-for-lifetime condition (e.g.
-	// SO_PEERCRED mismatch, crash-budget exceeded) has fired. The
-	// plugin is left in the registry so DispatchCommand can return a
-	// clear error, but no new work is sent to it.
-	disabled bool
-
 	// budget tracks crash recurrence inside a 60s sliding window. The
 	// 4th crash inside the window flips the plugin into a
-	// permanently-disabled state (see [crashBudget] and the supervisor
-	// loop in launch.go for the policy).
+	// permanently-disabled state. handlePermanentDisable then moves the
+	// snapshot into Host.disabled and removes us from h.launched.
 	budget *crashBudget
 
 	// stopping is set true the moment the host begins a planned
@@ -88,9 +82,9 @@ type launchedPlugin struct {
 	// this flag on every subprocess-exit observation: stopping=true
 	// suppresses the restart loop and stops budget accounting.
 	//
-	// stopping is read under [Host.mu] for the same reason `disabled`
-	// is; it lives on launchedPlugin (not on a global host channel) so
-	// per-plugin Stop semantics stay independent.
+	// stopping lives on launchedPlugin (not on a global host channel)
+	// so per-plugin Stop semantics stay independent. Read/written under
+	// [Host.mu].
 	stopping bool
 
 	// superviseDone is closed by the supervisor goroutine when it has
@@ -161,7 +155,6 @@ type LaunchedPluginInfo struct {
 	Path       string
 	SocketPath string
 	PID        int
-	Disabled   bool
 }
 
 // LaunchedPlugins returns a snapshot of every launched plugin, sorted by
@@ -176,7 +169,6 @@ func (h *Host) LaunchedPlugins() []LaunchedPluginInfo {
 			Path:       lp.path,
 			SocketPath: lp.socketPath,
 			PID:        lp.pid,
-			Disabled:   lp.disabled,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
@@ -475,7 +467,7 @@ func (h *Host) Start(ctx context.Context) {
 
 	for _, name := range names {
 		lp := h.lookupPluginByName(name)
-		if lp == nil || lp.disabled {
+		if lp == nil {
 			continue
 		}
 		startCtx, cancel := context.WithTimeout(ctx, 30*time.Second)

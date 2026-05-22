@@ -64,6 +64,25 @@ type initFailure struct {
 	failedAt time.Time
 }
 
+// disabledPlugin is the host-internal record of a plugin that ran
+// successfully and was later permanently disabled (e.g. crash-budget
+// exhausted). Snapshot is taken at disable time; fields are immutable
+// thereafter. [Host.Status] reads h.disabled to surface the "disabled"
+// row that the documented 4-state model promises. Lives in a separate
+// map from h.launched because handlePermanentDisable also removes the
+// plugin from h.launched to keep dispatch lookups clean.
+//
+// Read/written under [Host.mu].
+type disabledPlugin struct {
+	name           string
+	path           string
+	pid            int
+	restartCount   int
+	lastActivity   time.Time
+	lastExitReason string
+	commandCount   int
+}
+
 // skippedPlugin is the host-internal record of a plugin that appears in
 // cfg.Plugins.Enabled but was not found in any plugins.d directory at
 // Init time. Searched lists the directories the discovery walked, so
@@ -82,25 +101,31 @@ func (h *Host) Status() Snapshot {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	plugins := make([]PluginStatus, 0, len(h.launched)+len(h.initFailures)+len(h.skipped))
+	plugins := make([]PluginStatus, 0, len(h.launched)+len(h.disabled)+len(h.initFailures)+len(h.skipped))
 
 	for _, lp := range h.launched {
-		status := StatusRunning
-		errStr := ""
-		if lp.disabled {
-			status = StatusDisabled
-			errStr = lp.lastExitReason
-		}
 		plugins = append(plugins, PluginStatus{
 			Name:              lp.name,
-			Status:            status,
+			Status:            StatusRunning,
 			RestartCount:      lp.restartCount,
 			SubscriptionCount: h.subscriptions[lp.name],
 			CommandCount:      len(lp.capabilities.provideCommands),
 			LastActivity:      lp.lastActivity,
 			PID:               lp.pid,
 			Path:              lp.path,
-			Error:             errStr,
+		})
+	}
+
+	for _, dp := range h.disabled {
+		plugins = append(plugins, PluginStatus{
+			Name:         dp.name,
+			Status:       StatusDisabled,
+			RestartCount: dp.restartCount,
+			CommandCount: dp.commandCount,
+			LastActivity: dp.lastActivity,
+			PID:          dp.pid,
+			Path:         dp.path,
+			Error:        dp.lastExitReason,
 		})
 	}
 

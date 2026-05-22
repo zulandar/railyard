@@ -23,19 +23,22 @@ func newStatusFixtureHost(t *testing.T) *Host {
 				lastActivity: time.Unix(1_700_000_050, 0),
 				capabilities: pluginCapabilities{provideCommands: []string{"do_a", "do_b"}},
 			},
+		},
+		subscriptions: map[string]int{
+			"running-plugin": 3,
+		},
+		// disabled-plugin lives in h.disabled (not h.launched) — that
+		// mirrors production, where handlePermanentDisable moves the
+		// entry across maps in one critical section.
+		disabled: map[string]*disabledPlugin{
 			"disabled-plugin": {
 				name:           "disabled-plugin",
 				path:           "/etc/railyard/plugins.d/disabled-plugin",
 				pid:            54321,
-				disabled:       true,
 				restartCount:   4,
 				lastActivity:   time.Unix(1_700_000_010, 0),
 				lastExitReason: "crash budget exceeded",
 			},
-		},
-		subscriptions: map[string]int{
-			"running-plugin":  3,
-			"disabled-plugin": 0,
 		},
 		initFailures: map[string]initFailure{
 			"broken-plugin": {
@@ -173,6 +176,86 @@ func TestStatusSkippedReportsSearchPaths(t *testing.T) {
 		}
 	}
 	t.Fatal("missing-plugin missing")
+}
+
+// TestMarkPermanentlyDisabledSurfacesViaStatus is the railyard-kuh
+// regression. Before this fix, handlePermanentDisable set lp.disabled=true
+// AND delete(h.launched, lp.name) in the same critical section, but
+// Status() only iterated h.launched — so a disabled plugin was invisible
+// in real execution. The fix moves the entry into h.disabled, which
+// Status() iterates as a separate source. This test drives the move
+// directly and asserts the disabled row reaches the snapshot.
+func TestMarkPermanentlyDisabledSurfacesViaStatus(t *testing.T) {
+	h := &Host{
+		bootedAt:      time.Unix(1_700_000_000, 0),
+		clock:         func() time.Time { return time.Unix(1_700_000_100, 0) },
+		launched:      map[string]*launchedPlugin{},
+		subscriptions: map[string]int{},
+		initFailures:  map[string]initFailure{},
+		disabled:      map[string]*disabledPlugin{},
+		pluginCmds:    map[string]string{"do_a": "doomed-plugin", "do_b": "doomed-plugin"},
+	}
+	lp := &launchedPlugin{
+		name:           "doomed-plugin",
+		path:           "/etc/railyard/plugins.d/doomed-plugin",
+		pid:            99999,
+		restartCount:   3,
+		lastActivity:   time.Unix(1_700_000_080, 0),
+		lastExitReason: "crash budget exceeded",
+		capabilities:   pluginCapabilities{provideCommands: []string{"do_a", "do_b"}},
+	}
+	h.launched["doomed-plugin"] = lp
+
+	h.markPermanentlyDisabled(lp)
+
+	// Removed from h.launched, present in h.disabled.
+	if _, stillLaunched := h.launched["doomed-plugin"]; stillLaunched {
+		t.Fatal("plugin must be removed from h.launched")
+	}
+	dp, ok := h.disabled["doomed-plugin"]
+	if !ok {
+		t.Fatal("plugin must be in h.disabled after markPermanentlyDisabled")
+	}
+	if dp.lastExitReason != "crash budget exceeded" {
+		t.Errorf("disabled.lastExitReason = %q", dp.lastExitReason)
+	}
+	if dp.restartCount != 3 {
+		t.Errorf("disabled.restartCount = %d", dp.restartCount)
+	}
+	if dp.commandCount != 2 {
+		t.Errorf("disabled.commandCount = %d", dp.commandCount)
+	}
+	if len(h.pluginCmds) != 0 {
+		t.Errorf("pluginCmds entries owned by disabled plugin must be cleared; got %v", h.pluginCmds)
+	}
+
+	// Status() must surface the row as 'disabled'.
+	snap := h.Status()
+	var row *PluginStatus
+	for i := range snap.Plugins {
+		if snap.Plugins[i].Name == "doomed-plugin" {
+			row = &snap.Plugins[i]
+			break
+		}
+	}
+	if row == nil {
+		t.Fatal("disabled plugin missing from Status() snapshot")
+	}
+	if row.Status != StatusDisabled {
+		t.Errorf("status = %q, want %q", row.Status, StatusDisabled)
+	}
+	if row.Error != "crash budget exceeded" {
+		t.Errorf("error = %q", row.Error)
+	}
+	if row.PID != 99999 {
+		t.Errorf("PID = %d", row.PID)
+	}
+	if row.RestartCount != 3 {
+		t.Errorf("RestartCount = %d", row.RestartCount)
+	}
+	if row.CommandCount != 2 {
+		t.Errorf("CommandCount = %d", row.CommandCount)
+	}
 }
 
 func TestStatusYardmasterInfoPopulated(t *testing.T) {

@@ -239,10 +239,9 @@ func (h *Host) isShuttingDown() bool {
 
 // handlePermanentDisable performs the budget-exceeded teardown: emits
 // the structured ERROR log, kills the lingering subprocess (in case it
-// is still draining), removes the socket file, and drops the plugin
-// from the active registry. The plugin is left disabled — future
-// lookups by name return nil and DispatchCommand reports a clear
-// error.
+// is still draining), removes the socket file, snapshots the plugin's
+// final state into h.disabled, and drops it from the active registry.
+// [Host.Status] surfaces the snapshot as the "disabled" row.
 func (h *Host) handlePermanentDisable(lp *launchedPlugin, finalCount int) {
 	firstAt := lp.budget.firstCrash()
 
@@ -266,21 +265,34 @@ func (h *Host) handlePermanentDisable(lp *launchedPlugin, finalCount int) {
 	lp.client.Kill()
 	removeSocket(lp.socketPath)
 
-	// Flip disabled inside the lock, then remove from h.launched so
-	// future lookupPluginByName returns nil and Stop's iteration
-	// doesn't double-process us. We keep the WIP semantic — disabled
-	// is true even though the entry is removed — so any subscribe
-	// stream cancellations in flight observe the right state if they
-	// re-fetch the plugin.
+	h.markPermanentlyDisabled(lp)
+}
+
+// markPermanentlyDisabled snapshots lp into h.disabled, removes it from
+// h.launched, and clears any command ownership the plugin held — all in
+// a single critical section so Status() readers observe exactly one of
+// the running/disabled rows. Factored out of handlePermanentDisable for
+// direct unit testability (the rest of handlePermanentDisable touches
+// go-plugin's client.Kill and the socket file, which need a real
+// subprocess to exercise).
+func (h *Host) markPermanentlyDisabled(lp *launchedPlugin) {
 	h.mu.Lock()
-	lp.disabled = true
+	defer h.mu.Unlock()
+	h.disabled[lp.name] = &disabledPlugin{
+		name:           lp.name,
+		path:           lp.path,
+		pid:            lp.pid,
+		restartCount:   lp.restartCount,
+		lastActivity:   lp.lastActivity,
+		lastExitReason: lp.lastExitReason,
+		commandCount:   len(lp.capabilities.provideCommands),
+	}
 	delete(h.launched, lp.name)
 	for cmd, owner := range h.pluginCmds {
 		if owner == lp.name {
 			delete(h.pluginCmds, cmd)
 		}
 	}
-	h.mu.Unlock()
 }
 
 // relaunch is the supervisor's path for re-establishing the
@@ -331,8 +343,8 @@ func (h *Host) relaunch(ctx context.Context, c candidate, lp *launchedPlugin) er
 	// Swap the new go-plugin handles into the supervisor's lp, under
 	// the host lock so concurrent lookups see a consistent view. We
 	// preserve lp.budget, lp.superviseDone, lp.allow, lp.capabilities,
-	// lp.disabled, lp.stopping, and lp.subMu/subCancels — those are
-	// supervisor state that must outlive the dead subprocess.
+	// lp.stopping, and lp.subMu/subCancels — those are supervisor state
+	// that must outlive the dead subprocess.
 	h.mu.Lock()
 	lp.client = fresh.client
 	lp.pluginRPC = fresh.pluginRPC
