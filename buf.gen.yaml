@@ -1,0 +1,29 @@
+# buf codegen config for the railyard plugin gRPC contract.
+#
+# Generates Go message stubs and Go gRPC service stubs in-tree (paths:
+# source_relative) so the .pb.go files sit next to their .proto. The
+# plugins are pinned in `deps:` so a fresh checkout running
+# `scripts/proto.sh` produces byte-identical output to CI.
+version: v2
+
+# `managed: true` lets buf inject the go_package option from
+# go_package_prefix below when desired. The .proto already declares its
+# own go_package, so we leave override_go_package_prefix unset and let
+# the in-file directive win.
+managed:
+  enabled: true
+
+plugins:
+  - remote: buf.build/protocolbuffers/go:v1.36.11
+    out: pkg/plugin/proto/v1
+    opt:
+      - paths=source_relative
+
+  - remote: buf.build/grpc/go:v1.6.2
+    out: pkg/plugin/proto/v1
+    opt:
+      - paths=source_relative
+      - require_unimplemented_servers=true
+
+inputs:
+  - directory: pkg/plugin/proto/v1

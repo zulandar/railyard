@@ -48,19 +48,17 @@ func logBootSummary(logger *slog.Logger, host *pluginhost.Host) {
 	)
 }
 
-// buildPluginHost constructs the plugin host and registers every plugin that
-// called [plugin.Register] at init time. The returned host has NOT had its
-// lifecycle started — callers are expected to call host.Init / host.Start /
-// host.Stop around the surrounding subsystems.
+// buildPluginHost constructs the plugin host. Under the subprocess plugin
+// model (railyard-fll.3) the host discovers plugin binaries on disk and
+// launches each enabled binary as a subprocess during [pluginhost.Host.Init].
+// There is no in-process registry walk anymore; the returned host has NOT
+// yet launched any plugins. Callers are expected to call host.Init,
+// host.Start, and host.Stop around the surrounding subsystems.
 //
-// The OSS railyard binary registers zero plugins, so this helper is a
-// no-op-on-paper there: a bus is still constructed (publishing to a nil
-// bus is a no-op; an active bus with zero subscribers is also a no-op) and
-// a host with an empty plugin set is returned. The behavioral effect on
-// the OSS binary is just a small amount of extra allocation at boot.
-//
-// In an enterprise build that side-effect imports plugins, this is where
-// they get wired into Init/Start.
+// The OSS railyard binary ships no plugin binaries in its image, so when
+// railyard.yaml's `plugins.enabled` list is empty (the OSS default) this
+// helper produces a host that owns no subprocesses — Init/Start/Stop
+// become effective no-ops.
 func buildPluginHost(cfg *config.Config, db *gorm.DB, bus events.Bus) *pluginhost.Host {
 	deps := pluginhost.Dependencies{
 		Cfg:             cfg,
@@ -77,11 +75,7 @@ func buildPluginHost(cfg *config.Config, db *gorm.DB, bus events.Bus) *pluginhos
 		ForceCompleteFn: forceCompleteAdapter(db, bus),
 	}
 
-	host := pluginhost.NewHost(deps)
-	for _, entry := range plugin.Registered() {
-		host.Register(entry.Factory())
-	}
-	return host
+	return pluginhost.NewHost(deps)
 }
 
 // resolveRailyardVersion returns the ldflags-supplied Version if it isn't

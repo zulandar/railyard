@@ -21,18 +21,10 @@ type EventHandler func(topic EventType, payload any)
 // are no-ops. It is safe to call from within the handler itself.
 type Unsubscribe func()
 
-// DaemonFunc is the signature for a long-lived worker registered via
-// [Host.RunDaemon]. The host wraps every daemon with panic recovery,
-// context cancellation on shutdown, and a 5-second drain timeout (with
-// a restart bound of 3 panics before the daemon is permanently
-// disabled). A daemon should return nil on normal shutdown and a
-// non-nil error on unexpected failure; the host logs the error and
-// counts it toward the restart budget.
-type DaemonFunc func(ctx context.Context) error
-
 // Host is the single interface plugins use to interact with railyard
 // core. Implementations live in the railyard internal/pluginhost
-// package; this package only declares the contract.
+// package; the in-plugin gRPC client adapter satisfies this interface
+// over the wire. This package only declares the contract.
 //
 // Every method on Host is safe for concurrent use unless documented
 // otherwise on the method itself.
@@ -81,16 +73,6 @@ type Host interface {
 	// return [CommandResult] with Success=false and a non-nil error
 	// describing the violation.
 	DispatchCommand(ctx context.Context, name string, args CommandArgs) (CommandResult, error)
-
-	// RunDaemon registers a goroutine the host manages on the
-	// plugin's behalf. The host wraps the function with panic
-	// recovery, context cancellation on shutdown, and a 5-second
-	// drain timeout. After three consecutive panics the daemon is
-	// permanently disabled and an ERROR is logged.
-	//
-	// RunDaemon returns immediately; the daemon runs asynchronously.
-	// It is intended to be called from [Plugin.Start].
-	RunDaemon(name string, fn DaemonFunc)
 
 	// Logger returns a structured logger scoped to the plugin's name.
 	// All records emitted through the returned logger include a

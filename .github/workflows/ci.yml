@@ -27,6 +27,21 @@ jobs:
       - name: Build
         run: go build ./...
 
+      # Lane H (railyard-fll.7): examples/plugins/hello is a standalone Go
+      # module that uses `replace github.com/zulandar/railyard => ../../..`
+      # to bind against the in-tree SDK. Building it in CI catches any
+      # SDK drift that would break the documented quickstart guide
+      # (docs/plugins/authoring.md §2) before the guide goes stale.
+      - name: Build hello example plugin
+        run: cd examples/plugins/hello && go build -o railyard-hello-example .
+
+      # Note: the existing `go test ./...` invocation does NOT pass
+      # `-short`, so integration-class tests gated on testing.Short() run
+      # here automatically. This includes:
+      #   - pkg/cli.TestOSSExamplePluginEndToEnd      (Lane H, .7.3)
+      #   - internal/pluginhost.TestLaunchPluginHappyPath
+      #   - internal/pluginhost.TestE2EEventDelivery
+      # All three are Linux-gated (SO_PEERCRED) and run on ubuntu-latest.
       - name: Test
         run: go test ./... -count=1 -timeout 300s -race
 
@@ -44,6 +59,46 @@ jobs:
         uses: golangci/golangci-lint-action@v9
         with:
           version: latest
+
+  proto:
+    # Plugin gRPC contract checks (Lane N, railyard-fll.10).
+    #
+    # `buf lint` enforces the STANDARD ruleset against
+    # pkg/plugin/proto/v1/plugin.proto. `buf breaking` compares the live
+    # module to the committed snapshot at pkg/plugin/proto/snapshots/v1/
+    # — any wire-incompatible change must be made deliberately by
+    # updating the snapshot (see docs/plugins/proto.md).
+    #
+    # The Go-level golden test at pkg/plugin/proto/v1/compat_test.go
+    # already shells out to buf as part of `go test ./...`; this
+    # dedicated job gives a clearer failure surface in the PR check
+    # list and ensures buf-specific regressions don't hide behind a
+    # generic "tests failed" status.
+    name: Proto
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      # Pinned to v1.69.0 (current stable). Bump deliberately — `latest`
+      # is intentionally avoided so a buf release that changes the lint
+      # ruleset can't break CI without a reviewed commit.
+      - name: Install buf
+        run: |
+          set -euo pipefail
+          BUF_VERSION="v1.69.0"
+          BIN="$RUNNER_TEMP/buf-bin"
+          mkdir -p "$BIN"
+          curl -fsSL \
+            "https://github.com/bufbuild/buf/releases/download/${BUF_VERSION}/buf-Linux-x86_64" \
+            -o "$BIN/buf"
+          chmod +x "$BIN/buf"
+          echo "$BIN" >> "$GITHUB_PATH"
+
+      - name: buf lint
+        run: buf lint
+
+      - name: buf breaking (against committed snapshot)
+        run: buf breaking --against pkg/plugin/proto/snapshots/v1
 
   govulncheck:
     name: Vulnerability Check

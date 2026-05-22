@@ -2,104 +2,40 @@ package cli
 
 import (
 	"bytes"
-	"context"
 	"log/slog"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
+	"github.com/zulandar/railyard/internal/config"
 	"github.com/zulandar/railyard/internal/pluginhost"
-	"github.com/zulandar/railyard/pkg/plugin"
 )
-
-// bootFakePlugin is a minimal plugin.Plugin implementation used by the
-// boot-summary tests. It does no work — the tests only need the host to
-// remember the plugin's name so [pluginhost.Host.Names] can return it.
-type bootFakePlugin struct {
-	name string
-}
-
-func (p *bootFakePlugin) Name() string                                  { return p.name }
-func (p *bootFakePlugin) Init(ctx context.Context, h plugin.Host) error { return nil }
-func (p *bootFakePlugin) Start(ctx context.Context) error               { return nil }
-func (p *bootFakePlugin) Stop(ctx context.Context) error                { return nil }
-
-// TestPluginsListEmpty asserts the OSS-binary output: when no plugins are
-// linked into the binary, the command prints the friendly fallback line
-// rather than an empty table.
-func TestPluginsListEmpty(t *testing.T) {
-	var buf bytes.Buffer
-	if err := renderPluginsList(&buf, nil); err != nil {
-		t.Fatalf("renderPluginsList error: %v", err)
-	}
-	got := buf.String()
-	want := "No plugins registered in this binary."
-	if !strings.Contains(got, want) {
-		t.Errorf("output = %q, want it to contain %q", got, want)
-	}
-}
-
-// TestPluginsListWithEntries seeds two fake registry entries and asserts
-// the rendered table includes the header row, both plugin names, and the
-// build-time status / placeholder daemon and subscription cells.
-//
-// We feed the renderer directly rather than calling plugin.Register so
-// the package-level registry stays clean for sibling tests (the registry
-// is process-global and has no public reset).
-func TestPluginsListWithEntries(t *testing.T) {
-	var buf bytes.Buffer
-	entries := []plugin.PluginEntry{
-		{Name: "trainmaster", Factory: func() plugin.Plugin { return nil }},
-		{Name: "audit-log", Factory: func() plugin.Plugin { return nil }},
-	}
-	if err := renderPluginsList(&buf, entries); err != nil {
-		t.Fatalf("renderPluginsList error: %v", err)
-	}
-	got := buf.String()
-
-	// Header row.
-	if !strings.Contains(got, "NAME") || !strings.Contains(got, "STATUS") {
-		t.Errorf("missing header row in output:\n%s", got)
-	}
-	if !strings.Contains(got, "DAEMONS") || !strings.Contains(got, "SUBSCRIPTIONS") {
-		t.Errorf("missing daemons/subscriptions header in output:\n%s", got)
-	}
-
-	// Per-plugin rows. We don't lock in exact column widths (tabwriter
-	// may vary with the longest name) — just assert the cells line up
-	// per row.
-	for _, name := range []string{"trainmaster", "audit-log"} {
-		if !strings.Contains(got, name) {
-			t.Errorf("missing plugin %q in output:\n%s", name, got)
-		}
-	}
-	// "registered" status should appear at least once per plugin row.
-	if c := strings.Count(got, "registered"); c < 2 {
-		t.Errorf(`expected "registered" to appear at least twice (one per plugin), got %d:\n%s`, c, got)
-	}
-
-	// Daemons/subscriptions are unknown without IPC, so the renderer
-	// emits "-" placeholders. We count occurrences loosely: with two
-	// rows and two unknown columns per row we expect at least four "-"
-	// substrings.
-	if c := strings.Count(got, "-"); c < 4 {
-		t.Errorf(`expected at least 4 "-" placeholder cells, got %d:\n%s`, c, got)
-	}
-
-	// Registration order must be preserved.
-	tIdx := strings.Index(got, "trainmaster")
-	aIdx := strings.Index(got, "audit-log")
-	if tIdx < 0 || aIdx < 0 || tIdx > aIdx {
-		t.Errorf("registration order not preserved: trainmaster idx=%d audit-log idx=%d", tIdx, aIdx)
-	}
-}
 
 // TestPluginsListSubcommandWiring runs the cobra command end-to-end to
 // ensure `ry plugins list` is reachable from the root command tree and
-// emits the expected fallback when no plugins are linked. The OSS test
-// binary registers zero plugins (sibling packages don't side-effect
-// import any), so this test exercises the empty-case path through the
-// real RunE.
+// produces a non-empty render. We swap pluginsListDiscover for a
+// stub so the test never hits the real plugins.d filesystem.
 func TestPluginsListSubcommandWiring(t *testing.T) {
+	withStubDiscover(t, func(cfg *config.Config) ([]pluginhost.PluginCandidate, error) {
+		return []pluginhost.PluginCandidate{
+			{
+				Name:          "trainmaster",
+				Path:          "/etc/railyard/plugins.d/trainmaster",
+				Source:        "/etc/railyard/plugins.d",
+				Executable:    true,
+				Enabled:       true,
+				AllowEvents:   []string{"*"},
+				AllowCommands: []string{"dispatch.start", "dispatch.cancel"},
+				SocketPath:    "/tmp/railyard-0/plugins/trainmaster.sock",
+			},
+		}, nil
+	})
+	withStubConfigLoad(t, func(string) (*config.Config, error) {
+		return &config.Config{}, nil
+	})
+
 	root := newRootCmd()
 	var buf bytes.Buffer
 	root.SetOut(&buf)
@@ -109,8 +45,133 @@ func TestPluginsListSubcommandWiring(t *testing.T) {
 		t.Fatalf("`ry plugins list` failed: %v", err)
 	}
 	got := buf.String()
-	if !strings.Contains(got, "No plugins registered") && !strings.Contains(got, "NAME") {
-		t.Errorf("`ry plugins list` produced unexpected output:\n%s", got)
+	// Header columns.
+	for _, want := range []string{"NAME", "ENABLED", "EXECUTABLE", "EVENTS", "COMMANDS", "PATH"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("header missing column %q in output:\n%s", want, got)
+		}
+	}
+	// Row fields.
+	if !strings.Contains(got, "trainmaster") {
+		t.Errorf("expected plugin name in output:\n%s", got)
+	}
+	// "1" event allow entry, "2" command allow entries (non-verbose
+	// renders counts).
+	if !strings.Contains(got, "/etc/railyard/plugins.d/trainmaster") {
+		t.Errorf("expected path in output:\n%s", got)
+	}
+}
+
+// TestPluginsListEmpty exercises the "no plugins discovered" path.
+func TestPluginsListEmpty(t *testing.T) {
+	withStubDiscover(t, func(cfg *config.Config) ([]pluginhost.PluginCandidate, error) {
+		return nil, nil
+	})
+	withStubConfigLoad(t, func(string) (*config.Config, error) {
+		return &config.Config{}, nil
+	})
+
+	root := newRootCmd()
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	root.SetArgs([]string{"plugins", "list"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("`ry plugins list` failed: %v", err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "no plugins found") {
+		t.Errorf("expected friendly empty message; got:\n%s", got)
+	}
+}
+
+// TestPluginsListVerbose checks that the -v flag expands the allow
+// lists into their comma-separated contents instead of counts.
+func TestPluginsListVerbose(t *testing.T) {
+	withStubDiscover(t, func(cfg *config.Config) ([]pluginhost.PluginCandidate, error) {
+		return []pluginhost.PluginCandidate{
+			{
+				Name:          "alpha",
+				Path:          "/p/alpha",
+				Executable:    true,
+				Enabled:       true,
+				AllowEvents:   []string{"Car.Created", "Engine.Started"},
+				AllowCommands: []string{"alpha.*"},
+			},
+		}, nil
+	})
+	withStubConfigLoad(t, func(string) (*config.Config, error) {
+		return &config.Config{}, nil
+	})
+
+	root := newRootCmd()
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	root.SetArgs([]string{"plugins", "list", "-v"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("`ry plugins list -v` failed: %v", err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "Car.Created,Engine.Started") {
+		t.Errorf("verbose mode did not expand events:\n%s", got)
+	}
+	if !strings.Contains(got, "alpha.*") {
+		t.Errorf("verbose mode did not expand commands:\n%s", got)
+	}
+}
+
+// TestPluginsListWithRealDiscovery sets up a temp plugins dir with one
+// fake "plugin" binary, points config at it via PluginsDir, and runs
+// the command without stubbing DiscoverPlugins — exercising the
+// internal/pluginhost integration end-to-end.
+func TestPluginsListWithRealDiscovery(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX executable bit semantics")
+	}
+
+	pluginsDir := t.TempDir()
+	binPath := filepath.Join(pluginsDir, "hello")
+	if err := os.WriteFile(binPath, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("seeding fake plugin: %v", err)
+	}
+
+	withStubConfigLoad(t, func(string) (*config.Config, error) {
+		return &config.Config{
+			Plugins: config.PluginsConfig{
+				Enabled:    []string{"hello"},
+				PluginsDir: pluginsDir,
+				Settings: map[string]config.PluginSettings{
+					"hello": {
+						Allow: config.AllowConfig{
+							Events:   []string{"*"},
+							Commands: []string{"hello.*", "hello.greet"},
+						},
+					},
+				},
+			},
+		}, nil
+	})
+	// Do NOT stub pluginsListDiscover — exercise the real path.
+
+	root := newRootCmd()
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	root.SetArgs([]string{"plugins", "list"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("`ry plugins list` failed: %v", err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "hello") {
+		t.Errorf("real-discovery test missing plugin name 'hello':\n%s", got)
+	}
+	if !strings.Contains(got, binPath) {
+		t.Errorf("real-discovery test missing binary path %q:\n%s", binPath, got)
+	}
+	// 1 event allow + 2 command allow entries in non-verbose form.
+	if !strings.Contains(got, "yes") {
+		t.Errorf("real-discovery test missing enabled/executable yes markers:\n%s", got)
 	}
 }
 
@@ -148,22 +209,32 @@ func TestLogBootSummaryEmpty(t *testing.T) {
 	}
 }
 
-// TestLogBootSummaryNonEmpty registers two plugins on the host and asserts
-// the boot summary line lists both names in registration order. The
-// pluginhost-side lifecycle isn't invoked here — Names() reflects whatever
-// is currently in the registered set, which for a pre-Init host is the
-// raw registration order.
+// TestLogBootSummaryNonEmpty exercised the boot summary line when the
+// host had non-empty Names(). Under the subprocess plugin model the
+// only way to populate Names() is to actually launch a subprocess
+// plugin — coverage for that path lives in
+// internal/pluginhost/launch_test.go where the host owns the lifecycle.
+// Re-wiring this CLI-side smoke check to spin up a subprocess (so it
+// keeps testing logBootSummary specifically) is tracked by bd issue
+// railyard-bjp.
 func TestLogBootSummaryNonEmpty(t *testing.T) {
-	var buf bytes.Buffer
-	logger := slog.New(slog.NewTextHandler(&buf, nil))
-	host := pluginhost.NewHost(pluginhost.Dependencies{})
-	host.Register(&bootFakePlugin{name: "trainmaster"})
-	host.Register(&bootFakePlugin{name: "audit-log"})
+	t.Skip("legacy in-process registration removed; tracked by bd issue railyard-bjp")
+}
 
-	logBootSummary(logger, host)
+// withStubDiscover swaps pluginsListDiscover for the test and restores
+// it via t.Cleanup.
+func withStubDiscover(t *testing.T, fn func(*config.Config) ([]pluginhost.PluginCandidate, error)) {
+	t.Helper()
+	orig := pluginsListDiscover
+	pluginsListDiscover = fn
+	t.Cleanup(func() { pluginsListDiscover = orig })
+}
 
-	got := buf.String()
-	if !strings.Contains(got, "loaded plugins: trainmaster, audit-log") {
-		t.Errorf("missing expected boot summary line:\n%s", got)
-	}
+// withStubConfigLoad swaps pluginsListLoadConfig for the test and
+// restores it via t.Cleanup.
+func withStubConfigLoad(t *testing.T, fn func(string) (*config.Config, error)) {
+	t.Helper()
+	orig := pluginsListLoadConfig
+	pluginsListLoadConfig = fn
+	t.Cleanup(func() { pluginsListLoadConfig = orig })
 }

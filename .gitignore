@@ -30,3 +30,7 @@ credentials.json
 .dolt/
 *.db
 .beads-credential-key
+
+# Example plugin binaries (built by docs/quickstart and the verification test)
+/examples/plugins/hello/hello
+/examples/plugins/hello/railyard-hello-example
