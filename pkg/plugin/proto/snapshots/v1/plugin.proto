@@ -1,0 +1,479 @@
+// Package railyard.plugin.v1 is the wire contract between a railyard
+// host and an out-of-process plugin spoken over gRPC on a Unix domain
+// socket. The Go SDK (pkg/plugin) wraps these RPCs in the same
+// signatures that in-process plugins use today; the proto contract is
+// the source of truth for what crosses the process boundary.
+//
+// Wire-compat policy (see docs/plugins/proto.md):
+//
+//   - Adding fields, enum values, oneof arms, or messages is additive
+//     and SHOULD remain wire-compatible. New senders/old receivers will
+//     observe defaults or unknown-field skips.
+//   - Renaming or renumbering an existing field is breaking and forces
+//     a new v2 package.
+//   - Removing a field requires reserving its number and name so it
+//     can never be reused on the v1 wire.
+//   - `buf breaking` runs against the snapshot in this directory's
+//     snapshots/ folder on every change; the snapshot is the
+//     last-known-good baseline.
+
+syntax = "proto3";
+
+package railyard.plugin.v1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/zulandar/railyard/pkg/plugin/proto/v1;protov1";
+
+// -----------------------------------------------------------------------------
+// Services
+// -----------------------------------------------------------------------------
+
+// PluginService is implemented by the plugin process. The host calls
+// these RPCs to drive the plugin's lifecycle. Every call is unary; the
+// streaming surface lives on HostService.Subscribe.
+service PluginService {
+  // Init is the handshake. The plugin advertises its desired
+  // capabilities (event subscriptions, command registrations, SDK
+  // version) and the host returns the subset actually permitted by the
+  // allow-list along with structured denial reasons for anything
+  // refused. Init MUST complete before Start is called.
+  rpc Init(InitRequest) returns (InitResponse);
+
+  // Start signals the host has finished booting core subsystems and the
+  // plugin may launch any long-lived workers. Start MUST return
+  // promptly; long-running work belongs in a daemon the plugin
+  // registers with the host.
+  rpc Start(StartRequest) returns (StartResponse);
+
+  // Stop signals shutdown. The plugin SHOULD release resources and
+  // return within the host's drain timeout (5 seconds in Phase 1).
+  rpc Stop(StopRequest) returns (StopResponse);
+
+  // HandleCommand is invoked by the host when an external caller
+  // dispatches a command the plugin registered via Init capabilities.
+  // The args/result preserve the weakly-typed shape of the Go SDK via
+  // google.protobuf.Struct.
+  rpc HandleCommand(HandleCommandRequest) returns (HandleCommandResponse);
+}
+
+// HostService is implemented by the railyard host. The plugin dials
+// back into the host over the same multiplexed transport to read state,
+// subscribe to events, dispatch core commands, fetch its config block,
+// and emit structured log records.
+service HostService {
+  // YardInfo returns the static identity of this railyard instance.
+  // The result is fixed for the lifetime of the host; plugins typically
+  // cache it after the first call.
+  rpc YardInfo(YardInfoRequest) returns (YardInfoResponse);
+
+  // Snapshot returns the current full yard state in a single read
+  // transaction. The shape mirrors pkg/plugin.Snapshot.
+  rpc Snapshot(SnapshotRequest) returns (SnapshotResponse);
+
+  // Subscribe opens a server-streamed multiplexed event channel. The
+  // plugin asks for the intersection of its allow-list and the topics
+  // it cares about; the host fans events from the internal bus into
+  // the stream until the plugin cancels.
+  rpc Subscribe(SubscribeRequest) returns (stream Event);
+
+  // DispatchCommand invokes a command by name. The host first looks up
+  // the name in the Phase 1 core allow-list, then in plugin-registered
+  // commands. Validation errors are returned in the response, not as a
+  // gRPC error.
+  rpc DispatchCommand(DispatchCommandRequest) returns (DispatchCommandResponse);
+
+  // Config returns the raw yaml bytes of the named plugin's top-level
+  // config block from railyard.yaml. The plugin SDK rehydrates the
+  // bytes into a yaml.Node so the in-process Host.Config signature
+  // remains stable for plugin authors. If no block is configured, the
+  // response carries `present = false` and an empty payload.
+  rpc Config(ConfigRequest) returns (ConfigResponse);
+
+  // Log accepts a structured log record from the plugin. The host
+  // re-emits the record through its own slog handler with a
+  // "plugin=<name>" attribute already set by the host wrapper.
+  rpc Log(LogRequest) returns (LogResponse);
+}
+
+// -----------------------------------------------------------------------------
+// Init / capabilities handshake
+// -----------------------------------------------------------------------------
+
+// CommandSchema is the plugin's declared shape for a command it wishes
+// to register. Phase 1 supports a required-keys schema only: each entry
+// in `required_args` names a key and the expected primitive type as a
+// string (one of "string", "int", "float", "bool"). This is enough for
+// the host to reject obviously malformed args before HandleCommand.
+message CommandSchema {
+  // name is the command name (unique across the host).
+  string name = 1;
+
+  // required_args is key -> primitive type name. Empty map means the
+  // command takes no required arguments.
+  map<string, string> required_args = 2;
+
+  // description is an optional human-readable summary surfaced in
+  // documentation tooling.
+  string description = 3;
+}
+
+// Capabilities is the plugin's advertised wish-list at Init time.
+message Capabilities {
+  // subscribe_events is the set of EventType names (the same string
+  // constants as pkg/plugin.EventType) the plugin wants to receive.
+  repeated string subscribe_events = 1;
+
+  // provide_commands is the set of commands the plugin wishes to
+  // register so external callers can dispatch them through the host.
+  repeated CommandSchema provide_commands = 2;
+
+  // sdk_version is the pkg/plugin SDK version the plugin was built
+  // against. The host logs this for support diagnostics; mismatches
+  // are not fatal in Phase 1.
+  string sdk_version = 3;
+}
+
+// CapabilityDenial explains why a requested capability was refused by
+// the host's allow-list. The plugin SHOULD log denials at WARN so
+// operators can see what their config blocks.
+message CapabilityDenial {
+  // DenialKind discriminates the capability type. Field numbers are
+  // stable; new kinds append at the tail.
+  enum Kind {
+    KIND_UNSPECIFIED = 0;
+    KIND_EVENT = 1;
+    KIND_COMMAND = 2;
+  }
+
+  Kind kind = 1;
+
+  // name is the event topic or command name that was denied.
+  string name = 2;
+
+  // reason is a human-readable explanation (e.g. "not in allow-list",
+  // "conflict with core command").
+  string reason = 3;
+}
+
+message InitRequest {
+  // plugin_name is the plugin's stable identifier; matches the registry
+  // key the host looked up to launch this process.
+  string plugin_name = 1;
+
+  // capabilities is the plugin's wish-list.
+  Capabilities capabilities = 2;
+}
+
+message InitResponse {
+  // allowed_events is the subset of capabilities.subscribe_events the
+  // host permits this plugin to subscribe to.
+  repeated string allowed_events = 1;
+
+  // allowed_commands is the subset of capability command names the
+  // plugin may invoke through HostService.DispatchCommand.
+  repeated string allowed_commands = 2;
+
+  // denials lists every requested-but-refused capability with a reason
+  // for diagnostics.
+  repeated CapabilityDenial denials = 3;
+}
+
+// -----------------------------------------------------------------------------
+// Lifecycle
+// -----------------------------------------------------------------------------
+
+message StartRequest {}
+message StartResponse {}
+
+message StopRequest {
+  // drain_timeout_ms hints how long the host will wait for the plugin
+  // to return from Stop before killing the process. Informational; the
+  // host enforces its own deadline regardless.
+  int64 drain_timeout_ms = 1;
+}
+message StopResponse {}
+
+// -----------------------------------------------------------------------------
+// Commands (host <-> plugin)
+// -----------------------------------------------------------------------------
+
+// HandleCommandRequest carries the args verbatim from the dispatch
+// caller. The host has already validated against the plugin's declared
+// CommandSchema before forwarding.
+message HandleCommandRequest {
+  string name = 1;
+  google.protobuf.Struct args = 2;
+}
+
+// HandleCommandResponse mirrors pkg/plugin.CommandResult.
+message HandleCommandResponse {
+  bool success = 1;
+  string error = 2;
+  google.protobuf.Struct data = 3;
+}
+
+message DispatchCommandRequest {
+  string name = 1;
+  google.protobuf.Struct args = 2;
+}
+
+message DispatchCommandResponse {
+  bool success = 1;
+  string error = 2;
+  google.protobuf.Struct data = 3;
+}
+
+// -----------------------------------------------------------------------------
+// YardInfo
+// -----------------------------------------------------------------------------
+
+message YardInfoRequest {}
+
+// YardInfo mirrors pkg/plugin.YardInfo one-for-one.
+message YardInfoResponse {
+  string yard_id = 1;
+  string owner = 2;
+  string project = 3;
+  string repo_url = 4;
+  string railyard_version = 5;
+  string build_commit = 6;
+  google.protobuf.Timestamp build_time = 7;
+}
+
+// -----------------------------------------------------------------------------
+// Snapshot
+// -----------------------------------------------------------------------------
+
+message SnapshotRequest {}
+
+message SnapshotResponse {
+  Snapshot snapshot = 1;
+}
+
+// Snapshot mirrors pkg/plugin.Snapshot.
+message Snapshot {
+  google.protobuf.Timestamp timestamp = 1;
+  repeated TrackSnap tracks = 2;
+  repeated EngineSnap engines = 3;
+  CarsSnap cars = 4;
+  YardmasterSnap yardmaster = 5;
+  SnapStats stats = 6;
+}
+
+// TrackSnap mirrors pkg/plugin.TrackSnap.
+message TrackSnap {
+  string name = 1;
+  string language = 2;
+  int32 slots = 3;
+  repeated string active_engines = 4;
+}
+
+// EngineSnap mirrors pkg/plugin.EngineSnap.
+message EngineSnap {
+  string id = 1;
+  string track = 2;
+  string status = 3;
+  string current_car = 4;
+  google.protobuf.Timestamp last_activity = 5;
+}
+
+// CarsSnap mirrors pkg/plugin.CarsSnap.
+message CarsSnap {
+  repeated CarSummary active = 1;
+  map<string, int32> counts = 2;
+}
+
+// CarSummary mirrors pkg/plugin.CarSummary. ClaimedAt is optional to
+// preserve the Go *time.Time nullable semantics.
+message CarSummary {
+  string id = 1;
+  string title = 2;
+  string track = 3;
+  string status = 4;
+  string type = 5;
+  int32 priority = 6;
+  string assignee = 7;
+  string branch = 8;
+  string requested_by = 9;
+  google.protobuf.Timestamp created_at = 10;
+  optional google.protobuf.Timestamp claimed_at = 11;
+}
+
+// YardmasterSnap mirrors pkg/plugin.YardmasterSnap.
+message YardmasterSnap {
+  string status = 1;
+  string last_action = 2;
+  google.protobuf.Timestamp last_action_at = 3;
+}
+
+// SnapStats mirrors pkg/plugin.SnapStats.
+message SnapStats {
+  map<string, int32> engine_counts_by_status = 1;
+}
+
+// -----------------------------------------------------------------------------
+// Config / Log
+// -----------------------------------------------------------------------------
+
+message ConfigRequest {
+  // name is the top-level key in railyard.yaml to look up.
+  string name = 1;
+}
+
+message ConfigResponse {
+  // present reports whether a config block existed under `name`.
+  bool present = 1;
+
+  // config_yaml is the raw YAML bytes of the config block, exactly as
+  // they appear under `name` in railyard.yaml. The SDK rehydrates these
+  // bytes into a yaml.Node on the plugin side.
+  bytes config_yaml = 2;
+}
+
+// LogRequest mirrors slog.Record minus runtime PC. Attrs are a flat
+// map<string, string>; structured value preservation can be added
+// in a follow-up without a wire break.
+message LogRequest {
+  // level is slog's numeric level (Debug=-4, Info=0, Warn=4, Error=8).
+  int32 level = 1;
+
+  // emitted_at is the wall-clock time of the record at the plugin.
+  google.protobuf.Timestamp emitted_at = 2;
+
+  // message is the record's message body.
+  string message = 3;
+
+  // attrs is the flattened attribute map. Nested groups are joined with
+  // '.' before being placed here.
+  map<string, string> attrs = 4;
+}
+
+message LogResponse {}
+
+// -----------------------------------------------------------------------------
+// Events
+// -----------------------------------------------------------------------------
+
+// EventType discriminates the streamed Event payload. The numeric
+// ordering has no semantic meaning; topics are referenced by name in
+// the allow-list (matching the pkg/plugin.EventType string constants).
+//
+// New types append at the tail. Removing a type requires reserving its
+// number and name. The string constants on pkg/plugin.EventType remain
+// the canonical name for allow-list matching.
+enum EventType {
+  EVENT_TYPE_UNSPECIFIED = 0;
+  EVENT_TYPE_CAR_CREATED = 1;
+  EVENT_TYPE_CAR_CLAIMED = 2;
+  EVENT_TYPE_CAR_STATUS_CHANGED = 3;
+  EVENT_TYPE_CAR_MERGED = 4;
+  EVENT_TYPE_MERGE_FAILED = 5;
+  EVENT_TYPE_ENGINE_STARTED = 6;
+  EVENT_TYPE_ENGINE_STOPPED = 7;
+  EVENT_TYPE_ENGINE_STALLED = 8;
+  EVENT_TYPE_YARDMASTER_ACTION = 9;
+  EVENT_TYPE_YARD_PAUSED = 10;
+  EVENT_TYPE_YARD_RESUMED = 11;
+}
+
+message SubscribeRequest {
+  // topics is the list of EventType names (string form from
+  // pkg/plugin.EventType, e.g. "CarCreated") the plugin wants. The host
+  // intersects this with the plugin's allowed_events from Init.
+  repeated string topics = 1;
+}
+
+// Event is a single bus event multiplexed onto the Subscribe stream.
+// `type` is the discriminator; `payload` is the matching oneof arm.
+// New event types append a new oneof arm with the next free field
+// number on the payload oneof AND a new enum value on EventType.
+message Event {
+  EventType type = 1;
+  google.protobuf.Timestamp emitted_at = 2;
+
+  oneof payload {
+    CarCreatedEvent car_created = 10;
+    CarClaimedEvent car_claimed = 11;
+    CarStatusChangedEvent car_status_changed = 12;
+    CarMergedEvent car_merged = 13;
+    MergeFailedEvent merge_failed = 14;
+    EngineStartedEvent engine_started = 15;
+    EngineStoppedEvent engine_stopped = 16;
+    EngineStalledEvent engine_stalled = 17;
+    YardmasterActionEvent yardmaster_action = 18;
+    YardPausedEvent yard_paused = 19;
+    YardResumedEvent yard_resumed = 20;
+  }
+}
+
+// CarCreatedEvent mirrors pkg/plugin.CarCreatedEvent.
+message CarCreatedEvent {
+  string car_id = 1;
+  string track = 2;
+  string type = 3;
+  int32 priority = 4;
+  string requested_by = 5;
+}
+
+// CarClaimedEvent mirrors pkg/plugin.CarClaimedEvent.
+message CarClaimedEvent {
+  string car_id = 1;
+  string engine_id = 2;
+}
+
+// CarStatusChangedEvent mirrors pkg/plugin.CarStatusChangedEvent.
+message CarStatusChangedEvent {
+  string car_id = 1;
+  string old_status = 2;
+  string new_status = 3;
+}
+
+// CarMergedEvent mirrors pkg/plugin.CarMergedEvent.
+message CarMergedEvent {
+  string car_id = 1;
+  string branch = 2;
+}
+
+// MergeFailedEvent mirrors pkg/plugin.MergeFailedEvent.
+message MergeFailedEvent {
+  string car_id = 1;
+  string reason = 2;
+}
+
+// EngineStartedEvent mirrors pkg/plugin.EngineStartedEvent.
+message EngineStartedEvent {
+  string engine_id = 1;
+  string track = 2;
+}
+
+// EngineStoppedEvent mirrors pkg/plugin.EngineStoppedEvent.
+message EngineStoppedEvent {
+  string engine_id = 1;
+}
+
+// EngineStalledEvent mirrors pkg/plugin.EngineStalledEvent. The Go
+// struct uses int64 unix seconds; we preserve that exact shape on the
+// wire rather than converting to a Timestamp so trainmaster's existing
+// payload contract is unaffected.
+message EngineStalledEvent {
+  string engine_id = 1;
+  int64 last_activity_unix = 2;
+}
+
+// YardmasterActionEvent mirrors pkg/plugin.YardmasterActionEvent.
+message YardmasterActionEvent {
+  string target_id = 1;
+  string action_type = 2;
+}
+
+// YardPausedEvent mirrors pkg/plugin.YardPausedEvent.
+message YardPausedEvent {
+  string reason = 1;
+}
+
+// YardResumedEvent mirrors pkg/plugin.YardResumedEvent.
+message YardResumedEvent {
+  string reason = 1;
+}
