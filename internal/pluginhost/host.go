@@ -188,10 +188,14 @@ func NewHost(deps Dependencies) *Host {
 		launched:     make(map[string]*launchedPlugin),
 		shutdownCh:   make(chan struct{}),
 		clock:        time.Now,
-		bootedAt:     time.Now(),
 		initFailures: make(map[string]initFailure),
 		// `skipped` starts nil; populated by Init when there are missing plugins.
 	}
+	// bootedAt MUST come from h.clock so tests that stub the clock can
+	// deterministically assert Snapshot.Yardmaster.BootedAt. (host.go's
+	// clock field exists exactly for this kind of test determinism — see
+	// the field doc above.)
+	h.bootedAt = h.clock()
 	h.backoffSleep = defaultBackoffSleep
 	h.yardInfo = buildYardInfo(deps)
 	h.allowed = buildAllowList(&deps)
