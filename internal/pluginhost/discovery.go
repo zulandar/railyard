@@ -149,6 +149,25 @@ const userPluginsDirName = ".railyard/plugins"
 // developer convenience.
 const localPluginsDirName = "plugins"
 
+// pluginSearchDirs returns the ordered list of directories that
+// discoverCandidates walks. Resolution mirrors the discoverCandidates
+// body — unresolvable directories (e.g. $HOME unset, cwd inaccessible)
+// are omitted. Shared with [Host.Init]'s missing-plugin diagnostic so
+// the "not found in: …" error reflects what was actually searched.
+func pluginSearchDirs(extra string) []string {
+	dirs := []string{systemPluginsDir}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		dirs = append(dirs, filepath.Join(home, userPluginsDirName))
+	}
+	if cwd, err := os.Getwd(); err == nil && cwd != "" {
+		dirs = append(dirs, filepath.Join(cwd, localPluginsDirName))
+	}
+	if extra != "" {
+		dirs = append(dirs, extra)
+	}
+	return dirs
+}
+
 // candidate is a single discovered plugin executable.
 type candidate struct {
 	// name is the executable basename with any extension stripped. It is
@@ -186,19 +205,7 @@ func discoverCandidates(extra string, logger *slog.Logger) []candidate {
 
 	// Build the directory list in priority order (low → high). A nil entry
 	// represents an absent directory we cannot resolve (e.g. $HOME unset).
-	dirs := []string{systemPluginsDir}
-
-	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		dirs = append(dirs, filepath.Join(home, userPluginsDirName))
-	}
-
-	if cwd, err := os.Getwd(); err == nil && cwd != "" {
-		dirs = append(dirs, filepath.Join(cwd, localPluginsDirName))
-	}
-
-	if extra != "" {
-		dirs = append(dirs, extra)
-	}
+	dirs := pluginSearchDirs(extra)
 
 	// Merge by name. Later entries overwrite earlier ones with a WARN.
 	merged := make(map[string]candidate)

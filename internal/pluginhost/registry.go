@@ -249,23 +249,17 @@ func (h *Host) Init(ctx context.Context) {
 	launch, missing := filterEnabled(cs, enabled)
 
 	if len(missing) > 0 {
-		// Build the canonical list of directories that were (or would
-		// have been) searched, mirroring discoverCandidates' directory
-		// resolution. We use the same constants so the paths stay in sync
-		// with production discovery.
-		homeDir, _ := os.UserHomeDir()
-		searched := []string{systemPluginsDir}
-		if homeDir != "" {
-			searched = append(searched, homeDir+"/"+userPluginsDirName)
-		}
-		searched = append(searched, "./"+localPluginsDirName)
-		if extra != "" {
-			searched = append(searched, extra)
-		}
+		// Same directory resolution as discoverCandidates — shared so the
+		// "not found in: …" diagnostic reflects the paths actually walked.
+		searched := pluginSearchDirs(extra)
 
 		h.mu.Lock()
 		for _, name := range missing {
-			h.skipped = append(h.skipped, skippedPlugin{name: name, searched: searched})
+			// Per-entry copy so a future append on one skippedPlugin's
+			// `searched` cannot mutate every other entry via a shared
+			// backing array.
+			perEntry := append([]string(nil), searched...)
+			h.skipped = append(h.skipped, skippedPlugin{name: name, searched: perEntry})
 			logger.Warn("pluginhost: enabled plugin not found on disk",
 				slog.String("plugin", name),
 			)
