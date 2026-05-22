@@ -149,13 +149,30 @@ func coerceInt(v any) int {
 	return 0
 }
 
-// DispatchCommand looks up a command in the static allow-list first, and
-// if the name is not allow-listed falls through to plugin-registered
-// in-process handlers (see [Host.RegisterCommand]). The allow-list
-// remains authoritative for the built-in names — RegisterCommand rejects
-// any name that collides with it, so the fall-through can never override
-// a core binding. Names absent from both maps return the existing
-// "command not allowed" result.
+// DispatchCommand is the in-process [plugin.Host] dispatch path. It
+// resolves a name against (1) the static allow-list, then (2) the
+// inProcCmds map populated by [Host.RegisterCommand]. The allow-list
+// remains authoritative for the built-in names — RegisterCommand
+// rejects any name that collides with it, so the fall-through can
+// never override a core binding. Names absent from both maps return
+// the standard "command not allowed" result.
+//
+// The fall-through INTENTIONALLY omits h.pluginCmds (the subprocess
+// plugin-registered surface). Subprocess plugins are reached through
+// hostservice.go DispatchCommand, which consults the allow-list and
+// then pluginCmds in two explicit branches. The two surfaces are
+// disjoint by design:
+//
+//   - In-process callers (core railyard subsystems / in-plugin SDK)
+//     reach allow-list + inProcCmds via this method.
+//   - Subprocess plugins reach allow-list + pluginCmds via the gRPC
+//     HostService.DispatchCommand RPC.
+//
+// In-process invocation of a subprocess plugin's command would require
+// driving its PluginService.HandleCommand RPC from here, which has no
+// production caller today; if a future caller needs it, add the
+// pluginCmds branch using lookupPluginByCommand + pluginRPC.HandleCommand
+// mirroring hostservice.go.
 func (h *Host) DispatchCommand(ctx context.Context, name string, args plugin.CommandArgs) (plugin.CommandResult, error) {
 	if binding, ok := h.allowed[name]; ok {
 		if err := validateArgs(binding.args, args); err != nil {

@@ -43,6 +43,7 @@ package plugintest
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 
@@ -115,13 +116,16 @@ type RecordedDispatch struct {
 // FakeHost is safe for concurrent use by the plugin under test.
 type FakeHost struct {
 	// SnapshotValue is returned (with a nil error) from [FakeHost.Snapshot].
-	// If a non-nil SnapshotErr is also set, the error takes precedence and
-	// the value is returned alongside it unchanged.
+	// When SnapshotErr is also set the error takes precedence and the
+	// value is dropped on the floor — see [FakeHost.Snapshot] for the
+	// matching real-host contract.
 	SnapshotValue *plugin.Snapshot
 
 	// SnapshotErr is returned from [FakeHost.Snapshot] when non-nil.
-	// SnapshotValue is still returned alongside it (mirroring how real
-	// hosts may return partial state with a wrapped error).
+	// Setting both SnapshotErr and SnapshotValue results in (nil, err)
+	// to match railyard's real *Host, which returns (nil, err) on every
+	// failure path. This prevents tests from silently passing on code
+	// that would panic in production by skipping the err check.
 	SnapshotErr error
 
 	// YardInfoValue is returned verbatim from [FakeHost.YardInfo].
@@ -200,29 +204,62 @@ func (h *FakeHost) Subscribe(topic plugin.EventType, handler plugin.EventHandler
 	}
 }
 
-// Snapshot returns SnapshotValue and SnapshotErr. The context is not
-// inspected — tests that want to assert on context cancellation should
-// build that assertion into a custom test, not rely on FakeHost.
+// Snapshot returns SnapshotValue and SnapshotErr. When SnapshotErr is
+// non-nil the value is dropped and (nil, err) is returned — this
+// mirrors railyard's real *Host, which returns (nil, err) on every
+// failure path (see pkg/plugin/hostclient_adapter.go). The context is
+// not inspected.
 func (h *FakeHost) Snapshot(_ context.Context) (*plugin.Snapshot, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return h.SnapshotValue, h.SnapshotErr
+	if h.SnapshotErr != nil {
+		return nil, h.SnapshotErr
+	}
+	return h.SnapshotValue, nil
 }
 
-// RegisterCommand records the registration and returns
-// RegisterCommandErr. The registration is recorded even when an error
-// is returned so tests can assert on the attempted name.
+// RegisterCommand records the registration and returns an error in the
+// same situations railyard's real *Host does (see
+// internal/pluginhost/command.go):
+//
+//   - empty name → "pluginhost: command name must not be empty"
+//   - nil handler → "pluginhost: command handler must not be nil"
+//   - duplicate name → "pluginhost: command %q is already registered"
+//
+// A non-nil [FakeHost.RegisterCommandErr] takes precedence over the
+// validation errors so tests can inject arbitrary failure modes.
+//
+// The registration is recorded even when an error is returned so tests
+// can assert on the attempted name.
 func (h *FakeHost) RegisterCommand(name string, handler plugin.CommandHandler) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.registrations = append(h.registrations, RecordedRegistration{Name: name, Handler: handler})
-	return h.RegisterCommandErr
+	if h.RegisterCommandErr != nil {
+		return h.RegisterCommandErr
+	}
+	if name == "" {
+		return errors.New("pluginhost: command name must not be empty")
+	}
+	if handler == nil {
+		return errors.New("pluginhost: command handler must not be nil")
+	}
+	for _, prev := range h.registrations[:len(h.registrations)-1] {
+		if prev.Name == name {
+			return fmt.Errorf("pluginhost: command %q is already registered", name)
+		}
+	}
+	return nil
 }
 
 // DispatchCommand records the call and invokes the matching handler
 // from DispatchHandlers. If no handler is registered for the supplied
-// name, the returned [plugin.CommandResult] has Success=false and the
-// returned error is non-nil with a descriptive message.
+// name, the returned [plugin.CommandResult] has Success=false with an
+// "Error" field describing the miss AND the returned error is nil —
+// mirroring railyard's real *Host, which returns
+// (CommandResult{Success:false, Error:"command not allowed: X"}, nil)
+// for unknown names. Tests that branch on err alone (without checking
+// Success) would otherwise silently diverge from production behavior.
 func (h *FakeHost) DispatchCommand(ctx context.Context, name string, args plugin.CommandArgs) (plugin.CommandResult, error) {
 	h.mu.Lock()
 	h.dispatches = append(h.dispatches, RecordedDispatch{Name: name, Args: args})
@@ -233,7 +270,7 @@ func (h *FakeHost) DispatchCommand(ctx context.Context, name string, args plugin
 		return plugin.CommandResult{
 			Success: false,
 			Error:   "plugintest: no handler registered for command " + name,
-		}, errors.New("plugintest: no handler registered for command " + name)
+		}, nil
 	}
 	return handler(ctx, args)
 }
@@ -253,16 +290,19 @@ func (h *FakeHost) Logger() *slog.Logger {
 	return slog.New(h.defaultHandler)
 }
 
-// Subscriptions returns a snapshot of the currently recorded
-// subscriptions. The returned slice is a fresh copy; mutating it does
-// not affect the host's internal state. The pointed-to
-// [RecordedSubscription] values are shared, however — reading them is
-// safe, but tests should not mutate them.
-func (h *FakeHost) Subscriptions() []*RecordedSubscription {
+// Subscriptions returns a value-copy snapshot of the currently
+// recorded subscriptions. Each element is a deep copy taken under the
+// host mutex, so callers may freely read fields like Unsubscribed even
+// while the plugin under test concurrently calls the returned
+// Unsubscribe — there is no shared pointer that go test -race could
+// flag. Mutating the returned slice does not affect host state.
+func (h *FakeHost) Subscriptions() []RecordedSubscription {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	out := make([]*RecordedSubscription, len(h.subscriptions))
-	copy(out, h.subscriptions)
+	out := make([]RecordedSubscription, len(h.subscriptions))
+	for i, s := range h.subscriptions {
+		out[i] = *s
+	}
 	return out
 }
 
@@ -303,25 +343,34 @@ func (h *FakeHost) Logs() []CapturedLog {
 // which simplifies test assertions compared to the real host's
 // per-subscriber goroutine model.
 //
+// DriveEvent snapshots the subscription slice under the host mutex,
+// then re-checks each entry's Unsubscribed flag under the mutex
+// immediately before invoking its handler. A concurrent Unsubscribe
+// observed between the snapshot and the per-entry check causes the
+// handler to be skipped — the godoc contract "DriveEvent skips
+// records where Unsubscribed is true" therefore holds even when
+// plugin code unsubscribes from a goroutine racing this call.
+//
 // Returns the number of handlers that were invoked.
 func (h *FakeHost) DriveEvent(topic plugin.EventType, payload any) int {
 	h.mu.Lock()
-	// Copy the slice header so we can release the lock before calling
-	// user handlers — they may re-enter the host (e.g. Subscribe inside
-	// a handler) and we must not deadlock.
-	targets := make([]*RecordedSubscription, 0, len(h.subscriptions))
-	for _, sub := range h.subscriptions {
-		if sub.Unsubscribed || sub.Topic != topic {
-			continue
-		}
-		targets = append(targets, sub)
-	}
+	snap := make([]*RecordedSubscription, len(h.subscriptions))
+	copy(snap, h.subscriptions)
 	h.mu.Unlock()
 
-	for _, sub := range targets {
-		sub.Handler(topic, payload)
+	invoked := 0
+	for _, sub := range snap {
+		h.mu.Lock()
+		if sub.Unsubscribed || sub.Topic != topic {
+			h.mu.Unlock()
+			continue
+		}
+		handler := sub.Handler
+		h.mu.Unlock()
+		handler(topic, payload)
+		invoked++
 	}
-	return len(targets)
+	return invoked
 }
 
 // Reset clears every recorded slice and resets the default log handler.

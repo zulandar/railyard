@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"sync"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -89,6 +90,28 @@ func TestSnapshotReturnsConfiguredError(t *testing.T) {
 	}
 }
 
+// TestSnapshotReturnsNilValueWhenErrorSet pins the FakeHost's
+// "match real-host failure semantics" contract: when SnapshotErr is
+// non-nil, the returned value is nil — even if SnapshotValue was
+// configured. Tests that skip the err check (a common bug) would
+// otherwise call .Cars on a non-nil zero snapshot in test but panic
+// on a nil pointer in production.
+func TestSnapshotReturnsNilValueWhenErrorSet(t *testing.T) {
+	t.Parallel()
+
+	fh := &plugintest.FakeHost{
+		SnapshotValue: &plugin.Snapshot{},
+		SnapshotErr:   errors.New("db down"),
+	}
+	snap, err := fh.Snapshot(context.Background())
+	if err == nil {
+		t.Fatalf("expected non-nil error")
+	}
+	if snap != nil {
+		t.Fatalf("expected nil snapshot when SnapshotErr is set, got %+v", snap)
+	}
+}
+
 func TestSubscribeRecordsAndUnsubscribe(t *testing.T) {
 	t.Parallel()
 
@@ -168,6 +191,85 @@ func TestDriveEventSkipsUnsubscribedHandlers(t *testing.T) {
 	}
 }
 
+// TestDriveEventConcurrentUnsubscribeIsRaceFree fires many concurrent
+// Subscribe / Unsubscribe / DriveEvent calls. The `go test -race`
+// detector must NOT report a data race — DriveEvent re-checks
+// Unsubscribed under the host mutex inside the dispatch loop, and
+// Subscriptions returns value snapshots taken under the mutex.
+//
+// Run with: go test -race ./pkg/plugin/plugintest/...
+func TestDriveEventConcurrentUnsubscribeIsRaceFree(t *testing.T) {
+	t.Parallel()
+
+	fh := &plugintest.FakeHost{}
+	const subs = 32
+	const iters = 200
+	unsubs := make([]plugin.Unsubscribe, subs)
+	for i := 0; i < subs; i++ {
+		unsubs[i] = fh.Subscribe(plugin.CarCreated, func(_ plugin.EventType, _ any) {})
+	}
+
+	var wg sync.WaitGroup
+	// Driver goroutine — fires synthetic events.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iters; i++ {
+			fh.DriveEvent(plugin.CarCreated, plugin.CarCreatedEvent{})
+		}
+	}()
+	// Unsubscriber — races against the driver.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for _, u := range unsubs {
+			u()
+		}
+	}()
+	// Reader — exercises Subscriptions() concurrently.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iters; i++ {
+			for _, s := range fh.Subscriptions() {
+				_ = s.Unsubscribed
+			}
+		}
+	}()
+	wg.Wait()
+}
+
+// TestSubscriptionsReturnsValueSnapshot pins the post-fix contract:
+// Subscriptions returns []RecordedSubscription (value type), not
+// []*RecordedSubscription. The earlier shared-pointer return type
+// race-flagged under -race when callers read Unsubscribed while the
+// plugin under test invoked Unsubscribe.
+func TestSubscriptionsReturnsValueSnapshot(t *testing.T) {
+	t.Parallel()
+
+	fh := &plugintest.FakeHost{}
+	unsub := fh.Subscribe(plugin.CarCreated, func(_ plugin.EventType, _ any) {})
+
+	before := fh.Subscriptions()
+	if len(before) != 1 || before[0].Unsubscribed {
+		t.Fatalf("expected one active recorded subscription, got %+v", before)
+	}
+
+	unsub()
+
+	// The earlier snapshot was a value copy taken before unsub fired,
+	// so it must still report Unsubscribed=false.
+	if before[0].Unsubscribed {
+		t.Fatalf("value-copy snapshot should not reflect later Unsubscribe; got Unsubscribed=true")
+	}
+
+	// A fresh snapshot must reflect the new state.
+	after := fh.Subscriptions()
+	if !after[0].Unsubscribed {
+		t.Fatalf("expected fresh snapshot to show Unsubscribed=true")
+	}
+}
+
 func TestRegisterCommandRecords(t *testing.T) {
 	t.Parallel()
 
@@ -209,6 +311,55 @@ func TestRegisterCommandReturnsConfiguredError(t *testing.T) {
 	}
 }
 
+// TestRegisterCommandRejectsEmptyName / TestRegisterCommandRejectsNilHandler
+// / TestRegisterCommandRejectsDuplicate exercise the FakeHost's
+// mirror of railyard's real *Host validation. A plugin that wraps
+// RegisterCommand with `if err != nil` expecting protection must see
+// the same error contract in tests as in production — otherwise the
+// FakeHost is a false-green oracle.
+func TestRegisterCommandRejectsEmptyName(t *testing.T) {
+	t.Parallel()
+
+	fh := &plugintest.FakeHost{}
+	handler := func(_ context.Context, _ plugin.CommandArgs) (plugin.CommandResult, error) {
+		return plugin.CommandResult{}, nil
+	}
+	err := fh.RegisterCommand("", handler)
+	if err == nil {
+		t.Fatal("expected error for empty name")
+	}
+	// Recording still happens so the test can assert "the plugin tried".
+	if len(fh.Registrations()) != 1 {
+		t.Fatalf("expected 1 recorded registration even on error, got %d", len(fh.Registrations()))
+	}
+}
+
+func TestRegisterCommandRejectsNilHandler(t *testing.T) {
+	t.Parallel()
+
+	fh := &plugintest.FakeHost{}
+	err := fh.RegisterCommand("ok", nil)
+	if err == nil {
+		t.Fatal("expected error for nil handler")
+	}
+}
+
+func TestRegisterCommandRejectsDuplicate(t *testing.T) {
+	t.Parallel()
+
+	fh := &plugintest.FakeHost{}
+	handler := func(_ context.Context, _ plugin.CommandArgs) (plugin.CommandResult, error) {
+		return plugin.CommandResult{}, nil
+	}
+	if err := fh.RegisterCommand("dup", handler); err != nil {
+		t.Fatalf("first registration: %v", err)
+	}
+	err := fh.RegisterCommand("dup", handler)
+	if err == nil {
+		t.Fatal("expected error for duplicate name")
+	}
+}
+
 func TestDispatchCommandRoutesToHandler(t *testing.T) {
 	t.Parallel()
 
@@ -240,13 +391,18 @@ func TestDispatchCommandRoutesToHandler(t *testing.T) {
 	}
 }
 
+// TestDispatchCommandWithoutHandler exercises the unknown-command
+// contract. FakeHost mirrors railyard's real *Host: nil error, but
+// CommandResult.Success=false with a descriptive Error string. Tests
+// that only check err would silently diverge from prod; this test
+// pins the value-shape contract so the FakeHost cannot drift back.
 func TestDispatchCommandWithoutHandler(t *testing.T) {
 	t.Parallel()
 
 	fh := &plugintest.FakeHost{}
 	res, err := fh.DispatchCommand(context.Background(), "unknown", nil)
-	if err == nil {
-		t.Fatalf("expected error for missing handler, got nil")
+	if err != nil {
+		t.Fatalf("expected nil error (matching real host), got %v", err)
 	}
 	if res.Success {
 		t.Fatalf("expected Success=false for missing handler, got %+v", res)
