@@ -52,6 +52,13 @@ type launchedPlugin struct {
 	// routing.
 	capabilities pluginCapabilities
 
+	// allow is the per-plugin capability allow-list resolved from
+	// railyard.yaml at Init time (railyard-fll.4). It is consulted on
+	// every Subscribe and DispatchCommand to enforce the policy at
+	// runtime. The zero value denies every capability — that is the
+	// strict default when no allow block is configured.
+	allow AllowList
+
 	// logger is a slog scope with `plugin=<name>` already attached.
 	logger *slog.Logger
 
@@ -211,11 +218,17 @@ func (h *Host) initOne(ctx context.Context, c candidate, parentLogger *slog.Logg
 		return
 	}
 
+	// Resolve the per-plugin allow-list from config BEFORE invoking
+	// PluginService.Init so we can stash it on launchedPlugin even when
+	// Init's response is empty. A plugin listed in `enabled` with no
+	// settings entry gets the strict default (zero AllowList → deny all).
+	allow := h.resolveAllowList(c.name)
+	lp.allow = allow
+
 	// Call PluginService.Init. Capabilities advertisement is the
-	// plugin's responsibility (Lane D's SDK does it during the user's
-	// Init); we pass an empty capability set on this side because we
-	// have no per-plugin manifest yet (railyard-fll.4 will add the
-	// per-plugin allow block).
+	// plugin's responsibility — Lane D's SDK fills resp.AllowedEvents
+	// and resp.AllowedCommands from the user's Subscribe /
+	// RegisterCommand calls during impl.Init.
 	initCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	resp, err := lp.pluginRPC.Init(initCtx, &protov1.InitRequest{
@@ -232,15 +245,41 @@ func (h *Host) initOne(ctx context.Context, c candidate, parentLogger *slog.Logg
 		return
 	}
 
-	// Record the negotiated capability surface.
+	// Intersect the plugin's advertised wish-list with the configured
+	// allow-list. Denied caps are logged at WARN; the plugin still runs
+	// (per the .4.3 design decision — denials are surfaced in logs +
+	// InitResponse, not fatal). The host stores ONLY the allowed subset
+	// in lp.capabilities so subsequent dispatch routing trusts it.
+	advertisedEvents := append([]string(nil), resp.AllowedEvents...)
+	advertisedCmds := append([]string(nil), resp.AllowedCommands...)
+	allowedEvents, deniedEvents := filterAllowedEvents(advertisedEvents, allow)
+	allowedCmds, deniedCmds := filterAllowedCommands(advertisedCmds, allow)
+	for _, name := range deniedEvents {
+		pluginLogger.Warn(
+			"pluginhost: capability denied",
+			slog.String("plugin", c.name),
+			slog.String("cap", "event:"+name),
+			slog.String("reason", "not-in-allow-list"),
+		)
+	}
+	for _, name := range deniedCmds {
+		pluginLogger.Warn(
+			"pluginhost: capability denied",
+			slog.String("plugin", c.name),
+			slog.String("cap", "command:"+name),
+			slog.String("reason", "not-in-allow-list"),
+		)
+	}
+
+	// Record the filtered capability surface.
 	lp.capabilities = pluginCapabilities{
-		subscribeEvents: append([]string(nil), resp.AllowedEvents...),
-		provideCommands: append([]string(nil), resp.AllowedCommands...),
+		subscribeEvents: allowedEvents,
+		provideCommands: allowedCmds,
 	}
 
 	h.mu.Lock()
 	h.launched[lp.name] = lp
-	for _, cmd := range resp.AllowedCommands {
+	for _, cmd := range allowedCmds {
 		if cmd == "" {
 			continue
 		}
@@ -263,6 +302,54 @@ func (h *Host) initOne(ctx context.Context, c candidate, parentLogger *slog.Logg
 		h.pluginCmds[cmd] = lp.name
 	}
 	h.mu.Unlock()
+}
+
+// resolveAllowList builds the per-plugin AllowList from the loaded
+// config. A plugin without a settings entry receives the strict default
+// (zero-value AllowList; every cap denied).
+func (h *Host) resolveAllowList(name string) AllowList {
+	if h.deps.Cfg == nil {
+		return AllowList{}
+	}
+	s, ok := h.deps.Cfg.Plugins.Settings[name]
+	if !ok {
+		return AllowList{}
+	}
+	return newAllowList(s.Allow)
+}
+
+// filterAllowedEvents intersects advertised event topics with the
+// allow-list. Returns the allowed subset (in advertised order) and the
+// denied complement.
+func filterAllowedEvents(advertised []string, allow AllowList) (allowed, denied []string) {
+	for _, e := range advertised {
+		if e == "" {
+			continue
+		}
+		if allow.AllowEvent(e) {
+			allowed = append(allowed, e)
+		} else {
+			denied = append(denied, e)
+		}
+	}
+	return allowed, denied
+}
+
+// filterAllowedCommands intersects advertised command names with the
+// allow-list. Returns the allowed subset (in advertised order) and the
+// denied complement.
+func filterAllowedCommands(advertised []string, allow AllowList) (allowed, denied []string) {
+	for _, c := range advertised {
+		if c == "" {
+			continue
+		}
+		if allow.AllowCommand(c) {
+			allowed = append(allowed, c)
+		} else {
+			denied = append(denied, c)
+		}
+	}
+	return allowed, denied
 }
 
 // Start calls PluginService.Start on every launched plugin. A plugin

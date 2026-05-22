@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"gopkg.in/yaml.v3"
@@ -21,22 +23,34 @@ import (
 // peer.FromContext on every call.
 //
 // The pluginName is the stable identifier used for log attribution and
-// for looking up the plugin's config block.
+// for looking up the plugin's config block. The allow field is the
+// resolved per-plugin capability allow-list (railyard-fll.4) consulted
+// on every Subscribe and DispatchCommand for runtime enforcement.
 type hostService struct {
 	protov1.UnimplementedHostServiceServer
 
 	host       *Host
 	pluginName string
 	logger     *slog.Logger
+	allow      AllowList
 }
 
 // newHostService constructs a per-plugin HostService server. It is wired
-// into the AcceptAndServe callback in launch.go.
+// into the AcceptAndServe callback in launch.go. The allow-list is
+// resolved from config at construction time so the hostService can
+// enforce Subscribe / DispatchCommand from the moment the plugin process
+// dials back — including during the user's Init, before the launched
+// plugin entry has been recorded in the host's registry.
 func newHostService(h *Host, pluginName string) *hostService {
+	var allow AllowList
+	if h != nil {
+		allow = h.resolveAllowList(pluginName)
+	}
 	return &hostService{
 		host:       h,
 		pluginName: pluginName,
 		logger:     slog.Default().With(slog.String("plugin", pluginName)),
+		allow:      allow,
 	}
 }
 
@@ -73,9 +87,26 @@ func (s *hostService) Snapshot(ctx context.Context, _ *protov1.SnapshotRequest) 
 // The host's [Host.DispatchCommand] consults the core allow-list first;
 // when that misses we look in the plugin-command registry and forward to
 // the owning plugin's PluginService.HandleCommand.
+//
+// The plugin's per-allow-list (railyard-fll.4) is consulted BEFORE
+// routing. Commands not permitted by the allow-list are refused with
+// gRPC PermissionDenied — the same Commands list controls both what
+// the plugin may expose AND what it may invoke from inside its
+// process.
 func (s *hostService) DispatchCommand(ctx context.Context, req *protov1.DispatchCommandRequest) (*protov1.DispatchCommandResponse, error) {
 	if req == nil || req.Name == "" {
 		return nil, errors.New("pluginhost: command name is required")
+	}
+	if !s.allow.AllowCommand(req.Name) {
+		s.logger.Warn(
+			"pluginhost: DispatchCommand denied",
+			slog.String("plugin", s.pluginName),
+			slog.String("command", req.Name),
+		)
+		return nil, status.Errorf(codes.PermissionDenied,
+			"pluginhost: plugin %q is not allowed to dispatch command %q",
+			s.pluginName, req.Name,
+		)
 	}
 	args := plugin.CommandArgs{}
 	if req.Args != nil {

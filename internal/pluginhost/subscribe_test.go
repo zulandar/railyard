@@ -3,14 +3,35 @@ package pluginhost
 import (
 	"context"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/zulandar/railyard/internal/config"
 	"github.com/zulandar/railyard/internal/events"
 	"github.com/zulandar/railyard/pkg/plugin"
 	protov1 "github.com/zulandar/railyard/pkg/plugin/proto/v1"
 )
+
+// permissivePluginCfg returns a minimal config that grants `pluginName`
+// the "*" allow-list — used by tests that pre-date railyard-fll.4 and
+// just want the legacy "everything allowed" behavior.
+func permissivePluginCfg(pluginName string) *config.Config {
+	return &config.Config{
+		Plugins: config.PluginsConfig{
+			Enabled: []string{pluginName},
+			Settings: map[string]config.PluginSettings{
+				pluginName: {
+					Allow: config.AllowConfig{
+						Events:   []string{"*"},
+						Commands: []string{"*"},
+					},
+				},
+			},
+		},
+	}
+}
 
 // fakeSubscribeStream is a minimal in-process implementation of the
 // HostService_SubscribeServer used by the Subscribe RPC. It records
@@ -41,7 +62,7 @@ func (s *fakeSubscribeStream) Recv() (*protov1.Event, error) { return nil, nil }
 func TestSubscribeDeliversEvents(t *testing.T) {
 	bus := events.NewBus()
 	defer bus.(interface{ Close() }).Close()
-	host := NewHost(Dependencies{Bus: bus})
+	host := NewHost(Dependencies{Bus: bus, Cfg: permissivePluginCfg("p1")})
 	hs := newHostService(host, "p1")
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -110,7 +131,7 @@ func TestSubscribeNoGoroutineLeak(t *testing.T) {
 	baseline := runtime.NumGoroutine()
 
 	bus := events.NewBus()
-	host := NewHost(Dependencies{Bus: bus})
+	host := NewHost(Dependencies{Bus: bus, Cfg: permissivePluginCfg("p1")})
 	hs := newHostService(host, "p1")
 
 	for i := 0; i < 5; i++ {
@@ -156,5 +177,92 @@ func TestSubscribeNilBus(t *testing.T) {
 	stream := &fakeSubscribeStream{ctx: ctx}
 	if err := hs.Subscribe(&protov1.SubscribeRequest{Topics: []string{"X"}}, stream); err == nil {
 		t.Error("expected error from nil-bus Subscribe")
+	}
+}
+
+// TestSubscribeAllowList_AllDenied confirms a plugin with no allow-list
+// entry for the requested topic receives a gRPC PermissionDenied.
+func TestSubscribeAllowList_AllDenied(t *testing.T) {
+	bus := events.NewBus()
+	defer bus.(interface{ Close() }).Close()
+	// Plugin is enabled but has no settings entry → strict default
+	// (every cap denied).
+	cfg := &config.Config{
+		Plugins: config.PluginsConfig{
+			Enabled: []string{"p1"},
+		},
+	}
+	host := NewHost(Dependencies{Bus: bus, Cfg: cfg})
+	hs := newHostService(host, "p1")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := &fakeSubscribeStream{ctx: ctx}
+	err := hs.Subscribe(&protov1.SubscribeRequest{Topics: []string{string(plugin.CarCreated)}}, stream)
+	if err == nil {
+		t.Fatal("expected PermissionDenied")
+	}
+	if !strings.Contains(err.Error(), "not allowed to subscribe") {
+		t.Errorf("error = %q, want permission-denied message", err.Error())
+	}
+}
+
+// TestSubscribeAllowList_PartialDeny_AllowedTopicsFlow confirms that
+// when the request mixes allowed and denied topics, the allowed ones
+// flow through and the denied ones are silently dropped.
+func TestSubscribeAllowList_PartialDeny_AllowedTopicsFlow(t *testing.T) {
+	bus := events.NewBus()
+	defer bus.(interface{ Close() }).Close()
+	cfg := &config.Config{
+		Plugins: config.PluginsConfig{
+			Enabled: []string{"p1"},
+			Settings: map[string]config.PluginSettings{
+				"p1": {Allow: config.AllowConfig{
+					Events: []string{string(plugin.CarCreated)},
+				}},
+			},
+		},
+	}
+	host := NewHost(Dependencies{Bus: bus, Cfg: cfg})
+	hs := newHostService(host, "p1")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := &fakeSubscribeStream{ctx: ctx}
+
+	done := make(chan error, 1)
+	go func() {
+		// One allowed, one denied. The allowed one should flow.
+		done <- hs.Subscribe(&protov1.SubscribeRequest{
+			Topics: []string{string(plugin.CarCreated), string(plugin.CarMerged)},
+		}, stream)
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+	bus.Publish(string(plugin.CarCreated), plugin.CarCreatedEvent{CarID: "car-a"})
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		stream.mu.Lock()
+		n := len(stream.received)
+		stream.mu.Unlock()
+		if n >= 1 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	stream.mu.Lock()
+	got := len(stream.received)
+	stream.mu.Unlock()
+	if got == 0 {
+		t.Fatal("allowed CarCreated event was not delivered")
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Subscribe did not exit")
 	}
 }

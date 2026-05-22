@@ -84,6 +84,18 @@ type Config struct {
 // Enabled is the allow-list of plugin names to actually launch. A plugin
 // must be both discoverable (executable file found in one of the
 // directories) AND listed in Enabled to be launched.
+//
+// Per-plugin settings (currently just an [AllowConfig] capability allow
+// block) live as additional keys under the same `plugins:` mapping. They
+// are pulled out by [PluginsConfig.UnmarshalYAML] into [PluginsConfig.Settings]
+// keyed by plugin name. Example:
+//
+//	plugins:
+//	  enabled: [trainmaster]
+//	  trainmaster:
+//	    allow:
+//	      events:   ["*"]
+//	      commands: ["dispatch.*"]
 type PluginsConfig struct {
 	// Enabled is the list of plugin names allowed to launch.
 	// Names match the executable basename (stripped of any extension).
@@ -93,6 +105,150 @@ type PluginsConfig struct {
 	// binaries. When set, it takes precedence over the three default
 	// directories on name collision.
 	PluginsDir string `yaml:"plugins_dir"`
+
+	// Settings carries per-plugin configuration (currently just the
+	// capability allow-list). Keys are plugin names matching entries in
+	// Enabled — a setting block for a plugin not listed in Enabled is
+	// permitted but has no effect (the plugin will not launch). Plugins
+	// not listed here get the strict default: zero-value AllowConfig
+	// (everything denied).
+	//
+	// Populated by [PluginsConfig.UnmarshalYAML] from any keys in the
+	// `plugins:` mapping that are not `enabled` or `plugins_dir`.
+	Settings map[string]PluginSettings `yaml:"-"`
+}
+
+// PluginSettings is the per-plugin configuration block. Future per-plugin
+// knobs land here alongside Allow. Plugins continue to read their own
+// top-level YAML block (e.g. `trainmaster:` at the document root) via
+// Host.Config — those are unrelated to this struct.
+type PluginSettings struct {
+	// Allow is the capability allow-list for the plugin. Empty struct
+	// (the zero value) denies every advertised capability.
+	Allow AllowConfig `yaml:"allow"`
+}
+
+// AllowConfig is the capability allow-list for one plugin.
+//
+// Wildcard semantics:
+//
+//   - Events: each entry must be either "*" (match all topics) or a
+//     literal topic name. Prefix wildcards like "Car.*" are NOT supported
+//     for events — event topic names do not use a dot namespace today.
+//   - Commands: each entry may be "*" (match all), a prefix wildcard
+//     "ns.*" (match any command whose name starts with "ns."), or a
+//     literal command name.
+//
+// The same Commands list controls BOTH what a plugin may register
+// (provide_commands at Init) AND what it may invoke via
+// HostService.DispatchCommand from inside the plugin process. Splitting
+// these into two lists is a future bead — the current design matches the
+// .4 brief that treats the allow-list as a single capability gate.
+type AllowConfig struct {
+	Events   []string `yaml:"events"`
+	Commands []string `yaml:"commands"`
+}
+
+// pluginsConfigRaw is the on-wire shape of `plugins:`. It captures the
+// reserved keys typed and stashes the rest as a generic map for
+// per-plugin lookup. Used only inside UnmarshalYAML.
+type pluginsConfigRaw struct {
+	Enabled    []string             `yaml:"enabled"`
+	PluginsDir string               `yaml:"plugins_dir"`
+	Rest       map[string]yaml.Node `yaml:",inline"`
+}
+
+// UnmarshalYAML decodes the `plugins:` block. Reserved keys (`enabled`,
+// `plugins_dir`) populate the typed fields; every remaining key is
+// decoded into a PluginSettings struct and stored in Settings under the
+// key's name.
+//
+// Validation of allow-list wildcard tokens happens here so a malformed
+// entry fails config load with a clear message rather than surfacing
+// later at plugin launch time.
+func (p *PluginsConfig) UnmarshalYAML(node *yaml.Node) error {
+	var raw pluginsConfigRaw
+	if err := node.Decode(&raw); err != nil {
+		return err
+	}
+	p.Enabled = raw.Enabled
+	p.PluginsDir = raw.PluginsDir
+	if len(raw.Rest) == 0 {
+		return nil
+	}
+	p.Settings = make(map[string]PluginSettings, len(raw.Rest))
+	for name, n := range raw.Rest {
+		var s PluginSettings
+		// An empty mapping (e.g. `trainmaster: {}`) decodes to the zero
+		// value, which is what we want — strict default allow-list.
+		nCopy := n
+		if err := nCopy.Decode(&s); err != nil {
+			return fmt.Errorf("plugins.%s: %w", name, err)
+		}
+		if err := validateAllowConfig(name, s.Allow); err != nil {
+			return err
+		}
+		p.Settings[name] = s
+	}
+	return nil
+}
+
+// validateAllowConfig rejects wildcard tokens that are not "*" alone, a
+// "prefix.*" suffix wildcard (commands only), or a literal. Anything
+// containing a "*" character in any other position is malformed.
+func validateAllowConfig(plugin string, a AllowConfig) error {
+	for _, e := range a.Events {
+		if err := validateEventToken(e); err != nil {
+			return fmt.Errorf("plugins.%s.allow.events: %w", plugin, err)
+		}
+	}
+	for _, c := range a.Commands {
+		if err := validateCommandToken(c); err != nil {
+			return fmt.Errorf("plugins.%s.allow.commands: %w", plugin, err)
+		}
+	}
+	return nil
+}
+
+// validateEventToken accepts "*" alone or a literal topic name with no
+// "*" anywhere inside it.
+func validateEventToken(tok string) error {
+	if tok == "" {
+		return fmt.Errorf("empty token")
+	}
+	if tok == "*" {
+		return nil
+	}
+	if strings.Contains(tok, "*") {
+		return fmt.Errorf("invalid event token %q: only \"*\" (match all) or literal names allowed", tok)
+	}
+	return nil
+}
+
+// validateCommandToken accepts "*" alone, a "prefix.*" suffix wildcard,
+// or a literal command name. Bare "**", "*x", and "x*y" are rejected.
+func validateCommandToken(tok string) error {
+	if tok == "" {
+		return fmt.Errorf("empty token")
+	}
+	if tok == "*" {
+		return nil
+	}
+	if strings.HasSuffix(tok, ".*") {
+		prefix := tok[:len(tok)-2]
+		// The prefix must be a non-empty literal with no further '*'.
+		if prefix == "" {
+			return fmt.Errorf("invalid command token %q: prefix wildcard requires a non-empty prefix", tok)
+		}
+		if strings.Contains(prefix, "*") {
+			return fmt.Errorf("invalid command token %q: only one trailing \".*\" wildcard allowed", tok)
+		}
+		return nil
+	}
+	if strings.Contains(tok, "*") {
+		return fmt.Errorf("invalid command token %q: only \"*\", \"prefix.*\", or a literal name allowed", tok)
+	}
+	return nil
 }
 
 // YardmasterConfig holds settings for the yardmaster daemon.

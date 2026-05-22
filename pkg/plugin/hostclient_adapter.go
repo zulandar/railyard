@@ -49,6 +49,16 @@ type hostClient struct {
 	cmdMu           sync.RWMutex
 	commandHandlers map[string]CommandHandler
 
+	// subscribedTopics records every topic the plugin's user code has
+	// subscribed to via [hostClient.Subscribe]. The SDK adapter reads
+	// this set during the Init RPC response to advertise the plugin's
+	// capability wish-list to the host (railyard-fll.4 allow-list flow).
+	// Order is preserved insertion order so deterministic test output
+	// is possible; duplicate Subscribe calls do not re-record.
+	subMu              sync.Mutex
+	subscribedTopics   []string
+	subscribedTopicSet map[string]struct{}
+
 	// logger is the slog.Logger handed to the plugin via Logger(). It
 	// forwards records to the host through HostService.Log.
 	logger *slog.Logger
@@ -57,10 +67,11 @@ type hostClient struct {
 // newHostClient constructs a fresh hostClient.
 func newHostClient(pluginName string, hsc protov1.HostServiceClient, rootCtx context.Context) *hostClient {
 	hc := &hostClient{
-		pluginName:      pluginName,
-		hsc:             hsc,
-		rootCtx:         rootCtx,
-		commandHandlers: make(map[string]CommandHandler),
+		pluginName:         pluginName,
+		hsc:                hsc,
+		rootCtx:            rootCtx,
+		commandHandlers:    make(map[string]CommandHandler),
+		subscribedTopicSet: make(map[string]struct{}),
 	}
 	hc.logger = slog.New(&hostLogHandler{
 		hsc:        hsc,
@@ -108,10 +119,16 @@ func (h *hostClient) YardInfo() YardInfo {
 }
 
 // Subscribe implements Host.Subscribe.
+//
+// Each topic the plugin's user code subscribes to is also recorded on
+// the hostClient so the PluginService Init adapter can advertise the
+// full subscription set to the host as the plugin's capability
+// wish-list (railyard-fll.4 allow-list flow).
 func (h *hostClient) Subscribe(topic EventType, handler EventHandler) Unsubscribe {
 	if handler == nil {
 		return func() {}
 	}
+	h.recordSubscribedTopic(string(topic))
 	ctx, cancel := context.WithCancel(h.rootCtx)
 	stream, err := h.hsc.Subscribe(ctx, &protov1.SubscribeRequest{Topics: []string{string(topic)}})
 	if err != nil {
@@ -125,6 +142,42 @@ func (h *hostClient) Subscribe(topic EventType, handler EventHandler) Unsubscrib
 	}
 	go h.runSubscribeLoop(ctx, topic, stream, handler)
 	return unsub
+}
+
+// recordSubscribedTopic appends topic to the in-process advertisement
+// list, skipping duplicates. Called from Subscribe.
+func (h *hostClient) recordSubscribedTopic(topic string) {
+	if topic == "" {
+		return
+	}
+	h.subMu.Lock()
+	defer h.subMu.Unlock()
+	if _, seen := h.subscribedTopicSet[topic]; seen {
+		return
+	}
+	h.subscribedTopicSet[topic] = struct{}{}
+	h.subscribedTopics = append(h.subscribedTopics, topic)
+}
+
+// advertisedTopics returns a snapshot of every topic the plugin has
+// subscribed to so far. Consumed by the PluginService Init adapter.
+func (h *hostClient) advertisedTopics() []string {
+	h.subMu.Lock()
+	defer h.subMu.Unlock()
+	return append([]string(nil), h.subscribedTopics...)
+}
+
+// advertisedCommandNames returns a snapshot of every command name the
+// plugin has registered so far. Consumed by the PluginService Init
+// adapter.
+func (h *hostClient) advertisedCommandNames() []string {
+	h.cmdMu.RLock()
+	defer h.cmdMu.RUnlock()
+	out := make([]string, 0, len(h.commandHandlers))
+	for name := range h.commandHandlers {
+		out = append(out, name)
+	}
+	return out
 }
 
 func (h *hostClient) runSubscribeLoop(ctx context.Context, topic EventType, stream protov1.HostService_SubscribeClient, handler EventHandler) {

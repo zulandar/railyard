@@ -95,6 +95,12 @@ func TestLaunchPluginHappyPath(t *testing.T) {
 		Project: "railyard",
 		Plugins: config.PluginsConfig{
 			Enabled: []string{"testplugin"},
+			Settings: map[string]config.PluginSettings{
+				"testplugin": {Allow: config.AllowConfig{
+					Events:   []string{"*"},
+					Commands: []string{"*"},
+				}},
+			},
 		},
 	}
 	bus := events.NewBus()

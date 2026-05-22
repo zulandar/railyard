@@ -4,10 +4,13 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/zulandar/railyard/internal/events"
@@ -24,13 +27,20 @@ const subscribeQueueCap = 256
 // plugin's identity is the per-server pluginName supplied at
 // construction time.
 //
-// Topics in req.Topics are taken literally for now; the allow-list
-// intersection lands in railyard-fll.4 (Lane F). Each topic is wired to
-// the bus through Subscribe; events are multiplexed into a single
-// outbound stream with a bounded buffer. On overflow the oldest queued
-// event is dropped and a per-(plugin,topic) drop counter is incremented;
-// a throttled WARN log is deferred to railyard-fll.5.2 — for now we DEBUG
-// every drop and count it.
+// Topics in req.Topics are intersected with the plugin's allow-list
+// (railyard-fll.4) before wiring up bus subscriptions. Topics not in
+// the allow-list are silently filtered out — this is defense in depth
+// against a plugin asking for a cap that was already denied at Init.
+// If EVERY requested topic is denied (and at least one was requested),
+// the RPC returns gRPC PermissionDenied with a structured message
+// naming the rejected topics. An empty topic list passes through
+// cleanly (the plugin saying "I want nothing").
+//
+// Each surviving topic is wired to the bus; events are multiplexed
+// into a single outbound stream with a bounded buffer. On overflow the
+// oldest queued event is dropped and a per-(plugin,topic) drop counter
+// is incremented; a throttled WARN log is deferred to railyard-fll.5.2
+// — for now we DEBUG every drop and count it.
 //
 // The function returns when the client cancels the stream context or
 // when [Host.Stop] cancels the stream during shutdown.
@@ -40,6 +50,39 @@ func (s *hostService) Subscribe(req *protov1.SubscribeRequest, stream protov1.Ho
 	}
 	if s.host.deps.Bus == nil {
 		return fmt.Errorf("pluginhost: subscribe requires a non-nil bus")
+	}
+
+	// Allow-list filter (railyard-fll.4). Defense in depth: the Init
+	// handshake already filtered the plugin's declared subscriptions,
+	// but a plugin might dynamically Subscribe to a topic outside its
+	// allow list at runtime. We drop denied topics here and, when EVERY
+	// requested topic is denied, surface a PermissionDenied so the
+	// plugin sees a clear failure rather than an event stream that
+	// produces nothing.
+	allowedTopics := make([]string, 0, len(req.Topics))
+	deniedTopics := make([]string, 0)
+	for _, topic := range req.Topics {
+		if topic == "" {
+			continue
+		}
+		if s.allow.AllowEvent(topic) {
+			allowedTopics = append(allowedTopics, topic)
+		} else {
+			deniedTopics = append(deniedTopics, topic)
+		}
+	}
+	if len(deniedTopics) > 0 {
+		s.logger.Warn(
+			"pluginhost: Subscribe denied topics",
+			slog.String("plugin", s.pluginName),
+			slog.Any("denied", deniedTopics),
+		)
+	}
+	if len(allowedTopics) == 0 && len(req.Topics) > 0 {
+		return status.Errorf(codes.PermissionDenied,
+			"pluginhost: plugin %q is not allowed to subscribe to: %s",
+			s.pluginName, strings.Join(deniedTopics, ","),
+		)
 	}
 
 	streamCtx, streamCancel := context.WithCancel(stream.Context())
@@ -58,12 +101,9 @@ func (s *hostService) Subscribe(req *protov1.SubscribeRequest, stream protov1.Ho
 	queue := make(chan *protov1.Event, subscribeQueueCap)
 	drops := newDropCounter(s.pluginName, s.logger)
 
-	// Wire each requested topic to the bus.
-	unsubs := make([]events.Unsubscribe, 0, len(req.Topics))
-	for _, topic := range req.Topics {
-		if topic == "" {
-			continue
-		}
+	// Wire each allowed topic to the bus.
+	unsubs := make([]events.Unsubscribe, 0, len(allowedTopics))
+	for _, topic := range allowedTopics {
 		t := topic // capture
 		unsub := s.host.deps.Bus.Subscribe(t, func(payload any) {
 			ev, ok := payloadToProto(t, payload)

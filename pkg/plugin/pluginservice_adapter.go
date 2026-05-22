@@ -77,13 +77,26 @@ func (a *pluginServiceAdapter) Init(ctx context.Context, req *protov1.InitReques
 		// the plugin is well-formed but its Init signalled "do not run".
 		return nil, status.Error(codes.FailedPrecondition, fmt.Sprintf("plugin Init failed: %v", a.initErr))
 	}
-	// Lane D does not negotiate capabilities — that is host-side logic
-	// (railyard-fll.3). For now echo back the request's declared
-	// capabilities as the allowed set so the plugin can run end-to-end
-	// against a permissive host.
+	// Advertise the plugin's capability wish-list to the host. The host
+	// applies its allow-list (railyard-fll.4) and stores its filtered
+	// view internally; the response we hand back here describes what the
+	// plugin TRIED to register so the host can compute denials.
 	resp := &protov1.InitResponse{}
-	if req != nil && req.Capabilities != nil {
+	a.mu.Lock()
+	hc := a.hc
+	a.mu.Unlock()
+	if hc != nil {
+		resp.AllowedEvents = hc.advertisedTopics()
+		resp.AllowedCommands = hc.advertisedCommandNames()
+	}
+	// Defensive fallback: if the host sent its own declared wish-list in
+	// the request and the plugin didn't subscribe to anything in Init,
+	// echo the host-provided set. This keeps older plugin authors that
+	// rely on host-side advertisement working until they migrate.
+	if len(resp.AllowedEvents) == 0 && req != nil && req.Capabilities != nil {
 		resp.AllowedEvents = append(resp.AllowedEvents, req.Capabilities.SubscribeEvents...)
+	}
+	if len(resp.AllowedCommands) == 0 && req != nil && req.Capabilities != nil {
 		for _, cmd := range req.Capabilities.ProvideCommands {
 			if cmd == nil {
 				continue

@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"gopkg.in/yaml.v3"
 
 	"github.com/zulandar/railyard/internal/config"
@@ -89,6 +91,14 @@ func TestHostServiceConfig(t *testing.T) {
 func TestHostServiceDispatchCommandCore(t *testing.T) {
 	var seen string
 	host := NewHost(Dependencies{
+		Cfg: &config.Config{
+			Plugins: config.PluginsConfig{
+				Enabled: []string{"p1"},
+				Settings: map[string]config.PluginSettings{
+					"p1": {Allow: config.AllowConfig{Commands: []string{"*"}}},
+				},
+			},
+		},
 		PauseYardFn: func(_ context.Context, reason string) error {
 			seen = reason
 			return nil
@@ -108,9 +118,20 @@ func TestHostServiceDispatchCommandCore(t *testing.T) {
 }
 
 // TestHostServiceDispatchCommandUnknown returns an in-band Error rather
-// than a gRPC error.
+// than a gRPC error. The plugin must hold the allow-list cap for the
+// command name — otherwise we'd PermissionDenied before reaching the
+// "unknown command" branch.
 func TestHostServiceDispatchCommandUnknown(t *testing.T) {
-	host := NewHost(Dependencies{})
+	host := NewHost(Dependencies{
+		Cfg: &config.Config{
+			Plugins: config.PluginsConfig{
+				Enabled: []string{"p1"},
+				Settings: map[string]config.PluginSettings{
+					"p1": {Allow: config.AllowConfig{Commands: []string{"*"}}},
+				},
+			},
+		},
+	})
 	hs := newHostService(host, "p1")
 	resp, err := hs.DispatchCommand(context.Background(), &protov1.DispatchCommandRequest{
 		Name: "nope",
@@ -123,6 +144,70 @@ func TestHostServiceDispatchCommandUnknown(t *testing.T) {
 	}
 	if resp.Error == "" {
 		t.Error("expected non-empty Error")
+	}
+}
+
+// TestHostServiceDispatchCommandDeniedByAllowList confirms the
+// allow-list check fires BEFORE routing. A plugin with no allow-list
+// entries (or an entry that doesn't cover the name) gets
+// PermissionDenied.
+func TestHostServiceDispatchCommandDeniedByAllowList(t *testing.T) {
+	host := NewHost(Dependencies{
+		// No PauseYardFn — but we don't expect to reach it; the
+		// allow-list check should refuse the call first.
+		Cfg: &config.Config{
+			Plugins: config.PluginsConfig{
+				Enabled: []string{"p1"},
+				// No Settings entry → strict default → everything denied.
+			},
+		},
+	})
+	hs := newHostService(host, "p1")
+	_, err := hs.DispatchCommand(context.Background(), &protov1.DispatchCommandRequest{
+		Name: "pause_yard",
+	})
+	if err == nil {
+		t.Fatal("expected PermissionDenied error, got nil")
+	}
+	if got, want := status.Code(err), codes.PermissionDenied; got != want {
+		t.Errorf("status code = %v, want %v", got, want)
+	}
+}
+
+// TestHostServiceDispatchCommandPrefixWildcard confirms a "ns.*" wildcard
+// in the allow-list permits commands under that namespace.
+func TestHostServiceDispatchCommandPrefixWildcard(t *testing.T) {
+	host := NewHost(Dependencies{
+		Cfg: &config.Config{
+			Plugins: config.PluginsConfig{
+				Enabled: []string{"p1"},
+				Settings: map[string]config.PluginSettings{
+					"p1": {Allow: config.AllowConfig{Commands: []string{"foo.*"}}},
+				},
+			},
+		},
+	})
+	hs := newHostService(host, "p1")
+	// foo.bar passes the allow-list, then routes — but no handler →
+	// in-band "command not allowed: foo.bar" response (not gRPC error).
+	resp, err := hs.DispatchCommand(context.Background(), &protov1.DispatchCommandRequest{
+		Name: "foo.bar",
+	})
+	if err != nil {
+		t.Fatalf("unexpected gRPC error: %v", err)
+	}
+	if resp == nil || resp.Success {
+		t.Errorf("unexpected response: %+v", resp)
+	}
+	// Different namespace is refused at the allow-list step.
+	_, err = hs.DispatchCommand(context.Background(), &protov1.DispatchCommandRequest{
+		Name: "other.cmd",
+	})
+	if err == nil {
+		t.Fatal("expected PermissionDenied error, got nil")
+	}
+	if got, want := status.Code(err), codes.PermissionDenied; got != want {
+		t.Errorf("status code = %v, want %v", got, want)
 	}
 }
 

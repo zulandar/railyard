@@ -162,3 +162,248 @@ func keysOf(m map[string]yaml.Node) []string {
 	}
 	return out
 }
+
+// TestPluginsConfig_NoEntry_StrictDefault verifies that a plugin listed
+// in enabled with no per-plugin allow block gets the strict default
+// (empty AllowConfig — every advertised cap denied at the matcher).
+func TestPluginsConfig_NoEntry_StrictDefault(t *testing.T) {
+	yamlSrc := `
+owner: alice
+repo: git@github.com:org/app.git
+tracks:
+  - name: backend
+    language: go
+plugins:
+  enabled: [trainmaster]
+`
+	cfg, err := Parse([]byte(yamlSrc))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cfg.Plugins.Enabled) != 1 || cfg.Plugins.Enabled[0] != "trainmaster" {
+		t.Errorf("Enabled = %v, want [trainmaster]", cfg.Plugins.Enabled)
+	}
+	if cfg.Plugins.Settings != nil {
+		// Settings may be nil OR empty; both are acceptable
+		if _, present := cfg.Plugins.Settings["trainmaster"]; present {
+			t.Errorf("trainmaster should not be in Settings when no allow block is given")
+		}
+	}
+}
+
+// TestPluginsConfig_EmptyAllow_StrictDefault confirms `allow: {}`
+// decodes to an empty AllowConfig.
+func TestPluginsConfig_EmptyAllow_StrictDefault(t *testing.T) {
+	yamlSrc := `
+owner: alice
+repo: git@github.com:org/app.git
+tracks:
+  - name: backend
+    language: go
+plugins:
+  enabled: [trainmaster]
+  trainmaster:
+    allow: {}
+`
+	cfg, err := Parse([]byte(yamlSrc))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	s, ok := cfg.Plugins.Settings["trainmaster"]
+	if !ok {
+		t.Fatal("Settings missing trainmaster entry")
+	}
+	if len(s.Allow.Events) != 0 || len(s.Allow.Commands) != 0 {
+		t.Errorf("Allow = %+v, want zero", s.Allow)
+	}
+}
+
+// TestPluginsConfig_ExplicitStar parses ["*"] for both events and
+// commands.
+func TestPluginsConfig_ExplicitStar(t *testing.T) {
+	yamlSrc := `
+owner: alice
+repo: git@github.com:org/app.git
+tracks:
+  - name: backend
+    language: go
+plugins:
+  enabled: [trainmaster]
+  trainmaster:
+    allow:
+      events:   ["*"]
+      commands: ["*"]
+`
+	cfg, err := Parse([]byte(yamlSrc))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	s := cfg.Plugins.Settings["trainmaster"]
+	if len(s.Allow.Events) != 1 || s.Allow.Events[0] != "*" {
+		t.Errorf("Events = %v, want [*]", s.Allow.Events)
+	}
+	if len(s.Allow.Commands) != 1 || s.Allow.Commands[0] != "*" {
+		t.Errorf("Commands = %v, want [*]", s.Allow.Commands)
+	}
+}
+
+// TestPluginsConfig_PrefixWildcard parses "ns.*" as a valid command
+// token.
+func TestPluginsConfig_PrefixWildcard(t *testing.T) {
+	yamlSrc := `
+owner: alice
+repo: git@github.com:org/app.git
+tracks:
+  - name: backend
+    language: go
+plugins:
+  enabled: [trainmaster]
+  trainmaster:
+    allow:
+      events:   [CarMerged, MergeFailed]
+      commands: ["dispatch.*", "ping"]
+`
+	cfg, err := Parse([]byte(yamlSrc))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	s := cfg.Plugins.Settings["trainmaster"]
+	if len(s.Allow.Events) != 2 {
+		t.Errorf("Events = %v, want 2 entries", s.Allow.Events)
+	}
+	if len(s.Allow.Commands) != 2 {
+		t.Errorf("Commands = %v, want 2 entries", s.Allow.Commands)
+	}
+}
+
+// TestPluginsConfig_RejectsInvalidWildcard catches the malformed shapes
+// the brief calls out.
+func TestPluginsConfig_RejectsInvalidWildcard(t *testing.T) {
+	cases := []struct {
+		name     string
+		yaml     string
+		wantText string
+	}{
+		{
+			name: "event_with_star_in_middle",
+			yaml: `
+owner: alice
+repo: r
+tracks: [{name: t, language: go}]
+plugins:
+  enabled: [p]
+  p:
+    allow:
+      events: ["Car*Merged"]
+`,
+			wantText: "events",
+		},
+		{
+			name: "event_double_star",
+			yaml: `
+owner: alice
+repo: r
+tracks: [{name: t, language: go}]
+plugins:
+  enabled: [p]
+  p:
+    allow:
+      events: ["**"]
+`,
+			wantText: "events",
+		},
+		{
+			name: "command_leading_star",
+			yaml: `
+owner: alice
+repo: r
+tracks: [{name: t, language: go}]
+plugins:
+  enabled: [p]
+  p:
+    allow:
+      commands: ["*x"]
+`,
+			wantText: "commands",
+		},
+		{
+			name: "command_double_star",
+			yaml: `
+owner: alice
+repo: r
+tracks: [{name: t, language: go}]
+plugins:
+  enabled: [p]
+  p:
+    allow:
+      commands: ["**"]
+`,
+			wantText: "commands",
+		},
+		{
+			name: "command_inner_star",
+			yaml: `
+owner: alice
+repo: r
+tracks: [{name: t, language: go}]
+plugins:
+  enabled: [p]
+  p:
+    allow:
+      commands: ["foo.*.bar"]
+`,
+			wantText: "commands",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Parse([]byte(tc.yaml))
+			if err == nil {
+				t.Fatalf("expected parse error for %s", tc.name)
+			}
+			if !strings.Contains(err.Error(), tc.wantText) {
+				t.Errorf("error = %q, want substring %q", err.Error(), tc.wantText)
+			}
+		})
+	}
+}
+
+// TestPluginsConfig_MultiplePlugins covers two plugin entries in
+// the same plugins: block.
+func TestPluginsConfig_MultiplePlugins(t *testing.T) {
+	yamlSrc := `
+owner: alice
+repo: git@github.com:org/app.git
+tracks:
+  - name: backend
+    language: go
+plugins:
+  enabled: [trainmaster, slack-notifier]
+  trainmaster:
+    allow:
+      events: ["*"]
+      commands: ["dispatch.*"]
+  slack-notifier:
+    allow:
+      events: [CarMerged, MergeFailed]
+      commands: []
+`
+	cfg, err := Parse([]byte(yamlSrc))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got, want := len(cfg.Plugins.Settings), 2; got != want {
+		t.Fatalf("Settings count = %d, want %d", got, want)
+	}
+	tm := cfg.Plugins.Settings["trainmaster"]
+	if len(tm.Allow.Events) != 1 || tm.Allow.Events[0] != "*" {
+		t.Errorf("trainmaster.Allow.Events = %v", tm.Allow.Events)
+	}
+	if len(tm.Allow.Commands) != 1 || tm.Allow.Commands[0] != "dispatch.*" {
+		t.Errorf("trainmaster.Allow.Commands = %v", tm.Allow.Commands)
+	}
+	sn := cfg.Plugins.Settings["slack-notifier"]
+	if len(sn.Allow.Events) != 2 {
+		t.Errorf("slack-notifier.Allow.Events = %v", sn.Allow.Events)
+	}
+}
