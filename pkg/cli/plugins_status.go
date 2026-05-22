@@ -58,6 +58,11 @@ func newPluginsStatusCmd() *cobra.Command {
 			"many subscriptions and commands each one owns; restart count and last " +
 			"activity. Use `ry plugins list` for the build-time view (what's on disk).",
 		Args: cobra.NoArgs,
+		// Connection-refused is the expected first-time path for this
+		// command. Suppress cobra's usage/flags dump on RunE error so
+		// the human-readable hint we print to stderr isn't followed by
+		// a confusing block of flag help.
+		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runPluginsStatus(cmd, configPath, urlFlag, jsonOut, timeout)
 		},
