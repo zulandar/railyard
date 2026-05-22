@@ -16,9 +16,29 @@ import (
 // forbidden — that is the entire point of the test. Adding to this
 // list requires a corresponding update to the plugin authoring guide
 // because each entry becomes a transitive dependency for every plugin.
+//
+// The gRPC/protobuf/hashicorp entries below were added by railyard-fll.2
+// (the Go SDK refactor): plugin.Serve speaks the proto contract on a
+// HashiCorp go-plugin subprocess, which pulls grpc + protobuf + the
+// go-plugin runtime into the SDK's transitive closure. Removing any of
+// them requires re-architecting Serve.
 var allowedNonStdPrefixes = []string{
 	"github.com/zulandar/railyard/pkg/plugin",
 	"gopkg.in/yaml.v3",
+	"github.com/hashicorp/go-plugin",
+	"github.com/hashicorp/go-hclog",
+	"github.com/hashicorp/yamux",
+	"github.com/oklog/run",
+	"github.com/fatih/color",
+	"github.com/mattn/go-colorable",
+	"github.com/mattn/go-isatty",
+	"github.com/golang/protobuf",
+	"google.golang.org/grpc",
+	"google.golang.org/protobuf",
+	"google.golang.org/genproto/googleapis/rpc",
+	"golang.org/x/net",
+	"golang.org/x/sys",
+	"golang.org/x/text",
 }
 
 // forbiddenPrefix is the railyard internal tree. The whole purpose of

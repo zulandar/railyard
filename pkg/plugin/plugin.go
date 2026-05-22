@@ -3,15 +3,30 @@
 // part of railyard's plugin API contract — signatures are intentionally
 // stable across patch releases of the railyard core module.
 //
-// A plugin is a Go type that implements [Plugin]. Plugins are registered
-// at package init time by calling [Register] from a side-effect import in
-// an enterprise binary's main package. The plugin host (provided by the
-// railyard core, not by this package) walks the registry on boot, calls
-// each plugin's lifecycle methods, and brokers all interaction with
-// internal subsystems via the [Host] interface.
+// # Authoring a plugin
 //
-// Plugins must not import any package under github.com/zulandar/railyard/internal.
-// The [Host] interface is the only sanctioned path into core.
+// A plugin is a Go type that implements [Plugin] and ships as a
+// standalone binary whose main package calls [Serve]:
+//
+//	func main() {
+//	    plugin.Serve(&MyPlugin{})
+//	}
+//
+// The host launches each plugin as a subprocess and brokers all
+// interaction with internal subsystems via the [Host] interface, which
+// is fulfilled by an in-plugin gRPC client adapter. Plugins MUST NOT
+// import any package under github.com/zulandar/railyard/internal — the
+// [Host] interface is the only sanctioned path into core.
+//
+// # Legacy in-process model (deprecated)
+//
+// Earlier railyard releases supported registering a plugin at package
+// init time via [Register], driven from a side-effect import in an
+// enterprise binary's main package. That mode is preserved during the
+// gRPC migration so existing host code keeps building, but it is
+// deprecated: new plugins should use [Serve] and existing in-process
+// plugins should migrate before the deprecation sweep tracked by
+// railyard-fll.8.
 package plugin
 
 import (
@@ -66,6 +81,9 @@ type Plugin interface {
 // PluginEntry is a single entry in the plugin registry. It pairs the
 // plugin's declared name with the factory function that constructs a
 // new instance.
+//
+// Deprecated: replaced by plugin.Serve. See railyard-fll.8 for the
+// cleanup sweep.
 type PluginEntry struct {
 	// Name is the plugin's stable identifier as passed to [Register].
 	Name string
@@ -91,6 +109,11 @@ var (
 // twice is allowed — later registrations replace earlier ones, which is
 // useful for testing — but the host will log a WARN on duplicates at
 // boot.
+//
+// Deprecated: replaced by plugin.Serve. The in-process registry is
+// retained so the existing host code keeps building while the
+// subprocess plugin model lands incrementally; new code should not call
+// Register. See railyard-fll.8 for the cleanup sweep.
 func Register(name string, factory func() Plugin) {
 	if name == "" {
 		panic("plugin.Register: name must not be empty")
@@ -111,8 +134,13 @@ func Register(name string, factory func() Plugin) {
 
 // Registered returns a snapshot of every plugin currently in the
 // registry, in registration order. The returned slice is a copy; the
-// caller is free to mutate it. This is the lookup the host walks during
-// boot.
+// caller is free to mutate it. This is the lookup the legacy host
+// walks during boot.
+//
+// Deprecated: replaced by plugin.Serve. The in-process registry is
+// retained so the existing host code keeps building during the
+// migration to the subprocess plugin model. See railyard-fll.8 for the
+// cleanup sweep.
 func Registered() []PluginEntry {
 	registryMu.RLock()
 	defer registryMu.RUnlock()

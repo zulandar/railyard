@@ -78,7 +78,11 @@ func buildPluginHost(cfg *config.Config, db *gorm.DB, bus events.Bus) *pluginhos
 	}
 
 	host := pluginhost.NewHost(deps)
-	for _, entry := range plugin.Registered() {
+	// plugin.Registered is deprecated in favour of plugin.Serve (railyard-fll.2),
+	// but the host rewrite that consumes the new model lands in railyard-fll.3.
+	// Until then this site keeps using the legacy registry; the cleanup sweep
+	// is tracked by railyard-fll.8.
+	for _, entry := range plugin.Registered() { //nolint:staticcheck // SA1019: legacy in-process bootstrap retained until railyard-fll.3
 		host.Register(entry.Factory())
 	}
 	return host

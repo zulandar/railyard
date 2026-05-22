@@ -49,6 +49,11 @@ func newPluginsListCmd() *cobra.Command {
 			"running yardmaster.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// plugin.Registered / plugin.PluginEntry are deprecated under
+			// the subprocess plugin model (railyard-fll.2). The `ry plugins`
+			// view continues to use them until the host rewrite in
+			// railyard-fll.3 surfaces an equivalent introspection path.
+			//nolint:staticcheck // SA1019: legacy registry view retained until railyard-fll.3
 			return renderPluginsList(cmd.OutOrStdout(), plugin.Registered())
 		},
 	}
@@ -59,6 +64,12 @@ func newPluginsListCmd() *cobra.Command {
 // global lookup keeps the function unit-testable: tests can feed in
 // arbitrary entries (including the empty slice) without polluting the
 // package-level registry, which has no public reset.
+//
+// Note: plugin.PluginEntry is deprecated in the subprocess plugin model
+// (railyard-fll.2); this renderer keeps using it as the legacy bootstrap
+// path until the host rewrite in railyard-fll.3.
+//
+//nolint:staticcheck // SA1019: legacy registry view retained until railyard-fll.3
 func renderPluginsList(out io.Writer, entries []plugin.PluginEntry) error {
 	if len(entries) == 0 {
 		fmt.Fprintln(out, "No plugins registered in this binary.")

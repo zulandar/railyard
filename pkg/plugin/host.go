@@ -90,6 +90,12 @@ type Host interface {
 	//
 	// RunDaemon returns immediately; the daemon runs asynchronously.
 	// It is intended to be called from [Plugin.Start].
+	//
+	// Deprecated: replaced by plugin.Serve. Under the subprocess
+	// plugin model the plugin already owns its process; long-lived
+	// workers should be plain goroutines launched from Start. The
+	// in-plugin Host adapter still satisfies this method for
+	// source-compat — see railyard-fll.8 for the cleanup sweep.
 	RunDaemon(name string, fn DaemonFunc)
 
 	// Logger returns a structured logger scoped to the plugin's name.
