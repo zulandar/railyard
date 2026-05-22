@@ -6,7 +6,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -20,6 +19,22 @@ type fakeStatusProvider struct{ snap pluginhost.Snapshot }
 
 func (f *fakeStatusProvider) Status() pluginhost.Snapshot { return f.snap }
 
+// serveTestHealth binds on 127.0.0.1:0, keeps the listener open, and
+// hands it to serveHealthOnListener. Returns the listener's URL base so
+// the test can issue requests. Avoids the bind→Close→rebind port-grab
+// race the earlier test had.
+func serveTestHealth(t *testing.T, hs *HealthServer, provider StatusProvider) (urlBase string, cancel context.CancelFunc) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	addr := ln.Addr().String()
+	ctx, cancelFn := context.WithCancel(context.Background())
+	go func() { _ = serveHealthOnListener(ctx, ln, hs, provider) }()
+	return "http://" + addr, cancelFn
+}
+
 func TestHealthServerServesPluginsStatusJSON(t *testing.T) {
 	hs := NewHealthServer(1 * time.Second)
 	provider := &fakeStatusProvider{
@@ -31,24 +46,14 @@ func TestHealthServerServesPluginsStatusJSON(t *testing.T) {
 		},
 	}
 
-	// Bind on :0 to grab any free port.
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-	addr := ln.Addr().String()
-	port := mustPort(t, addr)
-	_ = ln.Close()
-
-	ctx, cancel := context.WithCancel(context.Background())
+	urlBase, cancel := serveTestHealth(t, hs, provider)
 	defer cancel()
-	errCh := make(chan error, 1)
-	go func() { errCh <- StartHealthServer(ctx, port, hs, provider) }()
 
 	// Wait until the server is up.
-	url := "http://" + addr + "/plugins/status"
+	url := urlBase + "/plugins/status"
 	deadline := time.Now().Add(2 * time.Second)
 	var resp *http.Response
+	var err error
 	for time.Now().Before(deadline) {
 		resp, err = http.Get(url)
 		if err == nil {
@@ -82,21 +87,13 @@ func TestHealthServerRejectsNonGetOnPluginsStatus(t *testing.T) {
 	hs := NewHealthServer(1 * time.Second)
 	provider := &fakeStatusProvider{}
 
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-	port := mustPort(t, ln.Addr().String())
-	addr := ln.Addr().String()
-	_ = ln.Close()
-
-	ctx, cancel := context.WithCancel(context.Background())
+	urlBase, cancel := serveTestHealth(t, hs, provider)
 	defer cancel()
-	go func() { _ = StartHealthServer(ctx, port, hs, provider) }()
 
-	url := "http://" + addr + "/plugins/status"
+	url := urlBase + "/plugins/status"
 	deadline := time.Now().Add(2 * time.Second)
 	var resp *http.Response
+	var err error
 	for time.Now().Before(deadline) {
 		req, _ := http.NewRequest(http.MethodPost, url, nil)
 		resp, err = http.DefaultClient.Do(req)
@@ -114,40 +111,19 @@ func TestHealthServerRejectsNonGetOnPluginsStatus(t *testing.T) {
 	}
 }
 
-func mustPort(t *testing.T, addr string) int {
-	t.Helper()
-	_, p, err := net.SplitHostPort(addr)
-	if err != nil {
-		t.Fatalf("split host:port: %v", err)
-	}
-	n, err := strconv.Atoi(p)
-	if err != nil {
-		t.Fatalf("parse port %q: %v", p, err)
-	}
-	return n
-}
-
 // TestHealthServerNilProviderJSONShape (railyard-k5z regression): when
 // provider is nil the handler must emit "plugins":[] (not null) and must
 // NOT leak a zero-time "booted_at".
 func TestHealthServerNilProviderJSONShape(t *testing.T) {
 	hs := NewHealthServer(1 * time.Second)
 
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-	addr := ln.Addr().String()
-	port := mustPort(t, addr)
-	_ = ln.Close()
-
-	ctx, cancel := context.WithCancel(context.Background())
+	urlBase, cancel := serveTestHealth(t, hs, nil)
 	defer cancel()
-	go func() { _ = StartHealthServer(ctx, port, hs, nil) }()
 
-	url := "http://" + addr + "/plugins/status"
+	url := urlBase + "/plugins/status"
 	deadline := time.Now().Add(2 * time.Second)
 	var resp *http.Response
+	var err error
 	for time.Now().Before(deadline) {
 		resp, err = http.Get(url)
 		if err == nil {
@@ -185,21 +161,13 @@ func TestSnapshotSkippedRowOmitsLastActivity(t *testing.T) {
 		},
 	}
 
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-	addr := ln.Addr().String()
-	port := mustPort(t, addr)
-	_ = ln.Close()
-
-	ctx, cancel := context.WithCancel(context.Background())
+	urlBase, cancel := serveTestHealth(t, hs, provider)
 	defer cancel()
-	go func() { _ = StartHealthServer(ctx, port, hs, provider) }()
 
-	url := "http://" + addr + "/plugins/status"
+	url := urlBase + "/plugins/status"
 	deadline := time.Now().Add(2 * time.Second)
 	var resp *http.Response
+	var err error
 	for time.Now().Before(deadline) {
 		resp, err = http.Get(url)
 		if err == nil {

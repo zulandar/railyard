@@ -31,9 +31,13 @@ func TestPluginsStatusIntegration(t *testing.T) {
 				RestartCount:      0,
 				SubscriptionCount: 3,
 				CommandCount:      2,
-				LastActivity:      time.Now().Add(-15 * time.Second),
-				PID:               4242,
-				Path:              "/etc/railyard/plugins.d/trainmaster",
+				// 2h ago renders as a stable "2h ago" bucket regardless
+				// of scheduling slop between fixture build and table
+				// render. A 15s offset previously flaked between
+				// "15s ago" and "16s ago" under CI load.
+				LastActivity: time.Now().Add(-2 * time.Hour),
+				PID:          4242,
+				Path:         "/etc/railyard/plugins.d/trainmaster",
 			},
 			{
 				Name:   "missing-plugin",
@@ -77,7 +81,7 @@ func TestPluginsStatusIntegration(t *testing.T) {
 	if !strings.Contains(got, "missing-plugin") || !strings.Contains(got, "skipped") {
 		t.Errorf("missing skipped row:\n%s", got)
 	}
-	if !strings.Contains(got, "15s ago") && !strings.Contains(got, "just now") {
-		t.Errorf("expected relative LAST-ACTIVITY rendering:\n%s", got)
+	if !strings.Contains(got, "2h ago") {
+		t.Errorf("expected '2h ago' LAST-ACTIVITY rendering:\n%s", got)
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -64,6 +65,18 @@ func (h *HealthServer) IsReady() bool {
 // listens on the given port. provider may be nil, in which case
 // /plugins/status returns an empty Snapshot.
 func StartHealthServer(ctx context.Context, port int, hs *HealthServer, provider StatusProvider) error {
+	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+	if err != nil {
+		return err
+	}
+	return serveHealthOnListener(ctx, ln, hs, provider)
+}
+
+// serveHealthOnListener serves the health endpoints on the supplied
+// listener. Factored out of StartHealthServer so tests can bind on :0,
+// keep the listener open, and pass it in — no port-grab race between
+// the test's Close() and the server's rebind.
+func serveHealthOnListener(ctx context.Context, ln net.Listener, hs *HealthServer, provider StatusProvider) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -100,17 +113,14 @@ func StartHealthServer(ctx context.Context, port int, hs *HealthServer, provider
 		}
 	})
 
-	srv := &http.Server{
-		Addr:    fmt.Sprintf(":%d", port),
-		Handler: mux,
-	}
+	srv := &http.Server{Handler: mux}
 
 	go func() {
 		<-ctx.Done()
 		srv.Close()
 	}()
 
-	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
+	if err := srv.Serve(ln); err != http.ErrServerClosed {
 		return err
 	}
 	return nil
