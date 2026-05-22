@@ -49,8 +49,6 @@ const (
 // succeeded but whose PluginService.Init RPC returned an error. The host
 // retains the entry so [Host.Status] can report the failure to operators.
 // Cleared on a subsequent successful relaunch of the same plugin name.
-//
-//nolint:unused // populated in Task 6
 type initFailure struct {
 	name     string
 	path     string
@@ -62,8 +60,6 @@ type initFailure struct {
 // cfg.Plugins.Enabled but was not found in any plugins.d directory at
 // Init time. Searched lists the directories the discovery walked, so
 // operators can see *where* it was looked for.
-//
-//nolint:unused // populated in Task 6
 type skippedPlugin struct {
 	name     string
 	searched []string

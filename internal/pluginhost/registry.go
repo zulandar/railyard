@@ -244,10 +244,30 @@ func (h *Host) Init(ctx context.Context) {
 
 	cs := discoverCandidates(extra, logger)
 	launch, missing := filterEnabled(cs, enabled)
-	for _, name := range missing {
-		logger.Warn("pluginhost: enabled plugin not found on disk",
-			slog.String("plugin", name),
-		)
+
+	if len(missing) > 0 {
+		// Build the canonical list of directories that were (or would
+		// have been) searched, mirroring discoverCandidates' directory
+		// resolution. We use the same constants so the paths stay in sync
+		// with production discovery.
+		homeDir, _ := os.UserHomeDir()
+		searched := []string{systemPluginsDir}
+		if homeDir != "" {
+			searched = append(searched, homeDir+"/"+userPluginsDirName)
+		}
+		searched = append(searched, "./"+localPluginsDirName)
+		if extra != "" {
+			searched = append(searched, extra)
+		}
+
+		h.mu.Lock()
+		for _, name := range missing {
+			h.skipped = append(h.skipped, skippedPlugin{name: name, searched: searched})
+			logger.Warn("pluginhost: enabled plugin not found on disk",
+				slog.String("plugin", name),
+			)
+		}
+		h.mu.Unlock()
 	}
 
 	for _, c := range launch {
@@ -269,6 +289,14 @@ func (h *Host) initOne(ctx context.Context, c candidate, parentLogger *slog.Logg
 			"plugin "+c.name+": launch failed — skipped ("+err.Error()+")",
 			slog.String("error", err.Error()),
 		)
+		h.mu.Lock()
+		h.initFailures[c.name] = initFailure{
+			name:     c.name,
+			path:     c.path,
+			err:      err.Error(),
+			failedAt: h.clock(),
+		}
+		h.mu.Unlock()
 		return
 	}
 
@@ -294,6 +322,14 @@ func (h *Host) initOne(ctx context.Context, c candidate, parentLogger *slog.Logg
 			"plugin "+c.name+": Init RPC failed — skipped ("+err.Error()+")",
 			slog.String("error", err.Error()),
 		)
+		h.mu.Lock()
+		h.initFailures[c.name] = initFailure{
+			name:     c.name,
+			path:     c.path,
+			err:      err.Error(),
+			failedAt: h.clock(),
+		}
+		h.mu.Unlock()
 		lp.client.Kill()
 		removeSocket(lp.socketPath)
 		return
@@ -365,6 +401,13 @@ func (h *Host) initOne(ctx context.Context, c candidate, parentLogger *slog.Logg
 
 	// Init success: record that the plugin was just active.
 	h.bumpActivity(c.name)
+
+	// Clear any prior initFailure for this plugin now that it has
+	// successfully (re)launched. This ensures Status() does not
+	// surface stale failures after a recovery.
+	h.mu.Lock()
+	delete(h.initFailures, c.name)
+	h.mu.Unlock()
 }
 
 // resolveAllowList builds the per-plugin AllowList from the loaded

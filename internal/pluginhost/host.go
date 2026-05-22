@@ -162,7 +162,7 @@ type Host struct {
 	// Status() as the "skipped" state. Populated once during Init.
 	// Read under h.mu; the underlying slice is treated as immutable
 	// after Init returns.
-	skipped []skippedPlugin //nolint:unused // populated in Tasks 3-6
+	skipped []skippedPlugin
 
 	// backoffSleep blocks for d or until the host shutdownCh is
 	// closed (whichever comes first). Returns true if the sleep
