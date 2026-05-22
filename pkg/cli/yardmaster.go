@@ -77,12 +77,13 @@ func runYardmaster(cmd *cobra.Command, configPath, logLevel string) error {
 	}()
 
 	startErr := yardmaster.Start(ctx, yardmaster.StartOpts{
-		ConfigPath: configPath,
-		Config:     cfg,
-		DB:         gormDB,
-		RepoDir:    repoDir,
-		Logger:     logger,
-		Bus:        bus,
+		ConfigPath:   configPath,
+		Config:       cfg,
+		DB:           gormDB,
+		RepoDir:      repoDir,
+		Logger:       logger,
+		Bus:          bus,
+		PluginStatus: host, // *pluginhost.Host satisfies yardmaster.StatusProvider
 	})
 
 	// Stop plugins after the supervisor loop returns. host.Stop owns its own

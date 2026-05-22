@@ -33,7 +33,7 @@ const (
 // RunDaemon is a thin wrapper around [RunDaemonWithBus] that passes a nil
 // bus. Existing callers (cmd/ry, tests) use this form unchanged.
 func RunDaemon(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath, repoDir string, pollInterval time.Duration, logger *slog.Logger) error {
-	return RunDaemonWithBus(ctx, db, cfg, configPath, repoDir, pollInterval, logger, nil)
+	return RunDaemonWithBus(ctx, db, cfg, configPath, repoDir, pollInterval, logger, nil, nil)
 }
 
 // RunDaemonWithBus runs the yardmaster daemon loop. It registers the yardmaster
@@ -43,7 +43,7 @@ func RunDaemon(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath,
 // bus, when non-nil, receives plugin lifecycle events (YardmasterAction,
 // CarMerged, MergeFailed) — see spec §6.3. Passing nil disables publishing and
 // matches the behavior of the OSS binary that does not configure plugins.
-func RunDaemonWithBus(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath, repoDir string, pollInterval time.Duration, logger *slog.Logger, bus events.Bus) error {
+func RunDaemonWithBus(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath, repoDir string, pollInterval time.Duration, logger *slog.Logger, bus events.Bus, statusProvider StatusProvider) error {
 	if db == nil {
 		return fmt.Errorf("yardmaster: db is required")
 	}
@@ -80,7 +80,7 @@ func RunDaemonWithBus(ctx context.Context, db *gorm.DB, cfg *config.Config, conf
 
 	hs := NewHealthServer(pollInterval)
 	go func() {
-		if err := StartHealthServer(ctx, cfg.Yardmaster.HealthPort, hs, nil); err != nil {
+		if err := StartHealthServer(ctx, cfg.Yardmaster.HealthPort, hs, statusProvider); err != nil {
 			logger.Error("Health server error", "error", err)
 		}
 	}()

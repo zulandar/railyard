@@ -25,6 +25,10 @@ type StartOpts struct {
 	// bus disables publishing — existing callers in cmd/ry/ that omit this
 	// field continue to work unchanged.
 	Bus events.Bus
+	// PluginStatus, when non-nil, is the source for GET /plugins/status
+	// served by the embedded HealthServer. *pluginhost.Host satisfies it.
+	// nil disables the route (handler returns an empty Snapshot).
+	PluginStatus StatusProvider
 }
 
 // Start launches the yardmaster daemon loop. It validates options, then
@@ -49,5 +53,5 @@ func Start(ctx context.Context, opts StartOpts) error {
 		logger = slog.Default()
 	}
 
-	return RunDaemonWithBus(ctx, opts.DB, opts.Config, opts.ConfigPath, opts.RepoDir, opts.PollInterval, logger, opts.Bus)
+	return RunDaemonWithBus(ctx, opts.DB, opts.Config, opts.ConfigPath, opts.RepoDir, opts.PollInterval, logger, opts.Bus, opts.PluginStatus)
 }
