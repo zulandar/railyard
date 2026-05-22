@@ -13,8 +13,11 @@
 //     surrounding `go test ./...` only proves test packages compile —
 //     a separate build step is what an OSS user actually does.
 //  2. The built binary runs, exits 0 for `--help`, and `plugins list`
-//     emits the railyard-hqe placeholder message (introspection of the
-//     live launched-plugin set is a future rewire).
+//     produces a deterministic message — either the table header (if
+//     the smoke environment happens to have a plugins.d directory
+//     populated) or the friendly "no plugins found" line. The previous
+//     railyard-hqe placeholder is gone now that the command sources its
+//     data from the read-only plugins.d discovery (bd railyard-hqe).
 //
 // Tests that shell out to the go toolchain follow the pattern in
 // pkg/plugin/import_test.go: they Skip when `go` isn't on PATH and
@@ -85,14 +88,35 @@ func TestOSSSmokeBuild(t *testing.T) {
 		t.Fatalf("built binary missing or empty at %s: %v", outPath, err)
 	}
 
-	t.Run("PluginsListPlaceholder", func(t *testing.T) {
-		stdout, stderr, err := runBinary(t, outPath, 15*time.Second, "plugins", "list")
-		if err != nil {
-			t.Fatalf("`ry plugins list` failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	t.Run("PluginsListRunsCleanly", func(t *testing.T) {
+		// Run from a temp working directory so the smoke binary does not
+		// happen to discover a ./plugins folder belonging to a developer
+		// machine. The smoke test asserts a property of the binary, not
+		// of the host's filesystem layout.
+		smokeDir := t.TempDir()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		cmd := exec.CommandContext(ctx, outPath, "plugins", "list")
+		cmd.Dir = smokeDir
+		// Point HOME at the smoke dir too so ~/.railyard/plugins is also
+		// empty for this run.
+		cmd.Env = append(os.Environ(), "HOME="+smokeDir)
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("`ry plugins list` failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
 		}
-		const want = "railyard-hqe"
-		if !strings.Contains(stdout, want) {
-			t.Errorf("`ry plugins list` stdout did not contain %q\nstdout:\n%s\nstderr:\n%s", want, stdout, stderr)
+		out := stdout.String()
+		// The command must produce SOMETHING — either the table header
+		// (a /etc/railyard/plugins.d candidate slipped in) or the
+		// friendly empty-case message. Either is a green smoke result.
+		header := strings.Contains(out, "NAME") && strings.Contains(out, "PATH")
+		empty := strings.Contains(out, "no plugins found")
+		if !header && !empty {
+			t.Errorf("`ry plugins list` stdout was neither a table header nor the empty-case message\nstdout:\n%s\nstderr:\n%s", out, stderr.String())
 		}
 	})
 

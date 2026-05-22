@@ -52,6 +52,30 @@ func resolveSocketPath(name string) (string, error) {
 	return "", fmt.Errorf("pluginhost: no writable socket directory candidate worked for plugin %q", name)
 }
 
+// predictSocketPath returns the would-be UDS path for the named plugin
+// WITHOUT creating any directories. Used by the read-only discovery path
+// ([DiscoverPlugins]) so `ry plugins list` does not mutate the filesystem.
+//
+// The selection mirrors [resolveSocketPath] in priority order, but each
+// candidate is accepted as soon as its parent chain looks plausibly
+// usable — XDG and /run only when they exist as directories today. The
+// /tmp fallback is always available conceptually, so it serves as the
+// last resort. Returns an empty string for an empty name (matches the
+// guardrail in resolveSocketPath; discovery callers tolerate an empty
+// string as "unknown").
+func predictSocketPath(name string) string {
+	if name == "" {
+		return ""
+	}
+	if xdg := os.Getenv("XDG_RUNTIME_DIR"); xdg != "" {
+		return filepath.Join(xdg, "railyard", "plugins", name+".sock")
+	}
+	if info, err := os.Stat("/run/railyard/plugins"); err == nil && info.IsDir() {
+		return filepath.Join("/run/railyard/plugins", name+".sock")
+	}
+	return filepath.Join(os.TempDir(), fmt.Sprintf("railyard-%d", os.Getuid()), "plugins", name+".sock")
+}
+
 // isWritableDir reports whether path is a directory writable by the
 // current process. It is best-effort — race conditions between the check
 // and a subsequent bind are tolerated because the caller falls back to a

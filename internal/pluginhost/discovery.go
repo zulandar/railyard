@@ -7,7 +7,137 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/zulandar/railyard/internal/config"
 )
+
+// PluginCandidate describes a plugin binary found on disk along with its
+// enabled-and-allow status from config. It does NOT reflect runtime
+// state — whether the plugin is actually running, has crashed, or has
+// ever launched — only what the host would do if it were started right
+// now with this config.
+type PluginCandidate struct {
+	// Name is the executable basename (extension stripped). It is the
+	// lookup key for the config allow-list, the registry, and the
+	// would-be socket path.
+	Name string
+
+	// Path is the absolute path to the binary on disk.
+	Path string
+
+	// Source is the directory the candidate was discovered in — useful
+	// for operator diagnostics when name collisions occur.
+	Source string
+
+	// Executable reports whether the file has any executable bit set.
+	// DiscoverPlugins still returns non-executable candidates that
+	// appear in `plugins.enabled` so the operator can see why a
+	// configured plugin would not launch; for purely-discovered (not
+	// enabled) candidates this is always true (non-executables are
+	// skipped during the scan).
+	Executable bool
+
+	// Enabled is true when the plugin's name appears in
+	// cfg.Plugins.Enabled. Only enabled plugins are launched by the
+	// host on boot.
+	Enabled bool
+
+	// AllowEvents is the configured event allow-list for the plugin
+	// (copy of cfg.Plugins.Settings[name].Allow.Events). Empty when no
+	// allow block is configured — meaning the strict default of "deny
+	// every advertised event".
+	AllowEvents []string
+
+	// AllowCommands is the configured command allow-list for the
+	// plugin. Empty when no allow block is configured.
+	AllowCommands []string
+
+	// SocketPath is the would-be Unix-domain socket path the host
+	// would bind for this plugin if launched right now. Computed
+	// without creating any directories so this stays a read-only
+	// discovery call. Empty when name resolution failed.
+	SocketPath string
+}
+
+// DiscoverPlugins runs the same plugins.d scan + config intersection
+// the [Host] uses on startup, without launching anything or mutating
+// any filesystem state beyond what os.ReadDir requires.
+//
+// The returned slice contains every plugin we would consider at boot:
+//
+//  1. Executable candidates found in any of the three well-known
+//     plugin directories (and the optional cfg.Plugins.PluginsDir
+//     override), regardless of whether they appear in
+//     cfg.Plugins.Enabled.
+//  2. Names listed in cfg.Plugins.Enabled that did NOT resolve to a
+//     binary on disk — these are returned with Path="", Executable=false
+//     and Enabled=true so an operator can spot the misconfiguration.
+//
+// Entries are sorted by Name. A nil config is treated as "no enabled
+// plugins and no override directory" — i.e. a pure on-disk scan.
+func DiscoverPlugins(cfg *config.Config) ([]PluginCandidate, error) {
+	logger := slog.Default()
+
+	var (
+		extra    string
+		enabled  []string
+		settings map[string]config.PluginSettings
+	)
+	if cfg != nil {
+		extra = cfg.Plugins.PluginsDir
+		enabled = cfg.Plugins.Enabled
+		settings = cfg.Plugins.Settings
+	}
+
+	cs := discoverCandidates(extra, logger)
+
+	enabledSet := make(map[string]struct{}, len(enabled))
+	for _, name := range enabled {
+		enabledSet[name] = struct{}{}
+	}
+
+	byName := make(map[string]PluginCandidate, len(cs)+len(enabled))
+	for _, c := range cs {
+		pc := PluginCandidate{
+			Name:       c.name,
+			Path:       c.path,
+			Source:     c.source,
+			Executable: true, // scanDir already filters non-executables
+			SocketPath: predictSocketPath(c.name),
+		}
+		_, pc.Enabled = enabledSet[c.name]
+		if s, ok := settings[c.name]; ok {
+			pc.AllowEvents = append([]string(nil), s.Allow.Events...)
+			pc.AllowCommands = append([]string(nil), s.Allow.Commands...)
+		}
+		byName[c.name] = pc
+	}
+
+	// Surface enabled-but-missing plugins so the table is honest about
+	// misconfiguration. Path/Executable stay zero-valued.
+	for _, name := range enabled {
+		if _, ok := byName[name]; ok {
+			continue
+		}
+		pc := PluginCandidate{
+			Name:       name,
+			Enabled:    true,
+			SocketPath: predictSocketPath(name),
+		}
+		if s, ok := settings[name]; ok {
+			pc.AllowEvents = append([]string(nil), s.Allow.Events...)
+			pc.AllowCommands = append([]string(nil), s.Allow.Commands...)
+		}
+		byName[name] = pc
+	}
+
+	out := make([]PluginCandidate, 0, len(byName))
+	for _, pc := range byName {
+		out = append(out, pc)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
+}
 
 // systemPluginsDir is the system-wide plugin directory scanned first.
 const systemPluginsDir = "/etc/railyard/plugins.d"
