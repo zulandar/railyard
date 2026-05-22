@@ -19,23 +19,26 @@ type Snapshot struct {
 }
 
 // YardmasterInfo carries the host-process identity fields the CLI surfaces
-// above the plugin table.
+// above the plugin table. BootedAt uses `omitzero` so the field is dropped
+// when zero — avoids leaking "0001-01-01T00:00:00Z" to consumers in the
+// nil-provider (no plugin host configured) path.
 type YardmasterInfo struct {
 	Version     string    `json:"version"`
 	BuildCommit string    `json:"build_commit"`
-	BootedAt    time.Time `json:"booted_at"`
+	BootedAt    time.Time `json:"booted_at,omitzero"`
 }
 
 // PluginStatus is one row in the snapshot's plugins list. Field
 // population rules differ by Status — see the design doc's per-state
-// semantics table.
+// semantics table. LastActivity uses `omitzero` so skipped rows (which
+// never observe activity) omit the field rather than emit "0001-01-01..".
 type PluginStatus struct {
 	Name              string    `json:"name"`
 	Status            string    `json:"status"` // running | disabled | failed | skipped
 	RestartCount      int       `json:"restart_count"`
 	SubscriptionCount int       `json:"subscription_count"`
 	CommandCount      int       `json:"command_count"`
-	LastActivity      time.Time `json:"last_activity"`
+	LastActivity      time.Time `json:"last_activity,omitzero"`
 	PID               int       `json:"pid"`
 	Path              string    `json:"path"`
 	Error             string    `json:"error,omitempty"`

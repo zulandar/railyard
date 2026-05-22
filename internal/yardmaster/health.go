@@ -77,7 +77,11 @@ func StartHealthServer(ctx context.Context, port int, hs *HealthServer, provider
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		snap := pluginhost.Snapshot{}
+		// Always emit a well-formed Snapshot with a non-nil Plugins slice
+		// so jq scripts that range over .plugins[] don't error against
+		// the OSS binary (or any deployment running without a plugin
+		// host wired in).
+		snap := pluginhost.Snapshot{Plugins: []pluginhost.PluginStatus{}}
 		if provider != nil {
 			snap = provider.Status()
 		}
