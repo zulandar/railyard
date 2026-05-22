@@ -2,6 +2,8 @@ package cli
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -19,18 +21,18 @@ type fakeRunner struct {
 	idx      int
 }
 
-func (f *fakeRunner) run(_ context.Context, opts engine.SpawnOpts) (*engine.Session, sessionOutcome) {
+func (f *fakeRunner) run(_ context.Context, opts engine.SpawnOpts) (*engine.Session, sessionOutcome, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, opts)
 	if f.idx >= len(f.outcomes) {
 		// Default to outcomeClear if we run out of scripted outcomes — this
 		// should not happen in well-formed tests.
-		return &engine.Session{ID: "sess-end"}, sessionOutcome{kind: outcomeClear}
+		return &engine.Session{ID: "sess-end"}, sessionOutcome{kind: outcomeClear}, nil
 	}
 	out := f.outcomes[f.idx]
 	f.idx++
-	return &engine.Session{ID: "sess-fake"}, out
+	return &engine.Session{ID: "sess-fake"}, out, nil
 }
 
 func (f *fakeRunner) callCount() int {
@@ -148,7 +150,7 @@ func TestPauseAndRetry_ExponentialBackoff(t *testing.T) {
 	// instant respawn case) and <= ~3s.
 	var spawnTimes []time.Time
 	var mu sync.Mutex
-	wrapped := func(ctx context.Context, opts engine.SpawnOpts) (*engine.Session, sessionOutcome) {
+	wrapped := func(ctx context.Context, opts engine.SpawnOpts) (*engine.Session, sessionOutcome, error) {
 		mu.Lock()
 		spawnTimes = append(spawnTimes, time.Now())
 		mu.Unlock()
@@ -188,7 +190,9 @@ func TestPauseAndRetry_ExponentialBackoff(t *testing.T) {
 
 // TestPauseAndRetry_MaxRetriesExhausted — after maxRetries rate-limit signals,
 // the helper converts the outcome to outcomeStall with a rate_limit_exhausted
-// reason so the caller's stall path runs as a fallback.
+// reason so the caller's stall path runs as a fallback. The Detail string must
+// report the true count of rate-limit responses observed (= total spawns), not
+// (total - 1) — regression guard for railyard-19b.
 func TestPauseAndRetry_MaxRetriesExhausted(t *testing.T) {
 	runner := &fakeRunner{
 		outcomes: []sessionOutcome{
@@ -214,6 +218,40 @@ func TestPauseAndRetry_MaxRetriesExhausted(t *testing.T) {
 	}
 	if runner.callCount() != 3 {
 		t.Errorf("call count = %d, want 3 (initial + 2 retries before exhaustion)", runner.callCount())
+	}
+	// 3 spawns, all rate-limited → the Detail must say "rate-limited 3 times",
+	// not 2 (the pre-fix off-by-one).
+	if !strings.Contains(outcome.stallReason.Detail, "rate-limited 3 times") {
+		t.Errorf("Detail = %q, expected to contain %q", outcome.stallReason.Detail, "rate-limited 3 times")
+	}
+}
+
+// TestPauseAndRetry_SpawnErrorSurfacesToCaller — when the runner returns a
+// non-nil error (spawn failed: binary missing, fork-limit, etc.), the helper
+// must propagate the error so the outer engine loop can log+sleep+retry on
+// the next poll tick rather than converting it into a permanent stall.
+// Regression guard for railyard-27s.
+func TestPauseAndRetry_SpawnErrorSurfacesToCaller(t *testing.T) {
+	spawnErr := errors.New("simulated SpawnAgent failure")
+	runner := func(_ context.Context, _ engine.SpawnOpts) (*engine.Session, sessionOutcome, error) {
+		return nil, sessionOutcome{}, spawnErr
+	}
+
+	sess, outcome, err := spawnAndMonitorWithRetryRunner(
+		context.Background(),
+		engine.SpawnOpts{CarID: "car-spawn-err"},
+		3, 60, nil, runner,
+	)
+	if !errors.Is(err, spawnErr) {
+		t.Fatalf("err = %v, want simulated spawn error", err)
+	}
+	if sess != nil {
+		t.Errorf("sess = %+v, want nil on spawn error", sess)
+	}
+	// Outcome should be a zero-value sentinel — the caller must NOT treat this
+	// as a stall.
+	if outcome.kind == outcomeStall {
+		t.Errorf("outcome.kind = outcomeStall, but spawn errors must not auto-stall the car")
 	}
 }
 

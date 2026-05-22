@@ -449,7 +449,7 @@ func (c *Config) applyDefaults() {
 	c.Database.TLS.CACert = resolveEnvVars(c.Database.TLS.CACert)
 	c.Database.TLS.ClientCert = resolveEnvVars(c.Database.TLS.ClientCert)
 	c.Database.TLS.ClientKey = resolveEnvVars(c.Database.TLS.ClientKey)
-	if c.Stall.StdoutTimeoutSec == 0 {
+	if c.Stall.StdoutTimeoutSec <= 0 {
 		c.Stall.StdoutTimeoutSec = 120
 	}
 	if c.Stall.RepeatedErrorMax == 0 {
@@ -502,15 +502,11 @@ func (c *Config) applyDefaults() {
 		if c.Tracks[i].EngineSlots == 0 {
 			c.Tracks[i].EngineSlots = 3
 		}
-		// stall_stdout_timeout_sec — per-track override beats global Stall.StdoutTimeoutSec
-		// beats the 120s baseline. After applyDefaults runs every track has a populated
-		// value so the engine spawn path can read it directly without fallback logic.
+		// stall_stdout_timeout_sec — per-track override beats global Stall.StdoutTimeoutSec.
+		// The global is guaranteed positive (defaulted to 120 above), so when the track
+		// didn't set its own value we just inherit the global directly.
 		if c.Tracks[i].StallStdoutTimeoutSec == 0 {
-			if c.Stall.StdoutTimeoutSec > 0 {
-				c.Tracks[i].StallStdoutTimeoutSec = c.Stall.StdoutTimeoutSec
-			} else {
-				c.Tracks[i].StallStdoutTimeoutSec = 120
-			}
+			c.Tracks[i].StallStdoutTimeoutSec = c.Stall.StdoutTimeoutSec
 		}
 		if c.Tracks[i].AgentProvider == "" {
 			c.Tracks[i].AgentProvider = c.AgentProvider
