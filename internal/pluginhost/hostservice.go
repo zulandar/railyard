@@ -131,8 +131,10 @@ func (s *hostService) DispatchCommand(ctx context.Context, req *protov1.Dispatch
 		if err != nil {
 			return &protov1.DispatchCommandResponse{Success: false, Error: err.Error()}, nil
 		}
-		// DispatchCommand success: record that the dispatching plugin was just active.
+		// DispatchCommand success: bump BOTH the dispatching plugin (it just
+		// did an RPC) and the owning plugin (its code just ran).
 		s.host.bumpActivity(s.pluginName)
+		s.host.bumpActivity(owner.name)
 		return &protov1.DispatchCommandResponse{
 			Success: hcResp.Success,
 			Error:   hcResp.Error,
