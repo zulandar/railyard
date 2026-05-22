@@ -369,8 +369,13 @@ allow-listing](#capabilities-and-allow-listing).
 
 ### DispatchCommand
 
-Invokes a command by name. The host enforces the operator's allow-list
-before routing.
+Invokes a command by name. The host first checks the core allow-list; if
+the name is not allow-listed, the call falls through to any matching
+handler registered via `RegisterCommand`. The allow-list remains
+authoritative for the built-in names — `RegisterCommand` rejects
+collisions, so the fall-through can never shadow a core binding. Names
+absent from both maps return `Success: false` with
+`Error: "command not allowed: <name>"`.
 
 ```go
 res, err := h.DispatchCommand(ctx, "scale_track", plugin.CommandArgs{

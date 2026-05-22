@@ -181,3 +181,95 @@ func TestRegisterCommandValidation(t *testing.T) {
 		t.Error("nil handler should error")
 	}
 }
+
+// TestDispatchPluginRegisteredCommand verifies that a command registered
+// via Host.RegisterCommand is reachable through Host.DispatchCommand when
+// the name is not in the core allow-list. The handler's return value is
+// propagated verbatim.
+func TestDispatchPluginRegisteredCommand(t *testing.T) {
+	host := NewHost(Dependencies{})
+	var gotCtx context.Context
+	var gotArgs plugin.CommandArgs
+	want := plugin.CommandResult{Success: true, Data: map[string]any{"echo": "hi"}}
+	handler := func(ctx context.Context, args plugin.CommandArgs) (plugin.CommandResult, error) {
+		gotCtx, gotArgs = ctx, args
+		return want, nil
+	}
+	if err := host.RegisterCommand("my.echo", handler); err != nil {
+		t.Fatalf("RegisterCommand: %v", err)
+	}
+	ctx := context.Background()
+	args := plugin.CommandArgs{"msg": "hi"}
+	res, err := host.DispatchCommand(ctx, "my.echo", args)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !res.Success {
+		t.Fatalf("Success = false (Error=%q), want true", res.Error)
+	}
+	if gotCtx != ctx {
+		t.Errorf("handler ctx not propagated")
+	}
+	if gotArgs["msg"] != "hi" {
+		t.Errorf("handler args = %v, want msg=hi", gotArgs)
+	}
+	if v, _ := res.Data["echo"].(string); v != "hi" {
+		t.Errorf("Data.echo = %v, want hi", res.Data["echo"])
+	}
+}
+
+// TestDispatchPluginRegisteredCommandHandlerError verifies a plugin
+// handler's returned Go error is surfaced verbatim by DispatchCommand
+// (not wrapped) — same shape callers see for allow-list bindings.
+func TestDispatchPluginRegisteredCommandHandlerError(t *testing.T) {
+	host := NewHost(Dependencies{})
+	boom := errors.New("boom")
+	handler := func(ctx context.Context, args plugin.CommandArgs) (plugin.CommandResult, error) {
+		return plugin.CommandResult{Success: false, Error: boom.Error()}, boom
+	}
+	if err := host.RegisterCommand("my.boom", handler); err != nil {
+		t.Fatalf("RegisterCommand: %v", err)
+	}
+	res, err := host.DispatchCommand(context.Background(), "my.boom", nil)
+	if !errors.Is(err, boom) {
+		t.Errorf("err = %v, want boom", err)
+	}
+	if res.Success {
+		t.Error("Success = true, want false")
+	}
+	if res.Error != "boom" {
+		t.Errorf("Error = %q, want %q", res.Error, "boom")
+	}
+}
+
+// TestRegisterCommandStillRejectsAllowListAfterFallThrough re-asserts the
+// post-change behavior: RegisterCommand must still reject names that
+// collide with the core allow-list, AND DispatchCommand for that name
+// must continue to hit the core binding (not the plugin map). This
+// preserves the security boundary the allow-list provides.
+func TestRegisterCommandStillRejectsAllowListAfterFallThrough(t *testing.T) {
+	var called bool
+	host := NewHost(Dependencies{
+		PauseYardFn: func(ctx context.Context, _ string) error {
+			called = true
+			return nil
+		},
+	})
+	err := host.RegisterCommand("pause_yard", func(ctx context.Context, args plugin.CommandArgs) (plugin.CommandResult, error) {
+		t.Fatal("plugin handler must never be invoked for an allow-list name")
+		return plugin.CommandResult{}, nil
+	})
+	if err == nil {
+		t.Fatal("RegisterCommand should reject names that collide with the allow-list")
+	}
+	res, derr := host.DispatchCommand(context.Background(), "pause_yard", nil)
+	if derr != nil {
+		t.Fatalf("DispatchCommand: %v", derr)
+	}
+	if !res.Success {
+		t.Fatalf("Success = false (Error=%q), want true via core binding", res.Error)
+	}
+	if !called {
+		t.Error("core PauseYardFn should have been invoked")
+	}
+}

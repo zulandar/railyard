@@ -149,26 +149,33 @@ func coerceInt(v any) int {
 	return 0
 }
 
-// DispatchCommand looks up a command in the static allow-list, validates
-// its args, and invokes the bound function. Plugin-registered command
-// names are NOT dispatched here (spec §7.3 keeps the allow-list and
-// plugin-provided surfaces separate); call plugin code directly for
-// those, or expose a separate dispatch path in a follow-up.
+// DispatchCommand looks up a command in the static allow-list first, and
+// if the name is not allow-listed falls through to plugin-registered
+// in-process handlers (see [Host.RegisterCommand]). The allow-list
+// remains authoritative for the built-in names — RegisterCommand rejects
+// any name that collides with it, so the fall-through can never override
+// a core binding. Names absent from both maps return the existing
+// "command not allowed" result.
 func (h *Host) DispatchCommand(ctx context.Context, name string, args plugin.CommandArgs) (plugin.CommandResult, error) {
-	binding, ok := h.allowed[name]
-	if !ok {
-		return plugin.CommandResult{
-			Success: false,
-			Error:   fmt.Sprintf("command not allowed: %s", name),
-		}, nil
+	if binding, ok := h.allowed[name]; ok {
+		if err := validateArgs(binding.args, args); err != nil {
+			return plugin.CommandResult{
+				Success: false,
+				Error:   err.Error(),
+			}, nil
+		}
+		return binding.fn(ctx, args)
 	}
-	if err := validateArgs(binding.args, args); err != nil {
-		return plugin.CommandResult{
-			Success: false,
-			Error:   err.Error(),
-		}, nil
+	h.mu.Lock()
+	handler, ok := h.inProcCmds[name]
+	h.mu.Unlock()
+	if ok {
+		return handler(ctx, args)
 	}
-	return binding.fn(ctx, args)
+	return plugin.CommandResult{
+		Success: false,
+		Error:   fmt.Sprintf("command not allowed: %s", name),
+	}, nil
 }
 
 // RegisterCommand stores a plugin-provided command handler. Returns an
