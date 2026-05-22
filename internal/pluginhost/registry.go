@@ -391,12 +391,13 @@ func (h *Host) initOne(ctx context.Context, c candidate, parentLogger *slog.Logg
 	// Init success: record that the plugin was just active.
 	h.bumpActivity(c.name)
 
-	// Clear any prior initFailure for this plugin now that it has
-	// successfully (re)launched. This ensures Status() does not
-	// surface stale failures after a recovery.
-	h.mu.Lock()
-	delete(h.initFailures, c.name)
-	h.mu.Unlock()
+	// Note: we do NOT touch h.initFailures here. Init() walks each plugin
+	// exactly once and routes failures to the early returns above, so
+	// reaching this line guarantees no prior initFailure entry exists
+	// for c.name. Supervisor relaunch() bypasses initOne entirely. If a
+	// future code path adds in-place re-init (e.g. config reload), it
+	// will need to clear initFailures itself in the same lock acquisition
+	// that re-inserts into h.launched.
 }
 
 // resolveAllowList builds the per-plugin AllowList from the loaded

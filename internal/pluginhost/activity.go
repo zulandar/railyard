@@ -21,3 +21,27 @@ func (h *Host) bumpActivity(name string) {
 	}
 	lp.lastActivity = h.clock()
 }
+
+// bumpActivityPair bumps lastActivity for two plugins in a single
+// critical section. Used by DispatchCommand's plugin-routed path where
+// both the dispatching plugin and the owning plugin "just did
+// something" on the same RPC. Two separate bumpActivity calls would
+// leave a race window where a concurrent handlePermanentDisable could
+// remove the owner between the two locks.
+//
+// Empty / unknown names are silently ignored, matching bumpActivity.
+func (h *Host) bumpActivityPair(a, b string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	now := h.clock()
+	if a != "" {
+		if lp, ok := h.launched[a]; ok {
+			lp.lastActivity = now
+		}
+	}
+	if b != "" {
+		if lp, ok := h.launched[b]; ok {
+			lp.lastActivity = now
+		}
+	}
+}

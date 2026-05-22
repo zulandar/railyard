@@ -24,6 +24,12 @@ type StatusProvider interface {
 	Status() pluginhost.Snapshot
 }
 
+// Compile-time assertion that *pluginhost.Host satisfies StatusProvider.
+// Without this, a signature drift on Host.Status() would only break the
+// CLI build at the assignment site (pkg/cli/yardmaster.go). This catches
+// it at the package that defines the interface.
+var _ StatusProvider = (*pluginhost.Host)(nil)
+
 // HealthServer provides HTTP health check endpoints for k8s probes.
 type HealthServer struct {
 	pollInterval time.Duration
