@@ -301,6 +301,17 @@ func UpdateWithBus(db *gorm.DB, bus events.Bus, id string, updates map[string]in
 	return nil
 }
 
+// IsValidTransition reports whether moving a car from status from to
+// status to is allowed under [ValidTransitions]. The special case
+// "any → blocked" is always permitted. Exposed so callers that need
+// to drive the status update through their own transaction (e.g.
+// pkg/cli/pluginhost.forceCompleteAdapter, which atomically pairs the
+// transition with an audit row) can reproduce the same validation
+// gate Update applies.
+func IsValidTransition(from, to string) bool {
+	return isValidTransition(from, to)
+}
+
 // isValidTransition checks whether a status transition is allowed.
 func isValidTransition(from, to string) bool {
 	if to == "blocked" {

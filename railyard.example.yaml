@@ -21,6 +21,13 @@ repo: git@github.com:org/myproject.git
 # When set, branch_prefix defaults to "ry" and namespace to "railyard-{project}".
 # project: myproject
 
+# Stable identifier for this railyard instance, surfaced to plugins as
+# plugin.YardInfo.YardID. Distinct from `project` so two yards in the same
+# project can be told apart (e.g. by the trainmaster connector when
+# registering with a central server). When unset, the plugin host falls
+# back to `project` for backward compatibility and emits a DEBUG log at boot.
+# yard_id: myproject-prod
+
 # ---------------------------------------------------------------------------
 # Optional — general settings
 # ---------------------------------------------------------------------------

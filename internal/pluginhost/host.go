@@ -175,6 +175,21 @@ func NewHost(deps Dependencies) *Host {
 	h.backoffSleep = defaultBackoffSleep
 	h.yardInfo = buildYardInfo(deps)
 	h.allowed = buildAllowList(&deps)
+	// One-shot INFO log when YardID was filled from the legacy Project
+	// alias instead of the dedicated cfg.YardID field. Mirrors the
+	// fallback decision in buildYardInfo so operators can spot the
+	// implicit aliasing in logs and migrate their config. Emitted at
+	// INFO (not DEBUG) because daemon entrypoints default to
+	// slog.LevelInfo via logutil.ParseLevel — a DEBUG record would be
+	// dropped by the handler's Enabled gate and the operator nudge
+	// would never reach the log. This fires at most once per host
+	// boot so the noise budget is tiny.
+	if deps.Cfg != nil && deps.Cfg.YardID == "" && deps.Cfg.Project != "" {
+		slog.Default().Info(
+			"pluginhost: yard_id not set in config; falling back to project for plugin.YardInfo.YardID",
+			"project", deps.Cfg.Project,
+		)
+	}
 	return h
 }
 
@@ -203,6 +218,13 @@ func defaultBackoffSleep(d time.Duration, shutdown <-chan struct{}) bool {
 }
 
 // buildYardInfo gathers the static metadata once.
+//
+// YardID resolution prefers the dedicated cfg.YardID field and falls
+// back to cfg.Project when YardID is empty. The fallback preserves
+// pre-existing behavior for configs that have not yet adopted the
+// `yard_id:` field — see NewHost for the one-time DEBUG log emitted on
+// the fallback path. The fallback decision is encapsulated here so the
+// log site in NewHost can mirror it without diverging.
 func buildYardInfo(deps Dependencies) plugin.YardInfo {
 	info := plugin.YardInfo{
 		RailyardVersion: deps.RailyardVersion,
@@ -210,7 +232,11 @@ func buildYardInfo(deps Dependencies) plugin.YardInfo {
 		BuildTime:       deps.BuildTime,
 	}
 	if deps.Cfg != nil {
-		info.YardID = deps.Cfg.Project
+		if deps.Cfg.YardID != "" {
+			info.YardID = deps.Cfg.YardID
+		} else {
+			info.YardID = deps.Cfg.Project
+		}
 		info.Owner = deps.Cfg.Owner
 		info.Project = deps.Cfg.Project
 		info.RepoURL = deps.Cfg.Repo

@@ -19,9 +19,15 @@ var envVarRe = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
 
 // Config is the top-level Railyard configuration, loaded from config.yaml.
 type Config struct {
-	Owner             string              `yaml:"owner"`
-	Repo              string              `yaml:"repo"`
-	Project           string              `yaml:"project"`
+	Owner   string `yaml:"owner"`
+	Repo    string `yaml:"repo"`
+	Project string `yaml:"project"`
+	// YardID is the stable, operator-configured identifier for this
+	// railyard instance. Plugins (notably trainmaster) treat it as
+	// distinct from Project: two yards in the same project must have
+	// different YardIDs. When unset, internal/pluginhost falls back to
+	// Project for backward compatibility — see buildYardInfo and NewHost.
+	YardID            string              `yaml:"yard_id"`
 	BranchPrefix      string              `yaml:"branch_prefix"`
 	DefaultBranch     string              `yaml:"default_branch"`
 	DefaultAcceptance string              `yaml:"default_acceptance"`

@@ -12,6 +12,7 @@ import (
 	"github.com/zulandar/railyard/internal/config"
 	"github.com/zulandar/railyard/internal/dashboard"
 	"github.com/zulandar/railyard/internal/events"
+	"github.com/zulandar/railyard/internal/models"
 	"github.com/zulandar/railyard/internal/orchestration"
 	"github.com/zulandar/railyard/internal/pluginhost"
 	"github.com/zulandar/railyard/internal/yardmaster"
@@ -161,18 +162,77 @@ func scaleTrackAdapter(db *gorm.DB, cfg *config.Config) func(ctx context.Context
 	}
 }
 
-// forceCompleteAdapter binds "force_complete" to car.UpdateWithBus with
-// status=done. There is no dedicated "force complete with operator reason"
-// path in railyard today; the closest existing semantic is the status
-// transition, which the car package's Update validates and (on success)
-// publishes a [plugin.CarStatusChanged] event for. The operator reason is
-// surfaced via a best-effort progress note appended after the transition;
-// failure to write the note is logged but does not fail the command (the
-// transition is the load-bearing effect).
+// forceCompleteAdapter binds "force_complete" to a direct status
+// transition (status=done) paired with a [models.CarProgress] audit
+// row. The audit row's EngineID is the literal marker
+// "<plugin-dispatched>" so operators can grep the progress log for
+// plugin-initiated completions.
+//
+// Atomicity & ordering. The status flip and the progress-note insert
+// run inside one db.Transaction so a failure to persist the audit row
+// rolls back the status update — there must never be a
+// force-completed car without a matching reason on file. The status
+// transition log line and the [plugin.CarStatusChanged] publish both
+// fire AFTER the outer transaction commits. This keeps subscribers
+// and on-call operators from observing transitions that the rollback
+// would have erased; the previous design routed the publish/log
+// through [car.UpdateWithBus] which ran inside the inner tx and could
+// emit a phantom event when the audit-row insert later failed.
+//
+// Reason required. An empty reason is rejected at the adapter (with
+// a "reason required" error) because the allow-list's string-arg
+// validator only checks the kind, not emptiness. A blank Note would
+// silently violate the "never a force-complete without a reason on
+// file" invariant the audit row exists to enforce.
 func forceCompleteAdapter(db *gorm.DB, bus events.Bus) func(ctx context.Context, carID, reason string) error {
 	return func(ctx context.Context, carID, reason string) error {
-		if err := car.UpdateWithBus(db, bus, carID, map[string]interface{}{"status": "done"}); err != nil {
+		if strings.TrimSpace(reason) == "" {
+			return fmt.Errorf("force_complete %s: reason required", carID)
+		}
+		var oldStatus string
+		err := db.Transaction(func(tx *gorm.DB) error {
+			var c models.Car
+			if err := tx.Where("id = ?", carID).First(&c).Error; err != nil {
+				return fmt.Errorf("load car %s: %w", carID, err)
+			}
+			oldStatus = c.Status
+			if !car.IsValidTransition(c.Status, "done") {
+				valid := car.ValidTransitions[c.Status]
+				return fmt.Errorf("car: invalid status transition from %q to %q; valid transitions: %v", c.Status, "done", valid)
+			}
+			now := time.Now()
+			updates := map[string]interface{}{
+				"status":       "done",
+				"completed_at": now,
+			}
+			if err := tx.Model(&models.Car{}).Where("id = ?", carID).Updates(updates).Error; err != nil {
+				return fmt.Errorf("update car %s: %w", carID, err)
+			}
+			note := &models.CarProgress{
+				CarID:        carID,
+				EngineID:     "<plugin-dispatched>",
+				Note:         reason,
+				FilesChanged: "[]",
+				CreatedAt:    now,
+			}
+			if err := tx.Create(note).Error; err != nil {
+				return fmt.Errorf("write progress note: %w", err)
+			}
+			return nil
+		})
+		if err != nil {
 			return fmt.Errorf("force_complete %s: %w", carID, err)
+		}
+		// Publish and log only after the commit lands so a rolled-back
+		// transaction can never leak a phantom CarStatusChanged event
+		// or a misleading "status transition" log line.
+		slog.Info("car: status transition", "car", carID, "from", oldStatus, "to", "done", "via", "force_complete")
+		if bus != nil {
+			bus.Publish(string(plugin.CarStatusChanged), plugin.CarStatusChangedEvent{
+				CarID:     carID,
+				OldStatus: oldStatus,
+				NewStatus: "done",
+			})
 		}
 		return nil
 	}

@@ -149,26 +149,50 @@ func coerceInt(v any) int {
 	return 0
 }
 
-// DispatchCommand looks up a command in the static allow-list, validates
-// its args, and invokes the bound function. Plugin-registered command
-// names are NOT dispatched here (spec §7.3 keeps the allow-list and
-// plugin-provided surfaces separate); call plugin code directly for
-// those, or expose a separate dispatch path in a follow-up.
+// DispatchCommand is the in-process [plugin.Host] dispatch path. It
+// resolves a name against (1) the static allow-list, then (2) the
+// inProcCmds map populated by [Host.RegisterCommand]. The allow-list
+// remains authoritative for the built-in names — RegisterCommand
+// rejects any name that collides with it, so the fall-through can
+// never override a core binding. Names absent from both maps return
+// the standard "command not allowed" result.
+//
+// The fall-through INTENTIONALLY omits h.pluginCmds (the subprocess
+// plugin-registered surface). Subprocess plugins are reached through
+// hostservice.go DispatchCommand, which consults the allow-list and
+// then pluginCmds in two explicit branches. The two surfaces are
+// disjoint by design:
+//
+//   - In-process callers (core railyard subsystems / in-plugin SDK)
+//     reach allow-list + inProcCmds via this method.
+//   - Subprocess plugins reach allow-list + pluginCmds via the gRPC
+//     HostService.DispatchCommand RPC.
+//
+// In-process invocation of a subprocess plugin's command would require
+// driving its PluginService.HandleCommand RPC from here, which has no
+// production caller today; if a future caller needs it, add the
+// pluginCmds branch using lookupPluginByCommand + pluginRPC.HandleCommand
+// mirroring hostservice.go.
 func (h *Host) DispatchCommand(ctx context.Context, name string, args plugin.CommandArgs) (plugin.CommandResult, error) {
-	binding, ok := h.allowed[name]
-	if !ok {
-		return plugin.CommandResult{
-			Success: false,
-			Error:   fmt.Sprintf("command not allowed: %s", name),
-		}, nil
+	if binding, ok := h.allowed[name]; ok {
+		if err := validateArgs(binding.args, args); err != nil {
+			return plugin.CommandResult{
+				Success: false,
+				Error:   err.Error(),
+			}, nil
+		}
+		return binding.fn(ctx, args)
 	}
-	if err := validateArgs(binding.args, args); err != nil {
-		return plugin.CommandResult{
-			Success: false,
-			Error:   err.Error(),
-		}, nil
+	h.mu.Lock()
+	handler, ok := h.inProcCmds[name]
+	h.mu.Unlock()
+	if ok {
+		return handler(ctx, args)
 	}
-	return binding.fn(ctx, args)
+	return plugin.CommandResult{
+		Success: false,
+		Error:   fmt.Sprintf("command not allowed: %s", name),
+	}, nil
 }
 
 // RegisterCommand stores a plugin-provided command handler. Returns an

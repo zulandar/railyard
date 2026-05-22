@@ -369,8 +369,13 @@ allow-listing](#capabilities-and-allow-listing).
 
 ### DispatchCommand
 
-Invokes a command by name. The host enforces the operator's allow-list
-before routing.
+Invokes a command by name. The host first checks the core allow-list; if
+the name is not allow-listed, the call falls through to any matching
+handler registered via `RegisterCommand`. The allow-list remains
+authoritative for the built-in names — `RegisterCommand` rejects
+collisions, so the fall-through can never shadow a core binding. Names
+absent from both maps return `Success: false` with
+`Error: "command not allowed: <name>"`.
 
 ```go
 res, err := h.DispatchCommand(ctx, "scale_track", plugin.CommandArgs{
@@ -544,6 +549,48 @@ an ERROR. See `railyard-fll.6` for the host-side design.
 **Shutdown drain** — the `Stop` context is cancelled after 5 seconds.
 Past that, the host abandons the plugin and exits. Honor `ctx.Done()`
 on any wait Stop performs.
+
+---
+
+## Testing your plugin
+
+The SDK ships `pkg/plugin/plugintest`, a maintained `plugin.Host` fake
+plus recording affordances, so you don't have to hand-roll a host stub
+in every plugin project. Construct a `plugintest.FakeHost` (zero value
+is usable), drive `Init`/`Start`, fire a synthetic event via
+`DriveEvent`, then assert on the captured subscriptions, command
+registrations, dispatches, and log records.
+
+```go
+import (
+    "context"
+    "testing"
+
+    "github.com/zulandar/railyard/pkg/plugin"
+    "github.com/zulandar/railyard/pkg/plugin/plugintest"
+)
+
+func TestPluginLogsCarCreated(t *testing.T) {
+    fh := &plugintest.FakeHost{}
+    p := &MyPlugin{}
+
+    _ = p.Init(context.Background(), fh)
+    _ = p.Start(context.Background())
+
+    fh.DriveEvent(plugin.CarCreated, plugin.CarCreatedEvent{CarID: "c-1"})
+
+    if len(fh.Logs()) != 1 {
+        t.Fatalf("expected 1 log record, got %d", len(fh.Logs()))
+    }
+}
+```
+
+`FakeHost` covers every `plugin.Host` method (`Config`, `YardInfo`,
+`Snapshot`, `Subscribe`, `RegisterCommand`, `DispatchCommand`,
+`Logger`) and adds a test-only `DriveEvent` affordance. See
+`examples/plugins/hello/plugin_test.go` for a working example and the
+godoc on `pkg/plugin/plugintest` for the full set of recording
+accessors.
 
 ---
 
