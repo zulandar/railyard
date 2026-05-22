@@ -22,9 +22,11 @@ func newPluginsCmd() *cobra.Command {
 		Short: "Inspect plugins available to this binary",
 		Long: "Inspect plugins available to this binary. " +
 			"Use `ry plugins list` to see plugins discovered in the plugins.d directories " +
-			"and their enabled-in-config status.",
+			"and their enabled-in-config status. " +
+			"Use `ry plugins status` to query a running yardmaster for live runtime state.",
 	}
 	cmd.AddCommand(newPluginsListCmd())
+	cmd.AddCommand(newPluginsStatusCmd())
 	return cmd
 }
 
