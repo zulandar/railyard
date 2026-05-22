@@ -119,14 +119,14 @@ type launchedPlugin struct {
 	// relaunches since this host booted. Distinct from
 	// consecutiveCrashes, which resets on a clean Init. Read/written
 	// under [Host.mu].
-	restartCount int //nolint:unused // populated in Tasks 3-6
+	restartCount int
 
 	// lastActivity is the most recent timestamp at which this plugin
 	// did something the host noticed: successful Init, Start,
 	// supervisor relaunch, DispatchCommand hit, or Subscribe. Event
 	// delivery into the plugin's subscription stream does NOT bump
 	// this field (hot path). Read/written under [Host.mu].
-	lastActivity time.Time //nolint:unused // populated in Tasks 3-6
+	lastActivity time.Time
 }
 
 // pluginCapabilities is the host's view of the negotiated capability
@@ -362,6 +362,9 @@ func (h *Host) initOne(ctx context.Context, c candidate, parentLogger *slog.Logg
 	// Hand the plugin to the supervisor — it owns the registry
 	// insertion AND the restart loop for the lifetime of the host.
 	h.startSupervisor(ctx, c, lp)
+
+	// Init success: record that the plugin was just active.
+	h.bumpActivity(c.name)
 }
 
 // resolveAllowList builds the per-plugin AllowList from the loaded
@@ -450,6 +453,8 @@ func (h *Host) Start(ctx context.Context) {
 			slog.Int("events", len(lp.capabilities.subscribeEvents)),
 			slog.Int("commands", len(lp.capabilities.provideCommands)),
 		)
+		// Start success: record that the plugin was just active.
+		h.bumpActivity(name)
 	}
 }
 

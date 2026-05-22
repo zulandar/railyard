@@ -159,6 +159,18 @@ func (h *Host) supervise(ctx context.Context, c candidate, lp *launchedPlugin) {
 		// the sliding window (per the brief).
 		lp.consecutiveCrashes = 0
 
+		// Bump restartCount and lastActivity together in a single
+		// critical section. We do NOT call h.bumpActivity here because
+		// that helper only updates lastActivity — restartCount needs to
+		// be incremented in the same lock acquisition to stay
+		// consistent with any concurrent Status() reader.
+		h.mu.Lock()
+		if relaunchLP, ok := h.launched[c.name]; ok {
+			relaunchLP.restartCount++
+			relaunchLP.lastActivity = h.clock()
+		}
+		h.mu.Unlock()
+
 		// If shutdown fired DURING relaunch, tear the brand-new
 		// subprocess down rather than leaving the loop and trusting
 		// the next iteration's shutdown check (which would leak the

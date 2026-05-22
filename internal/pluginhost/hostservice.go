@@ -119,6 +119,8 @@ func (s *hostService) DispatchCommand(ctx context.Context, req *protov1.Dispatch
 		if err != nil {
 			return &protov1.DispatchCommandResponse{Success: false, Error: err.Error()}, nil
 		}
+		// DispatchCommand success: record that the dispatching plugin was just active.
+		s.host.bumpActivity(s.pluginName)
 		return commandResultToDispatch(res)
 	}
 
@@ -129,6 +131,8 @@ func (s *hostService) DispatchCommand(ctx context.Context, req *protov1.Dispatch
 		if err != nil {
 			return &protov1.DispatchCommandResponse{Success: false, Error: err.Error()}, nil
 		}
+		// DispatchCommand success: record that the dispatching plugin was just active.
+		s.host.bumpActivity(s.pluginName)
 		return &protov1.DispatchCommandResponse{
 			Success: hcResp.Success,
 			Error:   hcResp.Error,

@@ -97,6 +97,9 @@ func (s *hostService) Subscribe(req *protov1.SubscribeRequest, stream protov1.Ho
 		lp.subMu.Unlock()
 	}
 
+	// Subscribe setup success: record that the plugin was just active.
+	s.host.bumpActivity(s.pluginName)
+
 	// Multiplexed queue. Buffered so the bus subscriber goroutines can
 	// drop into it without blocking even when the gRPC stream is slow.
 	queue := make(chan *protov1.Event, subscribeQueueCap)
