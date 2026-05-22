@@ -80,7 +80,7 @@ func RunDaemonWithBus(ctx context.Context, db *gorm.DB, cfg *config.Config, conf
 
 	hs := NewHealthServer(pollInterval)
 	go func() {
-		if err := StartHealthServer(ctx, cfg.Yardmaster.HealthPort, hs); err != nil {
+		if err := StartHealthServer(ctx, cfg.Yardmaster.HealthPort, hs, nil); err != nil {
 			logger.Error("Health server error", "error", err)
 		}
 	}()

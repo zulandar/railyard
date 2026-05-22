@@ -2,15 +2,27 @@ package yardmaster
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
 
 	"github.com/zulandar/railyard/internal/messaging"
 	"github.com/zulandar/railyard/internal/models"
+	"github.com/zulandar/railyard/internal/pluginhost"
 	"gorm.io/gorm"
 )
+
+// StatusProvider is the contract the HTTP server uses to satisfy
+// GET /plugins/status. It is satisfied by *pluginhost.Host via the
+// Status() method. The indirection keeps the yardmaster package
+// from importing pluginhost beyond the type-level dependency on
+// pluginhost.Snapshot.
+type StatusProvider interface {
+	Status() pluginhost.Snapshot
+}
 
 // HealthServer provides HTTP health check endpoints for k8s probes.
 type HealthServer struct {
@@ -41,9 +53,11 @@ func (h *HealthServer) IsReady() bool {
 	return time.Since(h.lastPoll) < 2*h.pollInterval
 }
 
-// StartHealthServer starts an HTTP server with /healthz and /readyz endpoints.
-// It blocks until ctx is cancelled. The server listens on the given port.
-func StartHealthServer(ctx context.Context, port int, hs *HealthServer) error {
+// StartHealthServer starts an HTTP server with /healthz, /readyz, and
+// /plugins/status endpoints. It blocks until ctx is cancelled. The server
+// listens on the given port. provider may be nil, in which case
+// /plugins/status returns an empty Snapshot.
+func StartHealthServer(ctx context.Context, port int, hs *HealthServer, provider StatusProvider) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -56,6 +70,23 @@ func StartHealthServer(ctx context.Context, port int, hs *HealthServer) error {
 		} else {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			w.Write([]byte("not ready: last poll too old"))
+		}
+	})
+	mux.HandleFunc("/plugins/status", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		snap := pluginhost.Snapshot{}
+		if provider != nil {
+			snap = provider.Status()
+		}
+		w.Header().Set("Content-Type", "application/json")
+		enc := json.NewEncoder(w)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(snap); err != nil {
+			// Body header already written; just log.
+			slog.Default().Error("plugins/status: encode", "err", err)
 		}
 	})
 
