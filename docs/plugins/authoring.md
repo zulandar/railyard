@@ -552,6 +552,48 @@ on any wait Stop performs.
 
 ---
 
+## Testing your plugin
+
+The SDK ships `pkg/plugin/plugintest`, a maintained `plugin.Host` fake
+plus recording affordances, so you don't have to hand-roll a host stub
+in every plugin project. Construct a `plugintest.FakeHost` (zero value
+is usable), drive `Init`/`Start`, fire a synthetic event via
+`DriveEvent`, then assert on the captured subscriptions, command
+registrations, dispatches, and log records.
+
+```go
+import (
+    "context"
+    "testing"
+
+    "github.com/zulandar/railyard/pkg/plugin"
+    "github.com/zulandar/railyard/pkg/plugin/plugintest"
+)
+
+func TestPluginLogsCarCreated(t *testing.T) {
+    fh := &plugintest.FakeHost{}
+    p := &MyPlugin{}
+
+    _ = p.Init(context.Background(), fh)
+    _ = p.Start(context.Background())
+
+    fh.DriveEvent(plugin.CarCreated, plugin.CarCreatedEvent{CarID: "c-1"})
+
+    if len(fh.Logs()) != 1 {
+        t.Fatalf("expected 1 log record, got %d", len(fh.Logs()))
+    }
+}
+```
+
+`FakeHost` covers every `plugin.Host` method (`Config`, `YardInfo`,
+`Snapshot`, `Subscribe`, `RegisterCommand`, `DispatchCommand`,
+`Logger`) and adds a test-only `DriveEvent` affordance. See
+`examples/plugins/hello/plugin_test.go` for a working example and the
+godoc on `pkg/plugin/plugintest` for the full set of recording
+accessors.
+
+---
+
 ## Deploying
 
 The binary needs to be executable (`chmod +x`) and live in one of the
