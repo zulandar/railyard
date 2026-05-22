@@ -39,8 +39,9 @@ const subscribeQueueCap = 256
 // Each surviving topic is wired to the bus; events are multiplexed
 // into a single outbound stream with a bounded buffer. On overflow the
 // oldest queued event is dropped and a per-(plugin,topic) drop counter
-// is incremented; a throttled WARN log is deferred to railyard-fll.5.2
-// — for now we DEBUG every drop and count it.
+// is incremented. The counter increment is unconditional (other
+// metrics may consume it); WARN-level logging is throttled to at most
+// 1/sec per (plugin, topic) via [dropWarner] (railyard-fll.5.2).
 //
 // The function returns when the client cancels the stream context or
 // when [Host.Stop] cancels the stream during shutdown.
@@ -100,6 +101,7 @@ func (s *hostService) Subscribe(req *protov1.SubscribeRequest, stream protov1.Ho
 	// drop into it without blocking even when the gRPC stream is slow.
 	queue := make(chan *protov1.Event, subscribeQueueCap)
 	drops := newDropCounter(s.pluginName, s.logger)
+	warner := newDropWarner(s.logger)
 
 	// Wire each allowed topic to the bus.
 	unsubs := make([]events.Unsubscribe, 0, len(allowedTopics))
@@ -124,6 +126,7 @@ func (s *hostService) Subscribe(req *protov1.SubscribeRequest, stream protov1.Ho
 				default:
 				}
 				drops.record(t)
+				warner.recordDrop(s.pluginName, t)
 			}
 		})
 		unsubs = append(unsubs, unsub)
@@ -155,10 +158,10 @@ func (s *hostService) Subscribe(req *protov1.SubscribeRequest, stream protov1.Ho
 	}
 }
 
-// dropCounter tallies per-topic dropped events with throttled DEBUG
-// logging. The throttled WARN that operators care about is wired in
-// railyard-fll.5.2; this stub increments the counter and logs at DEBUG
-// only.
+// dropCounter tallies per-topic dropped events. The counter survives
+// independent of the WARN log throttling in [dropWarner] because other
+// metrics consumers (e.g. future Prometheus exporters) may want the
+// raw total without any time-windowed rollup applied.
 type dropCounter struct {
 	pluginName string
 	logger     *slog.Logger
@@ -174,6 +177,9 @@ func newDropCounter(pluginName string, logger *slog.Logger) *dropCounter {
 	}
 }
 
+// record increments the running total of drops for `topic`. The
+// throttled WARN log is emitted by [dropWarner.recordDrop]; this
+// method intentionally does NOT log so the counter stays cheap.
 func (d *dropCounter) record(topic string) {
 	d.mu.Lock()
 	ctr, ok := d.count[topic]
@@ -182,11 +188,7 @@ func (d *dropCounter) record(topic string) {
 		d.count[topic] = ctr
 	}
 	d.mu.Unlock()
-	n := ctr.Add(1)
-	d.logger.Debug("pluginhost: subscribe queue overflow",
-		slog.String("topic", topic),
-		slog.Int64("dropped", n),
-	)
+	ctr.Add(1)
 }
 
 // payloadToProto converts a bus event payload to its wire shape. The
