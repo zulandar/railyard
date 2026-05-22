@@ -1,6 +1,11 @@
 package pluginhost
 
-import "time"
+import (
+	"fmt"
+	"sort"
+	"strings"
+	"time"
+)
 
 // Snapshot is the runtime-state projection returned by [Host.Status].
 // It is the wire format for GET /plugins/status served by the yardmaster
@@ -71,6 +76,57 @@ type skippedPlugin struct {
 //
 // Plugins are returned in the slice sorted ascending by name.
 func (h *Host) Status() Snapshot {
-	// Implemented in Task 6.
-	return Snapshot{}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	plugins := make([]PluginStatus, 0, len(h.launched)+len(h.initFailures)+len(h.skipped))
+
+	for _, lp := range h.launched {
+		status := StatusRunning
+		errStr := ""
+		if lp.disabled {
+			status = StatusDisabled
+			errStr = lp.lastExitReason
+		}
+		plugins = append(plugins, PluginStatus{
+			Name:              lp.name,
+			Status:            status,
+			RestartCount:      lp.restartCount,
+			SubscriptionCount: h.subscriptions[lp.name],
+			CommandCount:      len(lp.capabilities.provideCommands),
+			LastActivity:      lp.lastActivity,
+			PID:               lp.pid,
+			Path:              lp.path,
+			Error:             errStr,
+		})
+	}
+
+	for _, f := range h.initFailures {
+		plugins = append(plugins, PluginStatus{
+			Name:         f.name,
+			Status:       StatusFailed,
+			Path:         f.path,
+			LastActivity: f.failedAt,
+			Error:        f.err,
+		})
+	}
+
+	for _, s := range h.skipped {
+		plugins = append(plugins, PluginStatus{
+			Name:   s.name,
+			Status: StatusSkipped,
+			Error:  fmt.Sprintf("not found in: %s", strings.Join(s.searched, ", ")),
+		})
+	}
+
+	sort.Slice(plugins, func(i, j int) bool { return plugins[i].Name < plugins[j].Name })
+
+	return Snapshot{
+		Yardmaster: YardmasterInfo{
+			Version:     h.deps.RailyardVersion,
+			BuildCommit: h.deps.BuildCommit,
+			BootedAt:    h.bootedAt,
+		},
+		Plugins: plugins,
+	}
 }
