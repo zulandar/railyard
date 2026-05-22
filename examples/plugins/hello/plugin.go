@@ -44,16 +44,16 @@ func (h *Hello) Init(_ context.Context, host plugin.Host) error {
 
 // Start subscribes to CarCreated. Subscription handlers run on a
 // dedicated per-subscriber goroutine, so Start returns immediately.
-// Long-lived work should be queued through host.RunDaemon — never in
-// the Start body.
+// Long-lived work should be launched as a plain goroutine from Start —
+// never in the Start body itself.
 func (h *Hello) Start(_ context.Context) error {
 	h.host.Subscribe(plugin.CarCreated, h.onCarCreated)
 	return nil
 }
 
 // onCarCreated runs on the plugin's dedicated subscriber goroutine.
-// Keep handler work fast — long work belongs in a daemon (see
-// docs/plugins/authoring.md §9).
+// Keep handler work fast — long work belongs in a goroutine the plugin
+// owns (see docs/plugins/authoring.md §9).
 func (h *Hello) onCarCreated(_ plugin.EventType, payload any) {
 	evt, ok := payload.(plugin.CarCreatedEvent)
 	if !ok {

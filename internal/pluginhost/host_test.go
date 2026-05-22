@@ -49,7 +49,7 @@ func TestYardInfoFromConfig(t *testing.T) {
 
 // Legacy in-process lifecycle tests (TestLifecycleOrdering,
 // TestInitFailureIsolation, TestStopDrainTimeout, TestRunDaemonInvokesFn)
-// were removed when railyard-fll.3 swapped the in-process Plugin walk for
-// the subprocess go-plugin model. They are tracked for re-write in bd
-// issue railyard-bjp; see internal/pluginhost/launch_test.go for the new
-// happy-path coverage of the subprocess launch + handshake.
+// were removed when the subprocess go-plugin model replaced the in-process
+// Plugin walk. They are tracked for re-write in bd issue railyard-bjp;
+// see internal/pluginhost/launch_test.go for the new happy-path coverage
+// of the subprocess launch + handshake.

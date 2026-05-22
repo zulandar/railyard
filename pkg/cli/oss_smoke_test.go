@@ -12,10 +12,9 @@
 //  1. The OSS binary compiles cleanly via `go build ./cmd/ry`. The
 //     surrounding `go test ./...` only proves test packages compile —
 //     a separate build step is what an OSS user actually does.
-//  2. The built binary runs, exits 0 for `--help`, and reports
-//     "No plugins registered in this binary." for `plugins list`.
-//  3. plugin.Registered() is empty at OSS build time, with no hidden
-//     init() side-effects from transitive imports adding entries.
+//  2. The built binary runs, exits 0 for `--help`, and `plugins list`
+//     emits the railyard-hqe placeholder message (introspection of the
+//     live launched-plugin set is a future rewire).
 //
 // Tests that shell out to the go toolchain follow the pattern in
 // pkg/plugin/import_test.go: they Skip when `go` isn't on PATH and
@@ -32,30 +31,7 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/zulandar/railyard/pkg/plugin"
 )
-
-// TestOSSRegistryEmpty is the fast-path unit test that asserts the OSS
-// binary's plugin registry is empty at process start. Any future PR
-// that side-effect imports a package which calls plugin.Register at
-// init time from inside the OSS module will break this test loudly.
-//
-// We also call Registered() twice to catch the (currently impossible
-// but easy-to-regress) case where a lazy init populates the registry
-// on first read.
-func TestOSSRegistryEmpty(t *testing.T) {
-	if got := plugin.Registered(); len(got) != 0 {
-		t.Fatalf("OSS build registered %d plugins at init: %+v; the OSS binary must have zero", len(got), got)
-	}
-
-	// Second call: catches accidental lazy init. The registry is a
-	// process-global with no public reset, so this is the only place
-	// we can pin the property.
-	if got := plugin.Registered(); len(got) != 0 {
-		t.Fatalf("plugin.Registered() returned %d entries on second call: %+v; OSS registry must stay empty across calls", len(got), got)
-	}
-}
 
 // TestOSSSmokeBuild builds the OSS `ry` binary into a temp dir and
 // exercises two subcommands end-to-end. This is the only place that
@@ -109,12 +85,12 @@ func TestOSSSmokeBuild(t *testing.T) {
 		t.Fatalf("built binary missing or empty at %s: %v", outPath, err)
 	}
 
-	t.Run("PluginsListReportsNone", func(t *testing.T) {
+	t.Run("PluginsListPlaceholder", func(t *testing.T) {
 		stdout, stderr, err := runBinary(t, outPath, 15*time.Second, "plugins", "list")
 		if err != nil {
 			t.Fatalf("`ry plugins list` failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
 		}
-		const want = "No plugins registered in this binary."
+		const want = "railyard-hqe"
 		if !strings.Contains(stdout, want) {
 			t.Errorf("`ry plugins list` stdout did not contain %q\nstdout:\n%s\nstderr:\n%s", want, stdout, stderr)
 		}

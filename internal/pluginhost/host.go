@@ -1,19 +1,16 @@
 // Package pluginhost provides the concrete implementation of the
 // [plugin.Host] contract declared in github.com/zulandar/railyard/pkg/plugin.
 //
-// Under the subprocess plugin model (railyard-fll.3) the host discovers
-// plugin binaries on disk, launches each enabled binary as a subprocess
-// over a Unix-domain socket via [github.com/hashicorp/go-plugin], and
-// brokers state through the [HostService] gRPC server defined in
-// hostservice.go. The legacy in-process Register / Init / Start / Stop
-// surface that walked an `[]plugin.Plugin` is gone — plugins are now
-// processes, not goroutines.
+// Under the subprocess plugin model the host discovers plugin binaries
+// on disk, launches each enabled binary as a subprocess over a
+// Unix-domain socket via [github.com/hashicorp/go-plugin], and brokers
+// state through the [HostService] gRPC server defined in hostservice.go.
+// Plugins are processes, not goroutines.
 //
 // The bare *Host type still implements [plugin.Host] so internal
-// subsystems can construct an in-process Host view for testing and so the
-// daemon-manager fields in daemon.go keep compiling. Those methods are
-// not exercised by subprocess plugins — they reach the host exclusively
-// through gRPC.
+// subsystems can construct an in-process Host view for testing. Those
+// methods are not exercised by subprocess plugins — they reach the host
+// exclusively through gRPC.
 package pluginhost
 
 import (
@@ -113,15 +110,11 @@ type Host struct {
 	// tests and the in-plugin SDK view keep compiling.
 	inProcCmds map[string]plugin.CommandHandler
 
-	// daemons / subscriptions / daemonCtx / daemonCancel exist purely so
-	// daemon.go and the bare-*Host Subscribe/RunDaemon shims keep
-	// compiling — *Host must satisfy the plugin.Host interface even
-	// though subprocess plugins never reach these paths. Final removal
-	// is tracked by railyard-fll.8.3.
-	daemons       map[string][]*daemonState
+	// subscriptions tracks per-plugin live Subscribe count for the
+	// bare-*Host Subscribe shim. *Host must satisfy [plugin.Host] even
+	// though subprocess plugins never reach this path (they go through
+	// the gRPC HostService.Subscribe stream in subscribe.go).
 	subscriptions map[string]int
-	daemonCtx     context.Context
-	daemonCancel  context.CancelFunc
 
 	// launched is the registry of subprocess plugins the host owns.
 	// Keyed by plugin name.
@@ -252,13 +245,6 @@ func (h *Host) Logger() *slog.Logger {
 	return slog.Default()
 }
 
-// RunDaemon registers a managed daemon under an empty plugin name.
-// Retained so *Host satisfies [plugin.Host]. Subprocess plugins do not
-// use this — their daemons run in the plugin's own process.
-func (h *Host) RunDaemon(name string, fn plugin.DaemonFunc) {
-	h.runDaemonFor("", name, fn)
-}
-
 // Subscribe delegates to the underlying events bus. Retained for
 // [plugin.Host] interface satisfaction; subprocess plugins reach the bus
 // through HostService.Subscribe instead.
@@ -267,9 +253,8 @@ func (h *Host) Subscribe(topic plugin.EventType, handler plugin.EventHandler) pl
 }
 
 // subscribeFor is the per-plugin-tracked Subscribe implementation used
-// by in-process callers via pluginView.Subscribe. Kept so daemon.go and
-// the legacy paths still compile; subprocess plugins use the gRPC
-// Subscribe path implemented in subscribe.go.
+// by in-process callers via *Host.Subscribe. Subprocess plugins use the
+// gRPC Subscribe path implemented in subscribe.go.
 func (h *Host) subscribeFor(pluginName string, topic plugin.EventType, handler plugin.EventHandler) plugin.Unsubscribe {
 	h.incrSubscription(pluginName)
 	var once sync.Once

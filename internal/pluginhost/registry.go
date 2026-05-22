@@ -529,14 +529,6 @@ func (h *Host) Stop(parent context.Context) {
 	// zombie subprocess. The shutdownCh / lp.stopping signals above
 	// guarantee the supervisor exits promptly; this Wait is the join.
 	h.supervisorWG.Wait()
-
-	// Belt-and-suspenders: cancel the legacy daemonCtx (still alive for
-	// in-process daemon.go users).
-	h.mu.Lock()
-	if h.daemonCancel != nil {
-		h.daemonCancel()
-	}
-	h.mu.Unlock()
 }
 
 // terminateSubprocess performs the SIGTERM → 5s wait → SIGKILL

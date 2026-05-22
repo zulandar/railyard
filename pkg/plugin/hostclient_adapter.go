@@ -291,40 +291,6 @@ func (h *hostClient) DispatchCommand(ctx context.Context, name string, args Comm
 	}, nil
 }
 
-// RunDaemon implements Host.RunDaemon.
-//
-// Deprecated: in the subprocess plugin model, a plugin already owns its
-// own process — there is no host-managed daemon set to register into.
-// RunDaemon is preserved for source-compat with plugins authored against
-// the in-process SDK and simply spawns the daemon as a regular
-// goroutine with panic recovery. Callers should migrate to plain
-// goroutines directly. See railyard-fll.8 for the cleanup sweep.
-func (h *hostClient) RunDaemon(name string, fn DaemonFunc) {
-	if fn == nil {
-		return
-	}
-	h.logger.Warn(
-		"plugin: Host.RunDaemon is deprecated under the subprocess plugin model; spawn a goroutine directly",
-		slog.String("daemon", name),
-	)
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				h.logger.Error("plugin: daemon panic recovered",
-					slog.String("daemon", name),
-					slog.Any("panic", r),
-				)
-			}
-		}()
-		if err := fn(h.rootCtx); err != nil && !errors.Is(err, context.Canceled) {
-			h.logger.Error("plugin: daemon returned error",
-				slog.String("daemon", name),
-				slog.String("err", err.Error()),
-			)
-		}
-	}()
-}
-
 // Logger implements Host.Logger.
 func (h *hostClient) Logger() *slog.Logger {
 	return h.logger
