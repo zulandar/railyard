@@ -12,6 +12,7 @@ import (
 	"github.com/zulandar/railyard/internal/config"
 	"github.com/zulandar/railyard/internal/dashboard"
 	"github.com/zulandar/railyard/internal/events"
+	"github.com/zulandar/railyard/internal/models"
 	"github.com/zulandar/railyard/internal/orchestration"
 	"github.com/zulandar/railyard/internal/pluginhost"
 	"github.com/zulandar/railyard/internal/yardmaster"
@@ -166,12 +167,40 @@ func scaleTrackAdapter(db *gorm.DB, cfg *config.Config) func(ctx context.Context
 // path in railyard today; the closest existing semantic is the status
 // transition, which the car package's Update validates and (on success)
 // publishes a [plugin.CarStatusChanged] event for. The operator reason is
-// surfaced via a best-effort progress note appended after the transition;
-// failure to write the note is logged but does not fail the command (the
-// transition is the load-bearing effect).
+// captured as a [models.CarProgress] audit row whose EngineID is set to the
+// literal marker "<plugin-dispatched>" so operators can grep the progress log
+// for plugin-initiated completions.
+//
+// The status transition and the progress-note write run inside the same
+// db.Transaction so a failure to persist the audit row rolls back the
+// status update — there must never be a force-completed car without a
+// matching reason on file. UpdateWithBus publishes its lifecycle events
+// during the inner Updates call; under the outer transaction those publishes
+// fire before the wrapper commits. Subscribers observing CarStatusChanged
+// for force_complete should treat the event as "intent to commit" and
+// re-read state if they need strict post-commit consistency. This is an
+// accepted trade-off to keep UpdateWithBus's signature untouched (no
+// drive-by refactor) while still meeting the atomicity requirement on the
+// load-bearing DB writes.
 func forceCompleteAdapter(db *gorm.DB, bus events.Bus) func(ctx context.Context, carID, reason string) error {
 	return func(ctx context.Context, carID, reason string) error {
-		if err := car.UpdateWithBus(db, bus, carID, map[string]interface{}{"status": "done"}); err != nil {
+		err := db.Transaction(func(tx *gorm.DB) error {
+			if err := car.UpdateWithBus(tx, bus, carID, map[string]interface{}{"status": "done"}); err != nil {
+				return err
+			}
+			note := &models.CarProgress{
+				CarID:        carID,
+				EngineID:     "<plugin-dispatched>",
+				Note:         reason,
+				FilesChanged: "[]",
+				CreatedAt:    time.Now(),
+			}
+			if err := tx.Create(note).Error; err != nil {
+				return fmt.Errorf("write progress note: %w", err)
+			}
+			return nil
+		})
+		if err != nil {
 			return fmt.Errorf("force_complete %s: %w", carID, err)
 		}
 		return nil
