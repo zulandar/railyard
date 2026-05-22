@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -22,9 +23,17 @@ var pluginsStatusFetch = defaultPluginsStatusFetch
 // never invoke it (they swap pluginsStatusFetch); the integration test
 // in plugins_integration_test.go exercises it against a real httptest
 // server.
-func defaultPluginsStatusFetch(url string, timeout time.Duration) (*pluginhost.Snapshot, error) {
+//
+// ctx is the cobra command context — cancellation propagates to the
+// in-flight request so Ctrl+C returns immediately rather than waiting
+// for client.Timeout.
+func defaultPluginsStatusFetch(ctx context.Context, url string, timeout time.Duration) (*pluginhost.Snapshot, error) {
 	client := &http.Client{Timeout: timeout}
-	resp, err := client.Get(url) //nolint:noctx
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -88,7 +97,7 @@ func runPluginsStatus(cmd *cobra.Command, configPath, urlFlag string, jsonOut bo
 		url = fmt.Sprintf("http://127.0.0.1:%d/plugins/status", port)
 	}
 
-	snap, err := pluginsStatusFetch(url, timeout)
+	snap, err := pluginsStatusFetch(cmd.Context(), url, timeout)
 	if err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(),
 			"ry plugins status: yardmaster not reachable at %s: %v\n"+

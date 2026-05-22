@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -11,7 +12,7 @@ import (
 	"github.com/zulandar/railyard/internal/pluginhost"
 )
 
-func withStubStatusFetch(t *testing.T, fn func(url string, timeout time.Duration) (*pluginhost.Snapshot, error)) {
+func withStubStatusFetch(t *testing.T, fn func(ctx context.Context, url string, timeout time.Duration) (*pluginhost.Snapshot, error)) {
 	t.Helper()
 	orig := pluginsStatusFetch
 	pluginsStatusFetch = fn
@@ -22,7 +23,7 @@ func TestPluginsStatusTableOutput(t *testing.T) {
 	withStubConfigLoad(t, func(string) (*config.Config, error) {
 		return &config.Config{Yardmaster: config.YardmasterConfig{HealthPort: 8081}}, nil
 	})
-	withStubStatusFetch(t, func(url string, timeout time.Duration) (*pluginhost.Snapshot, error) {
+	withStubStatusFetch(t, func(ctx context.Context, url string, timeout time.Duration) (*pluginhost.Snapshot, error) {
 		if !strings.Contains(url, "8081") {
 			t.Errorf("expected default URL to use HealthPort 8081, got %q", url)
 		}
@@ -60,7 +61,7 @@ func TestPluginsStatusJSONOutput(t *testing.T) {
 	withStubConfigLoad(t, func(string) (*config.Config, error) {
 		return &config.Config{Yardmaster: config.YardmasterConfig{HealthPort: 8081}}, nil
 	})
-	withStubStatusFetch(t, func(url string, timeout time.Duration) (*pluginhost.Snapshot, error) {
+	withStubStatusFetch(t, func(ctx context.Context, url string, timeout time.Duration) (*pluginhost.Snapshot, error) {
 		return &pluginhost.Snapshot{
 			Plugins: []pluginhost.PluginStatus{{Name: "trainmaster", Status: pluginhost.StatusRunning}},
 		}, nil
@@ -84,7 +85,7 @@ func TestPluginsStatusConnectionRefusedHint(t *testing.T) {
 	withStubConfigLoad(t, func(string) (*config.Config, error) {
 		return &config.Config{Yardmaster: config.YardmasterConfig{HealthPort: 8081}}, nil
 	})
-	withStubStatusFetch(t, func(url string, timeout time.Duration) (*pluginhost.Snapshot, error) {
+	withStubStatusFetch(t, func(ctx context.Context, url string, timeout time.Duration) (*pluginhost.Snapshot, error) {
 		return nil, errors.New("dial tcp 127.0.0.1:8081: connect: connection refused")
 	})
 
@@ -111,7 +112,7 @@ func TestPluginsStatusUrlOverride(t *testing.T) {
 		return &config.Config{}, nil
 	})
 	called := ""
-	withStubStatusFetch(t, func(url string, timeout time.Duration) (*pluginhost.Snapshot, error) {
+	withStubStatusFetch(t, func(ctx context.Context, url string, timeout time.Duration) (*pluginhost.Snapshot, error) {
 		called = url
 		return &pluginhost.Snapshot{}, nil
 	})
