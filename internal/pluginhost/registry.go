@@ -112,7 +112,10 @@ type launchedPlugin struct {
 
 	// lastExitReason is a short, human-readable string describing why
 	// the subprocess last terminated unexpectedly. Surfaced in the
-	// permanent-disable ERROR log; populated by the supervisor.
+	// permanent-disable ERROR log AND by Status() for disabled rows.
+	// Read/written under [Host.mu]. Same-goroutine reads in
+	// handlePermanentDisable run sequentially after the supervisor's
+	// locked write, so they see the latest value without re-locking.
 	lastExitReason string
 
 	// restartCount is the cumulative count of successful supervisor

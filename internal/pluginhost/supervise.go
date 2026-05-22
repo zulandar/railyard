@@ -99,7 +99,12 @@ func (h *Host) supervise(ctx context.Context, c candidate, lp *launchedPlugin) {
 		// code, so we can only attest "exited unexpectedly". Lane D's
 		// SDK convention is that a panic-recovery returns exit code 1
 		// via os.Exit(1); we record that as the canonical reason.
+		// Writes to lp.lastExitReason MUST take h.mu — Status() reads
+		// it under the lock to surface the Error column for disabled
+		// rows.
+		h.mu.Lock()
 		lp.lastExitReason = "subprocess exited unexpectedly"
+		h.mu.Unlock()
 		count, exceeded := lp.budget.recordCrash()
 		lp.consecutiveCrashes++
 
@@ -148,7 +153,9 @@ func (h *Host) supervise(ctx context.Context, c candidate, lp *launchedPlugin) {
 				fmt.Sprintf("plugin %s: relaunch attempt failed: %v", c.name, err),
 				slog.String("error", err.Error()),
 			)
+			h.mu.Lock()
 			lp.lastExitReason = "relaunch failed: " + err.Error()
+			h.mu.Unlock()
 			// Loop iterates again — recordCrash and possibly
 			// permanent-disable handled at the top.
 			continue
