@@ -209,7 +209,7 @@ func TestMonitorSession_ZeroExitCarDone(t *testing.T) {
 	stallCh := make(chan engine.StallReason, 1)
 
 	outcome := monitorSessionWithDB(
-		context.Background(), doneCh, stallCh, gormDB, "car-ms1",
+		context.Background(), doneCh, stallCh, nil, gormDB, "car-ms1",
 	)
 
 	if outcome.kind != outcomeCompleted {
@@ -233,7 +233,7 @@ func TestMonitorSession_ZeroExitCarNotDone(t *testing.T) {
 	stallCh := make(chan engine.StallReason, 1)
 
 	outcome := monitorSessionWithDB(
-		context.Background(), doneCh, stallCh, gormDB, "car-ms2",
+		context.Background(), doneCh, stallCh, nil, gormDB, "car-ms2",
 	)
 
 	if outcome.kind != outcomeClear {
@@ -256,11 +256,41 @@ func TestMonitorSession_StallButCarDone(t *testing.T) {
 	stallCh <- engine.StallReason{Type: "stdout_timeout", Detail: "no output"}
 
 	outcome := monitorSessionWithDB(
-		context.Background(), doneCh, stallCh, gormDB, "car-ms3",
+		context.Background(), doneCh, stallCh, nil, gormDB, "car-ms3",
 	)
 
 	if outcome.kind != outcomeCompleted {
 		t.Errorf("kind = %d, want outcomeCompleted (%d) — stall was false alarm", outcome.kind, outcomeCompleted)
+	}
+}
+
+func TestMonitorSession_RateLimitSignal(t *testing.T) {
+	gormDB := engineTestDB(t)
+
+	gormDB.Create(&models.Car{
+		ID:     "car-msrl",
+		Title:  "Rate limited car",
+		Status: "in_progress",
+		Track:  "backend",
+	})
+
+	doneCh := make(chan error, 1)
+	stallCh := make(chan engine.StallReason, 1)
+	rateCh := make(chan engine.RateLimitSignal, 1)
+	rateCh <- engine.RateLimitSignal{Source: "openrouter", RetryAfter: 5 * time.Second}
+
+	outcome := monitorSessionWithDB(
+		context.Background(), doneCh, stallCh, rateCh, gormDB, "car-msrl",
+	)
+
+	if outcome.kind != outcomeRateLimited {
+		t.Errorf("kind = %d, want outcomeRateLimited (%d)", outcome.kind, outcomeRateLimited)
+	}
+	if outcome.rateLimitSignal.Source != "openrouter" {
+		t.Errorf("rateLimitSignal.Source = %q, want %q", outcome.rateLimitSignal.Source, "openrouter")
+	}
+	if outcome.rateLimitSignal.RetryAfter != 5*time.Second {
+		t.Errorf("rateLimitSignal.RetryAfter = %v, want 5s", outcome.rateLimitSignal.RetryAfter)
 	}
 }
 
@@ -279,7 +309,7 @@ func TestMonitorSession_StallCarNotDone(t *testing.T) {
 	stallCh <- engine.StallReason{Type: "stdout_timeout", Detail: "no output"}
 
 	outcome := monitorSessionWithDB(
-		context.Background(), doneCh, stallCh, gormDB, "car-ms4",
+		context.Background(), doneCh, stallCh, nil, gormDB, "car-ms4",
 	)
 
 	if outcome.kind != outcomeStall {

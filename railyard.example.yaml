@@ -120,6 +120,10 @@ repo: git@github.com:org/myproject.git
 #   escalation_cooldown_sec: 600     # per-car cooldown between escalations (prevents cost spikes)
 #   max_concurrent_escalations: 3    # limit concurrent escalation goroutines
 #   stale_engine_threshold_sec: 60   # seconds before an engine is considered stale
+#   rate_limit_max_retries: 3        # max consecutive upstream rate-limit retries before falling through to stall (default 3).
+#                                    # Raise for paid-tier production with occasional spikes; lower for fast escalation.
+#   rate_limit_max_wait_sec: 300     # cap per-retry wait duration in seconds (default 300).
+#                                    # Honored alongside upstream Retry-After hints; see charts/railyard/README.md "Rate limit handling".
 
 # ---------------------------------------------------------------------------
 # Yardmaster daemon settings (optional — defaults shown)
@@ -208,6 +212,9 @@ tracks:
     test_command: "go test ./..."
     # agent_provider: claude    # override global provider for this track
     # agent_model: anthropic-claude-opus-4.7   # optional per-track override
+    # stall_stdout_timeout_sec: 600   # bump the stall fuse beyond the 120s default for tracks pinned
+                                       # to rate-limit-sensitive backends (free OpenRouter, free DO).
+                                       # Inherits stall.stdout_timeout_sec when unset.
     conventions:
       style: "stdlib-first, no frameworks"
       test_framework: "stdlib table-driven"

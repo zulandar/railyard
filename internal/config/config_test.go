@@ -560,6 +560,45 @@ func TestParse_StallDefaults(t *testing.T) {
 	}
 }
 
+func TestParse_StallRateLimitDefaults(t *testing.T) {
+	// Unset rate_limit_max_retries and rate_limit_max_wait_sec — defaults should be
+	// applied so the engine retry loop has bounded behavior out of the box.
+	cfg, err := Parse([]byte(minimalYAML))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Stall.RateLimitMaxRetries != 3 {
+		t.Errorf("Stall.RateLimitMaxRetries = %d, want 3 (default)", cfg.Stall.RateLimitMaxRetries)
+	}
+	if cfg.Stall.RateLimitMaxWaitSec != 300 {
+		t.Errorf("Stall.RateLimitMaxWaitSec = %d, want 300 (default)", cfg.Stall.RateLimitMaxWaitSec)
+	}
+}
+
+func TestParse_StallRateLimitOverrides(t *testing.T) {
+	// Explicit values must be preserved through applyDefaults.
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+stall:
+  rate_limit_max_retries: 7
+  rate_limit_max_wait_sec: 45
+tracks:
+  - name: backend
+    language: go
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Stall.RateLimitMaxRetries != 7 {
+		t.Errorf("Stall.RateLimitMaxRetries = %d, want 7", cfg.Stall.RateLimitMaxRetries)
+	}
+	if cfg.Stall.RateLimitMaxWaitSec != 45 {
+		t.Errorf("Stall.RateLimitMaxWaitSec = %d, want 45", cfg.Stall.RateLimitMaxWaitSec)
+	}
+}
+
 func TestParse_StallCustomValues(t *testing.T) {
 	yaml := `
 owner: alice
@@ -584,6 +623,75 @@ tracks:
 	}
 	if cfg.Stall.MaxClearCycles != 10 {
 		t.Errorf("Stall.MaxClearCycles = %d, want 10", cfg.Stall.MaxClearCycles)
+	}
+}
+
+func TestParse_StallStdoutTimeoutSec_GlobalDefault(t *testing.T) {
+	// No per-track override; global Stall.StdoutTimeoutSec=180. Every track
+	// should inherit the global value after applyDefaults.
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+stall:
+  stdout_timeout_sec: 180
+tracks:
+  - name: backend
+    language: go
+  - name: frontend
+    language: typescript
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Stall.StdoutTimeoutSec != 180 {
+		t.Errorf("Stall.StdoutTimeoutSec = %d, want 180", cfg.Stall.StdoutTimeoutSec)
+	}
+	if cfg.Tracks[0].StallStdoutTimeoutSec != 180 {
+		t.Errorf("Tracks[0].StallStdoutTimeoutSec = %d, want 180 (inherited from global)", cfg.Tracks[0].StallStdoutTimeoutSec)
+	}
+	if cfg.Tracks[1].StallStdoutTimeoutSec != 180 {
+		t.Errorf("Tracks[1].StallStdoutTimeoutSec = %d, want 180 (inherited from global)", cfg.Tracks[1].StallStdoutTimeoutSec)
+	}
+}
+
+func TestParse_StallStdoutTimeoutSec_PerTrackOverride(t *testing.T) {
+	// Per-track override (600) wins over global (180). A second track without
+	// an override still inherits the global value.
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+stall:
+  stdout_timeout_sec: 180
+tracks:
+  - name: backend
+    language: go
+    stall_stdout_timeout_sec: 600
+  - name: frontend
+    language: typescript
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Tracks[0].StallStdoutTimeoutSec != 600 {
+		t.Errorf("Tracks[0].StallStdoutTimeoutSec = %d, want 600 (per-track override)", cfg.Tracks[0].StallStdoutTimeoutSec)
+	}
+	if cfg.Tracks[1].StallStdoutTimeoutSec != 180 {
+		t.Errorf("Tracks[1].StallStdoutTimeoutSec = %d, want 180 (inherited from global)", cfg.Tracks[1].StallStdoutTimeoutSec)
+	}
+}
+
+func TestParse_StallStdoutTimeoutSec_BaselineDefault(t *testing.T) {
+	// Neither per-track override nor global Stall.StdoutTimeoutSec is set.
+	// Track should inherit the 120s baseline (which flows through the global
+	// default applied earlier in applyDefaults).
+	cfg, err := Parse([]byte(minimalYAML))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Tracks[0].StallStdoutTimeoutSec != 120 {
+		t.Errorf("Tracks[0].StallStdoutTimeoutSec = %d, want 120 (baseline default)", cfg.Tracks[0].StallStdoutTimeoutSec)
 	}
 }
 

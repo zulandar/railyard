@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/rand"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -160,9 +161,12 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 	// Start heartbeat.
 	hbErrCh := engine.StartHeartbeat(ctx, gormDB, eng.ID, engine.DefaultHeartbeatInterval)
 
-	// Build stall config from config file.
+	// Build stall config from config file. StdoutTimeout uses the per-track
+	// resolved value (per-track override → global Stall.StdoutTimeoutSec → 120s
+	// baseline) so tracks pinned to rate-limit-sensitive backends can extend
+	// the stall fuse without affecting healthy tracks.
 	stallCfg := engine.StallConfig{
-		StdoutTimeout:    time.Duration(cfg.Stall.StdoutTimeoutSec) * time.Second,
+		StdoutTimeout:    time.Duration(trackCfg.StallStdoutTimeoutSec) * time.Second,
 		RepeatedErrorMax: cfg.Stall.RepeatedErrorMax,
 		MaxClearCycles:   cfg.Stall.MaxClearCycles,
 	}
@@ -345,31 +349,27 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 			}
 		}
 
-		// Spawn agent subprocess.
-		sess, err := engine.SpawnAgent(ctx, gormDB, engine.SpawnOpts{
+		// Spawn-and-monitor with pause-and-retry on upstream rate limits.
+		// The inner loop re-spawns the agent subprocess after a rate-limit
+		// signal, up to cfg.Stall.RateLimitMaxRetries attempts. On exhaustion
+		// the outcome is converted to outcomeStall so the existing stall
+		// handling path can block the car as a fallback.
+		spawnOpts := engine.SpawnOpts{
 			EngineID:       eng.ID,
 			CarID:          claimed.ID,
 			ContextPayload: contextPayload,
 			WorkDir:        workDir,
 			ProviderName:   providerName,
 			Model:          trackCfg.AgentModel,
-		})
-		if err != nil {
-			logger.Error("Spawn error", "error", err)
+		}
+		sess, outcome, spawnErr := spawnAndMonitorWithRetry(ctx, gormDB, spawnOpts, stallCfg, cfg.Stall.RateLimitMaxRetries, cfg.Stall.RateLimitMaxWaitSec, cycle, cycleLog)
+		if spawnErr != nil {
+			// Transient spawn failure (binary missing, fork-limit, etc.) — log
+			// and let the next poll tick retry. The car is NOT blocked.
+			logger.Error("Spawn error", "error", spawnErr)
 			sleepWithContext(ctx, pollInterval)
 			continue
 		}
-
-		cycleLog.Info("Spawned session", "session", sess.ID, "pid", sess.PID)
-
-		// Start stall detection.
-		sd := engine.NewStallDetector(sess, stallCfg)
-		sd.SetCycle(cycle)
-		sd.Start(ctx)
-
-		// Monitor: wait for subprocess exit or stall.
-		outcome := monitorSession(ctx, sess, sd, gormDB, claimed.ID)
-		sd.Stop()
 
 		switch outcome.kind {
 		case outcomeCompleted:
@@ -564,26 +564,209 @@ func runEngineDrain(cmd *cobra.Command) error {
 type outcomeKind int
 
 const (
-	outcomeCompleted outcomeKind = iota // car marked done
-	outcomeClear                        // agent exited, car not done
-	outcomeStall                        // stall detected
-	outcomeCancelled                    // context cancelled (shutdown)
+	outcomeCompleted   outcomeKind = iota // car marked done
+	outcomeClear                          // agent exited, car not done
+	outcomeStall                          // stall detected
+	outcomeCancelled                      // context cancelled (shutdown)
+	outcomeRateLimited                    // upstream rate-limit signal observed; engine should pause and retry
 )
 
 type sessionOutcome struct {
-	kind        outcomeKind
-	stallReason engine.StallReason
+	kind            outcomeKind
+	stallReason     engine.StallReason
+	rateLimitSignal engine.RateLimitSignal
 }
 
-// monitorSession waits for the subprocess to exit, a stall, or context cancellation.
-// It verifies car status in the DB before returning outcomes.
-func monitorSession(ctx context.Context, sess *engine.Session, sd *engine.StallDetector, db *gorm.DB, carID string) sessionOutcome {
-	return monitorSessionWithDB(ctx, sess.Done(), sd.Stalled(), db, carID)
+// spawnRunner is the seam between spawnAndMonitorWithRetry's loop body and
+// the actual SpawnAgent + monitorSession machinery. Tests inject a fake
+// implementation to drive the pause-and-retry loop without standing up real
+// subprocesses or databases.
+//
+// A non-nil error indicates the spawn itself failed (e.g. binary missing,
+// fork-limit hit) — the caller treats this as transient and retries on the
+// next poll tick rather than blocking the car. Detector-observed outcomes
+// (stall, rate-limit, completion) ride on sessionOutcome with err == nil.
+type spawnRunner func(ctx context.Context, opts engine.SpawnOpts) (*engine.Session, sessionOutcome, error)
+
+// defaultSpawnRunner spawns the agent via engine.SpawnAgent, attaches both the
+// stall and rate-limit detectors, and runs monitorSession until a terminal
+// outcome arrives. On outcomeRateLimited it terminates the subprocess so the
+// caller's retry loop can sleep without the process still talking to the
+// upstream. Each successful spawn emits a "Spawned session" log so retries
+// remain visible.
+func defaultSpawnRunner(db *gorm.DB, stallCfg engine.StallConfig, cycle int, cycleLog *slog.Logger) spawnRunner {
+	if cycleLog == nil {
+		cycleLog = slog.Default()
+	}
+	return func(ctx context.Context, opts engine.SpawnOpts) (*engine.Session, sessionOutcome, error) {
+		sess, err := engine.SpawnAgent(ctx, db, opts)
+		if err != nil {
+			return nil, sessionOutcome{}, err
+		}
+		cycleLog.Info("Spawned session", "session", sess.ID, "pid", sess.PID)
+
+		sd := engine.NewStallDetector(sess, stallCfg)
+		sd.SetCycle(cycle)
+		sd.Start(ctx)
+
+		rd := engine.NewRateLimitDetector()
+		rd.AttachToSession(sess)
+
+		outcome := monitorSession(ctx, sess, sd, rd, db, opts.CarID)
+		sd.Stop()
+		rd.Stop()
+
+		if outcome.kind == outcomeRateLimited {
+			// Terminate the running subprocess so it doesn't keep burning
+			// tokens against the upstream that just rejected us, then drain
+			// its Done channel. Wait blocks until exit.
+			sess.Cancel()
+			_ = sess.Wait()
+		}
+		return sess, outcome, nil
+	}
+}
+
+// spawnAndMonitorWithRetry spawns an agent subprocess and monitors it until a
+// terminal outcome is reached. If the rate-limit detector fires, the engine
+// sleeps for a bounded duration and the agent is re-spawned with the same
+// SpawnOpts. After maxRetries consecutive rate-limit retries the outcome is
+// converted to outcomeStall so the caller's existing stall path can block the
+// car as a fallback.
+//
+// Returns the final session (last spawn) so the caller can log session.ID/PID
+// and reference it in completion/stall handling.
+func spawnAndMonitorWithRetry(ctx context.Context, db *gorm.DB, opts engine.SpawnOpts, stallCfg engine.StallConfig, maxRetries, maxWaitSec int, cycle int, cycleLog *slog.Logger) (*engine.Session, sessionOutcome, error) {
+	return spawnAndMonitorWithRetryRunner(ctx, opts, maxRetries, maxWaitSec, cycleLog, defaultSpawnRunner(db, stallCfg, cycle, cycleLog))
+}
+
+// spawnAndMonitorWithRetryRunner is the testable core of
+// spawnAndMonitorWithRetry. It runs the spawn-and-monitor loop using the
+// given runner, sleeping between rate-limit retries until the retry budget is
+// exhausted or a non-rate-limit outcome is observed.
+func spawnAndMonitorWithRetryRunner(ctx context.Context, opts engine.SpawnOpts, maxRetries, maxWaitSec int, cycleLog *slog.Logger, runner spawnRunner) (*engine.Session, sessionOutcome, error) {
+	if maxRetries <= 0 {
+		maxRetries = 3
+	}
+	if maxWaitSec <= 0 {
+		maxWaitSec = 300
+	}
+	if cycleLog == nil {
+		cycleLog = slog.Default()
+	}
+
+	retries := 0
+	var lastSig engine.RateLimitSignal
+	var lastSess *engine.Session
+	for {
+		if ctx.Err() != nil {
+			return lastSess, sessionOutcome{kind: outcomeCancelled}, nil
+		}
+
+		sess, outcome, err := runner(ctx, opts)
+		if err != nil {
+			// Spawn failed (binary missing, fork-limit, etc.) — surface to the
+			// outer engine loop so it can log + sleep + reclaim on the next
+			// poll tick. We do NOT count this against the rate-limit retry
+			// budget; it's a different failure class.
+			return lastSess, sessionOutcome{}, err
+		}
+		lastSess = sess
+
+		if outcome.kind != outcomeRateLimited {
+			return sess, outcome, nil
+		}
+
+		lastSig = outcome.rateLimitSignal
+		retries++
+		if retries > maxRetries {
+			cycleLog.Warn("Rate limit retries exhausted, treating as stall",
+				"car", opts.CarID,
+				"retries", retries,
+				"source", lastSig.Source,
+			)
+			converted := sessionOutcome{
+				kind: outcomeStall,
+				stallReason: engine.StallReason{
+					Type:   "rate_limit_exhausted",
+					Detail: fmt.Sprintf("rate-limited %d times by %s (max retries %d)", retries, lastSig.Source, maxRetries),
+				},
+			}
+			return sess, converted, nil
+		}
+
+		wait := lastSig.RetryAfter
+		if wait <= 0 {
+			wait = computeBackoff(retries)
+		}
+		maxWait := time.Duration(maxWaitSec) * time.Second
+		if wait > maxWait {
+			wait = maxWait
+		}
+
+		cycleLog.Info("Rate limit hit, pausing before retry",
+			"car", opts.CarID,
+			"source", lastSig.Source,
+			"wait", wait,
+			"attempt", retries,
+			"max", maxRetries,
+		)
+		sleepWithContext(ctx, wait)
+		if ctx.Err() != nil {
+			return sess, sessionOutcome{kind: outcomeCancelled}, nil
+		}
+	}
+}
+
+// computeBackoff returns the backoff wait for a given 1-indexed retry attempt.
+// Schedule: 10s, 30s, 60s, 120s, 300s (capped). A ±20% jitter is applied so
+// concurrent engines hitting the same rate limit don't synchronize their
+// retries and re-hammer the upstream.
+func computeBackoff(attempt int) time.Duration {
+	base := []time.Duration{
+		10 * time.Second,
+		30 * time.Second,
+		60 * time.Second,
+		120 * time.Second,
+		300 * time.Second,
+	}
+	if attempt < 1 {
+		attempt = 1
+	}
+	idx := attempt - 1
+	if idx >= len(base) {
+		idx = len(base) - 1
+	}
+	d := base[idx]
+	// ±20% jitter via math/rand (non-crypto, intentional — backoff jitter
+	// doesn't need cryptographic randomness).
+	span := int64(d) / 5
+	if span <= 0 {
+		return d
+	}
+	j := rand.Int63n(span)
+	if rand.Intn(2) == 0 {
+		return d - time.Duration(j)
+	}
+	return d + time.Duration(j)
+}
+
+// monitorSession waits for the subprocess to exit, a stall, a rate-limit
+// signal, or context cancellation. It verifies car status in the DB before
+// returning outcomes.
+func monitorSession(ctx context.Context, sess *engine.Session, sd *engine.StallDetector, rd *engine.RateLimitDetector, db *gorm.DB, carID string) sessionOutcome {
+	var rateCh <-chan engine.RateLimitSignal
+	if rd != nil {
+		rateCh = rd.Signaled()
+	}
+	return monitorSessionWithDB(ctx, sess.Done(), sd.Stalled(), rateCh, db, carID)
 }
 
 // monitorSessionWithDB is the testable core of monitorSession. It takes raw
 // channels and a DB connection, and verifies car status before returning outcomes.
-func monitorSessionWithDB(ctx context.Context, doneCh <-chan error, stallCh <-chan engine.StallReason, db *gorm.DB, carID string) sessionOutcome {
+// rateCh may be nil — callers that haven't wired a rate-limit detector pass nil
+// and the select simply never fires that case.
+func monitorSessionWithDB(ctx context.Context, doneCh <-chan error, stallCh <-chan engine.StallReason, rateCh <-chan engine.RateLimitSignal, db *gorm.DB, carID string) sessionOutcome {
 	select {
 	case <-ctx.Done():
 		return sessionOutcome{kind: outcomeCancelled}
@@ -596,6 +779,12 @@ func monitorSessionWithDB(ctx context.Context, doneCh <-chan error, stallCh <-ch
 			return sessionOutcome{kind: outcomeCompleted}
 		}
 		return sessionOutcome{kind: outcomeStall, stallReason: reason}
+
+	case sig := <-rateCh:
+		// Rate-limit signal observed. Return immediately — the outer loop
+		// owns the pause-and-retry decision, including whether to terminate
+		// the subprocess and respawn.
+		return sessionOutcome{kind: outcomeRateLimited, rateLimitSignal: sig}
 
 	case err := <-doneCh:
 		if err != nil {

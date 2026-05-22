@@ -125,6 +125,8 @@ type StallConfig struct {
 	EscalationCooldownSec    int `yaml:"escalation_cooldown_sec"`    // per-car cooldown between escalations (default 600)
 	MaxConcurrentEscalations int `yaml:"max_concurrent_escalations"` // limit concurrent escalation goroutines (default 3)
 	StaleEngineThresholdSec  int `yaml:"stale_engine_threshold_sec"` // seconds before an engine is considered stale (default 60)
+	RateLimitMaxRetries      int `yaml:"rate_limit_max_retries"`     // max consecutive rate-limit retries before stalling (default 3)
+	RateLimitMaxWaitSec      int `yaml:"rate_limit_max_wait_sec"`    // max seconds to wait between retries (default 300)
 }
 
 // TLSConfig holds TLS settings for encrypted database connections.
@@ -165,16 +167,17 @@ type ScalingConfig struct {
 
 // TrackConfig defines an area of concern within the repo.
 type TrackConfig struct {
-	Name           string                   `yaml:"name"`
-	Language       string                   `yaml:"language"`
-	FilePatterns   []string                 `yaml:"file_patterns"`
-	EngineSlots    int                      `yaml:"engine_slots"`
-	PreTestCommand string                   `yaml:"pre_test_command"`
-	TestCommand    string                   `yaml:"test_command"`
-	Conventions    map[string]interface{}   `yaml:"conventions"`
-	AgentProvider  string                   `yaml:"agent_provider"`
-	AgentModel     string                   `yaml:"agent_model"`
-	Playwright     *models.PlaywrightConfig `yaml:"playwright,omitempty"`
+	Name                  string                   `yaml:"name"`
+	Language              string                   `yaml:"language"`
+	FilePatterns          []string                 `yaml:"file_patterns"`
+	EngineSlots           int                      `yaml:"engine_slots"`
+	StallStdoutTimeoutSec int                      `yaml:"stall_stdout_timeout_sec"`
+	PreTestCommand        string                   `yaml:"pre_test_command"`
+	TestCommand           string                   `yaml:"test_command"`
+	Conventions           map[string]interface{}   `yaml:"conventions"`
+	AgentProvider         string                   `yaml:"agent_provider"`
+	AgentModel            string                   `yaml:"agent_model"`
+	Playwright            *models.PlaywrightConfig `yaml:"playwright,omitempty"`
 }
 
 // BullCommentsConfig controls Bull's issue commenting behavior.
@@ -446,7 +449,7 @@ func (c *Config) applyDefaults() {
 	c.Database.TLS.CACert = resolveEnvVars(c.Database.TLS.CACert)
 	c.Database.TLS.ClientCert = resolveEnvVars(c.Database.TLS.ClientCert)
 	c.Database.TLS.ClientKey = resolveEnvVars(c.Database.TLS.ClientKey)
-	if c.Stall.StdoutTimeoutSec == 0 {
+	if c.Stall.StdoutTimeoutSec <= 0 {
 		c.Stall.StdoutTimeoutSec = 120
 	}
 	if c.Stall.RepeatedErrorMax == 0 {
@@ -466,6 +469,12 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Stall.MaxConcurrentEscalations == 0 {
 		c.Stall.MaxConcurrentEscalations = 3
+	}
+	if c.Stall.RateLimitMaxRetries == 0 {
+		c.Stall.RateLimitMaxRetries = 3
+	}
+	if c.Stall.RateLimitMaxWaitSec == 0 {
+		c.Stall.RateLimitMaxWaitSec = 300
 	}
 	if c.Yardmaster.HealthPort == 0 {
 		c.Yardmaster.HealthPort = 8081
@@ -492,6 +501,12 @@ func (c *Config) applyDefaults() {
 	for i := range c.Tracks {
 		if c.Tracks[i].EngineSlots == 0 {
 			c.Tracks[i].EngineSlots = 3
+		}
+		// stall_stdout_timeout_sec — per-track override beats global Stall.StdoutTimeoutSec.
+		// The global is guaranteed positive (defaulted to 120 above), so when the track
+		// didn't set its own value we just inherit the global directly.
+		if c.Tracks[i].StallStdoutTimeoutSec == 0 {
+			c.Tracks[i].StallStdoutTimeoutSec = c.Stall.StdoutTimeoutSec
 		}
 		if c.Tracks[i].AgentProvider == "" {
 			c.Tracks[i].AgentProvider = c.AgentProvider
