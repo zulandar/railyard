@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"runtime/debug"
-	"sync"
 
 	"github.com/zulandar/railyard/pkg/plugin"
 )
@@ -184,67 +183,9 @@ func (h *Host) invokeDaemonOnce(s *daemonState) (stop bool) {
 	return true
 }
 
-// cancelDaemons cancels every daemon belonging to the named plugin and
-// returns the slice of daemonStates so the caller can join on their done
-// channels. The plugin's entry is removed from h.daemons so subsequent
-// Stop calls (or re-registrations) start fresh.
-//
-// Returns nil when the plugin has no registered daemons.
-func (h *Host) cancelDaemons(pluginName string) []*daemonState {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	states := h.daemons[pluginName]
-	if len(states) == 0 {
-		return nil
-	}
-	delete(h.daemons, pluginName)
-	for _, s := range states {
-		s.cancel()
-	}
-	return states
-}
-
-// joinDaemons waits for the supplied daemon goroutines to finish or until
-// the deadline expires (signalled via the parent context). Daemons that
-// have not finished by the deadline are abandoned with a WARN log.
-//
-// Each daemon's join is independent — slow daemon A does not block fast
-// daemon B's drain — but the overall wait is bounded by the parent
-// context's deadline so the caller's drain budget stays intact.
-func joinDaemons(parent context.Context, states []*daemonState) {
-	if len(states) == 0 {
-		return
-	}
-	var wg sync.WaitGroup
-	for _, s := range states {
-		wg.Add(1)
-		go func(s *daemonState) {
-			defer wg.Done()
-			select {
-			case <-s.done:
-				// Daemon honored cancellation in time.
-			case <-parent.Done():
-				// plugin= / daemon= attrs are already attached to s.logger
-				// (see runDaemonFor) — including them in the message would
-				// duplicate them at the structured-attr level. Keep the
-				// message terse; downstream log views surface the attrs.
-				s.logger.Warn("daemon abandoned (drain timeout exceeded)")
-			}
-		}(s)
-	}
-	// Bound the join by the parent context. wg.Wait blocks until every
-	// goroutine returns, which they all do as soon as parent is cancelled
-	// (since each goroutine selects on parent.Done()).
-	done := make(chan struct{})
-	go func() {
-		wg.Wait()
-		close(done)
-	}()
-	select {
-	case <-done:
-	case <-parent.Done():
-		// Wait for the wg goroutines to observe the cancellation. They
-		// each select on parent.Done so this completes promptly.
-		<-done
-	}
-}
+// cancelDaemons and joinDaemons were removed when registry.go was
+// rewritten for the subprocess plugin model (railyard-fll.3) — the new
+// Stop path operates on the launched-plugin map directly. The remaining
+// supervisor machinery (runDaemonFor / superviseDaemon / invokeDaemonOnce)
+// stays in place so the bare-*Host RunDaemon shim continues to satisfy
+// the plugin.Host contract. Final removal is tracked by railyard-fll.8.3.

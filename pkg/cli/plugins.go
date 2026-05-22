@@ -27,33 +27,31 @@ func newPluginsCmd() *cobra.Command {
 
 // newPluginsListCmd returns the `ry plugins list` subcommand.
 //
-// The list is sourced from [plugin.Registered], which is the package-level
-// registry populated at init() time by side-effect imports in custom
-// (e.g. enterprise) binaries. The OSS `ry` binary registers zero plugins,
-// in which case the command prints "No plugins registered in this binary."
+// Under the subprocess plugin model (railyard-fll.3) plugins are launched
+// out-of-process and the host's launched-plugin registry is the source of
+// truth. From a one-shot CLI invocation we do NOT have a live host
+// instance to query (the running yardmaster owns it), so for now we fall
+// back to the legacy [plugin.Registered] view — which on the OSS binary
+// is always empty, producing the friendly "No plugins registered" line.
 //
-// Status / daemon / subscription columns reflect the build-time view only.
-// Live runtime status (a plugin currently running and how many daemons
-// and subscriptions it has registered) would require IPC into a running
-// yardmaster, which is intentionally not part of this command — that is
-// a future bead. Status always reads "registered"; the daemon and
-// subscription columns always render "-" so the output schema stays
-// stable once a future `ry plugins status` subcommand fills them in.
+// Wiring this command to a live launched-plugin list (so it shows the
+// names, status, and socket paths of the currently-running subprocesses)
+// is tracked by bd issue railyard-hqe.
 func newPluginsListCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
-		Short: "List plugins compiled into this binary",
-		Long: "List plugins compiled into this binary. " +
-			"This is a build-time view: status is always \"registered\" and the " +
-			"daemons / subscriptions columns are unknown without IPC into a " +
-			"running yardmaster.",
+		Short: "List plugins available to this binary",
+		Long: "List plugins available to this binary. " +
+			"Under the subprocess plugin model the live list is owned by a " +
+			"running yardmaster; this fallback shows the legacy in-process " +
+			"registry (empty on the OSS binary). See bd issue railyard-hqe " +
+			"for the rewire to launched-plugin introspection.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// plugin.Registered / plugin.PluginEntry are deprecated under
-			// the subprocess plugin model (railyard-fll.2). The `ry plugins`
-			// view continues to use them until the host rewrite in
-			// railyard-fll.3 surfaces an equivalent introspection path.
-			//nolint:staticcheck // SA1019: legacy registry view retained until railyard-fll.3
+			// Legacy registry view; the OSS binary registers zero plugins
+			// so this always prints "No plugins registered in this binary."
+			// railyard-hqe tracks the rewire to live launched-plugin info.
+			//nolint:staticcheck // SA1019: tracked by bd issue railyard-hqe
 			return renderPluginsList(cmd.OutOrStdout(), plugin.Registered())
 		},
 	}

@@ -52,6 +52,13 @@ type Config struct {
 	AuthMethod string           `yaml:"auth_method"`
 	Yardmaster YardmasterConfig `yaml:"yardmaster"`
 
+	// Plugins is the host's plugin-system block. It is read by
+	// internal/pluginhost during boot to determine which subprocess plugins
+	// to launch from the candidate plugins.d directories. Optional — when
+	// the block is absent, no plugins are launched and the host is a
+	// pass-through.
+	Plugins PluginsConfig `yaml:"plugins"`
+
 	// PluginConfigs holds top-level YAML blocks whose keys are not part of the
 	// typed Config schema. Plugins read their own block (keyed by plugin name)
 	// and decode the yaml.Node into a plugin-defined struct. Nil when no
@@ -61,6 +68,31 @@ type Config struct {
 	// populated by the loader from leftover top-level keys, never directly
 	// unmarshaled.
 	PluginConfigs map[string]yaml.Node `yaml:"-"`
+}
+
+// PluginsConfig configures the railyard plugin subsystem.
+//
+// Discovery: the host scans three well-known directories in order
+//
+//  1. /etc/railyard/plugins.d/
+//  2. ~/.railyard/plugins/
+//  3. ./plugins/  (working directory; dev convenience)
+//
+// plus any directory under [PluginsConfig.PluginsDir] (highest priority).
+// Later paths override earlier on name collision, with a WARN log.
+//
+// Enabled is the allow-list of plugin names to actually launch. A plugin
+// must be both discoverable (executable file found in one of the
+// directories) AND listed in Enabled to be launched.
+type PluginsConfig struct {
+	// Enabled is the list of plugin names allowed to launch.
+	// Names match the executable basename (stripped of any extension).
+	Enabled []string `yaml:"enabled"`
+
+	// PluginsDir is an optional additional directory to scan for plugin
+	// binaries. When set, it takes precedence over the three default
+	// directories on name collision.
+	PluginsDir string `yaml:"plugins_dir"`
 }
 
 // YardmasterConfig holds settings for the yardmaster daemon.

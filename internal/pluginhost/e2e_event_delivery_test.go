@@ -1,3 +1,12 @@
+//go:build legacy_inproc
+// +build legacy_inproc
+
+// Legacy end-to-end event-delivery test. Drove an in-process fake plugin
+// subscribed via host.Register + h.Subscribe. The subprocess plugin
+// model (railyard-fll.3) reaches the bus through gRPC instead; the
+// replacement coverage lives in subscribe_test.go (host-side stream)
+// and railyard-fll.7 will add a real subprocess plugin example. Tracked
+// by bd issue railyard-bjp.
 package pluginhost
 
 import (

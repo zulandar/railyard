@@ -1,3 +1,8 @@
+//go:build legacy_inproc
+// +build legacy_inproc
+
+// Legacy in-process lifecycle log tests. Re-write tracked by bd issue
+// railyard-bjp.
 package pluginhost
 
 import (

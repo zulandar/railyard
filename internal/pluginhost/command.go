@@ -186,10 +186,13 @@ func (h *Host) RegisterCommand(name string, handler plugin.CommandHandler) error
 	if _, exists := h.allowed[name]; exists {
 		return fmt.Errorf("pluginhost: command %q conflicts with the core allow-list", name)
 	}
-	if _, exists := h.pluginCmds[name]; exists {
+	if _, exists := h.inProcCmds[name]; exists {
 		return fmt.Errorf("pluginhost: command %q is already registered by another plugin", name)
 	}
-	h.pluginCmds[name] = handler
+	if _, exists := h.pluginCmds[name]; exists {
+		return fmt.Errorf("pluginhost: command %q is already registered by a subprocess plugin", name)
+	}
+	h.inProcCmds[name] = handler
 	return nil
 }
 

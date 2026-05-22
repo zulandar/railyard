@@ -1,3 +1,11 @@
+//go:build legacy_inproc
+// +build legacy_inproc
+
+// Legacy in-process lifecycle integration tests. They drive the retired
+// host.Register(plugin.Plugin) + Init/Start/Stop walk and the daemon
+// manager. The subprocess plugin model (railyard-fll.3) replaced that
+// surface; re-writing these as subprocess-driven tests is tracked by bd
+// issue railyard-bjp.
 package pluginhost
 
 import (
