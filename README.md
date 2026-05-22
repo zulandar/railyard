@@ -14,14 +14,14 @@
   <a href="https://github.com/zulandar/railyard/blob/main/LICENSE"><img src="https://img.shields.io/github/license/zulandar/railyard" alt="License"></a>
 </p>
 
-Multi-agent AI orchestration for coding. Railyard coordinates multiple AI coding agents (Claude Code, Codex, Gemini, OpenCode, Copilot) across tracks (backend, frontend, infra) with per-branch isolation, a MySQL database, semantic code search, and automated supervision.
+Multi-agent AI orchestration for coding. Railyard coordinates multiple AI coding agents (Claude Code, Codex, Gemini, Copilot) across tracks (backend, frontend, infra) with per-branch isolation, a MySQL database, semantic code search, and automated supervision.
 
 Each developer runs their own Railyard instance against the same repo. Agents work on isolated branches (`ry/{owner}/{track}/{car-id}`), and a supervisor (Yardmaster) handles merges, stall detection, and dependency management.
 
 ### Feature Highlights
 
 - **Multi-Agent Orchestration** — run N engines in parallel across your repo, each claiming and completing work independently
-- **Any AI CLI** — first-class support for Claude Code, Codex, Gemini CLI, OpenCode, and GitHub Copilot, switchable per-track
+- **Any AI CLI** — first-class support for Claude Code, Codex, Gemini CLI, and GitHub Copilot, switchable per-track
 - **Track-Based Routing** — partition your repo into tracks (backend, frontend, infra) with distinct languages, conventions, and file patterns
 - **MySQL State Store** — all cars, engines, messages, and audit logs live in a single queryable MySQL database
 - **Semantic Code Search** — CocoIndex + pgvector give every engine MCP-powered search by meaning, with per-branch overlay indexes
@@ -68,7 +68,7 @@ Each developer runs their own Railyard instance against the same repo. Agents wo
   │     └─────┬─────┘     │
   │           │           │
 ┌─▼───────┐ ┌─▼───────┐ ┌─▼───────┐
-│Engine 1 │ │Engine 2 │ │Engine N │  ← AI coding agents (Claude, Codex, Gemini, OpenCode, Copilot)
+│Engine 1 │ │Engine 2 │ │Engine N │  ← AI coding agents (Claude, Codex, Gemini, Copilot)
 └─────┬───┘ └─────┬───┘ └────┬────┘
       │           │          │
       │     ┌─────▼─────┐   │
@@ -94,7 +94,6 @@ Each developer runs their own Railyard instance against the same repo. Agents wo
   - Claude Code (default) — `npm install -g @anthropic-ai/claude-code`
   - Codex — `npm install -g @openai/codex`
   - Gemini — `npm install -g @google/gemini-cli`
-  - OpenCode — `go install github.com/opencode-ai/opencode@latest`
   - Copilot — `gh extension install github/gh-copilot`
 - **Docker** (optional) — for pgvector/CocoIndex semantic search
 - **GitHub CLI** (optional, required when `require_pr: true`) — [install](https://cli.github.com/)
@@ -443,7 +442,7 @@ See [`railyard.example.yaml`](railyard.example.yaml) for a copy-paste ready temp
 ```yaml
 owner: alice                            # Your identity (branch prefix: ry/alice/...)
 repo: git@github.com:org/repo.git       # Target repository
-agent_provider: claude                  # AI CLI provider (claude, codex, gemini, opencode, copilot)
+agent_provider: claude                  # AI CLI provider (claude, codex, gemini, copilot)
 # branch_prefix: ry/alice               # Override default ry/{owner}
 # default_acceptance: "Tests pass, code reviewed"  # Default acceptance criteria for Dispatch
 # require_pr: true                      # Create draft PRs instead of direct merge to main
@@ -541,7 +540,7 @@ internal/
   db/                MySQL/GORM connection and migrations
   dispatch/          Dispatch planner agent (decomposition)
   engine/            Engine daemon: claim, spawn, stall detection, outcomes, overlay
-    providers/       AI CLI provider implementations (Claude, Codex, Gemini, OpenCode, Copilot)
+    providers/       AI CLI provider implementations (Claude, Codex, Gemini, Copilot)
   inspect/           Inspection Pit PR review daemon: GitHub App auth, AI review, inline comments
   logutil/           Structured logging helpers (slog level/handler/timestamp)
   messaging/         Agent-to-agent message passing via DB

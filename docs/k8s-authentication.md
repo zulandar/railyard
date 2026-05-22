@@ -1,6 +1,6 @@
 # Kubernetes Authentication Guide
 
-Railyard engine pods run AI agents (Claude, Codex, Gemini, OpenCode, or Copilot) that require provider credentials. This guide covers every supported authentication method and how to configure each one via Helm values.
+Railyard engine pods run AI agents (Claude, Codex, Gemini, or Copilot) that require provider credentials. This guide covers every supported authentication method and how to configure each one via Helm values.
 
 ## Method 1: API Key
 
@@ -13,7 +13,6 @@ An API key is the simplest approach. The chart maps `auth.apiKey` to the correct
 | `claude` | `ANTHROPIC_API_KEY` |
 | `codex` | `OPENAI_API_KEY` |
 | `gemini` | `GEMINI_API_KEY` |
-| `opencode` | `ANTHROPIC_API_KEY` |
 | `copilot` | `GH_TOKEN` (via `auth.copilot.token` or `auth.githubToken`) |
 
 ### Steps
@@ -306,7 +305,7 @@ The Secret is mounted via `envFrom` on all engine pods. It must contain the corr
 
 | Method | Required Keys |
 |--------|--------------|
-| `api_key` (claude/opencode) | `ANTHROPIC_API_KEY` |
+| `api_key` (claude) | `ANTHROPIC_API_KEY` |
 | `api_key` (codex) | `OPENAI_API_KEY` |
 | `api_key` (gemini) | `GEMINI_API_KEY` |
 | `api_key` (copilot) | `GH_TOKEN` |

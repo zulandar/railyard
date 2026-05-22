@@ -128,7 +128,7 @@ helm install railyard ./charts/railyard \
 
 | Value | Description | Default |
 |-------|-------------|---------|
-| `engine.agentProvider` | Agent provider: `claude`, `codex`, `gemini`, `opencode`, `copilot` | `claude` |
+| `engine.agentProvider` | Agent provider: `claude`, `codex`, `gemini`, `copilot` | `claude` |
 | `engine.resources` | Resource requests/limits per engine pod | `{}` |
 | `engine.nodeSelector` | Node selector for engine pods | `{}` |
 | `engine.tolerations` | Tolerations for engine pods | `[]` |
@@ -457,8 +457,7 @@ Messages API and route the `claude` CLI only.
 Key facts:
 
 - **`engine.agentProvider: codex` is required.** The `claude` CLI cannot speak
-  OpenAI-compat, and opencode is currently broken on this path (tracked in
-  follow-up issue `railyard-tsm`). Startup config validation enforces this.
+  OpenAI-compat. Startup config validation enforces this.
 - **`engine.agentModel` is required** — the chart and codex have no implicit
   default model. Startup validation fails fast if it is missing.
 - **Naming is backend-specific** — railyard does not parse or translate model

@@ -7,7 +7,7 @@ Thanks for your interest in contributing to Railyard! This guide covers everythi
 - **Go 1.26+**
 - **MySQL 8.0+** — SQL database
 - **tmux** — terminal multiplexer
-- **AI coding CLI** (at least one) — Claude Code (default): `npm install -g @anthropic-ai/claude-code`; alternatives: Codex, Gemini, OpenCode, Copilot (see README for install commands)
+- **AI coding CLI** (at least one) — Claude Code (default): `npm install -g @anthropic-ai/claude-code`; alternatives: Codex, Gemini, Copilot (see README for install commands)
 - **Docker** (optional) — for pgvector/CocoIndex semantic search
 - **Python 3.13+** (optional) — for CocoIndex semantic search
 
@@ -51,7 +51,7 @@ internal/
   db/                MySQL/GORM connection and migrations
   dispatch/          Dispatch planner agent (decomposition)
   engine/            Engine daemon: claim, spawn, stall detection, outcomes, overlay
-    providers/       AI CLI provider implementations (Claude, Codex, Gemini, OpenCode, Copilot)
+    providers/       AI CLI provider implementations (Claude, Codex, Gemini, Copilot)
   messaging/         Agent-to-agent message passing via DB
   models/            GORM models (Car, Engine, Message, Track, etc.)
   orchestration/     tmux session management, start/stop/scale/status
@@ -185,7 +185,7 @@ Use [GitHub Issues](https://github.com/zulandar/railyard/issues) to report bugs 
 Railyard coordinates multiple AI coding agents:
 
 - **Dispatch** — decomposes requests into structured work items (cars)
-- **Engines** — worker agents (Claude, Codex, Gemini, OpenCode, or Copilot) that claim and execute cars on isolated branches
+- **Engines** — worker agents (Claude, Codex, Gemini, or Copilot) that claim and execute cars on isolated branches
 - **Yardmaster** — supervisor that monitors engines, runs tests, and merges completed work
 - **Telegraph** — chat bridge for Slack/Discord integration
 

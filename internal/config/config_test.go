@@ -1325,7 +1325,7 @@ func TestParse_AgentProviderGlobalOverride(t *testing.T) {
 	yaml := `
 owner: alice
 repo: git@github.com:org/app.git
-agent_provider: opencode
+agent_provider: codex
 tracks:
   - name: backend
     language: go
@@ -1334,11 +1334,11 @@ tracks:
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.AgentProvider != "opencode" {
-		t.Errorf("AgentProvider = %q, want %q", cfg.AgentProvider, "opencode")
+	if cfg.AgentProvider != "codex" {
+		t.Errorf("AgentProvider = %q, want %q", cfg.AgentProvider, "codex")
 	}
-	if cfg.Tracks[0].AgentProvider != "opencode" {
-		t.Errorf("Tracks[0].AgentProvider = %q, want %q (inherited from global)", cfg.Tracks[0].AgentProvider, "opencode")
+	if cfg.Tracks[0].AgentProvider != "codex" {
+		t.Errorf("Tracks[0].AgentProvider = %q, want %q (inherited from global)", cfg.Tracks[0].AgentProvider, "codex")
 	}
 }
 
@@ -1350,7 +1350,7 @@ agent_provider: claude
 tracks:
   - name: backend
     language: go
-    agent_provider: opencode
+    agent_provider: codex
   - name: frontend
     language: typescript
 `
@@ -1358,8 +1358,8 @@ tracks:
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.Tracks[0].AgentProvider != "opencode" {
-		t.Errorf("Tracks[0].AgentProvider = %q, want %q (per-track override)", cfg.Tracks[0].AgentProvider, "opencode")
+	if cfg.Tracks[0].AgentProvider != "codex" {
+		t.Errorf("Tracks[0].AgentProvider = %q, want %q (per-track override)", cfg.Tracks[0].AgentProvider, "codex")
 	}
 	if cfg.Tracks[1].AgentProvider != "claude" {
 		t.Errorf("Tracks[1].AgentProvider = %q, want %q (inherited from global)", cfg.Tracks[1].AgentProvider, "claude")

@@ -16,7 +16,7 @@ import (
 // mutating shared state would race between concurrent engines selecting
 // different models.
 type AgentProvider interface {
-	// Name returns the provider identifier (e.g., "claude", "opencode").
+	// Name returns the provider identifier (e.g., "claude", "codex").
 	Name() string
 	// BuildCommand constructs the exec.Cmd for the provider's CLI tool (engine mode).
 	// Honors opts.Model via a provider-appropriate mechanism (env var or flag).

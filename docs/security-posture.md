@@ -2,7 +2,7 @@
 
 **Audience:** Security engineers, DevOps/SecOps, compliance reviewers (SOC 2, OWASP)
 **Last updated:** 2026-03-08
-**Scope:** Railyard — an AI agent orchestration platform that spawns, monitors, and coordinates coding agents (Claude, Codex, Gemini, OpenCode) against a MySQL database and optional pgvector instance.
+**Scope:** Railyard — an AI agent orchestration platform that spawns, monitors, and coordinates coding agents (Claude, Codex, Gemini, Copilot) against a MySQL database and optional pgvector instance.
 
 ---
 

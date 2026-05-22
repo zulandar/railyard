@@ -5,7 +5,7 @@
 #   docker build --build-arg AGENT_PROVIDER=claude -f Dockerfile.engine .
 #   docker build --build-arg AGENT_PROVIDER=codex --build-arg COCOINDEX_BASE=without-cocoindex -f Dockerfile.engine .
 #
-# Supported providers: claude (default), codex, gemini, opencode, copilot
+# Supported providers: claude (default), codex, gemini, copilot
 
 # Global build args — must be declared before the first FROM.
 ARG COCOINDEX_BASE=with-cocoindex
@@ -74,11 +74,9 @@ ARG AGENT_PROVIDER=claude
 
 # ── Node.js 22 LTS (NodeSource) ─────────────────────────────────────────────
 # Required for claude, codex, gemini, and copilot (all npm-based CLIs).
-RUN if [ "$AGENT_PROVIDER" != "opencode" ]; then \
-      curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
-      && apt-get install -y --no-install-recommends nodejs \
-      && rm -rf /var/lib/apt/lists/*; \
-    fi
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+  && apt-get install -y --no-install-recommends nodejs \
+  && rm -rf /var/lib/apt/lists/*
 
 # ── AI CLI provider ─────────────────────────────────────────────────────────
 RUN case "$AGENT_PROVIDER" in \
@@ -86,10 +84,6 @@ RUN case "$AGENT_PROVIDER" in \
       codex)    npm install -g @openai/codex ;; \
       gemini)   npm install -g @google/gemini-cli ;; \
       copilot)  npm install -g @github/copilot ;; \
-      opencode) \
-        go install github.com/opencode-ai/opencode@latest \
-        && cp /root/go/bin/opencode /usr/local/bin/opencode \
-        && rm -rf /root/go ;; \
       *) echo "Unknown AGENT_PROVIDER: $AGENT_PROVIDER" && exit 1 ;; \
     esac
 

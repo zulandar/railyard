@@ -266,11 +266,10 @@ func (c *Config) IsKubernetesMode() bool {
 
 // KnownProviders is the set of recognized agent provider names.
 var KnownProviders = map[string]bool{
-	"claude":   true,
-	"opencode": true,
-	"gemini":   true,
-	"codex":    true,
-	"copilot":  true,
+	"claude":  true,
+	"gemini":  true,
+	"codex":   true,
+	"copilot": true,
 }
 
 // MethodsRequiringAgentModel is the set of auth methods whose upstream endpoints
@@ -888,11 +887,11 @@ func (c *Config) validate() error {
 		))
 	}
 	// auth_method=openai_compat is only wired through the codex agent provider.
-	// claude CLI cannot speak OpenAI-compat and opencode's provider is broken
-	// (see railyard-tsm), so any other agent_provider is a misconfiguration.
+	// claude CLI cannot speak OpenAI-compat, so any other agent_provider is a
+	// misconfiguration.
 	if c.AuthMethod == "openai_compat" && c.AgentProvider != "codex" {
 		errs = append(errs, fmt.Sprintf(
-			"auth_method=openai_compat requires agent_provider=codex (claude CLI cannot speak OpenAI-compat; opencode is broken — see railyard-tsm), got %q",
+			"auth_method=openai_compat requires agent_provider=codex (claude CLI cannot speak OpenAI-compat), got %q",
 			c.AgentProvider,
 		))
 	}

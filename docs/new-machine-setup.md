@@ -9,7 +9,7 @@ Make sure you have the [prerequisites](../README.md#prerequisites) installed:
 - Go 1.25+
 - MySQL 8.0+
 - tmux
-- At least one AI coding CLI (Claude Code, Codex, Gemini, or OpenCode)
+- At least one AI coding CLI (Claude Code, Codex, Gemini, or Copilot)
 - Docker (optional, for CocoIndex semantic search)
 - Python 3.13+ (optional, for CocoIndex)
 

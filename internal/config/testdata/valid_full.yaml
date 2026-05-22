@@ -14,7 +14,7 @@ tracks:
     language: go
     file_patterns: ["cmd/**", "internal/**", "pkg/**", "*.go"]
     engine_slots: 5
-    agent_provider: opencode
+    agent_provider: codex
     conventions:
       go_version: "1.22"
       style: "stdlib-first, no frameworks"

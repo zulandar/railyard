@@ -31,7 +31,7 @@ git:
 image:
   repository: ghcr.io/zulandar/railyard/engine
   # Tag defaults to .Chart.AppVersion. Provider-specific images are published
-  # with a suffix: e.g. "0.8.5-codex", "0.8.5-gemini", "0.8.5-opencode".
+  # with a suffix: e.g. "0.8.5-codex", "0.8.5-gemini", "0.8.5-copilot".
   # The unqualified tag (e.g. "0.8.5") is the claude variant.
   tag: ""
   pullPolicy: IfNotPresent
@@ -239,7 +239,7 @@ tracks:
 # Engine pods
 # ---------------------------------------------------------------------------
 engine:
-  # -- Agent provider: claude, codex, gemini, opencode, copilot.
+  # -- Agent provider: claude, codex, gemini, copilot.
   agentProvider: claude
   # -- Resource requests/limits per engine pod.
   resources: {}

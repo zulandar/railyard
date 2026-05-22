@@ -70,7 +70,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        provider: [claude, codex, gemini, opencode, copilot]
+        provider: [claude, codex, gemini, copilot]
     steps:
       - uses: actions/checkout@v6
 
