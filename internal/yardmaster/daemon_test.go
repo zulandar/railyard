@@ -821,9 +821,11 @@ func TestMaybeSwitchEscalate_AtThreshold(t *testing.T) {
 
 	var buf bytes.Buffer
 	logger := testLogger(&buf)
+	var wg sync.WaitGroup
 	// Escalation will fire (at threshold). The actual Claude call will fail
 	// since there's no `claude` binary in CI, but we can verify the log output.
-	maybeSwitchEscalate(context.Background(), db, cfg, "car-esc2", SwitchFailFetch, nil, "", &sync.WaitGroup{}, nil, make(chan struct{}, 3), logger)
+	maybeSwitchEscalate(context.Background(), db, cfg, "car-esc2", SwitchFailFetch, nil, "", &wg, nil, make(chan struct{}, 3), logger)
+	wg.Wait()
 
 	if !strings.Contains(buf.String(), "escalating") {
 		t.Errorf("should escalate at threshold, got: %s", buf.String())
@@ -843,7 +845,9 @@ func TestMaybeSwitchEscalate_InfraEscalatesImmediately(t *testing.T) {
 
 	var buf bytes.Buffer
 	logger := testLogger(&buf)
-	maybeSwitchEscalate(context.Background(), db, cfg, "car-infra1", SwitchFailInfra, nil, "", &sync.WaitGroup{}, nil, make(chan struct{}, 3), logger)
+	var wg sync.WaitGroup
+	maybeSwitchEscalate(context.Background(), db, cfg, "car-infra1", SwitchFailInfra, nil, "", &wg, nil, make(chan struct{}, 3), logger)
+	wg.Wait()
 
 	if !strings.Contains(buf.String(), "infra failure") {
 		t.Errorf("should escalate immediately for infra, got: %s", buf.String())
@@ -867,7 +871,9 @@ func TestMaybeSwitchEscalate_SetsCarToMergeFailed(t *testing.T) {
 
 	var buf bytes.Buffer
 	logger := testLogger(&buf)
-	maybeSwitchEscalate(context.Background(), db, cfg, "car-esc3", SwitchFailMerge, nil, "", &sync.WaitGroup{}, nil, make(chan struct{}, 3), logger)
+	var wg sync.WaitGroup
+	maybeSwitchEscalate(context.Background(), db, cfg, "car-esc3", SwitchFailMerge, nil, "", &wg, nil, make(chan struct{}, 3), logger)
+	wg.Wait()
 
 	// Car status should change to "merge-failed" to break the retry loop.
 	var car models.Car
@@ -888,7 +894,9 @@ func TestMaybeSwitchEscalate_InfraSetsCarToMergeFailed(t *testing.T) {
 
 	var buf bytes.Buffer
 	logger := testLogger(&buf)
-	maybeSwitchEscalate(context.Background(), db, cfg, "car-infra2", SwitchFailInfra, nil, "", &sync.WaitGroup{}, nil, make(chan struct{}, 3), logger)
+	var wg sync.WaitGroup
+	maybeSwitchEscalate(context.Background(), db, cfg, "car-infra2", SwitchFailInfra, nil, "", &wg, nil, make(chan struct{}, 3), logger)
+	wg.Wait()
 
 	// Infra failures should also set merge-failed.
 	var car models.Car
@@ -2119,7 +2127,9 @@ func TestMaybeSwitchEscalate_WithCooldown(t *testing.T) {
 	// First call: should escalate (tracker allows it).
 	var buf1 bytes.Buffer
 	logger1 := testLogger(&buf1)
-	maybeSwitchEscalate(context.Background(), db, cfg, "car-cool1", SwitchFailMerge, nil, "", &sync.WaitGroup{}, tracker, sem, logger1)
+	var wg sync.WaitGroup
+	maybeSwitchEscalate(context.Background(), db, cfg, "car-cool1", SwitchFailMerge, nil, "", &wg, tracker, sem, logger1)
+	wg.Wait()
 	if !strings.Contains(buf1.String(), "escalating") {
 		t.Errorf("first call should escalate, got: %s", buf1.String())
 	}
@@ -2127,10 +2137,10 @@ func TestMaybeSwitchEscalate_WithCooldown(t *testing.T) {
 	// Reset car status back to "done" so the second call can proceed to the cooldown check.
 	db.Model(&models.Car{}).Where("id = ?", "car-cool1").Update("status", "done")
 
-	// Second call: should be skipped by cooldown.
+	// Second call: should be skipped by cooldown (no goroutine spawned).
 	var buf2 bytes.Buffer
 	logger2 := testLogger(&buf2)
-	maybeSwitchEscalate(context.Background(), db, cfg, "car-cool1", SwitchFailMerge, nil, "", &sync.WaitGroup{}, tracker, sem, logger2)
+	maybeSwitchEscalate(context.Background(), db, cfg, "car-cool1", SwitchFailMerge, nil, "", &wg, tracker, sem, logger2)
 	if !strings.Contains(buf2.String(), "cooldown active") {
 		t.Errorf("second call should be skipped by cooldown, got: %s", buf2.String())
 	}
