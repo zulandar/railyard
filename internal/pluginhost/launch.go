@@ -65,14 +65,20 @@ func (p *hostGRPCPlugin) GRPCClient(_ context.Context, broker *goplugin.GRPCBrok
 var _ goplugin.Plugin = (*hostGRPCPlugin)(nil)
 var _ goplugin.GRPCPlugin = (*hostGRPCPlugin)(nil)
 
-// launchPlugin spawns one plugin binary as a go-plugin subprocess, waits
-// for the gRPC handshake, performs the SO_PEERCRED verification, and
-// starts serving HostService on the broker's HostBrokerID stream. It
-// returns a fully-wired [*launchedPlugin] on success.
+// launchPluginOnce spawns one plugin binary as a go-plugin subprocess,
+// waits for the gRPC handshake, performs the SO_PEERCRED verification,
+// and starts serving HostService on the broker's HostBrokerID stream.
+// It returns a fully-wired [*launchedPlugin] on success.
 //
 // Any error along the way causes the subprocess to be killed and the
 // socket file removed before the function returns.
-func (h *Host) launchPlugin(ctx context.Context, c candidate, logger *slog.Logger) (*launchedPlugin, error) {
+//
+// "Once" in the name is load-bearing — this function performs a SINGLE
+// launch attempt. The restart-on-crash supervision wrapper is in
+// [Host.superviseLaunch] (railyard-fll.6). Existing callers that want a
+// single-shot launch (initial discovery walk) get one launch + the
+// supervisor that owns subsequent relaunches.
+func (h *Host) launchPluginOnce(ctx context.Context, c candidate, logger *slog.Logger) (*launchedPlugin, error) {
 	if c.path == "" {
 		return nil, errors.New("pluginhost: candidate path is empty")
 	}

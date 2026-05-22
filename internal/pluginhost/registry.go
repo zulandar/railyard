@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"sort"
 	"sync"
+	"syscall"
 	"time"
 
 	goplugin "github.com/hashicorp/go-plugin"
@@ -69,10 +71,49 @@ type launchedPlugin struct {
 	subCancels []context.CancelFunc
 
 	// disabled is true once a fatal-for-lifetime condition (e.g.
-	// SO_PEERCRED mismatch) has fired. The plugin is left in the
-	// registry so DispatchCommand can return a clear error, but no new
-	// work is sent to it.
+	// SO_PEERCRED mismatch, crash-budget exceeded) has fired. The
+	// plugin is left in the registry so DispatchCommand can return a
+	// clear error, but no new work is sent to it.
 	disabled bool
+
+	// budget tracks crash recurrence inside a 60s sliding window. The
+	// 4th crash inside the window flips the plugin into a
+	// permanently-disabled state (see [crashBudget] and the supervisor
+	// loop in launch.go for the policy).
+	budget *crashBudget
+
+	// stopping is set true the moment the host begins a planned
+	// shutdown for this plugin (host Stop, or a successful Plugin.Stop
+	// after which we don't want a restart). The supervisor consults
+	// this flag on every subprocess-exit observation: stopping=true
+	// suppresses the restart loop and stops budget accounting.
+	//
+	// stopping is read under [Host.mu] for the same reason `disabled`
+	// is; it lives on launchedPlugin (not on a global host channel) so
+	// per-plugin Stop semantics stay independent.
+	stopping bool
+
+	// superviseDone is closed by the supervisor goroutine when it has
+	// fully exited (either after permanent-disable or after a planned
+	// shutdown). [Host.Stop] waits on this so we never race the host's
+	// teardown with a restart attempt.
+	//
+	// May be nil for the brief window between launchedPlugin
+	// construction and supervisor spawn; consumers must nil-check.
+	superviseDone chan struct{}
+
+	// consecutiveCrashes is the count of crashes since the last
+	// successful (re)launch. The supervisor uses it to index into
+	// [backoffSchedule]; it is reset on a clean Init.
+	//
+	// Touched only by the supervisor goroutine — no synchronization
+	// required.
+	consecutiveCrashes int
+
+	// lastExitReason is a short, human-readable string describing why
+	// the subprocess last terminated unexpectedly. Surfaced in the
+	// permanent-disable ERROR log; populated by the supervisor.
+	lastExitReason string
 }
 
 // pluginCapabilities is the host's view of the negotiated capability
@@ -209,7 +250,7 @@ func (h *Host) initOne(ctx context.Context, c candidate, parentLogger *slog.Logg
 	pluginLogger := parentLogger.With(slog.String("plugin", c.name))
 	pluginLogger.Info("plugin " + c.name + ": init")
 
-	lp, err := h.launchPlugin(ctx, c, pluginLogger)
+	lp, err := h.launchPluginOnce(ctx, c, pluginLogger)
 	if err != nil {
 		pluginLogger.Warn(
 			"plugin "+c.name+": launch failed — skipped ("+err.Error()+")",
@@ -277,8 +318,10 @@ func (h *Host) initOne(ctx context.Context, c candidate, parentLogger *slog.Logg
 		provideCommands: allowedCmds,
 	}
 
+	// Register command ownership BEFORE spawning the supervisor so a
+	// crash-restart race cannot leave a window where the plugin's
+	// commands look unowned.
 	h.mu.Lock()
-	h.launched[lp.name] = lp
 	for _, cmd := range allowedCmds {
 		if cmd == "" {
 			continue
@@ -302,6 +345,10 @@ func (h *Host) initOne(ctx context.Context, c candidate, parentLogger *slog.Logg
 		h.pluginCmds[cmd] = lp.name
 	}
 	h.mu.Unlock()
+
+	// Hand the plugin to the supervisor — it owns the registry
+	// insertion AND the restart loop for the lifetime of the host.
+	h.startSupervisor(ctx, c, lp)
 }
 
 // resolveAllowList builds the per-plugin AllowList from the loaded
@@ -355,8 +402,14 @@ func filterAllowedCommands(advertised []string, allow AllowList) (allowed, denie
 // Start calls PluginService.Start on every launched plugin. A plugin
 // whose Start fails is left in the registry (so subsequent Stop is
 // orderly) but logged at WARN.
+//
+// Start also flips h.started, which the supervisor consults: a plugin
+// crash-restart that lands AFTER Start has been called must re-drive
+// Start on the relaunched subprocess, otherwise the plugin would
+// stay Init'd-but-not-Started after a relaunch.
 func (h *Host) Start(ctx context.Context) {
 	h.mu.Lock()
+	h.started = true
 	names := make([]string, 0, len(h.launched))
 	for n := range h.launched {
 		names = append(names, n)
@@ -388,21 +441,44 @@ func (h *Host) Start(ctx context.Context) {
 }
 
 // Stop calls PluginService.Stop on each launched plugin in reverse-name
-// order, then kills the subprocess. Each plugin gets a per-call
-// [stopDrainTimeout] budget; a plugin whose Stop blocks past that is
-// abandoned but the subprocess is still killed afterwards.
+// order, then escalates SIGTERM → 5s wait → SIGKILL. Each plugin gets a
+// per-call [stopDrainTimeout] budget for the Stop RPC; a plugin whose
+// Stop blocks past that is abandoned but the subprocess is still
+// signalled afterwards.
 //
 // Stop cancels every outstanding Subscribe stream BEFORE invoking the
 // plugin's Stop RPC, so a plugin waiting on an event recv loop does not
 // deadlock on shutdown.
+//
+// Stop ordering with respect to the supervisor loop (railyard-fll.6):
+//  1. Mark each lp.stopping=true under the host lock so a concurrent
+//     subprocess exit observed by the supervisor reads as "planned".
+//  2. Close h.shutdownCh so any in-flight backoff sleep returns early.
+//  3. For each plugin: cancel subscriptions, drive PluginService.Stop,
+//     send SIGTERM, wait up to 5s, fall back to SIGKILL.
+//  4. Reset the plugin's crashBudget so a future railyard restart
+//     starts fresh.
+//  5. After all plugins have been torn down, block on supervisorWG so
+//     no relaunch attempt is still in flight when Stop returns.
+//
+// Idempotent: subsequent Stop calls are no-ops (shutdownCh is closed
+// at most once via shutdownOnce).
 func (h *Host) Stop(parent context.Context) {
 	h.mu.Lock()
 	names := make([]string, 0, len(h.launched))
-	for n := range h.launched {
+	for n, lp := range h.launched {
+		// Mark each plugin stopping under the lock that the supervisor
+		// reads via isPluginStopping; this is the race guard ensuring
+		// no concurrent crash observed mid-Stop triggers a relaunch.
+		lp.stopping = true
 		names = append(names, n)
 	}
 	h.mu.Unlock()
 	sort.Sort(sort.Reverse(sort.StringSlice(names)))
+
+	// Wake every per-plugin supervisor and short-circuit any pending
+	// backoff sleep.
+	h.shutdownOnce.Do(func() { close(h.shutdownCh) })
 
 	for _, name := range names {
 		lp := h.lookupPluginByName(name)
@@ -431,13 +507,28 @@ func (h *Host) Stop(parent context.Context) {
 		}
 		cancel()
 
-		// Kill the subprocess unconditionally. go-plugin emits a SIGTERM
-		// and waits for the process to exit on a short internal
-		// deadline; SIGKILL fires if the plugin ignores SIGTERM.
-		lp.client.Kill()
+		// SIGTERM → 5s wait → SIGKILL escalation. go-plugin's
+		// client.Kill() jumps straight to SIGKILL via Process.Kill;
+		// we wrap that with a graceful SIGTERM first so well-behaved
+		// plugins can clean up.
+		h.terminateSubprocess(lp)
+
+		// Reset the crash budget so a future railyard restart starts
+		// fresh — the brief explicitly requires this on graceful Stop.
+		if lp.budget != nil {
+			lp.budget.reset()
+		}
+
 		removeSocket(lp.socketPath)
 		h.removeLaunched(name)
 	}
+
+	// Block on every supervisor goroutine before returning. Without
+	// this, a relaunch attempt could still be in flight (e.g. inside
+	// launchPluginOnce's handshake) when Stop returns, leaving a
+	// zombie subprocess. The shutdownCh / lp.stopping signals above
+	// guarantee the supervisor exits promptly; this Wait is the join.
+	h.supervisorWG.Wait()
 
 	// Belt-and-suspenders: cancel the legacy daemonCtx (still alive for
 	// in-process daemon.go users).
@@ -446,6 +537,45 @@ func (h *Host) Stop(parent context.Context) {
 		h.daemonCancel()
 	}
 	h.mu.Unlock()
+}
+
+// terminateSubprocess performs the SIGTERM → 5s wait → SIGKILL
+// escalation on lp's subprocess.
+//
+// We extract the pid from go-plugin's recorded value (registry.go) and
+// send signals directly via os.Process. If the process exits cleanly
+// within [stopDrainTimeout], we still invoke client.Kill() to release
+// go-plugin's internal goroutines (its own clientWaitGroup) — the
+// double-call is a no-op once the process is gone.
+func (h *Host) terminateSubprocess(lp *launchedPlugin) {
+	pid := lp.pid
+	if pid > 0 {
+		proc, err := os.FindProcess(pid)
+		if err == nil {
+			if err := proc.Signal(syscall.SIGTERM); err != nil {
+				// Process may already be gone — fine, fall through
+				// to client.Kill() for go-plugin bookkeeping.
+				lp.logger.Debug("plugin "+lp.name+": SIGTERM send failed (process may already be gone)",
+					slog.Int("pid", pid),
+					slog.String("error", err.Error()),
+				)
+			}
+		}
+	}
+
+	// Wait up to 5s for graceful exit, polling go-plugin's Exited().
+	deadline := h.clock().Add(stopDrainTimeout)
+	for h.clock().Before(deadline) {
+		if lp.client.Exited() {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	// Escalate to SIGKILL via go-plugin (also tears down the
+	// library's internal goroutines). Idempotent on an already-dead
+	// process.
+	lp.client.Kill()
 }
 
 // cancelPluginSubscriptions cancels every Subscribe stream owned by lp.

@@ -126,6 +126,40 @@ type Host struct {
 	// launched is the registry of subprocess plugins the host owns.
 	// Keyed by plugin name.
 	launched map[string]*launchedPlugin
+
+	// shutdownCh is closed by [Host.Stop] (idempotently, via
+	// shutdownOnce) to signal every per-plugin supervisor goroutine
+	// that it must NOT relaunch on the next observed subprocess exit.
+	// Supervisors poll this channel between iterations and exit
+	// cleanly when it's closed.
+	shutdownCh   chan struct{}
+	shutdownOnce sync.Once
+
+	// supervisorWG joins every supervisor goroutine. [Host.Stop] blocks
+	// on it after closing shutdownCh so a relaunch attempt cannot race
+	// the socket cleanup.
+	supervisorWG sync.WaitGroup
+
+	// started is set true after [Host.Start] runs. The supervisor uses
+	// it to decide whether a relaunched plugin should additionally be
+	// driven through PluginService.Start after Init — i.e. whether the
+	// host was already past the Start barrier when the crash happened.
+	//
+	// Read/written under h.mu.
+	started bool
+
+	// clock returns the current wall-clock time. The default is
+	// time.Now; tests override it so the restart-loop and crash-budget
+	// machinery is fully deterministic. Read without the lock — the
+	// field is set once at NewHost time.
+	clock func() time.Time
+
+	// backoffSleep blocks for d or until the host shutdownCh is
+	// closed (whichever comes first). Returns true if the sleep
+	// completed; false if it was short-circuited by shutdown. Default
+	// implementation set in NewHost; tests override with a deterministic
+	// version that signals via channels.
+	backoffSleep func(d time.Duration, shutdown <-chan struct{}) bool
 }
 
 // Compile-time assertion that *Host implements plugin.Host. Catches
@@ -142,10 +176,37 @@ func NewHost(deps Dependencies) *Host {
 		pluginCmds: make(map[string]string),
 		inProcCmds: make(map[string]plugin.CommandHandler),
 		launched:   make(map[string]*launchedPlugin),
+		shutdownCh: make(chan struct{}),
+		clock:      time.Now,
 	}
+	h.backoffSleep = defaultBackoffSleep
 	h.yardInfo = buildYardInfo(deps)
 	h.allowed = buildAllowList(&deps)
 	return h
+}
+
+// defaultBackoffSleep is the production [Host.backoffSleep] — a real
+// timer that is short-circuited by shutdown. Returns true if d elapsed,
+// false if shutdown closed first.
+func defaultBackoffSleep(d time.Duration, shutdown <-chan struct{}) bool {
+	if d <= 0 {
+		// Still honor shutdown even for zero waits so the supervisor
+		// can react to a Stop racing with a relaunch.
+		select {
+		case <-shutdown:
+			return false
+		default:
+			return true
+		}
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return true
+	case <-shutdown:
+		return false
+	}
 }
 
 // buildYardInfo gathers the static metadata once.
