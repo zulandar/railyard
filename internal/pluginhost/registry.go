@@ -114,6 +114,19 @@ type launchedPlugin struct {
 	// the subprocess last terminated unexpectedly. Surfaced in the
 	// permanent-disable ERROR log; populated by the supervisor.
 	lastExitReason string
+
+	// restartCount is the cumulative count of successful supervisor
+	// relaunches since this host booted. Distinct from
+	// consecutiveCrashes, which resets on a clean Init. Read/written
+	// under [Host.mu].
+	restartCount int //nolint:unused // populated in Tasks 3-6
+
+	// lastActivity is the most recent timestamp at which this plugin
+	// did something the host noticed: successful Init, Start,
+	// supervisor relaunch, DispatchCommand hit, or Subscribe. Event
+	// delivery into the plugin's subscription stream does NOT bump
+	// this field (hot path). Read/written under [Host.mu].
+	lastActivity time.Time //nolint:unused // populated in Tasks 3-6
 }
 
 // pluginCapabilities is the host's view of the negotiated capability
