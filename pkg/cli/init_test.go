@@ -307,6 +307,81 @@ func TestEnsureDBDataDir(t *testing.T) {
 	}
 }
 
+func TestEnsurePluginsDir_CreatesNew(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "plugins.d")
+	var out bytes.Buffer
+	if err := ensurePluginsDir(&out, dir); err != nil {
+		t.Fatalf("ensurePluginsDir: %v", err)
+	}
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatalf("stat created dir: %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("expected directory, got mode %v", info.Mode())
+	}
+	if perm := info.Mode().Perm(); perm != 0o755 {
+		t.Errorf("created dir perm = %#o, want %#o", perm, 0o755)
+	}
+	if !strings.Contains(out.String(), "Created plugins directory") {
+		t.Errorf("expected 'Created plugins directory' in output, got: %q", out.String())
+	}
+}
+
+func TestEnsurePluginsDir_Idempotent(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "plugins.d")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("seed dir: %v", err)
+	}
+	var out bytes.Buffer
+	if err := ensurePluginsDir(&out, dir); err != nil {
+		t.Fatalf("ensurePluginsDir on existing dir: %v", err)
+	}
+	if !strings.Contains(out.String(), "already present") {
+		t.Errorf("expected 'already present' in output, got: %q", out.String())
+	}
+}
+
+func TestEnsurePluginsDir_ExistsAsFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(path, []byte("oops"), 0o644); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+	var out bytes.Buffer
+	err := ensurePluginsDir(&out, path)
+	if err == nil {
+		t.Fatal("expected error when path exists as a file")
+	}
+	if !strings.Contains(err.Error(), "not a directory") {
+		t.Errorf("error should mention 'not a directory': %v", err)
+	}
+}
+
+func TestEnsurePluginsDir_PermissionDenied(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root — permission denied path is unreachable")
+	}
+	parent := filepath.Join(t.TempDir(), "locked")
+	if err := os.MkdirAll(parent, 0o555); err != nil {
+		t.Fatalf("seed locked parent: %v", err)
+	}
+	t.Cleanup(func() {
+		// Restore writable mode so t.TempDir cleanup can remove it.
+		_ = os.Chmod(parent, 0o755)
+	})
+	var out bytes.Buffer
+	err := ensurePluginsDir(&out, filepath.Join(parent, "plugins.d"))
+	if err == nil {
+		t.Fatal("expected permission error")
+	}
+	if !strings.Contains(err.Error(), "permission denied") {
+		t.Errorf("error should mention 'permission denied': %v", err)
+	}
+	if !strings.Contains(err.Error(), "--with-plugins") {
+		t.Errorf("error should point to --with-plugins fallback: %v", err)
+	}
+}
+
 func TestLanguagePreset(t *testing.T) {
 	tests := []struct {
 		lang        string
@@ -579,6 +654,92 @@ func TestInitCmd_Help(t *testing.T) {
 	}
 	if !strings.Contains(output, "--skip-telegraph") {
 		t.Errorf("help should show --skip-telegraph flag: %s", output)
+	}
+	if !strings.Contains(output, "--with-plugins") {
+		t.Errorf("help should show --with-plugins flag: %s", output)
+	}
+	if !strings.Contains(output, "--with-plugins-global") {
+		t.Errorf("help should show --with-plugins-global flag: %s", output)
+	}
+}
+
+func TestInitCmd_WithPlugins_CreatesPerUserDir(t *testing.T) {
+	dir := initGitRepo(t)
+	configPath := filepath.Join(dir, "railyard.yaml")
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+
+	cmd := newRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"init", "--yes", "--skip-db", "--with-plugins", "--config", configPath})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("init --with-plugins: %v", err)
+	}
+
+	pluginsDir := filepath.Join(fakeHome, ".railyard", "plugins")
+	info, err := os.Stat(pluginsDir)
+	if err != nil {
+		t.Fatalf("expected plugins dir at %s: %v", pluginsDir, err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("expected directory at %s, got mode %v", pluginsDir, info.Mode())
+	}
+	if perm := info.Mode().Perm(); perm != 0o755 {
+		t.Errorf("plugins dir perm = %#o, want %#o", perm, 0o755)
+	}
+	if !strings.Contains(out.String(), "Created plugins directory") {
+		t.Errorf("expected creation message in output: %s", out.String())
+	}
+}
+
+func TestInitCmd_WithPlugins_IdempotentWhenPresent(t *testing.T) {
+	dir := initGitRepo(t)
+	configPath := filepath.Join(dir, "railyard.yaml")
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+
+	// Pre-seed the per-user plugins dir.
+	pluginsDir := filepath.Join(fakeHome, ".railyard", "plugins")
+	if err := os.MkdirAll(pluginsDir, 0o755); err != nil {
+		t.Fatalf("seed plugins dir: %v", err)
+	}
+
+	cmd := newRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"init", "--yes", "--skip-db", "--with-plugins", "--config", configPath})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("init --with-plugins (re-run): %v", err)
+	}
+	if !strings.Contains(out.String(), "already present") {
+		t.Errorf("expected 'already present' message: %s", out.String())
+	}
+}
+
+func TestInitCmd_WithPluginsGlobal_PermissionDenied(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root — --with-plugins-global would actually succeed and touch /etc")
+	}
+	dir := initGitRepo(t)
+	configPath := filepath.Join(dir, "railyard.yaml")
+
+	cmd := newRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"init", "--yes", "--skip-db", "--with-plugins-global", "--config", configPath})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error from unprivileged --with-plugins-global")
+	}
+	if !strings.Contains(err.Error(), "permission denied") {
+		t.Errorf("error should mention 'permission denied': %v", err)
+	}
+	if !strings.Contains(err.Error(), "--with-plugins") {
+		t.Errorf("error should point to --with-plugins fallback: %v", err)
 	}
 }
 

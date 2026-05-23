@@ -213,6 +213,42 @@ func ensureDBDataDir(dataDir string) error {
 	return nil
 }
 
+// pluginsDirSystemPath is the system-wide plugin directory created by
+// --with-plugins-global. Kept in sync with internal/pluginhost.systemPluginsDir.
+const pluginsDirSystemPath = "/etc/railyard/plugins.d"
+
+// pluginsDirUserName is the per-user plugin directory created by
+// --with-plugins, joined onto $HOME. Kept in sync with
+// internal/pluginhost.userPluginsDirName.
+const pluginsDirUserName = ".railyard/plugins"
+
+// ensurePluginsDir creates dir at mode 0o755 if it does not already exist.
+// When dir is already a directory the call is a no-op (idempotent). When the
+// path exists but is not a directory, or the create fails for a non-permission
+// reason, an error is returned. Permission errors are translated into an
+// actionable message that points the operator at the per-user alternative.
+func ensurePluginsDir(out io.Writer, dir string) error {
+	info, err := os.Stat(dir)
+	if err == nil {
+		if !info.IsDir() {
+			return fmt.Errorf("plugins path %s exists but is not a directory", dir)
+		}
+		fmt.Fprintf(out, "Plugins directory already present: %s\n", dir)
+		return nil
+	}
+	if !os.IsNotExist(err) {
+		return fmt.Errorf("stat plugins dir %s: %w", dir, err)
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		if os.IsPermission(err) {
+			return fmt.Errorf("create %s: permission denied — re-run with sudo, or use --with-plugins for a per-user install", dir)
+		}
+		return fmt.Errorf("create plugins dir %s: %w", dir, err)
+	}
+	fmt.Fprintf(out, "Created plugins directory: %s\n", dir)
+	return nil
+}
+
 // containerName is the Docker container name used for the Railyard MySQL instance.
 const containerName = "railyard-mysql"
 
@@ -470,15 +506,17 @@ func renderConfig(owner, repo, dbHost string, dbPort int, dbUser, dbPassword str
 // newInitCmd creates the "ry init" cobra command.
 func newInitCmd() *cobra.Command {
 	var (
-		configPath    string
-		yes           bool
-		skipDB        bool
-		skipCoco      bool
-		skipTelegraph bool
-		dbHost        string
-		dbPort        int
-		dbUser        string
-		dbPassword    string
+		configPath        string
+		yes               bool
+		skipDB            bool
+		skipCoco          bool
+		skipTelegraph     bool
+		withPlugins       bool
+		withPluginsGlobal bool
+		dbHost            string
+		dbPort            int
+		dbUser            string
+		dbPassword        string
 	)
 
 	cmd := &cobra.Command{
@@ -492,7 +530,7 @@ and Telegraph chat bridge (Slack/Discord).
 
 Run this once in any git repository to get started with Railyard.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runInit(cmd, configPath, yes, skipDB, skipCoco, skipTelegraph, dbHost, dbPort, dbUser, dbPassword)
+			return runInit(cmd, configPath, yes, skipDB, skipCoco, skipTelegraph, withPlugins, withPluginsGlobal, dbHost, dbPort, dbUser, dbPassword)
 		},
 	}
 
@@ -501,6 +539,8 @@ Run this once in any git repository to get started with Railyard.`,
 	cmd.Flags().BoolVar(&skipDB, "skip-db", false, "skip database startup and initialization")
 	cmd.Flags().BoolVar(&skipCoco, "skip-cocoindex", false, "skip CocoIndex setup prompt")
 	cmd.Flags().BoolVar(&skipTelegraph, "skip-telegraph", false, "skip Telegraph chat bridge setup")
+	cmd.Flags().BoolVar(&withPlugins, "with-plugins", false, "create per-user plugin directory (~/.railyard/plugins) at 0755")
+	cmd.Flags().BoolVar(&withPluginsGlobal, "with-plugins-global", false, "create system-wide plugin directory (/etc/railyard/plugins.d) at 0755 (requires root)")
 	cmd.Flags().IntVarP(&dbPort, "port", "p", 3306, "database server port")
 	cmd.Flags().StringVarP(&dbHost, "host", "H", "127.0.0.1", "database server host address")
 	cmd.Flags().StringVarP(&dbUser, "user", "u", "root", "database server username")
@@ -509,7 +549,7 @@ Run this once in any git repository to get started with Railyard.`,
 }
 
 // runInit is the main orchestrator for the "ry init" command.
-func runInit(cmd *cobra.Command, configPath string, yes, skipDB, skipCoco, skipTelegraph bool, dbHost string, dbPort int, dbUser, dbPassword string) error {
+func runInit(cmd *cobra.Command, configPath string, yes, skipDB, skipCoco, skipTelegraph, withPlugins, withPluginsGlobal bool, dbHost string, dbPort int, dbUser, dbPassword string) error {
 	out := cmd.OutOrStdout()
 	in := io.Reader(byteReader{cmd.InOrStdin()})
 
@@ -654,6 +694,25 @@ func runInit(cmd *cobra.Command, configPath string, yes, skipDB, skipCoco, skipT
 		gitCommit.Dir = gitRoot
 		if commitOut, err := gitCommit.CombinedOutput(); err != nil {
 			fmt.Fprintf(out, "Warning: could not commit %s: %s\n", configPath, strings.TrimSpace(string(commitOut)))
+		}
+	}
+
+	// Step 5b: Optional plugin directory scaffolding. Both flags are
+	// orthogonal to database setup, so they run before any skipDB early
+	// return — a user passing --skip-db --with-plugins still gets their
+	// plugin dir created.
+	if withPlugins {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("resolve home directory for --with-plugins: %w", err)
+		}
+		if err := ensurePluginsDir(out, filepath.Join(home, pluginsDirUserName)); err != nil {
+			return err
+		}
+	}
+	if withPluginsGlobal {
+		if err := ensurePluginsDir(out, pluginsDirSystemPath); err != nil {
+			return err
 		}
 	}
 
