@@ -119,6 +119,8 @@ func (s *hostService) DispatchCommand(ctx context.Context, req *protov1.Dispatch
 		if err != nil {
 			return &protov1.DispatchCommandResponse{Success: false, Error: err.Error()}, nil
 		}
+		// DispatchCommand success: record that the dispatching plugin was just active.
+		s.host.bumpActivity(s.pluginName)
 		return commandResultToDispatch(res)
 	}
 
@@ -129,6 +131,12 @@ func (s *hostService) DispatchCommand(ctx context.Context, req *protov1.Dispatch
 		if err != nil {
 			return &protov1.DispatchCommandResponse{Success: false, Error: err.Error()}, nil
 		}
+		// DispatchCommand success: bump BOTH the dispatching plugin (it just
+		// did an RPC) and the owning plugin (its code just ran) under one
+		// lock — handlePermanentDisable could otherwise remove the owner
+		// between two separate bumpActivity calls and silently drop the
+		// owner's final activity.
+		s.host.bumpActivityPair(s.pluginName, owner.name)
 		return &protov1.DispatchCommandResponse{
 			Success: hcResp.Success,
 			Error:   hcResp.Error,

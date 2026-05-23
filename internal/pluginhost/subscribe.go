@@ -97,13 +97,20 @@ func (s *hostService) Subscribe(req *protov1.SubscribeRequest, stream protov1.Ho
 		lp.subMu.Unlock()
 	}
 
+	// Subscribe setup success: record that the plugin was just active.
+	s.host.bumpActivity(s.pluginName)
+
 	// Multiplexed queue. Buffered so the bus subscriber goroutines can
 	// drop into it without blocking even when the gRPC stream is slow.
 	queue := make(chan *protov1.Event, subscribeQueueCap)
 	drops := newDropCounter(s.pluginName, s.logger)
 	warner := newDropWarner(s.logger)
 
-	// Wire each allowed topic to the bus.
+	// Wire each allowed topic to the bus. incrSubscription per topic
+	// matches the in-process Host.Subscribe shim's per-topic accounting,
+	// so Status() reports the right SubscriptionCount for subprocess
+	// plugins (the gRPC path used to bypass the counter — see
+	// railyard-vdp).
 	unsubs := make([]events.Unsubscribe, 0, len(allowedTopics))
 	for _, topic := range allowedTopics {
 		t := topic // capture
@@ -130,13 +137,17 @@ func (s *hostService) Subscribe(req *protov1.SubscribeRequest, stream protov1.Ho
 			}
 		})
 		unsubs = append(unsubs, unsub)
+		s.host.incrSubscription(s.pluginName)
 	}
 
 	// Cleanup. Defers fire in LIFO order: unsubscribe → close queue →
-	// drain goroutine exits.
+	// drain goroutine exits. Decrement the per-plugin counter for every
+	// topic we incremented so Status() returns to zero when the stream
+	// ends.
 	defer func() {
 		for _, u := range unsubs {
 			u()
+			s.host.decrSubscription(s.pluginName)
 		}
 		close(queue)
 	}()

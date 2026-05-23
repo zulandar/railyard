@@ -147,6 +147,31 @@ type Host struct {
 	// field is set once at NewHost time.
 	clock func() time.Time
 
+	// bootedAt is the wall-clock time NewHost was constructed. Reported
+	// by [Host.Status] so operators can see uptime.
+	bootedAt time.Time
+
+	// initFailures retains plugins that launched successfully but whose
+	// PluginService.Init RPC returned an error. Surfaced by Status() as
+	// the "failed" state. Cleared on a subsequent successful relaunch
+	// of the same name. Read/written under h.mu.
+	initFailures map[string]initFailure
+
+	// disabled retains plugins that ran successfully and were later
+	// permanently disabled by the supervisor (crash budget exhausted,
+	// peer-cred mismatch). The plugin is removed from h.launched at the
+	// same time to keep dispatch lookups clean; this map preserves the
+	// snapshot Status() reports as the "disabled" state. Populated by
+	// handlePermanentDisable. Read/written under h.mu.
+	disabled map[string]*disabledPlugin
+
+	// skipped retains plugins listed in cfg.Plugins.Enabled but not
+	// found in any plugins.d directory at Init time. Surfaced by
+	// Status() as the "skipped" state. Populated once during Init.
+	// Read under h.mu; the underlying slice is treated as immutable
+	// after Init returns.
+	skipped []skippedPlugin
+
 	// backoffSleep blocks for d or until the host shutdownCh is
 	// closed (whichever comes first). Returns true if the sleep
 	// completed; false if it was short-circuited by shutdown. Default
@@ -165,13 +190,21 @@ var _ plugin.Host = (*Host)(nil)
 // plugins until [Host.Init] is called.
 func NewHost(deps Dependencies) *Host {
 	h := &Host{
-		deps:       deps,
-		pluginCmds: make(map[string]string),
-		inProcCmds: make(map[string]plugin.CommandHandler),
-		launched:   make(map[string]*launchedPlugin),
-		shutdownCh: make(chan struct{}),
-		clock:      time.Now,
+		deps:         deps,
+		pluginCmds:   make(map[string]string),
+		inProcCmds:   make(map[string]plugin.CommandHandler),
+		launched:     make(map[string]*launchedPlugin),
+		shutdownCh:   make(chan struct{}),
+		clock:        time.Now,
+		initFailures: make(map[string]initFailure),
+		disabled:     make(map[string]*disabledPlugin),
+		// `skipped` starts nil; populated by Init when there are missing plugins.
 	}
+	// bootedAt MUST come from h.clock so tests that stub the clock can
+	// deterministically assert Snapshot.Yardmaster.BootedAt. (host.go's
+	// clock field exists exactly for this kind of test determinism — see
+	// the field doc above.)
+	h.bootedAt = h.clock()
 	h.backoffSleep = defaultBackoffSleep
 	h.yardInfo = buildYardInfo(deps)
 	h.allowed = buildAllowList(&deps)

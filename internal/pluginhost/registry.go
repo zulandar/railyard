@@ -70,16 +70,10 @@ type launchedPlugin struct {
 	subMu      sync.Mutex
 	subCancels []context.CancelFunc
 
-	// disabled is true once a fatal-for-lifetime condition (e.g.
-	// SO_PEERCRED mismatch, crash-budget exceeded) has fired. The
-	// plugin is left in the registry so DispatchCommand can return a
-	// clear error, but no new work is sent to it.
-	disabled bool
-
 	// budget tracks crash recurrence inside a 60s sliding window. The
 	// 4th crash inside the window flips the plugin into a
-	// permanently-disabled state (see [crashBudget] and the supervisor
-	// loop in launch.go for the policy).
+	// permanently-disabled state. handlePermanentDisable then moves the
+	// snapshot into Host.disabled and removes us from h.launched.
 	budget *crashBudget
 
 	// stopping is set true the moment the host begins a planned
@@ -88,9 +82,9 @@ type launchedPlugin struct {
 	// this flag on every subprocess-exit observation: stopping=true
 	// suppresses the restart loop and stops budget accounting.
 	//
-	// stopping is read under [Host.mu] for the same reason `disabled`
-	// is; it lives on launchedPlugin (not on a global host channel) so
-	// per-plugin Stop semantics stay independent.
+	// stopping lives on launchedPlugin (not on a global host channel)
+	// so per-plugin Stop semantics stay independent. Read/written under
+	// [Host.mu].
 	stopping bool
 
 	// superviseDone is closed by the supervisor goroutine when it has
@@ -112,8 +106,24 @@ type launchedPlugin struct {
 
 	// lastExitReason is a short, human-readable string describing why
 	// the subprocess last terminated unexpectedly. Surfaced in the
-	// permanent-disable ERROR log; populated by the supervisor.
+	// permanent-disable ERROR log AND by Status() for disabled rows.
+	// Read/written under [Host.mu]. Same-goroutine reads in
+	// handlePermanentDisable run sequentially after the supervisor's
+	// locked write, so they see the latest value without re-locking.
 	lastExitReason string
+
+	// restartCount is the cumulative count of successful supervisor
+	// relaunches since this host booted. Distinct from
+	// consecutiveCrashes, which resets on a clean Init. Read/written
+	// under [Host.mu].
+	restartCount int
+
+	// lastActivity is the most recent timestamp at which this plugin
+	// did something the host noticed: successful Init, Start,
+	// supervisor relaunch, DispatchCommand hit, or Subscribe. Event
+	// delivery into the plugin's subscription stream does NOT bump
+	// this field (hot path). Read/written under [Host.mu].
+	lastActivity time.Time
 }
 
 // pluginCapabilities is the host's view of the negotiated capability
@@ -145,7 +155,6 @@ type LaunchedPluginInfo struct {
 	Path       string
 	SocketPath string
 	PID        int
-	Disabled   bool
 }
 
 // LaunchedPlugins returns a snapshot of every launched plugin, sorted by
@@ -160,7 +169,6 @@ func (h *Host) LaunchedPlugins() []LaunchedPluginInfo {
 			Path:       lp.path,
 			SocketPath: lp.socketPath,
 			PID:        lp.pid,
-			Disabled:   lp.disabled,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
@@ -231,10 +239,24 @@ func (h *Host) Init(ctx context.Context) {
 
 	cs := discoverCandidates(extra, logger)
 	launch, missing := filterEnabled(cs, enabled)
-	for _, name := range missing {
-		logger.Warn("pluginhost: enabled plugin not found on disk",
-			slog.String("plugin", name),
-		)
+
+	if len(missing) > 0 {
+		// Same directory resolution as discoverCandidates — shared so the
+		// "not found in: …" diagnostic reflects the paths actually walked.
+		searched := pluginSearchDirs(extra)
+
+		h.mu.Lock()
+		for _, name := range missing {
+			// Per-entry copy so a future append on one skippedPlugin's
+			// `searched` cannot mutate every other entry via a shared
+			// backing array.
+			perEntry := append([]string(nil), searched...)
+			h.skipped = append(h.skipped, skippedPlugin{name: name, searched: perEntry})
+			logger.Warn("pluginhost: enabled plugin not found on disk",
+				slog.String("plugin", name),
+			)
+		}
+		h.mu.Unlock()
 	}
 
 	for _, c := range launch {
@@ -256,6 +278,14 @@ func (h *Host) initOne(ctx context.Context, c candidate, parentLogger *slog.Logg
 			"plugin "+c.name+": launch failed — skipped ("+err.Error()+")",
 			slog.String("error", err.Error()),
 		)
+		h.mu.Lock()
+		h.initFailures[c.name] = initFailure{
+			name:     c.name,
+			path:     c.path,
+			err:      err.Error(),
+			failedAt: h.clock(),
+		}
+		h.mu.Unlock()
 		return
 	}
 
@@ -281,6 +311,14 @@ func (h *Host) initOne(ctx context.Context, c candidate, parentLogger *slog.Logg
 			"plugin "+c.name+": Init RPC failed — skipped ("+err.Error()+")",
 			slog.String("error", err.Error()),
 		)
+		h.mu.Lock()
+		h.initFailures[c.name] = initFailure{
+			name:     c.name,
+			path:     c.path,
+			err:      err.Error(),
+			failedAt: h.clock(),
+		}
+		h.mu.Unlock()
 		lp.client.Kill()
 		removeSocket(lp.socketPath)
 		return
@@ -349,6 +387,17 @@ func (h *Host) initOne(ctx context.Context, c candidate, parentLogger *slog.Logg
 	// Hand the plugin to the supervisor — it owns the registry
 	// insertion AND the restart loop for the lifetime of the host.
 	h.startSupervisor(ctx, c, lp)
+
+	// Init success: record that the plugin was just active.
+	h.bumpActivity(c.name)
+
+	// Note: we do NOT touch h.initFailures here. Init() walks each plugin
+	// exactly once and routes failures to the early returns above, so
+	// reaching this line guarantees no prior initFailure entry exists
+	// for c.name. Supervisor relaunch() bypasses initOne entirely. If a
+	// future code path adds in-place re-init (e.g. config reload), it
+	// will need to clear initFailures itself in the same lock acquisition
+	// that re-inserts into h.launched.
 }
 
 // resolveAllowList builds the per-plugin AllowList from the loaded
@@ -419,7 +468,7 @@ func (h *Host) Start(ctx context.Context) {
 
 	for _, name := range names {
 		lp := h.lookupPluginByName(name)
-		if lp == nil || lp.disabled {
+		if lp == nil {
 			continue
 		}
 		startCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -437,6 +486,8 @@ func (h *Host) Start(ctx context.Context) {
 			slog.Int("events", len(lp.capabilities.subscribeEvents)),
 			slog.Int("commands", len(lp.capabilities.provideCommands)),
 		)
+		// Start success: record that the plugin was just active.
+		h.bumpActivity(name)
 	}
 }
 

@@ -134,7 +134,7 @@ func TestStartHealthServer_Healthz(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go StartHealthServer(ctx, port, hs)
+	go StartHealthServer(ctx, port, hs, nil)
 	// Wait for the server to start.
 	waitForServer(t, port)
 
@@ -158,7 +158,7 @@ func TestStartHealthServer_Readyz_Ready(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go StartHealthServer(ctx, port, hs)
+	go StartHealthServer(ctx, port, hs, nil)
 	waitForServer(t, port)
 
 	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/readyz", port))
@@ -181,7 +181,7 @@ func TestStartHealthServer_Readyz_NotReady(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go StartHealthServer(ctx, port, hs)
+	go StartHealthServer(ctx, port, hs, nil)
 	waitForServer(t, port)
 
 	// Wait for the poll interval to expire.
@@ -208,7 +208,7 @@ func TestStartHealthServer_ShutdownOnCancel(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- StartHealthServer(ctx, port, hs)
+		errCh <- StartHealthServer(ctx, port, hs, nil)
 	}()
 	waitForServer(t, port)
 

@@ -619,6 +619,83 @@ documents discovery, runtime controls, and observability in detail.
 
 ---
 
+## Runtime introspection
+
+`ry plugins list` shows the build-time view: every plugin binary the host
+*would* attempt to launch on startup, intersected with `railyard.yaml`'s
+`plugins.enabled`. It does not reflect what is currently running.
+
+`ry plugins status` queries a running yardmaster over HTTP and reports
+the live state of each configured plugin.
+
+### What it reports
+
+For every plugin in `plugins.enabled` or known to the running host, one
+of four states:
+
+- **running** — launched, alive, accepting commands.
+- **disabled** — supervisor permanently disabled the plugin (crash budget
+  exhausted, peer-cred mismatch). The `error` column shows the last exit
+  reason.
+- **failed** — the launch handshake succeeded but `PluginService.Init`
+  returned an error. The `error` column shows the init error.
+- **skipped** — listed in `plugins.enabled` but no matching binary was
+  found in any of the plugins.d directories the host searches.
+
+Per-plugin fields:
+
+| Field | Meaning |
+|-------|---------|
+| `restart_count` | Cumulative supervisor relaunches since the host booted. |
+| `subscription_count` | Live event subscriptions the plugin owns. |
+| `command_count` | Plugin-registered commands the host routes to it. |
+| `last_activity` | Last lifecycle or dispatch event timestamp. NOT bumped by event delivery — see below. |
+| `pid` | Subprocess PID (0 when not running). |
+| `path` | Discovered binary path. |
+| `error` | Last exit reason (disabled), init error (failed), or "not found in: …" (skipped). |
+
+`last_activity` advances on: successful Init, successful Start, supervisor
+relaunch, every `DispatchCommand` hit, every `Subscribe`. It does **not**
+advance per delivered event — that would impose a host mutex write on
+every bus message.
+
+### Running it
+
+**Local-dev:**
+
+```bash
+ry plugins status
+```
+Reads `cfg.yardmaster.health_port` from `railyard.yaml` and queries
+`http://127.0.0.1:<port>/plugins/status`.
+
+**k8s — port-forward:**
+
+```bash
+kubectl -n railyard port-forward svc/yardmaster 8081:8081
+ry plugins status --url=http://localhost:8081/plugins/status
+```
+
+**k8s — exec:**
+
+The chart image ships the `ry` binary, so you can run the command inside
+the yardmaster pod:
+
+```bash
+kubectl -n railyard exec -it deploy/yardmaster -- ry plugins status
+```
+
+### Scripting
+
+Pass `--json` for the raw response in the wire format documented in the
+plugin status spec:
+
+```bash
+ry plugins status --json | jq '.plugins[] | select(.status != "running")'
+```
+
+---
+
 ## Migrating from the legacy in-process model
 
 If you have an existing plugin written against the old `init()` +

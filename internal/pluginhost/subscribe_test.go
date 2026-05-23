@@ -119,6 +119,67 @@ func TestSubscribeDeliversEvents(t *testing.T) {
 	}
 }
 
+// TestSubscribeBumpsSubscriptionCount asserts the gRPC Subscribe path
+// updates h.subscriptions per-topic (railyard-vdp regression). The
+// in-process Host.Subscribe shim already bumped this counter; only the
+// subprocess gRPC path used to bypass it, so Status() always reported
+// 0 for real plugins.
+func TestSubscribeBumpsSubscriptionCount(t *testing.T) {
+	bus := events.NewBus()
+	defer bus.(interface{ Close() }).Close()
+	host := NewHost(Dependencies{Bus: bus, Cfg: permissivePluginCfg("p1")})
+	hs := newHostService(host, "p1")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	stream := &fakeSubscribeStream{ctx: ctx}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- hs.Subscribe(&protov1.SubscribeRequest{
+			Topics: []string{string(plugin.CarCreated), string(plugin.CarMerged)},
+		}, stream)
+	}()
+
+	// Wait for the per-topic bus subscriptions to wire up. Poll the
+	// counter rather than sleeping to avoid a fixed race window.
+	deadline := time.Now().Add(2 * time.Second)
+	var got int
+	for time.Now().Before(deadline) {
+		host.mu.Lock()
+		got = host.subscriptions["p1"]
+		host.mu.Unlock()
+		if got == 2 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got != 2 {
+		t.Fatalf("after Subscribe, h.subscriptions[p1] = %d, want 2", got)
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Subscribe goroutine did not exit after cancel")
+	}
+
+	// After cleanup the counter must return to zero.
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		host.mu.Lock()
+		got = host.subscriptions["p1"]
+		host.mu.Unlock()
+		if got == 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got != 0 {
+		t.Fatalf("after Subscribe cleanup, h.subscriptions[p1] = %d, want 0", got)
+	}
+}
+
 // TestSubscribeNoGoroutineLeak ensures the per-stream bus subscriptions
 // + drain goroutine are cleaned up when the client disconnects. We bound
 // the leak check to a few hundred milliseconds because goroutine teardown
