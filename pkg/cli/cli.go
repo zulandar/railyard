@@ -3,6 +3,8 @@ package cli
 import (
 	"fmt"
 	"os"
+	"runtime/debug"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -56,9 +58,55 @@ func newVersionCmd() *cobra.Command {
 		Use:   "version",
 		Short: "Print version information",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Fprintf(cmd.OutOrStdout(), "ry %s (commit: %s, built: %s)\n", Version, Commit, Date)
+			info, ok := debug.ReadBuildInfo()
+			v, c, d := resolveVersion(Version, Commit, Date, info, ok)
+			fmt.Fprintf(cmd.OutOrStdout(), "ry %s (commit: %s, built: %s)\n", v, c, d)
 		},
 	}
+}
+
+// resolveVersion fills in version/commit/date from Go's build info when the
+// ldflags-injected values are still at their defaults. Ldflags always win —
+// release tarballs see no behavior change. The fallback path is what makes
+// `go install ...@latest` and locally-built binaries report something useful.
+func resolveVersion(version, commit, date string, info *debug.BuildInfo, infoOK bool) (string, string, string) {
+	if !infoOK {
+		return version, commit, date
+	}
+
+	versionFromBuildInfo := false
+	if version == "dev" && info.Main.Version != "" {
+		version = info.Main.Version
+		versionFromBuildInfo = true
+	}
+
+	var dirty bool
+	for _, s := range info.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			if commit == "none" {
+				if len(s.Value) >= 8 {
+					commit = s.Value[:8]
+				} else {
+					commit = s.Value
+				}
+			}
+		case "vcs.time":
+			if date == "unknown" {
+				date = s.Value
+			}
+		case "vcs.modified":
+			dirty = s.Value == "true"
+		}
+	}
+	// Only mark dirty when version came from build info — ldflag-injected
+	// values from a release build should display verbatim. Skip if the
+	// pseudo-version already carries "+dirty" build metadata to avoid
+	// double-tagging (e.g. "v0.9.10-...+dirty-dirty").
+	if dirty && versionFromBuildInfo && !strings.Contains(version, "+dirty") {
+		version += "-dirty"
+	}
+	return version, commit, date
 }
 
 func execute(cmd *cobra.Command) int {
