@@ -56,9 +56,9 @@ jobs:
       - name: Build ry binary
         run: |
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "\
-            -X main.Version=${GITHUB_REF_NAME#v} \
-            -X main.Commit=$(git rev-parse --short HEAD) \
-            -X main.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            -X github.com/zulandar/railyard/pkg/cli.Version=${GITHUB_REF_NAME#v} \
+            -X github.com/zulandar/railyard/pkg/cli.Commit=$(git rev-parse --short HEAD) \
+            -X github.com/zulandar/railyard/pkg/cli.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             -o ry ./cmd/ry/
 
       - name: Install Helm
@@ -169,7 +169,7 @@ jobs:
           VERSION="${GITHUB_REF_NAME}"
           COMMIT="${GITHUB_SHA::8}"
           DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          LDFLAGS="-s -w -X main.Version=${VERSION} -X main.Commit=${COMMIT} -X main.Date=${DATE}"
+          LDFLAGS="-s -w -X github.com/zulandar/railyard/pkg/cli.Version=${VERSION} -X github.com/zulandar/railyard/pkg/cli.Commit=${COMMIT} -X github.com/zulandar/railyard/pkg/cli.Date=${DATE}"
           OUTPUT="ry-${VERSION}-${GOOS}-${GOARCH}"
           if [ "$GOOS" = "windows" ]; then OUTPUT="${OUTPUT}.exe"; fi
           go build -ldflags "${LDFLAGS}" -o "${OUTPUT}" ./cmd/ry/
