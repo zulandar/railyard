@@ -243,10 +243,16 @@ func TestSubscribeE2EHighVolume(t *testing.T) {
 		t.Logf("[%s] published=%d delivered=%d drops_from_log=%d warmups=%d",
 			et, published, delivered, drops, warmups)
 
-		// (a) At least one drop occurred per topic. Proves the bounded
-		// queue + drop-oldest backpressure path fired end-to-end.
-		if drops == 0 {
-			t.Errorf("[%s] expected at least one drop (backpressure should have fired); drops=0", et)
+		// (a) Backpressure fired per topic. Proves the bounded queue +
+		// drop-oldest path engaged end-to-end. We assert delivered <
+		// published rather than drops_from_log > 0 because drop
+		// logging is racy under contention (see (c) below) — silent
+		// drops can occur when a publisher races a concurrent drain
+		// and the post-eviction re-send fails without recording a log.
+		// (railyard-lju)
+		if delivered >= published {
+			t.Errorf("[%s] backpressure did not fire: every published event was delivered (published=%d delivered=%d drops_from_log=%d) — increase burst rate or slow-handler latency",
+				et, published, delivered, drops)
 		}
 
 		// (b) WARN-throttle (railyard-fll.5.2 / Lane K). When .5.2
