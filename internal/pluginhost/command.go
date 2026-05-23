@@ -183,9 +183,9 @@ func (h *Host) DispatchCommand(ctx context.Context, name string, args plugin.Com
 		}
 		return binding.fn(ctx, args)
 	}
-	h.mu.Lock()
+	h.mu.RLock()
 	handler, ok := h.inProcCmds[name]
-	h.mu.Unlock()
+	h.mu.RUnlock()
 	if ok {
 		return handler(ctx, args)
 	}

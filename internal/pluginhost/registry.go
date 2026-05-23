@@ -137,8 +137,8 @@ type pluginCapabilities struct {
 // Used by `ry plugins list` (once it is rewired in railyard-hqe) and by
 // the boot summary log line.
 func (h *Host) Names() []string {
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	h.mu.RLock()
+	defer h.mu.RUnlock()
 	out := make([]string, 0, len(h.launched))
 	for name := range h.launched {
 		out = append(out, name)
@@ -160,8 +160,8 @@ type LaunchedPluginInfo struct {
 // LaunchedPlugins returns a snapshot of every launched plugin, sorted by
 // name. Safe for concurrent use.
 func (h *Host) LaunchedPlugins() []LaunchedPluginInfo {
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	h.mu.RLock()
+	defer h.mu.RUnlock()
 	out := make([]LaunchedPluginInfo, 0, len(h.launched))
 	for _, lp := range h.launched {
 		out = append(out, LaunchedPluginInfo{
@@ -178,8 +178,8 @@ func (h *Host) LaunchedPlugins() []LaunchedPluginInfo {
 // lookupPluginByName returns the launched plugin under name, or nil.
 // Holds the lock for the duration of the read.
 func (h *Host) lookupPluginByName(name string) *launchedPlugin {
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	h.mu.RLock()
+	defer h.mu.RUnlock()
 	return h.launched[name]
 }
 
@@ -187,8 +187,8 @@ func (h *Host) lookupPluginByName(name string) *launchedPlugin {
 // owning launched plugin, or nil. The pluginCmds map is populated during
 // Init from each plugin's AllowedCommands.
 func (h *Host) lookupPluginByCommand(cmdName string) *launchedPlugin {
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	h.mu.RLock()
+	defer h.mu.RUnlock()
 	owner, ok := h.pluginCmds[cmdName]
 	if !ok {
 		return nil

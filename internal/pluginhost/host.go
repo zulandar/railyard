@@ -93,8 +93,12 @@ type Host struct {
 	// once in NewHost.
 	allowed map[string]commandBinding
 
-	// Mutex guarding the maps below.
-	mu sync.Mutex
+	// RWMutex guarding the maps below. Read-only methods (Status,
+	// Names, LaunchedPlugins, lookupPluginByName, lookupPluginByCommand,
+	// isPluginStopping, DispatchCommand's inProcCmds lookup, relaunch's
+	// h.started read) take RLock so Status() does not serialize against
+	// the supervisor's hot path.
+	mu sync.RWMutex
 
 	// pluginCmds maps a plugin-registered command name to its serving
 	// subprocess plugin's name. Populated from Init's advertised

@@ -98,8 +98,8 @@ type skippedPlugin struct {
 //
 // Plugins are returned in the slice sorted ascending by name.
 func (h *Host) Status() Snapshot {
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	h.mu.RLock()
+	defer h.mu.RUnlock()
 
 	plugins := make([]PluginStatus, 0, len(h.launched)+len(h.disabled)+len(h.initFailures)+len(h.skipped))
 

@@ -219,8 +219,8 @@ func (h *Host) waitForExitOrShutdown(lp *launchedPlugin) bool {
 // host lock — keeps the supervisor's view consistent with Stop's
 // write.
 func (h *Host) isPluginStopping(lp *launchedPlugin) bool {
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	h.mu.RLock()
+	defer h.mu.RUnlock()
 	return lp.stopping
 }
 
@@ -326,9 +326,9 @@ func (h *Host) relaunch(ctx context.Context, c candidate, lp *launchedPlugin) er
 	// If the host has already been Started, re-Start the plugin.
 	// Otherwise leave it Init-only — host.Start will pick it up in
 	// the normal order.
-	h.mu.Lock()
+	h.mu.RLock()
 	hostStarted := h.started
-	h.mu.Unlock()
+	h.mu.RUnlock()
 	if hostStarted {
 		startCtx, startCancel := context.WithTimeout(ctx, 30*time.Second)
 		_, err := fresh.pluginRPC.Start(startCtx, &protov1.StartRequest{})
