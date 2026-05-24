@@ -175,6 +175,65 @@ func TestPluginsListWithRealDiscovery(t *testing.T) {
 	}
 }
 
+// TestPluginsListSurfacesNonExecutables seeds a plugins dir with a file
+// that lacks the exec bit, then runs `ry plugins list` end-to-end and
+// asserts the file appears with EXECUTABLE=no. This is the user-facing
+// acceptance criterion from railyard-4px — operators who drop a binary
+// without +x must see a diagnostic row, not "no plugins found".
+func TestPluginsListSurfacesNonExecutables(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX executable bit semantics")
+	}
+
+	pluginsDir := t.TempDir()
+	nonExecPath := filepath.Join(pluginsDir, "trainmaster-plugin")
+	if err := os.WriteFile(nonExecPath, []byte("not an executable"), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	withStubConfigLoad(t, func(string) (*config.Config, error) {
+		return &config.Config{
+			Plugins: config.PluginsConfig{PluginsDir: pluginsDir},
+		}, nil
+	})
+	// Do NOT stub pluginsListDiscover — exercise the real path.
+
+	root := newRootCmd()
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	root.SetArgs([]string{"plugins", "list"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("`ry plugins list` failed: %v", err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "trainmaster-plugin") {
+		t.Errorf("expected plugin name in output:\n%s", got)
+	}
+	if !strings.Contains(got, nonExecPath) {
+		t.Errorf("expected path %q in output:\n%s", nonExecPath, got)
+	}
+	// Locate the row for our seeded plugin and confirm EXECUTABLE column
+	// reads "no". Scan line-by-line so other rows (system plugins.d) can't
+	// cause a false positive on "no" appearing elsewhere.
+	var row string
+	for _, line := range strings.Split(got, "\n") {
+		if strings.Contains(line, "trainmaster-plugin") && strings.Contains(line, nonExecPath) {
+			row = line
+			break
+		}
+	}
+	if row == "" {
+		t.Fatalf("no row found for seeded plugin in output:\n%s", got)
+	}
+	// Row layout: NAME ENABLED EXECUTABLE EVENTS COMMANDS PATH
+	// The 3rd whitespace-separated field should be "no".
+	fields := strings.Fields(row)
+	if len(fields) < 3 || fields[2] != "no" {
+		t.Errorf("EXECUTABLE column = %q, want %q in row: %s", fields[2], "no", row)
+	}
+}
+
 // TestPluginsParentCmdHelp ensures `ry plugins` with no subcommand prints
 // help rather than erroring — matches the pattern other parent commands
 // (e.g. `ry overlay`) follow.

@@ -90,27 +90,26 @@ func DiscoverPlugins(cfg *config.Config) ([]PluginCandidate, error) {
 	}
 
 	cs := discoverCandidates(extra, logger)
+	nonExec := discoverNonExecCandidates(extra, logger)
 
 	enabledSet := make(map[string]struct{}, len(enabled))
 	for _, name := range enabled {
 		enabledSet[name] = struct{}{}
 	}
 
-	byName := make(map[string]PluginCandidate, len(cs)+len(enabled))
+	byName := make(map[string]PluginCandidate, len(cs)+len(nonExec)+len(enabled))
 	for _, c := range cs {
-		pc := PluginCandidate{
-			Name:       c.name,
-			Path:       c.path,
-			Source:     c.source,
-			Executable: true, // scanDir already filters non-executables
-			SocketPath: predictSocketPath(c.name),
+		byName[c.name] = pluginCandidateFromScan(c, true, enabledSet, settings)
+	}
+
+	// Surface non-executable candidates so operators can spot files that
+	// would never launch (e.g. missing +x on a dropped binary). Executable
+	// matches always win — skip names already in byName.
+	for _, c := range nonExec {
+		if _, ok := byName[c.name]; ok {
+			continue
 		}
-		_, pc.Enabled = enabledSet[c.name]
-		if s, ok := settings[c.name]; ok {
-			pc.AllowEvents = append([]string(nil), s.Allow.Events...)
-			pc.AllowCommands = append([]string(nil), s.Allow.Commands...)
-		}
-		byName[c.name] = pc
+		byName[c.name] = pluginCandidateFromScan(c, false, enabledSet, settings)
 	}
 
 	// Surface enabled-but-missing plugins so the table is honest about
@@ -137,6 +136,30 @@ func DiscoverPlugins(cfg *config.Config) ([]PluginCandidate, error) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil
+}
+
+// pluginCandidateFromScan builds a PluginCandidate from a scan-result
+// candidate, applying the enabled-set and per-plugin settings lookups
+// shared with the executable and non-executable scan paths.
+func pluginCandidateFromScan(
+	c candidate,
+	executable bool,
+	enabledSet map[string]struct{},
+	settings map[string]config.PluginSettings,
+) PluginCandidate {
+	pc := PluginCandidate{
+		Name:       c.name,
+		Path:       c.path,
+		Source:     c.source,
+		Executable: executable,
+		SocketPath: predictSocketPath(c.name),
+	}
+	_, pc.Enabled = enabledSet[c.name]
+	if s, ok := settings[c.name]; ok {
+		pc.AllowEvents = append([]string(nil), s.Allow.Events...)
+		pc.AllowCommands = append([]string(nil), s.Allow.Commands...)
+	}
+	return pc
 }
 
 // systemPluginsDir is the system-wide plugin directory scanned first.
@@ -227,6 +250,76 @@ func discoverCandidates(extra string, logger *slog.Logger) []candidate {
 		out = append(out, c)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].name < out[j].name })
+	return out
+}
+
+// discoverNonExecCandidates walks the same directories as
+// [discoverCandidates] and returns the non-executable regular files
+// found in them. The result is diagnostic-only — these are files that
+// would NOT launch on host startup but exist on disk, so
+// [DiscoverPlugins] can surface them in `ry plugins list` with
+// Executable=false rather than vanishing them with a flat "no plugins
+// found".
+//
+// Cross-directory name collisions are deduped silently (no WARN log)
+// because these are not going to be launched; the order is undefined
+// beyond "deterministic" — sorted by name on the way out.
+func discoverNonExecCandidates(extra string, logger *slog.Logger) []candidate {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	dirs := pluginSearchDirs(extra)
+	merged := make(map[string]candidate)
+	for _, dir := range dirs {
+		for _, c := range scanDirNonExec(dir, logger) {
+			merged[c.name] = c
+		}
+	}
+	out := make([]candidate, 0, len(merged))
+	for _, c := range merged {
+		out = append(out, c)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].name < out[j].name })
+	return out
+}
+
+// scanDirNonExec is the inverted counterpart to [scanDir]: it returns
+// regular files in dir that lack any executable bit. Missing directories
+// return an empty slice (no error). Permission errors are logged at
+// DEBUG — same as [scanDir].
+func scanDirNonExec(dir string, logger *slog.Logger) []candidate {
+	if dir == "" {
+		return nil
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			logger.Debug("pluginhost: skipping plugin dir",
+				slog.String("dir", dir),
+				slog.String("err", err.Error()),
+			)
+		}
+		return nil
+	}
+	var out []candidate
+	for _, ent := range entries {
+		if ent.IsDir() {
+			continue
+		}
+		full := filepath.Join(dir, ent.Name())
+		info, err := ent.Info()
+		if err != nil {
+			continue
+		}
+		if isExecutable(info.Mode()) {
+			continue
+		}
+		out = append(out, candidate{
+			name:   stripExt(ent.Name()),
+			path:   full,
+			source: dir,
+		})
+	}
 	return out
 }
 
