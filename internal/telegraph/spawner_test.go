@@ -219,6 +219,111 @@ func TestClaudeSpawner_SystemPromptFlag(t *testing.T) {
 	}
 }
 
+// TestClaudeSpawner_ModelSetsAnthropicModelEnv asserts that when Model is
+// configured, the spawned subprocess sees ANTHROPIC_MODEL set to that
+// value. This is the railyard-f7z fix: telegraph must honor
+// cfg.AgentModel exactly the way the engine's ClaudeProvider does, or
+// claude falls back to its default model and OpenRouter rejects the
+// request with 402 on free-tier credit budgets.
+func TestClaudeSpawner_ModelSetsAnthropicModelEnv(t *testing.T) {
+	dir := t.TempDir()
+	binary := writeMockBinary(t, dir, "claude", `echo "ANTHROPIC_MODEL=$ANTHROPIC_MODEL"`)
+
+	spawner := &ClaudeSpawner{
+		ClaudeBinary: binary,
+		WorkDir:      dir,
+		Model:        "openai/gpt-oss-120b:free",
+	}
+
+	proc, err := spawner.Spawn(context.Background(), "test")
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	defer proc.Close()
+
+	var lines []string
+	for line := range proc.Recv() {
+		lines = append(lines, line)
+	}
+	<-proc.Done()
+
+	got := strings.Join(lines, "\n")
+	want := "ANTHROPIC_MODEL=openai/gpt-oss-120b:free"
+	if !strings.Contains(got, want) {
+		t.Errorf("subprocess env missing %q; full stdout:\n%s", want, got)
+	}
+}
+
+// TestClaudeSpawner_EmptyModelDoesNotClobberInheritedEnv ensures that an
+// empty Model leaves ANTHROPIC_MODEL untouched — so operators who set it
+// via shell env keep that value. Mirrors the engine's behavior of "no
+// model = no env mutation".
+func TestClaudeSpawner_EmptyModelDoesNotClobberInheritedEnv(t *testing.T) {
+	dir := t.TempDir()
+	binary := writeMockBinary(t, dir, "claude", `echo "ANTHROPIC_MODEL=$ANTHROPIC_MODEL"`)
+
+	t.Setenv("ANTHROPIC_MODEL", "inherited-from-shell")
+
+	spawner := &ClaudeSpawner{
+		ClaudeBinary: binary,
+		WorkDir:      dir,
+		// Model intentionally empty.
+	}
+
+	proc, err := spawner.Spawn(context.Background(), "test")
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	defer proc.Close()
+
+	var lines []string
+	for line := range proc.Recv() {
+		lines = append(lines, line)
+	}
+	<-proc.Done()
+
+	got := strings.Join(lines, "\n")
+	want := "ANTHROPIC_MODEL=inherited-from-shell"
+	if !strings.Contains(got, want) {
+		t.Errorf("subprocess env did not inherit shell ANTHROPIC_MODEL; got:\n%s", got)
+	}
+}
+
+// TestLazySpawner_ModelPropagatesToDelegate confirms LazySpawner.Model
+// reaches the ClaudeSpawner delegate, so the same env var ends up on
+// the subprocess.
+func TestLazySpawner_ModelPropagatesToDelegate(t *testing.T) {
+	dir := t.TempDir()
+	binary := writeMockBinary(t, dir, "claude", `echo "ANTHROPIC_MODEL=$ANTHROPIC_MODEL"`)
+
+	spawner := &LazySpawner{
+		RenderPrompt:   func() (string, error) { return "prompt", nil },
+		EnsureWorktree: func() (string, error) { return dir, nil },
+		SyncWorktree:   func(string) error { return nil },
+		WriteMCPConfig: func(string) error { return nil },
+		ClaudeBinary:   binary,
+		Model:          "openai/gpt-oss-120b:free",
+	}
+
+	proc, err := spawner.Spawn(context.Background(), "hello")
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	defer proc.Close()
+
+	var lines []string
+	for line := range proc.Recv() {
+		lines = append(lines, line)
+	}
+	<-proc.Done()
+
+	got := strings.Join(lines, "\n")
+	want := "ANTHROPIC_MODEL=openai/gpt-oss-120b:free"
+	if !strings.Contains(got, want) {
+		t.Errorf("LazySpawner did not propagate Model to delegate; got:\n%s", got)
+	}
+}
+
 func TestClaudeSpawner_MissingBinary(t *testing.T) {
 	spawner := &ClaudeSpawner{
 		ClaudeBinary: "/nonexistent/path/to/claude-binary-xyz",

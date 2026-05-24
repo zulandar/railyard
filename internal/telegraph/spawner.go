@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -21,6 +22,11 @@ type ClaudeSpawner struct {
 	SystemPrompt string // appended via --append-system-prompt
 	WorkDir      string // working directory for the subprocess
 	ClaudeBinary string // path to claude binary; defaults to "claude"
+	// Model is the agent model name forwarded to claude via the
+	// ANTHROPIC_MODEL environment variable — same mechanism the engine's
+	// ClaudeProvider uses. Empty leaves the env unchanged, preserving the
+	// CLI's default (and any operator-set ANTHROPIC_MODEL in the shell).
+	Model string
 }
 
 // Spawn starts a claude subprocess. If prompt is non-empty, it is passed via
@@ -52,6 +58,14 @@ func (s *ClaudeSpawner) Spawn(ctx context.Context, prompt string) (Process, erro
 
 	if s.WorkDir != "" {
 		cmd.Dir = s.WorkDir
+	}
+
+	// Forward agent_model to claude via ANTHROPIC_MODEL — same mechanism
+	// the engine's ClaudeProvider uses. Without this, claude falls back to
+	// its default model, which OpenRouter rejects on free-tier credit
+	// budgets with HTTP 402.
+	if s.Model != "" {
+		cmd.Env = append(os.Environ(), "ANTHROPIC_MODEL="+s.Model)
 	}
 
 	// Use a process group so SIGTERM kills the entire tree (shell + children).
@@ -205,6 +219,8 @@ type LazySpawner struct {
 	WriteMCPConfig func(worktreeDir string) error
 	// ClaudeBinary is the path to the claude binary; defaults to "claude".
 	ClaudeBinary string
+	// Model is forwarded to the underlying ClaudeSpawner; see its docs.
+	Model string
 }
 
 // Spawn performs full dispatch setup then delegates to ClaudeSpawner.
@@ -242,6 +258,7 @@ func (ls *LazySpawner) Spawn(ctx context.Context, prompt string) (Process, error
 		SystemPrompt: systemPrompt,
 		WorkDir:      worktreeDir,
 		ClaudeBinary: ls.ClaudeBinary,
+		Model:        ls.Model,
 	}
 	return delegate.Spawn(ctx, prompt)
 }

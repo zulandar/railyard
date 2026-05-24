@@ -199,6 +199,7 @@ func runTelegraphStart(cmd *cobra.Command, configPath string) error {
 		WriteMCPConfig: func(worktreeDir string) error {
 			return dispatch.WriteDispatchMCPConfig(worktreeDir, cfg)
 		},
+		Model: cfg.AgentModel,
 	}
 	fmt.Fprintf(out, "telegraph: dispatch enabled (lazy spawner)\n")
 
