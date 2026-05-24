@@ -282,6 +282,12 @@ func runDBStart(cmd *cobra.Command, configPath string) error {
 		return fmt.Errorf("database host %s is not local — ry db start only manages local Docker containers.\nEnsure the remote database at %s:%d is running.", host, host, port)
 	}
 
+	// While the container is starting, mysqld closes the TCP socket mid-handshake
+	// on every probe attempt; the driver logs "unexpected EOF" each time. Silence
+	// for the duration of this function — errors still flow back via ConnectAdmin.
+	restore := db.SilenceDriverLogger()
+	defer restore()
+
 	// Local host: check if database is already running.
 	if _, err := db.ConnectAdmin(host, port, cfg.Database.Username, cfg.Database.Password); err == nil {
 		fmt.Fprintf(out, "Database is already running on %s:%d\n", host, port)

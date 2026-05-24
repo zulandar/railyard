@@ -262,6 +262,12 @@ func ensureDBRunning(out io.Writer, host string, port int, username, password st
 		return fmt.Errorf("database host %s is not local — auto-provisioning only works for 127.0.0.1/localhost.\nEnsure the remote database at %s:%d is running, or use --skip-db", host, host, port)
 	}
 
+	// While the container is starting, mysqld closes the TCP socket mid-handshake
+	// on every probe attempt; the driver logs "unexpected EOF" each time. Silence
+	// for the duration of this function — errors still flow back via dbProbeFn.
+	restore := db.SilenceDriverLogger()
+	defer restore()
+
 	// Local host: check if already running.
 	if err := dbProbeFn(host, port, username, password); err == nil {
 		fmt.Fprintf(out, "Database is already running on %s:%d\n", host, port)
