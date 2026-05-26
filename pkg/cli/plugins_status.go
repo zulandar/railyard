@@ -120,9 +120,9 @@ func runPluginsStatus(cmd *cobra.Command, configPath, urlFlag string, jsonOut bo
 // ("3m ago", "just now", "-" for zero).
 func renderStatusTable(out io.Writer, snap *pluginhost.Snapshot) error {
 	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "NAME\tSTATUS\tRESTARTS\tSUBS\tCMDS\tLAST-ACTIVITY\tPID\tPATH")
+	fmt.Fprintln(w, "NAME\tSTATUS\tRESTARTS\tSUBS\tCMDS\tLAST-ACTIVITY\tPID\tPATH\tERROR")
 	for _, p := range snap.Plugins {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			p.Name,
 			p.Status,
 			dashIfZero(p.RestartCount),
@@ -131,9 +131,33 @@ func renderStatusTable(out io.Writer, snap *pluginhost.Snapshot) error {
 			renderRelative(p.LastActivity),
 			dashIfZero(p.PID),
 			dashIfEmpty(p.Path),
+			truncateError(p.Error, errorColumnMax),
 		)
 	}
 	return w.Flush()
+}
+
+// errorColumnMax bounds the ERROR column to keep the table readable in
+// a standard terminal. Full untruncated error remains in --json.
+const errorColumnMax = 80
+
+// truncateError returns "-" for empty or whitespace-only errors and
+// otherwise collapses internal whitespace (newlines mangle tabwriter
+// alignment) and clips the result to max runes with a trailing
+// ellipsis.
+func truncateError(s string, max int) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if s == "" {
+		return "-"
+	}
+	if max <= 1 {
+		return s
+	}
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max-1]) + "…"
 }
 
 func dashIfZero(n int) string {
