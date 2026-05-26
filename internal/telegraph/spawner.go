@@ -113,12 +113,15 @@ func (s *ClaudeSpawner) Spawn(ctx context.Context, prompt string) (Process, erro
 
 	// Read stdout lines, then wait for process exit.
 	go func() {
+		stdoutBytes := 0
 		scanner := bufio.NewScanner(stdoutPipe)
 		scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024) // 1MB buffer
 	scanLoop:
 		for scanner.Scan() {
+			line := scanner.Text()
+			stdoutBytes += len(line) + 1 // +1 for the newline the scanner strips
 			select {
-			case recvCh <- scanner.Text():
+			case recvCh <- line:
 			case <-ctx.Done():
 				// Context cancelled and recvCh buffer full — stop reading
 				// so we don't block cleanup waiting on a dead consumer.
@@ -126,12 +129,24 @@ func (s *ClaudeSpawner) Spawn(ctx context.Context, prompt string) (Process, erro
 			}
 		}
 		close(recvCh)
-		if waitErr := cmd.Wait(); waitErr != nil {
-			log.Printf("telegraph: claude process exit error: %v", waitErr)
-		}
+
+		waitErr := cmd.Wait()
+		proc.mu.Lock()
+		proc.exitErr = waitErr
+		proc.mu.Unlock()
+
 		if stderrBuf.Len() > 0 {
 			log.Printf("telegraph: claude stderr: %s", strings.TrimSpace(stderrBuf.String()))
 		}
+		exitDesc := "0"
+		if waitErr != nil {
+			exitDesc = waitErr.Error()
+		}
+		// Always log exit details — a clean exit with empty stdout is exactly
+		// the case that was previously invisible (claude exiting 0 with a bare
+		// newline when the model returns no text).
+		log.Printf("telegraph: claude exited: stdout=%db stderr=%db exit=%s",
+			stdoutBytes, stderrBuf.Len(), exitDesc)
 		close(doneCh)
 	}()
 
@@ -144,11 +159,12 @@ type claudeProcess struct {
 	cancel    context.CancelFunc
 	stdinPipe io.WriteCloser // nil when spawned with -p
 
-	mu     sync.Mutex
-	sent   bool // true after Send() has been called
-	closed bool
-	recvCh chan string
-	doneCh chan struct{}
+	mu      sync.Mutex
+	sent    bool // true after Send() has been called
+	closed  bool
+	exitErr error // subprocess exit error; set once before doneCh closes
+	recvCh  chan string
+	doneCh  chan struct{}
 }
 
 // Send writes a message to the subprocess stdin and closes it (EOF signal).
@@ -186,6 +202,13 @@ func (p *claudeProcess) Recv() <-chan string {
 // Done returns a channel that closes when the process exits.
 func (p *claudeProcess) Done() <-chan struct{} {
 	return p.doneCh
+}
+
+// ExitErr returns the subprocess exit error. Only valid after Done() closes.
+func (p *claudeProcess) ExitErr() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.exitErr
 }
 
 // Close terminates the subprocess via context cancellation (SIGTERM).

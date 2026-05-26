@@ -324,6 +324,51 @@ func TestLazySpawner_ModelPropagatesToDelegate(t *testing.T) {
 	}
 }
 
+// TestClaudeSpawner_ExitErrSuccess asserts ExitErr() is nil after a
+// subprocess that exits 0. The relay uses this to distinguish a clean
+// (but possibly empty) response from a crashed one.
+func TestClaudeSpawner_ExitErrSuccess(t *testing.T) {
+	dir := t.TempDir()
+	binary := writeMockBinary(t, dir, "claude", `echo "hi"; exit 0`)
+
+	spawner := &ClaudeSpawner{ClaudeBinary: binary, WorkDir: dir}
+	proc, err := spawner.Spawn(context.Background(), "go")
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	defer proc.Close()
+
+	for range proc.Recv() { //nolint:revive // drain
+	}
+	<-proc.Done()
+
+	if got := proc.ExitErr(); got != nil {
+		t.Errorf("ExitErr() = %v, want nil for exit 0", got)
+	}
+}
+
+// TestClaudeSpawner_ExitErrFailure asserts ExitErr() is non-nil after a
+// subprocess that exits non-zero — e.g. claude returning an API error.
+func TestClaudeSpawner_ExitErrFailure(t *testing.T) {
+	dir := t.TempDir()
+	binary := writeMockBinary(t, dir, "claude", `echo "API Error: 402"; exit 1`)
+
+	spawner := &ClaudeSpawner{ClaudeBinary: binary, WorkDir: dir}
+	proc, err := spawner.Spawn(context.Background(), "go")
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	defer proc.Close()
+
+	for range proc.Recv() { //nolint:revive // drain
+	}
+	<-proc.Done()
+
+	if got := proc.ExitErr(); got == nil {
+		t.Error("ExitErr() = nil, want non-nil for exit 1")
+	}
+}
+
 func TestClaudeSpawner_MissingBinary(t *testing.T) {
 	spawner := &ClaudeSpawner{
 		ClaudeBinary: "/nonexistent/path/to/claude-binary-xyz",
