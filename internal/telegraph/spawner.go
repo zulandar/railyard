@@ -133,6 +133,7 @@ func (s *ClaudeSpawner) Spawn(ctx context.Context, prompt string) (Process, erro
 		waitErr := cmd.Wait()
 		proc.mu.Lock()
 		proc.exitErr = waitErr
+		proc.stderr = stderrBuf.String()
 		proc.mu.Unlock()
 
 		if stderrBuf.Len() > 0 {
@@ -162,7 +163,8 @@ type claudeProcess struct {
 	mu      sync.Mutex
 	sent    bool // true after Send() has been called
 	closed  bool
-	exitErr error // subprocess exit error; set once before doneCh closes
+	exitErr error  // subprocess exit error; set once before doneCh closes
+	stderr  string // captured stderr; set once before doneCh closes
 	recvCh  chan string
 	doneCh  chan struct{}
 }
@@ -209,6 +211,13 @@ func (p *claudeProcess) ExitErr() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.exitErr
+}
+
+// Stderr returns the subprocess's captured stderr. Only valid after Done() closes.
+func (p *claudeProcess) Stderr() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.stderr
 }
 
 // Close terminates the subprocess via context cancellation (SIGTERM).

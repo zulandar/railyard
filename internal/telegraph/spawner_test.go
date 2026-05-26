@@ -369,6 +369,29 @@ func TestClaudeSpawner_ExitErrFailure(t *testing.T) {
 	}
 }
 
+// TestClaudeSpawner_StderrCaptured asserts Stderr() returns the subprocess's
+// stderr output after Done(). The relay persists this to agent_logs so an
+// empty/errored dispatch leaves a queryable trace via `ry logs`.
+func TestClaudeSpawner_StderrCaptured(t *testing.T) {
+	dir := t.TempDir()
+	binary := writeMockBinary(t, dir, "claude", `echo "out line"; echo "API Error: 402 boom" >&2; exit 0`)
+
+	spawner := &ClaudeSpawner{ClaudeBinary: binary, WorkDir: dir}
+	proc, err := spawner.Spawn(context.Background(), "go")
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	defer proc.Close()
+
+	for range proc.Recv() { //nolint:revive // drain
+	}
+	<-proc.Done()
+
+	if got := proc.Stderr(); !strings.Contains(got, "API Error: 402 boom") {
+		t.Errorf("Stderr() = %q, want it to contain the stderr line", got)
+	}
+}
+
 func TestClaudeSpawner_MissingBinary(t *testing.T) {
 	spawner := &ClaudeSpawner{
 		ClaudeBinary: "/nonexistent/path/to/claude-binary-xyz",
