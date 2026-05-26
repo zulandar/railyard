@@ -176,6 +176,8 @@ func canonicalLanguage(lang string) string {
 		return "Java"
 	case "swift":
 		return "Swift"
+	case "dart", "flutter":
+		return "Dart"
 	case "ruby", "rb":
 		return "Ruby"
 	case "php":
@@ -318,10 +320,17 @@ func detectLanguages(root string) []string {
 		{"setup.py", "python"},
 		{"pyproject.toml", "python"},
 		{"requirements.txt", "python"},
+		{"pubspec.yaml", "dart"},
+		// Android marker (standard Android Studio layout). Listed before the
+		// generic JVM gradle entries so Android repos resolve to kotlin rather
+		// than being lumped under java.
+		{"app/src/main/AndroidManifest.xml", "kotlin"},
 		{"pom.xml", "java"},
 		{"build.gradle", "java"},
 		{"build.gradle.kts", "java"},
 		{"Package.swift", "swift"},
+		{"*.xcodeproj", "swift"},
+		{"*.xcworkspace", "swift"},
 		{"Gemfile", "ruby"},
 		{"composer.json", "php"},
 		{"mix.exs", "elixir"},

@@ -213,6 +213,94 @@ func TestDetectLanguages_Empty(t *testing.T) {
 	}
 }
 
+// TestDetectLanguages_DartFlutter verifies that detectLanguages identifies a
+// Dart/Flutter project by the presence of pubspec.yaml.
+func TestDetectLanguages_DartFlutter(t *testing.T) {
+	dir := t.TempDir()
+
+	if err := os.WriteFile(filepath.Join(dir, "pubspec.yaml"), []byte("name: example\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	languages := detectLanguages(dir)
+	if len(languages) != 1 || languages[0] != "dart" {
+		t.Errorf("expected [dart], got %v", languages)
+	}
+}
+
+// TestDetectLanguages_AndroidKotlin verifies that an Android project (Android
+// Studio standard layout) is detected as kotlin, not java.
+func TestDetectLanguages_AndroidKotlin(t *testing.T) {
+	dir := t.TempDir()
+
+	manifestDir := filepath.Join(dir, "app", "src", "main")
+	if err := os.MkdirAll(manifestDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(manifestDir, "AndroidManifest.xml"), []byte("<manifest/>\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	languages := detectLanguages(dir)
+	if len(languages) != 1 || languages[0] != "kotlin" {
+		t.Errorf("expected [kotlin], got %v", languages)
+	}
+}
+
+// TestDetectLanguages_AndroidKotlinWithGradle verifies that an Android project
+// with both an AndroidManifest.xml and build.gradle.kts is detected as kotlin
+// (not java) — the Android signal wins over the generic JVM gradle signal.
+func TestDetectLanguages_AndroidKotlinWithGradle(t *testing.T) {
+	dir := t.TempDir()
+
+	manifestDir := filepath.Join(dir, "app", "src", "main")
+	if err := os.MkdirAll(manifestDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(manifestDir, "AndroidManifest.xml"), []byte("<manifest/>\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "build.gradle.kts"), []byte("// kotlin DSL\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	languages := detectLanguages(dir)
+	if len(languages) != 1 || languages[0] != "kotlin" {
+		t.Errorf("expected [kotlin], got %v", languages)
+	}
+}
+
+// TestDetectLanguages_GradleWithoutAndroid verifies that a pure JVM gradle
+// project (no AndroidManifest.xml) is still detected as java — regression
+// guard against the Kotlin/Android indicator stealing all gradle projects.
+func TestDetectLanguages_GradleWithoutAndroid(t *testing.T) {
+	dir := t.TempDir()
+
+	if err := os.WriteFile(filepath.Join(dir, "build.gradle.kts"), []byte("// kotlin DSL\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	languages := detectLanguages(dir)
+	if len(languages) != 1 || languages[0] != "java" {
+		t.Errorf("expected [java], got %v", languages)
+	}
+}
+
+// TestDetectLanguages_iOSXcodeProject verifies that an Xcode-only iOS project
+// (no Package.swift, just a .xcodeproj bundle) is detected as swift.
+func TestDetectLanguages_iOSXcodeProject(t *testing.T) {
+	dir := t.TempDir()
+
+	if err := os.MkdirAll(filepath.Join(dir, "MyApp.xcodeproj"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	languages := detectLanguages(dir)
+	if len(languages) != 1 || languages[0] != "swift" {
+		t.Errorf("expected [swift], got %v", languages)
+	}
+}
+
 func TestSanitizeOwner(t *testing.T) {
 	tests := []struct {
 		input string
@@ -394,6 +482,9 @@ func TestLanguagePreset(t *testing.T) {
 		{"python", "backend", "pytest", "**/*.py"},
 		{"php", "backend", "vendor/bin/phpunit", "**/*.php"},
 		{"rust", "backend", "cargo test", "**/*.rs"},
+		{"swift", "mobile", "swift test", "**/*.swift"},
+		{"kotlin", "mobile", "./gradlew test", "**/*.kt"},
+		{"dart", "mobile", "flutter test", "**/*.dart"},
 		{"unknown-lang", "unknown-lang", "", ""},
 	}
 	for _, tt := range tests {
