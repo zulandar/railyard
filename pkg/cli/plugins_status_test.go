@@ -71,6 +71,7 @@ func TestPluginsStatusErrorColumn(t *testing.T) {
 				{Name: "good", Status: pluginhost.StatusRunning, PID: 42},
 				{Name: "broken", Status: pluginhost.StatusFailed, Error: "init: handshake failed"},
 				{Name: "noisy", Status: pluginhost.StatusFailed, Error: longErr},
+				{Name: "blanky", Status: pluginhost.StatusFailed, Error: "\n  \t"},
 			},
 		}, nil
 	})
@@ -90,7 +91,7 @@ func TestPluginsStatusErrorColumn(t *testing.T) {
 	}
 
 	lines := strings.Split(got, "\n")
-	var goodLine, brokenLine, noisyLine string
+	var goodLine, brokenLine, noisyLine, blankyLine string
 	for _, l := range lines {
 		switch {
 		case strings.HasPrefix(strings.TrimSpace(l), "good "):
@@ -99,6 +100,8 @@ func TestPluginsStatusErrorColumn(t *testing.T) {
 			brokenLine = l
 		case strings.HasPrefix(strings.TrimSpace(l), "noisy "):
 			noisyLine = l
+		case strings.HasPrefix(strings.TrimSpace(l), "blanky "):
+			blankyLine = l
 		}
 	}
 	if brokenLine == "" {
@@ -118,6 +121,15 @@ func TestPluginsStatusErrorColumn(t *testing.T) {
 	}
 	if !strings.Contains(noisyLine, "…") && !strings.Contains(noisyLine, "...") {
 		t.Errorf("expected truncation ellipsis on long error, got:\n%s", noisyLine)
+	}
+	if blankyLine == "" {
+		t.Fatalf("missing 'blanky' row in output:\n%s", got)
+	}
+	// Whitespace-only Error should render as "-" (consistent with
+	// the other dash placeholders), not as an empty cell.
+	fields := strings.Fields(blankyLine)
+	if len(fields) == 0 || fields[len(fields)-1] != "-" {
+		t.Errorf("expected whitespace-only error to render as \"-\", got row:\n%s", blankyLine)
 	}
 }
 

@@ -141,14 +141,15 @@ func renderStatusTable(out io.Writer, snap *pluginhost.Snapshot) error {
 // a standard terminal. Full untruncated error remains in --json.
 const errorColumnMax = 80
 
-// truncateError returns "-" for empty errors and otherwise collapses
-// internal whitespace (newlines mangle tabwriter alignment) and clips
-// the result to max runes with a trailing ellipsis.
+// truncateError returns "-" for empty or whitespace-only errors and
+// otherwise collapses internal whitespace (newlines mangle tabwriter
+// alignment) and clips the result to max runes with a trailing
+// ellipsis.
 func truncateError(s string, max int) string {
+	s = strings.Join(strings.Fields(s), " ")
 	if s == "" {
 		return "-"
 	}
-	s = strings.Join(strings.Fields(s), " ")
 	if max <= 1 {
 		return s
 	}
