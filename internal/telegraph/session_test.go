@@ -19,12 +19,13 @@ import (
 // ---------------------------------------------------------------------------
 
 type mockProcess struct {
-	mu     sync.Mutex
-	sent   []string
-	recvCh chan string
-	doneCh chan struct{}
-	closed bool
-	prompt string
+	mu      sync.Mutex
+	sent    []string
+	recvCh  chan string
+	doneCh  chan struct{}
+	closed  bool
+	prompt  string
+	exitErr error
 }
 
 func newMockProcess(prompt string) *mockProcess {
@@ -48,6 +49,24 @@ func (p *mockProcess) Send(msg string) error {
 func (p *mockProcess) Recv() <-chan string { return p.recvCh }
 
 func (p *mockProcess) Done() <-chan struct{} { return p.doneCh }
+
+func (p *mockProcess) ExitErr() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.exitErr
+}
+
+// exitWith records the exit error and closes doneCh, simulating process exit.
+// Tests call this after closing recvCh to mimic a real subprocess finishing.
+func (p *mockProcess) exitWith(err error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.closed {
+		p.closed = true
+		p.exitErr = err
+		close(p.doneCh)
+	}
+}
 
 func (p *mockProcess) Close() error {
 	p.mu.Lock()
@@ -753,7 +772,10 @@ func TestRelayOutput_ChunksLongMessages(t *testing.T) {
 	}
 }
 
-func TestRelayOutput_EmptyOutput(t *testing.T) {
+// TestRelayOutput_EmptyOutputSendsWarning asserts that when the agent
+// finishes cleanly but produces no text, the user gets a warning in the
+// thread instead of silence (and no empty message is POSTed).
+func TestRelayOutput_EmptyOutputSendsWarning(t *testing.T) {
 	db := openSessionTestDB(t)
 	adapter := NewMockAdapter()
 	adapter.Connect(context.Background())
@@ -768,11 +790,79 @@ func TestRelayOutput_EmptyOutput(t *testing.T) {
 
 	proc := newMockProcess("")
 	close(proc.recvCh) // no output
+	proc.exitWith(nil) // clean exit
 
 	sm.relayOutput(context.Background(), "C01", "thread-1", 1, proc)
 
-	if adapter.SentCount() != 0 {
-		t.Errorf("sent count = %d, want 0 for empty output", adapter.SentCount())
+	sent := adapter.AllSent()
+	if len(sent) != 1 {
+		t.Fatalf("sent count = %d, want exactly 1 (a warning)", len(sent))
+	}
+	if strings.TrimSpace(sent[0].Text) == "" {
+		t.Error("warning message is empty/whitespace")
+	}
+	if !strings.Contains(strings.ToLower(sent[0].Text), "no output") {
+		t.Errorf("warning text = %q, want it to mention no output", sent[0].Text)
+	}
+}
+
+// TestRelayOutput_WhitespaceLineDoesNotSendEmptyContent reproduces the
+// original bug: claude emits a single bare newline (scanner yields one ""
+// line). The relay must NOT POST an empty content message to the platform.
+func TestRelayOutput_WhitespaceLineDoesNotSendEmptyContent(t *testing.T) {
+	db := openSessionTestDB(t)
+	adapter := NewMockAdapter()
+	adapter.Connect(context.Background())
+	spawner := &mockSpawner{}
+
+	sm, _ := NewSessionManager(SessionManagerOpts{
+		DB:                 db,
+		Spawner:            spawner,
+		Adapter:            adapter,
+		RelayFlushInterval: 50 * time.Millisecond,
+	})
+
+	proc := newMockProcess("")
+	proc.recvCh <- "" // a single empty line — claude's bare-newline output
+	close(proc.recvCh)
+	proc.exitWith(nil)
+
+	sm.relayOutput(context.Background(), "C01", "thread-1", 1, proc)
+
+	for i, msg := range adapter.AllSent() {
+		if strings.TrimSpace(msg.Text) == "" {
+			t.Errorf("sent message %d is empty/whitespace — would trigger Discord 400", i)
+		}
+	}
+}
+
+// TestRelayOutput_EmptyOutputErrorExit asserts that when the agent exits
+// non-zero with no stdout, the warning reflects the failure.
+func TestRelayOutput_EmptyOutputErrorExit(t *testing.T) {
+	db := openSessionTestDB(t)
+	adapter := NewMockAdapter()
+	adapter.Connect(context.Background())
+	spawner := &mockSpawner{}
+
+	sm, _ := NewSessionManager(SessionManagerOpts{
+		DB:                 db,
+		Spawner:            spawner,
+		Adapter:            adapter,
+		RelayFlushInterval: 50 * time.Millisecond,
+	})
+
+	proc := newMockProcess("")
+	close(proc.recvCh)
+	proc.exitWith(fmt.Errorf("exit status 1"))
+
+	sm.relayOutput(context.Background(), "C01", "thread-1", 1, proc)
+
+	sent := adapter.AllSent()
+	if len(sent) != 1 {
+		t.Fatalf("sent count = %d, want exactly 1 (a warning)", len(sent))
+	}
+	if !strings.Contains(strings.ToLower(sent[0].Text), "error") {
+		t.Errorf("warning text = %q, want it to mention the error exit", sent[0].Text)
 	}
 }
 

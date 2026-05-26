@@ -29,6 +29,9 @@ type Process interface {
 	Recv() <-chan string
 	// Done returns a channel that closes when the process exits.
 	Done() <-chan struct{}
+	// ExitErr returns the subprocess exit error: nil if it exited 0, or a
+	// non-nil error describing the failure. Only valid after Done() closes.
+	ExitErr() error
 	// Close terminates the subprocess.
 	Close() error
 }
@@ -412,11 +415,24 @@ func (sm *SessionManager) relayOutput(ctx context.Context, channelID, threadID s
 	pendingLines := 0           // lines written to pending since last flush
 
 	flush := func() {
+		defer func() {
+			pending.Reset()
+			pendingLines = 0
+		}()
 		if pendingLines == 0 || sm.adapter == nil {
 			return
 		}
 		text := pending.String()
+		// Skip whitespace-only flushes — claude emits a bare newline for an
+		// empty model response, and POSTing that yields HTTP 400 "Cannot send
+		// an empty message". The empty-output warning is handled after the loop.
+		if strings.TrimSpace(text) == "" {
+			return
+		}
 		for _, chunk := range chunkMessage(text, 2000) {
+			if strings.TrimSpace(chunk) == "" {
+				continue
+			}
 			if err := sm.adapter.Send(ctx, OutboundMessage{
 				ChannelID: channelID,
 				ThreadID:  threadID,
@@ -425,8 +441,6 @@ func (sm *SessionManager) relayOutput(ctx context.Context, channelID, threadID s
 				log.Printf("telegraph: relay session %d: send error: %v", sessionID, err)
 			}
 		}
-		pending.Reset()
-		pendingLines = 0
 	}
 
 	ticker := time.NewTicker(sm.relayFlushInterval)
@@ -461,7 +475,11 @@ func (sm *SessionManager) relayOutput(ctx context.Context, channelID, threadID s
 
 	text := strings.TrimSpace(fullBuf.String())
 	if text == "" {
-		log.Printf("telegraph: relay session %d: no output from process", sessionID)
+		// The scanner closes recv before cmd.Wait() returns, so wait for exit
+		// to learn whether this was a clean empty response or a failure.
+		exitErr := waitProcessExit(proc)
+		log.Printf("telegraph: relay session %d: no output from process (exit=%v)", sessionID, exitErr)
+		sm.sendEmptyOutputWarning(ctx, channelID, threadID, sessionID, exitErr)
 		return
 	}
 	log.Printf("telegraph: relay session %d: %d chars output", sessionID, len(text))
@@ -479,6 +497,40 @@ func (sm *SessionManager) relayOutput(ctx context.Context, channelID, threadID s
 		Content:   text,
 	}
 	sm.db.Create(&conv)
+}
+
+// waitProcessExit waits (bounded) for the subprocess to finish so its
+// ExitErr() is valid. The scanner closes the recv channel before cmd.Wait()
+// returns, so the relay loop can end a moment before the exit status is known.
+// The timeout is a safety net; in practice Wait() completes in milliseconds.
+func waitProcessExit(proc Process) error {
+	select {
+	case <-proc.Done():
+	case <-time.After(10 * time.Second):
+	}
+	return proc.ExitErr()
+}
+
+// sendEmptyOutputWarning notifies the chat thread when the agent produced no
+// text, so the user isn't silently ghosted. The message reflects whether the
+// subprocess exited cleanly (likely a model/token-budget issue) or errored.
+func (sm *SessionManager) sendEmptyOutputWarning(ctx context.Context, channelID, threadID string, sessionID uint, exitErr error) {
+	if sm.adapter == nil {
+		return
+	}
+	var msg string
+	if exitErr != nil {
+		msg = fmt.Sprintf("⚠️ The agent exited with an error and returned no output (%v). Check the telegraph logs for details.", exitErr)
+	} else {
+		msg = "⚠️ The agent finished but returned no output. This usually means the model produced no text — often a token-budget limit or a model-compatibility issue. Check the telegraph logs for details."
+	}
+	if err := sm.adapter.Send(ctx, OutboundMessage{
+		ChannelID: channelID,
+		ThreadID:  threadID,
+		Text:      msg,
+	}); err != nil {
+		log.Printf("telegraph: relay session %d: warning send error: %v", sessionID, err)
+	}
 }
 
 // chunkMessage splits text into chunks of at most maxLen characters.
