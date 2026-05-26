@@ -208,6 +208,7 @@ func runTelegraphStart(cmd *cobra.Command, configPath string) error {
 		Config:  cfg,
 		Adapter: adapter,
 		Spawner: spawner,
+		Redact:  engine.RedactSecrets,
 		Out:     out,
 	})
 	if err != nil {

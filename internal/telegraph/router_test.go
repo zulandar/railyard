@@ -31,8 +31,16 @@ func openRouterTestDB(t *testing.T) *gorm.DB {
 		&models.Track{},
 		&models.DispatchSession{},
 		&models.TelegraphConversation{},
+		&models.AgentLog{},
 	); err != nil {
 		t.Fatalf("auto migrate: %v", err)
+	}
+	// A bare ":memory:" sqlite gives each pooled connection its own empty
+	// database. The session's relay and monitor goroutines write concurrently
+	// on process exit, so pin the pool to one connection to keep them on the
+	// same in-memory DB (production uses MySQL/Dolt, which handles concurrency).
+	if sqlDB, err := db.DB(); err == nil {
+		sqlDB.SetMaxOpenConns(1)
 	}
 	return db
 }

@@ -32,6 +32,9 @@ type Process interface {
 	// ExitErr returns the subprocess exit error: nil if it exited 0, or a
 	// non-nil error describing the failure. Only valid after Done() closes.
 	ExitErr() error
+	// Stderr returns the subprocess's captured stderr output. Only valid
+	// after Done() closes.
+	Stderr() string
 	// Close terminates the subprocess.
 	Close() error
 }
@@ -46,6 +49,7 @@ type SessionManager struct {
 	timeout            time.Duration
 	processTimeout     time.Duration
 	relayFlushInterval time.Duration
+	redact             func(string) string // strips secrets before agent_logs storage
 
 	mu       sync.RWMutex
 	sessions map[string]*activeSession // key: "channelID:threadID"
@@ -66,6 +70,10 @@ type SessionManagerOpts struct {
 	HeartbeatTimeout   time.Duration // defaults to DefaultHeartbeatTimeout
 	ProcessTimeout     time.Duration // max subprocess runtime; defaults to defaultProcessTimeout
 	RelayFlushInterval time.Duration // relay output flush interval; defaults to defaultRelayFlushInterval
+	// Redact strips secrets from subprocess I/O before it is written to
+	// agent_logs. Defaults to a no-op. Wired to engine.RedactSecrets in the
+	// cmd layer (telegraph stays decoupled from internal/engine).
+	Redact func(string) string
 }
 
 // NewSessionManager creates a SessionManager.
@@ -88,6 +96,10 @@ func NewSessionManager(opts SessionManagerOpts) (*SessionManager, error) {
 	if flushInterval <= 0 {
 		flushInterval = defaultRelayFlushInterval
 	}
+	redact := opts.Redact
+	if redact == nil {
+		redact = func(s string) string { return s }
+	}
 	return &SessionManager{
 		db:                 opts.DB,
 		adapter:            opts.Adapter,
@@ -95,6 +107,7 @@ func NewSessionManager(opts SessionManagerOpts) (*SessionManager, error) {
 		timeout:            timeout,
 		processTimeout:     procTimeout,
 		relayFlushInterval: flushInterval,
+		redact:             redact,
 		sessions:           make(map[string]*activeSession),
 	}, nil
 }
@@ -473,30 +486,35 @@ func (sm *SessionManager) relayOutput(ctx context.Context, channelID, threadID s
 	// Final flush for any remaining lines.
 	flush()
 
-	text := strings.TrimSpace(fullBuf.String())
+	stdout := fullBuf.String()
+	text := strings.TrimSpace(stdout)
+
+	// Record the assistant response in conversation history first — it is
+	// needed for session resumption and does not depend on the exit status.
+	if text != "" {
+		log.Printf("telegraph: relay session %d: %d chars output", sessionID, len(text))
+		var maxSeq int
+		sm.db.Model(&models.TelegraphConversation{}).
+			Where("session_id = ?", sessionID).
+			Select("COALESCE(MAX(sequence), 0)").Scan(&maxSeq)
+		sm.db.Create(&models.TelegraphConversation{
+			SessionID: sessionID,
+			Sequence:  maxSeq + 1,
+			Role:      "assistant",
+			Content:   text,
+		})
+	}
+
+	// The scanner closes recv before cmd.Wait() returns, so wait (bounded) for
+	// exit to learn the exit status and capture stderr, then persist the full
+	// subprocess I/O to agent_logs for `ry logs` visibility.
+	exitErr := waitProcessExit(proc)
+	sm.persistAgentIO(sessionID, stdout, proc.Stderr(), exitErr)
+
 	if text == "" {
-		// The scanner closes recv before cmd.Wait() returns, so wait for exit
-		// to learn whether this was a clean empty response or a failure.
-		exitErr := waitProcessExit(proc)
 		log.Printf("telegraph: relay session %d: no output from process (exit=%v)", sessionID, exitErr)
 		sm.sendEmptyOutputWarning(ctx, channelID, threadID, sessionID, exitErr)
-		return
 	}
-	log.Printf("telegraph: relay session %d: %d chars output", sessionID, len(text))
-
-	// Record assistant response in conversation history.
-	var maxSeq int
-	sm.db.Model(&models.TelegraphConversation{}).
-		Where("session_id = ?", sessionID).
-		Select("COALESCE(MAX(sequence), 0)").Scan(&maxSeq)
-
-	conv := models.TelegraphConversation{
-		SessionID: sessionID,
-		Sequence:  maxSeq + 1,
-		Role:      "assistant",
-		Content:   text,
-	}
-	sm.db.Create(&conv)
 }
 
 // waitProcessExit waits (bounded) for the subprocess to finish so its
@@ -509,6 +527,46 @@ func waitProcessExit(proc Process) error {
 	case <-time.After(10 * time.Second):
 	}
 	return proc.ExitErr()
+}
+
+// persistAgentIO writes the subprocess's stdout and stderr/exit summary to
+// agent_logs at completion, so a dispatch's full I/O is queryable via
+// `ry logs --session tg-<id>`. SessionID is namespaced ("tg-<id>") so it can't
+// collide with engine session ids ("sess-xxxx"). Content is redacted first.
+// An "err" row is written only when there is something diagnostic to record
+// (stderr present, non-zero exit, or empty stdout) to avoid noise on clean runs.
+func (sm *SessionManager) persistAgentIO(sessionID uint, stdout, stderr string, exitErr error) {
+	sid := fmt.Sprintf("tg-%d", sessionID)
+
+	if strings.TrimSpace(stdout) != "" {
+		sm.db.Create(&models.AgentLog{
+			EngineID:  "telegraph",
+			SessionID: sid,
+			Direction: "out",
+			Content:   sm.redact(stdout),
+			CreatedAt: time.Now(),
+		})
+	}
+
+	exitDesc := "0"
+	if exitErr != nil {
+		exitDesc = exitErr.Error()
+	}
+	if strings.TrimSpace(stderr) == "" && exitErr == nil && strings.TrimSpace(stdout) != "" {
+		return // clean run with output: the "out" row is enough
+	}
+	summary := fmt.Sprintf("exit=%s stdout=%db stderr=%db", exitDesc, len(stdout), len(stderr))
+	content := summary
+	if strings.TrimSpace(stderr) != "" {
+		content = stderr + "\n" + summary
+	}
+	sm.db.Create(&models.AgentLog{
+		EngineID:  "telegraph",
+		SessionID: sid,
+		Direction: "err",
+		Content:   sm.redact(content),
+		CreatedAt: time.Now(),
+	})
 }
 
 // sendEmptyOutputWarning notifies the chat thread when the agent produced no

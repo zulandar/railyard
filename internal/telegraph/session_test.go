@@ -26,6 +26,7 @@ type mockProcess struct {
 	closed  bool
 	prompt  string
 	exitErr error
+	stderr  string
 }
 
 func newMockProcess(prompt string) *mockProcess {
@@ -54,6 +55,19 @@ func (p *mockProcess) ExitErr() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.exitErr
+}
+
+func (p *mockProcess) Stderr() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.stderr
+}
+
+// setStderr records simulated stderr for the mock; call before exitWith.
+func (p *mockProcess) setStderr(s string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.stderr = s
 }
 
 // exitWith records the exit error and closes doneCh, simulating process exit.
@@ -124,8 +138,13 @@ func openSessionTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("open test db: %v", err)
 	}
-	if err := db.AutoMigrate(&models.DispatchSession{}, &models.TelegraphConversation{}); err != nil {
+	if err := db.AutoMigrate(&models.DispatchSession{}, &models.TelegraphConversation{}, &models.AgentLog{}); err != nil {
 		t.Fatalf("migrate test db: %v", err)
+	}
+	// Pin to one connection so concurrent relay/monitor goroutines share the
+	// same in-memory DB (a bare ":memory:" gives each pooled conn a fresh one).
+	if sqlDB, err := db.DB(); err == nil {
+		sqlDB.SetMaxOpenConns(1)
 	}
 	return db
 }
@@ -703,6 +722,7 @@ func TestRelayOutput_SendsToAdapter(t *testing.T) {
 	proc.recvCh <- "Hello from dispatch"
 	proc.recvCh <- "Created car-001"
 	close(proc.recvCh)
+	proc.exitWith(nil)
 
 	sm.relayOutput(context.Background(), "C01", "thread-1", 1, proc)
 
@@ -758,6 +778,7 @@ func TestRelayOutput_ChunksLongMessages(t *testing.T) {
 	proc.recvCh <- longLine
 	proc.recvCh <- longLine
 	close(proc.recvCh)
+	proc.exitWith(nil)
 
 	sm.relayOutput(context.Background(), "C01", "thread-1", 1, proc)
 
@@ -866,6 +887,105 @@ func TestRelayOutput_EmptyOutputErrorExit(t *testing.T) {
 	}
 }
 
+// TestRelayOutput_PersistsIOToAgentLogs asserts the full subprocess I/O is
+// written to agent_logs at completion (queryable via `ry logs --session
+// tg-<id>`): an "out" row with stdout, an "err" row with stderr + exit
+// summary, both passed through the injected Redact func.
+func TestRelayOutput_PersistsIOToAgentLogs(t *testing.T) {
+	db := openSessionTestDB(t)
+	adapter := NewMockAdapter()
+	adapter.Connect(context.Background())
+	spawner := &mockSpawner{}
+
+	sm, _ := NewSessionManager(SessionManagerOpts{
+		DB:                 db,
+		Spawner:            spawner,
+		Adapter:            adapter,
+		RelayFlushInterval: 50 * time.Millisecond,
+		Redact: func(s string) string {
+			return strings.ReplaceAll(s, "sk-secret", "[REDACTED]")
+		},
+	})
+
+	proc := newMockProcess("")
+	proc.recvCh <- "hello from the agent"
+	proc.recvCh <- "my token is sk-secret yes"
+	close(proc.recvCh)
+	proc.setStderr("boom: API Error 402 sk-secret")
+	proc.exitWith(fmt.Errorf("exit status 1"))
+
+	sm.relayOutput(context.Background(), "C01", "thread-1", 11, proc)
+
+	var logs []models.AgentLog
+	if err := db.Where("session_id = ?", "tg-11").Order("id ASC").Find(&logs).Error; err != nil {
+		t.Fatalf("query agent_logs: %v", err)
+	}
+
+	var out, errRow *models.AgentLog
+	for i := range logs {
+		switch logs[i].Direction {
+		case "out":
+			out = &logs[i]
+		case "err":
+			errRow = &logs[i]
+		}
+	}
+
+	if out == nil {
+		t.Fatal("no out row persisted to agent_logs")
+	}
+	if out.EngineID != "telegraph" {
+		t.Errorf("out EngineID = %q, want telegraph", out.EngineID)
+	}
+	if !strings.Contains(out.Content, "hello from the agent") {
+		t.Errorf("out content missing stdout: %q", out.Content)
+	}
+	if strings.Contains(out.Content, "sk-secret") {
+		t.Errorf("out content not redacted: %q", out.Content)
+	}
+
+	if errRow == nil {
+		t.Fatal("no err row persisted to agent_logs")
+	}
+	if !strings.Contains(errRow.Content, "boom: API Error 402") {
+		t.Errorf("err content missing stderr: %q", errRow.Content)
+	}
+	if !strings.Contains(errRow.Content, "exit status 1") {
+		t.Errorf("err content missing exit summary: %q", errRow.Content)
+	}
+	if strings.Contains(errRow.Content, "sk-secret") {
+		t.Errorf("err content not redacted: %q", errRow.Content)
+	}
+}
+
+// TestRelayOutput_CleanRunWritesNoErrRow asserts a clean run with output
+// persists only the "out" row — no noisy "err"/exit-summary row.
+func TestRelayOutput_CleanRunWritesNoErrRow(t *testing.T) {
+	db := openSessionTestDB(t)
+	adapter := NewMockAdapter()
+	adapter.Connect(context.Background())
+
+	sm, _ := NewSessionManager(SessionManagerOpts{
+		DB:                 db,
+		Spawner:            &mockSpawner{},
+		Adapter:            adapter,
+		RelayFlushInterval: 50 * time.Millisecond,
+	})
+
+	proc := newMockProcess("")
+	proc.recvCh <- "all good"
+	close(proc.recvCh)
+	proc.exitWith(nil) // clean exit, no stderr
+
+	sm.relayOutput(context.Background(), "C01", "thread-1", 7, proc)
+
+	var logs []models.AgentLog
+	db.Where("session_id = ?", "tg-7").Find(&logs)
+	if len(logs) != 1 || logs[0].Direction != "out" {
+		t.Fatalf("want exactly 1 'out' row for a clean run, got %d: %+v", len(logs), logs)
+	}
+}
+
 func TestRelayOutput_IncrementalStreaming(t *testing.T) {
 	db := openSessionTestDB(t)
 	adapter := NewMockAdapter()
@@ -902,6 +1022,7 @@ func TestRelayOutput_IncrementalStreaming(t *testing.T) {
 	proc.recvCh <- "line 3"
 	proc.recvCh <- "line 4"
 	close(proc.recvCh)
+	proc.exitWith(nil)
 
 	<-done
 
@@ -955,6 +1076,7 @@ func TestRelayOutput_PreservesLeadingWhitespace(t *testing.T) {
 	// Second batch starts with indented code too.
 	proc.recvCh <- "    indented line after flush"
 	close(proc.recvCh)
+	proc.exitWith(nil)
 
 	<-done
 
@@ -1018,6 +1140,7 @@ func TestRelayOutput_PreservesBlankLines(t *testing.T) {
 	proc.recvCh <- "" // blank line
 	proc.recvCh <- "paragraph three"
 	close(proc.recvCh)
+	proc.exitWith(nil)
 
 	<-done
 

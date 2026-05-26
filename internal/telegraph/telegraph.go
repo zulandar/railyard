@@ -22,6 +22,7 @@ type Daemon struct {
 	adapter        Adapter
 	spawner        ProcessSpawner
 	statusProvider StatusProvider
+	redact         func(string) string
 	out            io.Writer
 }
 
@@ -32,7 +33,12 @@ type DaemonOpts struct {
 	Adapter        Adapter
 	Spawner        ProcessSpawner // optional; enables dispatch sessions
 	StatusProvider StatusProvider // optional; defaults to orchestration-based
-	Out            io.Writer      // defaults to os.Stdout
+	// Redact strips secrets from dispatch subprocess I/O before it is written
+	// to agent_logs. Optional; defaults to a no-op. Wired to
+	// engine.RedactSecrets in the cmd layer to keep telegraph decoupled from
+	// internal/engine.
+	Redact func(string) string
+	Out    io.Writer // defaults to os.Stdout
 }
 
 // NewDaemon creates a Daemon with the given options.
@@ -60,6 +66,7 @@ func NewDaemon(opts DaemonOpts) (*Daemon, error) {
 		adapter:        opts.Adapter,
 		spawner:        opts.Spawner,
 		statusProvider: opts.StatusProvider,
+		redact:         opts.Redact,
 		out:            out,
 	}, nil
 }
@@ -124,6 +131,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 		Spawner:          spawner,
 		HeartbeatTimeout: hbTimeout,
 		ProcessTimeout:   procTimeout,
+		Redact:           d.redact,
 	})
 	if err != nil {
 		d.adapter.Close()
