@@ -381,6 +381,27 @@ func languagePreset(lang string) config.TrackConfig {
 			EngineSlots:  2,
 			TestCommand:  "bundle exec rspec",
 		}
+	case "swift":
+		return config.TrackConfig{
+			Name: "mobile", Language: "swift",
+			FilePatterns: []string{"**/*.swift"},
+			EngineSlots:  2,
+			TestCommand:  "swift test",
+		}
+	case "kotlin":
+		return config.TrackConfig{
+			Name: "mobile", Language: "kotlin",
+			FilePatterns: []string{"**/*.kt", "**/*.kts"},
+			EngineSlots:  2,
+			TestCommand:  "./gradlew test",
+		}
+	case "dart":
+		return config.TrackConfig{
+			Name: "mobile", Language: "dart",
+			FilePatterns: []string{"**/*.dart"},
+			EngineSlots:  2,
+			TestCommand:  "flutter test",
+		}
 	default:
 		return config.TrackConfig{
 			Name: lang, Language: lang,
