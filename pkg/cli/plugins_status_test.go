@@ -44,7 +44,7 @@ func TestPluginsStatusTableOutput(t *testing.T) {
 		t.Fatalf("`ry plugins status` failed: %v", err)
 	}
 	got := buf.String()
-	for _, want := range []string{"NAME", "STATUS", "RESTARTS", "SUBS", "CMDS", "LAST-ACTIVITY", "PID", "PATH"} {
+	for _, want := range []string{"NAME", "STATUS", "RESTARTS", "SUBS", "CMDS", "LAST-ACTIVITY", "PID", "PATH", "ERROR"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("header missing column %q in output:\n%s", want, got)
 		}
@@ -54,6 +54,70 @@ func TestPluginsStatusTableOutput(t *testing.T) {
 	}
 	if !strings.Contains(got, "broken") || !strings.Contains(got, "failed") {
 		t.Errorf("missing failed row:\n%s", got)
+	}
+}
+
+// TestPluginsStatusErrorColumn asserts the rendered table surfaces
+// PluginStatus.Error for non-running plugins so operators can diagnose
+// failed/disabled rows without falling back to --json. See railyard-kag.
+func TestPluginsStatusErrorColumn(t *testing.T) {
+	withStubConfigLoad(t, func(string) (*config.Config, error) {
+		return &config.Config{Yardmaster: config.YardmasterConfig{HealthPort: 8081}}, nil
+	})
+	longErr := strings.Repeat("x", 200)
+	withStubStatusFetch(t, func(ctx context.Context, url string, timeout time.Duration) (*pluginhost.Snapshot, error) {
+		return &pluginhost.Snapshot{
+			Plugins: []pluginhost.PluginStatus{
+				{Name: "good", Status: pluginhost.StatusRunning, PID: 42},
+				{Name: "broken", Status: pluginhost.StatusFailed, Error: "init: handshake failed"},
+				{Name: "noisy", Status: pluginhost.StatusFailed, Error: longErr},
+			},
+		}, nil
+	})
+
+	root := newRootCmd()
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	root.SetArgs([]string{"plugins", "status"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	got := buf.String()
+
+	if !strings.Contains(got, "ERROR") {
+		t.Errorf("expected ERROR column header in output:\n%s", got)
+	}
+
+	lines := strings.Split(got, "\n")
+	var goodLine, brokenLine, noisyLine string
+	for _, l := range lines {
+		switch {
+		case strings.HasPrefix(strings.TrimSpace(l), "good "):
+			goodLine = l
+		case strings.HasPrefix(strings.TrimSpace(l), "broken "):
+			brokenLine = l
+		case strings.HasPrefix(strings.TrimSpace(l), "noisy "):
+			noisyLine = l
+		}
+	}
+	if brokenLine == "" {
+		t.Fatalf("missing 'broken' row in output:\n%s", got)
+	}
+	if !strings.Contains(brokenLine, "init: handshake failed") {
+		t.Errorf("expected error text on 'broken' row, got:\n%s", brokenLine)
+	}
+	if goodLine != "" && strings.Contains(goodLine, "init:") {
+		t.Errorf("running row should not carry an error, got:\n%s", goodLine)
+	}
+	if noisyLine == "" {
+		t.Fatalf("missing 'noisy' row in output:\n%s", got)
+	}
+	if strings.Contains(noisyLine, longErr) {
+		t.Errorf("expected long error to be truncated; got full string in:\n%s", noisyLine)
+	}
+	if !strings.Contains(noisyLine, "…") && !strings.Contains(noisyLine, "...") {
+		t.Errorf("expected truncation ellipsis on long error, got:\n%s", noisyLine)
 	}
 }
 
