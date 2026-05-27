@@ -60,7 +60,7 @@ func Start(ctx context.Context, opts StartOpts) error {
 
 	tracks := buildTrackInfos(opts.Config.Tracks)
 
-	ai, err := NewProviderAI(opts.Config.Bull.AgentProvider, opts.Config.Bull.AgentModel)
+	ai, err := newTriageAI(opts.Config)
 	if err != nil {
 		return err
 	}
