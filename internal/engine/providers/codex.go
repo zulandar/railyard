@@ -13,7 +13,9 @@ import (
 //
 // Codex CLI (github.com/openai/codex) is a terminal-based coding agent.
 // Non-interactive execution uses "codex exec --full-auto <prompt>".
-// Interactive sessions use "codex --full-auto <prompt>".
+// Interactive sessions (dispatch) use "codex [dispatch_args...] <prompt>";
+// dispatch_args default to none (codex's flag surface varies across versions,
+// so --full-auto is opt-in via config rather than hardcoded).
 // Output is plain text (no structured JSON), so token parsing returns empty stats.
 // Authentication: OPENAI_API_KEY environment variable.
 //
@@ -56,12 +58,16 @@ func (p *CodexProvider) BuildCommand(ctx context.Context, opts engine.SpawnOpts)
 	return cmd, cancel
 }
 
-func (p *CodexProvider) BuildInteractiveCommand(systemPrompt, workDir, model string) *exec.Cmd {
+func (p *CodexProvider) BuildInteractiveCommand(systemPrompt, workDir, model string, extraArgs ...string) *exec.Cmd {
 	binary := p.Binary
 	if binary == "" {
 		binary = "codex"
 	}
-	args := []string{"--full-auto"}
+	// extraArgs (from config codex.dispatch_args) are placed top-level before
+	// the model flag and prompt. Default is empty: codex's flag layout varies
+	// across versions and some reject --full-auto top-level, so we pass nothing
+	// unless the operator opts in.
+	args := append([]string{}, extraArgs...)
 	if model != "" {
 		args = append(args, "--model", model)
 	}

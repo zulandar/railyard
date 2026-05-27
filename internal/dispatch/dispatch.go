@@ -69,7 +69,9 @@ func Start(opts StartOpts) error {
 	}
 
 	// Launch agent interactively — user attaches to tmux pane and converses.
-	cmd := provider.BuildInteractiveCommand(prompt, workDir, opts.Config.AgentModel)
+	// Codex-specific dispatch args (codex.dispatch_args) are passed through;
+	// non-codex providers ignore them.
+	cmd := provider.BuildInteractiveCommand(prompt, workDir, opts.Config.AgentModel, opts.Config.Codex.DispatchArgs...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

@@ -18,7 +18,7 @@ func (m *mockProvider) BuildCommand(ctx context.Context, opts SpawnOpts) (*exec.
 	cmd := exec.CommandContext(ctx, "echo", "mock")
 	return cmd, cancel
 }
-func (m *mockProvider) BuildInteractiveCommand(systemPrompt, workDir, model string) *exec.Cmd {
+func (m *mockProvider) BuildInteractiveCommand(systemPrompt, workDir, model string, _ ...string) *exec.Cmd {
 	return exec.Command("echo", "mock-interactive")
 }
 func (m *mockProvider) BuildPromptCommand(ctx context.Context, prompt, model string) (*exec.Cmd, context.CancelFunc) {

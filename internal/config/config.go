@@ -50,6 +50,10 @@ type Config struct {
 	// sections don't set their own. Each provider implementation decides how
 	// to apply the value (env var or CLI flag), or ignores it if unsupported.
 	AgentModel string `yaml:"agent_model"`
+	// Codex holds Codex-CLI-specific settings, applied only when
+	// AgentProvider is "codex". Optional — the zero value preserves codex's
+	// own defaults.
+	Codex CodexConfig `yaml:"codex"`
 	// AuthMethod mirrors the chart's `auth.method` value (api_key, oauth_token,
 	// bedrock, vertex, foundry, do_inference, openrouter) when running in Kubernetes mode.
 	// The chart is responsible for injecting this into the application config;
@@ -74,6 +78,26 @@ type Config struct {
 	// populated by the loader from leftover top-level keys, never directly
 	// unmarshaled.
 	PluginConfigs map[string]yaml.Node `yaml:"-"`
+}
+
+// CodexConfig holds settings specific to the Codex CLI provider.
+type CodexConfig struct {
+	// DispatchArgs are extra arguments inserted into the interactive
+	// `ry dispatch` codex invocation, placed before the model flag and
+	// prompt (e.g. `codex <dispatch_args...> [--model X] <prompt>`).
+	//
+	// Default: empty. With no args, dispatch uses codex's own interactive
+	// defaults and you approve actions in the attached tmux pane. This is
+	// intentional: codex's flag layout varies across versions, and some
+	// versions reject --full-auto as a top-level flag. Set this to whatever
+	// your installed codex accepts for low-friction execution, e.g.:
+	//
+	//	dispatch_args: ["--full-auto"]
+	//	dispatch_args: ["-c", "approval_policy=on-request", "-c", "sandbox_mode=workspace-write"]
+	//
+	// Note: non-interactive engine/escalation runs (`codex exec`) always pass
+	// --full-auto and are not affected by this setting.
+	DispatchArgs []string `yaml:"dispatch_args"`
 }
 
 // PluginsConfig configures the railyard plugin subsystem.

@@ -96,7 +96,7 @@ func (p *CopilotProvider) BuildCommand(ctx context.Context, opts engine.SpawnOpt
 	return cmd, cancel
 }
 
-func (p *CopilotProvider) BuildInteractiveCommand(systemPrompt, workDir, model string) *exec.Cmd {
+func (p *CopilotProvider) BuildInteractiveCommand(systemPrompt, workDir, model string, _ ...string) *exec.Cmd {
 	binary := p.Binary
 	if binary == "" {
 		binary = "copilot"

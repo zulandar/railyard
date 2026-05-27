@@ -56,7 +56,7 @@ func (p *ClaudeProvider) BuildCommand(ctx context.Context, opts engine.SpawnOpts
 	return cmd, cancel
 }
 
-func (p *ClaudeProvider) BuildInteractiveCommand(systemPrompt, workDir, model string) *exec.Cmd {
+func (p *ClaudeProvider) BuildInteractiveCommand(systemPrompt, workDir, model string, _ ...string) *exec.Cmd {
 	binary := p.Binary
 	if binary == "" {
 		binary = "claude"

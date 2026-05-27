@@ -24,8 +24,10 @@ type AgentProvider interface {
 	// BuildInteractiveCommand constructs an interactive CLI session (dispatch mode).
 	// The system prompt is appended to the agent's default behavior. When `model`
 	// is non-empty, the provider applies it via its native mechanism; empty
-	// preserves the CLI's default model selection.
-	BuildInteractiveCommand(systemPrompt, workDir, model string) *exec.Cmd
+	// preserves the CLI's default model selection. extraArgs carries optional
+	// provider-specific CLI flags (currently only the codex provider consumes
+	// them; others ignore them).
+	BuildInteractiveCommand(systemPrompt, workDir, model string, extraArgs ...string) *exec.Cmd
 	// BuildPromptCommand constructs a one-shot CLI invocation (escalation mode).
 	// The prompt is sent as a single message and the agent exits after responding.
 	// When `model` is non-empty, the provider applies it; empty preserves default.
@@ -56,7 +58,7 @@ func (defaultClaudeProvider) BuildCommand(ctx context.Context, opts SpawnOpts) (
 	return buildCommand(ctx, opts)
 }
 
-func (defaultClaudeProvider) BuildInteractiveCommand(systemPrompt, workDir, model string) *exec.Cmd {
+func (defaultClaudeProvider) BuildInteractiveCommand(systemPrompt, workDir, model string, _ ...string) *exec.Cmd {
 	cmd := exec.Command("claude",
 		"--dangerously-skip-permissions",
 		"--append-system-prompt", systemPrompt,
