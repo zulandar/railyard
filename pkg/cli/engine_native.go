@@ -1,0 +1,195 @@
+package cli
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"strings"
+	"time"
+
+	"github.com/zulandar/railyard/internal/agentloop"
+	"github.com/zulandar/railyard/internal/engine"
+	"github.com/zulandar/railyard/internal/models"
+	"gorm.io/gorm"
+)
+
+// nativeEngineKickoff is the user message that starts an engine loop turn. It
+// mirrors the claude CLI engine path (buildCommand's -p prompt): all the real
+// instructions live in the system prompt (the rendered car context).
+const nativeEngineKickoff = "Begin working on your assigned car. Follow the instructions in the system prompt."
+
+// nativeEngineMaxIterations bounds an engine loop run. Coding a car involves
+// many read/edit/test/commit tool calls, so this is well above the loop default;
+// the rate-limit retry wrapper and overall context still cap runaway cost.
+const nativeEngineMaxIterations = 80
+
+// nativeSpawnRunner returns a spawnRunner that drives the Railyard-owned agent
+// loop (engine tool profile: bash + read_file + write_file + edit_file) instead
+// of a CLI subprocess. It plugs into the same spawnAndMonitorWithRetryRunner, so
+// the rate-limit pause-and-retry behavior is reused unchanged. Token usage comes
+// straight from the API usage block (no text-scraping), and the transcript is
+// persisted to agent_logs (redacted) for `ry logs` and outcome stats.
+func nativeSpawnRunner(db *gorm.DB, client agentloop.Completer, maxIterations int, cycleLog *slog.Logger) spawnRunner {
+	if cycleLog == nil {
+		cycleLog = slog.Default()
+	}
+	if maxIterations <= 0 {
+		maxIterations = nativeEngineMaxIterations
+	}
+	return func(ctx context.Context, opts engine.SpawnOpts) (*engine.Session, sessionOutcome, error) {
+		sessionID, err := engine.GenerateSessionID()
+		if err != nil {
+			return nil, sessionOutcome{}, err
+		}
+
+		events := make(chan agentloop.Event, 64)
+		loop := agentloop.NewLoop(client, agentloop.LoopConfig{
+			Model:         opts.Model,
+			SystemPrompt:  opts.ContextPayload,
+			Tools:         agentloop.EngineTools(opts.WorkDir),
+			MaxIterations: maxIterations,
+			Events:        events,
+		})
+
+		// Record the session id on the engine row for `ry logs` parity.
+		db.Model(&models.Engine{}).Where("id = ?", opts.EngineID).Update("session_id", sessionID)
+		cycleLog.Info("Native loop session", "session", sessionID, "car", opts.CarID, "model", opts.Model)
+
+		result, transcript, runErr := runNativeEngineLoop(ctx, loop, events)
+		persistNativeAgentLog(db, opts, sessionID, transcript, result, runErr)
+
+		outcome := mapEngineOutcome(runErr, result, carIsDone(db, opts.CarID))
+		// The native runner does its own cleanup (Run already returned), so unlike
+		// the CLI runner there is no subprocess to terminate on rate-limit.
+		return &engine.Session{ID: sessionID, EngineID: opts.EngineID, CarID: opts.CarID}, outcome, nil
+	}
+}
+
+// mapEngineOutcome maps a loop run result to the engine's outcome model:
+//   - rate-limit error  -> outcomeRateLimited (the retry wrapper pauses & respawns)
+//   - context cancelled -> outcomeCancelled (daemon shutting down)
+//   - other error       -> outcomeClear (failed attempt; reclaim next cycle)
+//   - car marked done    -> outcomeCompleted
+//   - hit iteration cap  -> outcomeStall (ran out of steps; escalate, like a CLI stall)
+//   - finished, not done -> outcomeClear
+func mapEngineOutcome(runErr error, result agentloop.Result, carDone bool) sessionOutcome {
+	if runErr != nil {
+		if errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded) {
+			return sessionOutcome{kind: outcomeCancelled}
+		}
+		var rle *agentloop.RateLimitError
+		if errors.As(runErr, &rle) {
+			return sessionOutcome{
+				kind:            outcomeRateLimited,
+				rateLimitSignal: engine.RateLimitSignal{Source: "openrouter", RetryAfter: rle.RetryAfter},
+			}
+		}
+		return sessionOutcome{kind: outcomeClear}
+	}
+	if carDone {
+		return sessionOutcome{kind: outcomeCompleted}
+	}
+	if result.StopReason == agentloop.StopMaxIterations {
+		return sessionOutcome{
+			kind: outcomeStall,
+			stallReason: engine.StallReason{
+				Type:   "max_iterations",
+				Detail: fmt.Sprintf("native loop hit the %d-iteration cap without marking the car done", result.Iterations),
+			},
+		}
+	}
+	return sessionOutcome{kind: outcomeClear}
+}
+
+// runNativeEngineLoop runs one loop turn, draining its events into a transcript
+// so the full agent activity can be persisted. The loop runs in a goroutine so
+// events stream concurrently; after it returns, any buffered events are drained.
+func runNativeEngineLoop(ctx context.Context, loop *agentloop.Loop, events <-chan agentloop.Event) (agentloop.Result, string, error) {
+	var transcript strings.Builder
+	type runResult struct {
+		res agentloop.Result
+		err error
+	}
+	resCh := make(chan runResult, 1)
+	go func() {
+		r, e := loop.Run(ctx, nativeEngineKickoff)
+		resCh <- runResult{res: r, err: e}
+	}()
+
+	for {
+		select {
+		case ev := <-events:
+			writeTranscriptEvent(&transcript, ev)
+		case rr := <-resCh:
+			for {
+				select {
+				case ev := <-events:
+					writeTranscriptEvent(&transcript, ev)
+				default:
+					return rr.res, transcript.String(), rr.err
+				}
+			}
+		}
+	}
+}
+
+// writeTranscriptEvent appends a human-readable line for a loop event.
+func writeTranscriptEvent(b *strings.Builder, ev agentloop.Event) {
+	switch ev.Type {
+	case agentloop.EventAssistantText:
+		b.WriteString(ev.Text)
+		b.WriteByte('\n')
+	case agentloop.EventToolCallStart:
+		fmt.Fprintf(b, "🔧 %s %s\n", ev.ToolName, truncateForLog(ev.ToolArgs, 200))
+	case agentloop.EventToolCallEnd:
+		if ev.ToolError != "" {
+			fmt.Fprintf(b, "→ error: %s\n", truncateForLog(ev.ToolError, 200))
+		} else {
+			fmt.Fprintf(b, "→ %s\n", truncateForLog(ev.ToolResult, 200))
+		}
+	}
+}
+
+// persistNativeAgentLog writes the transcript + usage to agent_logs (redacted),
+// keyed by car so queryCarOutcomeStats can sum tokens and `ry logs` can show it.
+func persistNativeAgentLog(db *gorm.DB, opts engine.SpawnOpts, sessionID, transcript string, result agentloop.Result, runErr error) {
+	content := transcript
+	if runErr != nil {
+		if content != "" {
+			content += "\n"
+		}
+		content += "[run error] " + runErr.Error()
+	}
+	if strings.TrimSpace(content) == "" && result.Usage.TotalTokens == 0 {
+		return
+	}
+	db.Create(&models.AgentLog{
+		EngineID:     opts.EngineID,
+		SessionID:    sessionID,
+		CarID:        opts.CarID,
+		Direction:    "out",
+		Content:      engine.RedactSecrets(content),
+		InputTokens:  result.Usage.PromptTokens,
+		OutputTokens: result.Usage.CompletionTokens,
+		TokenCount:   result.Usage.TotalTokens,
+		Model:        opts.Model,
+		CreatedAt:    time.Now(),
+	})
+}
+
+// carIsDone reports whether the car has reached "done" status in the DB.
+func carIsDone(db *gorm.DB, carID string) bool {
+	var c models.Car
+	if err := db.Select("status").First(&c, "id = ?", carID).Error; err != nil {
+		return false
+	}
+	return c.Status == "done"
+}
+
+func truncateForLog(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "…"
+}
