@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -119,4 +120,60 @@ func TestLive_OpenRouter_ToolCall(t *testing.T) {
 		t.Errorf("final text = %q, want it to report the magic number 1729", res.FinalText)
 	}
 	t.Logf("live smoke OK: model=%s usage=%+v final=%q", model, res.Usage, res.FinalText)
+}
+
+// TestLive_OpenRouter_EngineToolsWriteFile validates the engine code-writing
+// path (railyard-j89.5.3 spike): the weak model must actually use the engine
+// tool profile (write_file + bash) to create a real file in the worktree. This
+// is the core capability the native engine runner depends on. Gated on a live
+// key and skipped when the upstream model is unavailable.
+func TestLive_OpenRouter_EngineToolsWriteFile(t *testing.T) {
+	key := liveKey()
+	if key == "" {
+		t.Skip("no live key: set RAILYARD_LIVE_OPENROUTER_KEY (or provide /tmp/or_test_key) to run")
+	}
+
+	model := os.Getenv("RAILYARD_LIVE_OPENROUTER_MODEL")
+	if model == "" {
+		model = "openrouter/owl-alpha"
+	}
+
+	t.Setenv("OPENROUTER_API_KEY", key)
+	t.Setenv("OPENROUTER_BASE_URL", "")
+	client, err := NewClientFromEnv("openrouter",
+		WithHTTPClient(&http.Client{Timeout: 45 * time.Second}),
+		WithMaxRetries(1),
+		WithRetryBaseDelay(time.Second),
+	)
+	if err != nil {
+		t.Fatalf("NewClientFromEnv: %v", err)
+	}
+
+	workDir := t.TempDir()
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	loop := NewLoop(client, LoopConfig{
+		Model:         model,
+		SystemPrompt:  "You are a coding engine. Use the provided file and shell tools to complete the task in the working directory. When done, briefly confirm.",
+		Tools:         EngineTools(workDir),
+		MaxIterations: 12,
+	})
+
+	res, err := loop.Run(ctx, "Create a file named greeting.txt in the current directory containing exactly the text: hello from railyard. Use the write_file tool.")
+	if err != nil {
+		if upstreamUnavailable(err) {
+			t.Skipf("upstream model %q unavailable, skipping engine-tools smoke: %v", model, err)
+		}
+		t.Fatalf("live engine loop run: %v", err)
+	}
+
+	got, readErr := os.ReadFile(filepath.Join(workDir, "greeting.txt"))
+	if readErr != nil {
+		t.Fatalf("model did not create greeting.txt (%v); final text = %q", readErr, res.FinalText)
+	}
+	if !strings.Contains(string(got), "hello from railyard") {
+		t.Errorf("greeting.txt = %q, want it to contain the requested text", got)
+	}
+	t.Logf("engine-tools smoke OK: model=%s usage=%+v file=%q", model, res.Usage, string(got))
 }
