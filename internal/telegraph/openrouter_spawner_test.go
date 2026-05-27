@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/zulandar/railyard/internal/agentloop"
+	"github.com/zulandar/railyard/internal/models"
 )
 
 // scriptedCompleter is a fake agentloop.Completer returning a fixed sequence of
@@ -213,5 +214,131 @@ func TestOpenRouterSpawner_RequiresClient(t *testing.T) {
 	spawner := &OpenRouterSpawner{WorkDir: t.TempDir(), Model: "m"} // no Client
 	if _, err := spawner.Spawn(context.Background(), "go"); err == nil {
 		t.Fatal("expected error when Client is not configured")
+	}
+}
+
+func TestLazySpawner_SelectsNativeLoopByFlag(t *testing.T) {
+	// With UseNativeLoop set, LazySpawner must drive the native agentloop (whose
+	// scripted answer we observe) rather than shelling out to claude.
+	c := &scriptedCompleter{responses: []agentloop.Response{stopResp("native answer")}}
+	spawner := &LazySpawner{
+		RenderPrompt:   func() (string, error) { return "dispatch prompt", nil },
+		EnsureWorktree: func() (string, error) { return t.TempDir(), nil },
+		SyncWorktree:   func(string) error { return nil },
+		UseNativeLoop:  true,
+		Client:         c,
+		Model:          "openrouter/owl-alpha",
+	}
+
+	proc, err := spawner.Spawn(context.Background(), "what is the status?")
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	defer proc.Close()
+
+	lines := drain(t, proc)
+	<-proc.Done()
+	if !strings.Contains(strings.Join(lines, "\n"), "native answer") {
+		t.Errorf("lines = %v, want native-loop answer (proves native selection)", lines)
+	}
+}
+
+func TestLazySpawner_NativeSkipsMCPConfig(t *testing.T) {
+	// The native loop uses bash to run ry; it has no MCP client, so the
+	// claude-specific .mcp.json write must be skipped.
+	c := &scriptedCompleter{responses: []agentloop.Response{stopResp("ok")}}
+	mcpCalled := false
+	spawner := &LazySpawner{
+		RenderPrompt:   func() (string, error) { return "p", nil },
+		EnsureWorktree: func() (string, error) { return t.TempDir(), nil },
+		WriteMCPConfig: func(string) error { mcpCalled = true; return nil },
+		UseNativeLoop:  true,
+		Client:         c,
+		Model:          "m",
+	}
+
+	proc, err := spawner.Spawn(context.Background(), "go")
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	defer proc.Close()
+	_ = drain(t, proc)
+	<-proc.Done()
+
+	if mcpCalled {
+		t.Error("WriteMCPConfig must not be called on the native-loop path")
+	}
+}
+
+func TestLazySpawner_NativeRequiresClient(t *testing.T) {
+	spawner := &LazySpawner{
+		RenderPrompt:   func() (string, error) { return "p", nil },
+		EnsureWorktree: func() (string, error) { return t.TempDir(), nil },
+		UseNativeLoop:  true,
+		// Client intentionally nil.
+	}
+	if _, err := spawner.Spawn(context.Background(), "go"); err == nil {
+		t.Fatal("expected error when native loop selected without a Client")
+	}
+}
+
+// TestOpenRouterSpawner_EndToEndRelaysSummary is the Phase 1 acceptance check:
+// a status question drives the native loop (which runs a command, then
+// summarizes), and SessionManager's existing relay/persistence posts the
+// summary to the chat adapter and records it — all reused unchanged. This is
+// the path that fixes the originally-reported "generic greeting" bug.
+func TestOpenRouterSpawner_EndToEndRelaysSummary(t *testing.T) {
+	db := openSessionTestDB(t)
+	adapter := NewMockAdapter()
+	adapter.Connect(context.Background())
+
+	// The model runs a (harmless, hermetic) command standing in for `ry car
+	// list`, then summarizes its output — exactly the behavior the bug lacked.
+	c := &scriptedCompleter{responses: []agentloop.Response{
+		bashCallResp("c1", "echo 'cars: 3 open'"),
+		stopResp("There are 3 open cars."),
+	}}
+	spawner := &OpenRouterSpawner{
+		SystemPrompt: "you are the dispatch agent",
+		WorkDir:      t.TempDir(),
+		Client:       c,
+		Model:        "openrouter/owl-alpha",
+	}
+
+	sm, err := NewSessionManager(SessionManagerOpts{
+		DB:                 db,
+		Spawner:            spawner,
+		Adapter:            adapter,
+		RelayFlushInterval: 20 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("NewSessionManager: %v", err)
+	}
+
+	proc, err := spawner.Spawn(context.Background(), "what is the status?")
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	// Reuse the production relay path verbatim.
+	sm.relayOutput(context.Background(), "C01", "thread-1", 1, proc)
+
+	var parts []string
+	for _, msg := range adapter.AllSent() {
+		parts = append(parts, msg.Text)
+	}
+	combined := strings.Join(parts, "\n")
+	if !strings.Contains(combined, "There are 3 open cars.") {
+		t.Errorf("adapter output = %q, want the summary", combined)
+	}
+	if !strings.Contains(combined, "🔧") {
+		t.Errorf("adapter output = %q, want a tool-call progress line", combined)
+	}
+
+	// The assistant response must be persisted for resume/`ry logs`.
+	var conv models.TelegraphConversation
+	db.Where("role = ?", "assistant").Last(&conv)
+	if !strings.Contains(conv.Content, "There are 3 open cars.") {
+		t.Errorf("persisted assistant content = %q, want the summary", conv.Content)
 	}
 }
