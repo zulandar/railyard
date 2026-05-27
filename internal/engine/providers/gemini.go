@@ -62,7 +62,7 @@ func (p *GeminiProvider) BuildCommand(ctx context.Context, opts engine.SpawnOpts
 	return cmd, cancel
 }
 
-func (p *GeminiProvider) BuildInteractiveCommand(systemPrompt, workDir, model string) *exec.Cmd {
+func (p *GeminiProvider) BuildInteractiveCommand(systemPrompt, workDir, model string, _ ...string) *exec.Cmd {
 	binary := p.Binary
 	if binary == "" {
 		binary = "gemini"

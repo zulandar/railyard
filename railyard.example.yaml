@@ -97,6 +97,21 @@ repo: git@github.com:org/myproject.git
 #   Direct OpenAI:     agent_model: gpt-4
 # See charts/railyard/README.md for the full operator guide.
 
+# Codex CLI provider settings (only used when agent_provider: codex).
+# codex:
+#   # Extra args for the interactive `ry dispatch` session, placed before the
+#   # model flag and prompt: `codex <dispatch_args...> [--model X] <prompt>`.
+#   # Default: empty — dispatch uses codex's interactive defaults and you
+#   # approve actions in the attached tmux pane. The codex CLI's flag layout
+#   # varies across versions (some reject --full-auto as a top-level flag), so
+#   # --full-auto is opt-in here rather than hardcoded. Set to whatever your
+#   # installed codex accepts for hands-off execution, e.g.:
+#   #   dispatch_args: ["--full-auto"]
+#   #   dispatch_args: ["-c", "approval_policy=on-request", "-c", "sandbox_mode=workspace-write"]
+#   # Note: non-interactive engine/escalation runs (`codex exec`) always pass
+#   # --full-auto and are unaffected by this setting.
+#   dispatch_args: []
+
 # ---------------------------------------------------------------------------
 # Database connection (optional — defaults shown)
 # ---------------------------------------------------------------------------

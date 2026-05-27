@@ -184,6 +184,52 @@ func TestCodexProvider_BuildInteractiveCommand_NoModelOmitsFlag(t *testing.T) {
 	}
 }
 
+func TestCodexProvider_BuildInteractiveCommand_NoExtraArgsOmitsFullAuto(t *testing.T) {
+	p := &CodexProvider{}
+	cmd := p.BuildInteractiveCommand("sys", "/tmp/work", "")
+
+	for _, a := range cmd.Args {
+		if a == "--full-auto" {
+			t.Errorf("interactive command should not pass --full-auto by default, got args: %v", cmd.Args)
+		}
+	}
+	// The prompt should be the sole positional after the binary.
+	if cmd.Args[len(cmd.Args)-1] != "sys" {
+		t.Errorf("last arg should be the prompt, got: %v", cmd.Args)
+	}
+}
+
+func TestCodexProvider_BuildInteractiveCommand_ExtraArgsInjected(t *testing.T) {
+	p := &CodexProvider{}
+	cmd := p.BuildInteractiveCommand("sys", "/tmp/work", "gpt-5.4", "--full-auto", "-c", "sandbox_mode=workspace-write")
+
+	args := strings.Join(cmd.Args, " ")
+	for _, want := range []string{"--full-auto", "-c", "sandbox_mode=workspace-write"} {
+		if !strings.Contains(args, want) {
+			t.Errorf("expected extra arg %q in args: %s", want, args)
+		}
+	}
+	// extraArgs must precede the model flag (and the prompt) so they parse as
+	// top-level codex flags rather than positional values.
+	fullAutoIdx, modelIdx, promptIdx := -1, -1, -1
+	for i, a := range cmd.Args {
+		switch a {
+		case "--full-auto":
+			fullAutoIdx = i
+		case "--model":
+			modelIdx = i
+		case "sys":
+			promptIdx = i
+		}
+	}
+	if fullAutoIdx == -1 || modelIdx == -1 || promptIdx == -1 {
+		t.Fatalf("missing expected args; got: %v", cmd.Args)
+	}
+	if !(fullAutoIdx < modelIdx && modelIdx < promptIdx) {
+		t.Errorf("expected extraArgs < --model < prompt ordering, got: %v", cmd.Args)
+	}
+}
+
 func TestCodexProvider_BuildPromptCommand_ModelAddsFlag(t *testing.T) {
 	p := &CodexProvider{}
 	cmd, cancel := p.BuildPromptCommand(context.Background(), "do thing", "gpt-5.4")
