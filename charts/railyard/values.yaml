@@ -126,20 +126,29 @@ cocoindex:
 #                  to https://inference.do-ai.run via ANTHROPIC_BASE_URL +
 #                  ANTHROPIC_API_KEY. Requires agent_model to be set in the
 #                  application config (no implicit default model).
-#   openrouter   - OpenRouter.ai: routes the claude CLI to https://openrouter.ai/api
-#                  via ANTHROPIC_BASE_URL + ANTHROPIC_API_KEY. Requires agent_model
-#                  to be set using OpenRouter's provider/model[:variant] form
-#                  (e.g., anthropic/claude-sonnet-4.5,
-#                  meta-llama/llama-3.3-70b-instruct:free).
-#                  Configure model/budget/provider guardrails per-key on the
-#                  OpenRouter dashboard.
+#   openrouter   - OpenRouter.ai via Railyard's NATIVE agent loop (Approach A):
+#                  Railyard drives OpenRouter's OpenAI-compatible endpoint
+#                  directly (OPENROUTER_API_KEY), owning the prompt + tool loop.
+#                  Works with weak AND capable models. Requires agent_model set
+#                  using OpenRouter's provider/model[:variant] form (e.g.,
+#                  anthropic/claude-sonnet-4.5, openrouter/owl-alpha,
+#                  meta-llama/llama-3.3-70b-instruct:free). See docs/openrouter.md.
+#                  NOTE: prior to the native loop, this value meant "claude CLI
+#                  via the Anthropic skin" — that is now `openrouter_skin`.
+#   openrouter_skin - OpenRouter.ai via the claude CLI + Anthropic skin (Approach B,
+#                  capable models ONLY): routes claude to https://openrouter.ai/api
+#                  via ANTHROPIC_BASE_URL + ANTHROPIC_API_KEY. Requires
+#                  agent_provider=claude and agent_model. Weak models (e.g.
+#                  owl-alpha) are derailed by the claude harness prompt — use the
+#                  native `openrouter` instead for those. See docs/openrouter.md.
 #   openai_compat - Any OpenAI-compatible backend (DO Inference, OpenRouter, direct OpenAI,
-#                  local LM Studio, etc.) via codex CLI. Requires agent_provider=codex
-#                  (claude CLI cannot speak OpenAI-compat) and agent_model set to a model
-#                  the backend supports. Each backend has its own naming convention —
+#                  local LM Studio, etc.) via Railyard's NATIVE agent loop (Approach A).
+#                  Requires auth.openaiCompat.baseURL + apiKey and agent_model set to a
+#                  model the backend supports. Each backend has its own naming convention —
 #                  consult the backend's docs.
 auth:
-  # -- Authentication method: api_key, oauth_token, bedrock, vertex, foundry, do_inference, openrouter, openai_compat.
+  # -- Authentication method: api_key, oauth_token, bedrock, vertex, foundry,
+  # do_inference, openrouter, openrouter_skin, openai_compat.
   method: api_key
   # -- Use an existing Secret instead of creating one. The Secret must contain
   # the appropriate keys for the chosen method (see auth-secret.yaml template).
@@ -169,12 +178,16 @@ auth:
   # Requires the application config to set agent_model (no implicit default).
   doInference:
     apiKey: ""   # DO model access key or PAT
-  # -- OpenRouter.ai configuration (used when method=openrouter).
+  # -- OpenRouter.ai configuration (used when method=openrouter [native loop]
+  # or method=openrouter_skin [claude CLI + Anthropic skin]).
   # Requires the application config to set agent_model using OpenRouter's
   # provider/model[:variant] form. Per-key guardrails (model allowlist,
   # provider allowlist, budget cap) configured on the OpenRouter dashboard.
   openrouter:
     apiKey: ""   # OpenRouter API key (sk-or-v1-...)
+    # -- OPTIONAL base URL override for the native loop (method=openrouter).
+    # Defaults to https://openrouter.ai/api/v1. Ignored by openrouter_skin.
+    baseURL: ""
   # -- OpenAI-compatible backend configuration (used when method=openai_compat).
   # Requires the application config to set agent_provider=codex and agent_model.
   # The chart writes a ConfigMap with the codex config.toml (see codex-config.yaml

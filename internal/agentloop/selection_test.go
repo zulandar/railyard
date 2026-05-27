@@ -4,15 +4,16 @@ import "testing"
 
 func TestIsNativeLoopMethod(t *testing.T) {
 	cases := map[string]bool{
-		"openrouter":    true,
-		"openai_compat": true,
-		"api_key":       false,
-		"oauth_token":   false,
-		"bedrock":       false,
-		"vertex":        false,
-		"foundry":       false,
-		"do_inference":  false, // routed through a CLI provider, not the native loop
-		"":              false,
+		"openrouter":      true,
+		"openai_compat":   true,
+		"api_key":         false,
+		"oauth_token":     false,
+		"bedrock":         false,
+		"vertex":          false,
+		"foundry":         false,
+		"do_inference":    false, // routed through a CLI provider, not the native loop
+		"openrouter_skin": false, // Approach B: claude CLI -> OpenRouter skin, not native
+		"":                false,
 	}
 	for method, want := range cases {
 		if got := IsNativeLoopMethod(method); got != want {

@@ -310,9 +310,10 @@ var KnownProviders = map[string]bool{
 // have no implicit default model — a request without one will fail at runtime.
 // Enforced in Kubernetes mode by Config.validate().
 var MethodsRequiringAgentModel = map[string]bool{
-	"do_inference":  true,
-	"openrouter":    true,
-	"openai_compat": true,
+	"do_inference":    true,
+	"openrouter":      true,
+	"openai_compat":   true,
+	"openrouter_skin": true, // Approach B: claude CLI -> OpenRouter skin (no default model)
 }
 
 // CocoIndexConfig holds settings for the CocoIndex semantic search integration.

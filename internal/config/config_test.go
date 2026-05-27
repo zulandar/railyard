@@ -1597,6 +1597,61 @@ tracks:
 	}
 }
 
+func TestParse_OpenRouterSkin_RequiresModelInK8s(t *testing.T) {
+	// openrouter_skin (Approach B: claude CLI -> OpenRouter Anthropic skin) has
+	// no default model, so k8s validation must require agent_model — like the
+	// other OpenRouter-backed methods.
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+project: myapp
+auth_method: openrouter_skin
+kubernetes:
+  namespace: railyard-myapp
+  image: ghcr.io/org/railyard-engine:latest
+tracks:
+  - name: backend
+    language: go
+`
+	_, err := Parse([]byte(yaml))
+	if err == nil {
+		t.Fatal("expected validation error for k8s + openrouter_skin + empty agent_model, got nil")
+	}
+	if !strings.Contains(err.Error(), "agent_model") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "agent_model")
+	}
+	if !strings.Contains(err.Error(), "openrouter_skin") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "openrouter_skin")
+	}
+}
+
+func TestParse_OpenRouterSkin_NoNativeKeyRequired(t *testing.T) {
+	// openrouter_skin routes through the claude CLI (chart-injected
+	// ANTHROPIC_BASE_URL), NOT the native loop, so it must validate in k8s with
+	// agent_model set and WITHOUT any OPENROUTER_API_KEY in the environment.
+	t.Setenv("OPENROUTER_API_KEY", "")
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+project: myapp
+auth_method: openrouter_skin
+agent_model: anthropic/claude-sonnet-4.5
+kubernetes:
+  namespace: railyard-myapp
+  image: ghcr.io/org/railyard-engine:latest
+tracks:
+  - name: backend
+    language: go
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.AuthMethod != "openrouter_skin" {
+		t.Errorf("AuthMethod = %q, want openrouter_skin", cfg.AuthMethod)
+	}
+}
+
 func TestParse_OpenRouter_MissingKeyLocalSkipped(t *testing.T) {
 	// In local (non-k8s) mode, the missing-key check must NOT fire — local
 	// operators manage their own environment.
