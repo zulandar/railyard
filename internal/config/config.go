@@ -12,6 +12,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/zulandar/railyard/internal/agentloop"
 	"github.com/zulandar/railyard/internal/models"
 )
 
@@ -55,10 +56,13 @@ type Config struct {
 	// own defaults.
 	Codex CodexConfig `yaml:"codex"`
 	// AuthMethod mirrors the chart's `auth.method` value (api_key, oauth_token,
-	// bedrock, vertex, foundry, do_inference, openrouter) when running in Kubernetes mode.
-	// The chart is responsible for injecting this into the application config;
-	// locally it is left unset. Used solely for startup validation — Go code
-	// does not switch behavior on this value.
+	// bedrock, vertex, foundry, do_inference, openrouter, openai_compat) when
+	// running in Kubernetes mode. The chart is responsible for injecting this
+	// into the application config; locally it is left unset. It drives startup
+	// validation and selects the agent backend: openrouter/openai_compat route
+	// agent roles through the Railyard-owned native loop (internal/agentloop)
+	// with credentials resolved from the environment, while other methods use
+	// the CLI providers. See agentloop.IsNativeLoopMethod.
 	AuthMethod string           `yaml:"auth_method"`
 	Yardmaster YardmasterConfig `yaml:"yardmaster"`
 
@@ -916,14 +920,15 @@ func (c *Config) validate() error {
 			c.AuthMethod,
 		))
 	}
-	// auth_method=openai_compat is only wired through the codex agent provider.
-	// claude CLI cannot speak OpenAI-compat, so any other agent_provider is a
-	// misconfiguration.
-	if c.AuthMethod == "openai_compat" && c.AgentProvider != "codex" {
-		errs = append(errs, fmt.Sprintf(
-			"auth_method=openai_compat requires agent_provider=codex (claude CLI cannot speak OpenAI-compat), got %q",
-			c.AgentProvider,
-		))
+	// openrouter / openai_compat select the Railyard-owned native agent loop
+	// (internal/agentloop), so agent_provider is irrelevant for those methods —
+	// no specific CLI provider is required. Their credentials come from the
+	// environment (the chart injects them), so in Kubernetes mode require the
+	// API key (and base URL) to be present, with an actionable error.
+	if c.IsKubernetesMode() && agentloop.IsNativeLoopMethod(c.AuthMethod) {
+		if err := agentloop.ValidateEnv(c.AuthMethod); err != nil {
+			errs = append(errs, err.Error())
+		}
 	}
 	// Bull validation (only when enabled).
 	if c.Bull.Enabled {

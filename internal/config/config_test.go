@@ -1516,7 +1516,9 @@ tracks:
 }
 
 func TestParse_AgentModelValidation_K8sOpenRouterWithModel(t *testing.T) {
-	// Happy path: k8s + openrouter + agent_model set should validate cleanly.
+	// Happy path: k8s + openrouter + agent_model set should validate cleanly
+	// when the OpenRouter API key is present in the environment.
+	t.Setenv("OPENROUTER_API_KEY", "sk-or-test")
 	yaml := `
 owner: alice
 repo: git@github.com:org/app.git
@@ -1542,9 +1544,85 @@ tracks:
 	}
 }
 
-func TestParse_OpenAICompat_RequiresCodex(t *testing.T) {
-	// auth_method: openai_compat is only wired through the codex agent provider.
-	// Pairing it with agent_provider: claude must fail validation.
+func TestParse_OpenRouter_MissingKeyInK8s(t *testing.T) {
+	// In k8s mode, selecting the native loop (openrouter) without the required
+	// API key in the environment must fail validation with an actionable error
+	// that names the missing variable.
+	t.Setenv("OPENROUTER_API_KEY", "")
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+project: myapp
+auth_method: openrouter
+agent_model: openrouter/owl-alpha
+kubernetes:
+  namespace: railyard-myapp
+  image: ghcr.io/org/railyard-engine:latest
+tracks:
+  - name: backend
+    language: go
+`
+	_, err := Parse([]byte(yaml))
+	if err == nil {
+		t.Fatal("expected validation error for k8s + openrouter + missing key, got nil")
+	}
+	if !strings.Contains(err.Error(), "OPENROUTER_API_KEY") {
+		t.Errorf("error = %q, want to name OPENROUTER_API_KEY", err.Error())
+	}
+}
+
+func TestParse_OpenAICompat_MissingKeyInK8s(t *testing.T) {
+	// openai_compat with a base URL but no API key must fail validation in k8s.
+	t.Setenv("OPENAI_BASE_URL", "https://api.example.com/v1")
+	t.Setenv("OPENAI_API_KEY", "")
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+project: myapp
+auth_method: openai_compat
+agent_model: gemma-4-31B-it
+kubernetes:
+  namespace: railyard-myapp
+  image: ghcr.io/org/railyard-engine:latest
+tracks:
+  - name: backend
+    language: go
+`
+	_, err := Parse([]byte(yaml))
+	if err == nil {
+		t.Fatal("expected validation error for k8s + openai_compat + missing key, got nil")
+	}
+	if !strings.Contains(err.Error(), "OPENAI_API_KEY") {
+		t.Errorf("error = %q, want to name OPENAI_API_KEY", err.Error())
+	}
+}
+
+func TestParse_OpenRouter_MissingKeyLocalSkipped(t *testing.T) {
+	// In local (non-k8s) mode, the missing-key check must NOT fire — local
+	// operators manage their own environment.
+	t.Setenv("OPENROUTER_API_KEY", "")
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+project: myapp
+auth_method: openrouter
+agent_model: openrouter/owl-alpha
+tracks:
+  - name: backend
+    language: go
+`
+	if _, err := Parse([]byte(yaml)); err != nil {
+		t.Fatalf("local mode must skip the missing-key check: %v", err)
+	}
+}
+
+func TestParse_OpenAICompat_IgnoresAgentProvider(t *testing.T) {
+	// openai_compat now selects the Railyard-owned native agent loop, so
+	// agent_provider is irrelevant and must NOT be required to be codex. With
+	// the env credentials present, pairing openai_compat with the default
+	// claude provider validates cleanly.
+	t.Setenv("OPENAI_BASE_URL", "https://api.example.com/v1")
+	t.Setenv("OPENAI_API_KEY", "sk-test")
 	yaml := `
 owner: alice
 repo: git@github.com:org/app.git
@@ -1559,18 +1637,21 @@ tracks:
   - name: backend
     language: go
 `
-	_, err := Parse([]byte(yaml))
-	if err == nil {
-		t.Fatal("expected validation error for openai_compat + agent_provider=claude, got nil")
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("openai_compat must not require codex (native loop ignores agent_provider): %v", err)
 	}
-	if !strings.Contains(err.Error(), "codex") {
-		t.Errorf("error = %q, want to contain %q", err.Error(), "codex")
+	if cfg.AuthMethod != "openai_compat" {
+		t.Errorf("AuthMethod = %q, want openai_compat", cfg.AuthMethod)
 	}
 }
 
 func TestParse_OpenAICompat_AllowsCodex(t *testing.T) {
 	// Happy path: openai_compat + agent_provider=codex + agent_model set should
-	// validate cleanly in k8s mode.
+	// validate cleanly in k8s mode (agent_provider is now irrelevant, but must
+	// still be accepted) when the env credentials are present.
+	t.Setenv("OPENAI_BASE_URL", "https://api.example.com/v1")
+	t.Setenv("OPENAI_API_KEY", "sk-test")
 	yaml := `
 owner: alice
 repo: git@github.com:org/app.git
