@@ -312,7 +312,10 @@ func (c *Client) doOnce(ctx context.Context, body []byte) (resp Response, retrya
 		return Response{}, false, fmt.Errorf("decode response: %w (body: %s)", err, raw)
 	}
 	if wresp.Error != nil {
-		return Response{}, false, &APIError{StatusCode: httpResp.StatusCode, Message: wresp.Error.Message}
+		// HTTP 2xx with an {"error":...} body is the transient stealth-provider
+		// case (notably openrouter/owl-alpha). Treat as retryable so Complete's
+		// existing backoff loop covers it — see railyard-0se.
+		return Response{}, true, &APIError{StatusCode: httpResp.StatusCode, Message: wresp.Error.Message}
 	}
 	if len(wresp.Choices) == 0 {
 		return Response{}, false, &APIError{StatusCode: httpResp.StatusCode, Message: "response contained no choices"}
