@@ -383,7 +383,7 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 		var outcome sessionOutcome
 		var spawnErr error
 		if useNativeLoop {
-			runner := nativeSpawnRunner(gormDB, loopClient, nativeEngineMaxIterations, cycleLog)
+			runner := nativeSpawnRunner(gormDB, loopClient, cfg.AuthMethod, nativeEngineMaxIterations, cycleLog)
 			sess, outcome, spawnErr = spawnAndMonitorWithRetryRunner(ctx, spawnOpts, cfg.Stall.RateLimitMaxRetries, cfg.Stall.RateLimitMaxWaitSec, cycleLog, runner)
 		} else {
 			sess, outcome, spawnErr = spawnAndMonitorWithRetry(ctx, gormDB, spawnOpts, stallCfg, cfg.Stall.RateLimitMaxRetries, cfg.Stall.RateLimitMaxWaitSec, cycle, cycleLog)

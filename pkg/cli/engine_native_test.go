@@ -70,33 +70,48 @@ func stopRespWithUsage(content string, prompt, completion int) agentloop.Respons
 func TestMapEngineOutcome(t *testing.T) {
 	rle := &agentloop.RateLimitError{RetryAfter: 7 * time.Second, Message: "slow"}
 
-	t.Run("rate limit", func(t *testing.T) {
-		o := mapEngineOutcome(rle, agentloop.Result{}, false)
+	t.Run("rate limit (openrouter)", func(t *testing.T) {
+		o := mapEngineOutcome(rle, agentloop.Result{}, false, "openrouter")
 		if o.kind != outcomeRateLimited {
 			t.Fatalf("kind = %v, want outcomeRateLimited", o.kind)
 		}
 		if o.rateLimitSignal.RetryAfter != 7*time.Second {
 			t.Errorf("RetryAfter = %v, want 7s", o.rateLimitSignal.RetryAfter)
 		}
+		if o.rateLimitSignal.Source != "openrouter" {
+			t.Errorf("Source = %q, want %q", o.rateLimitSignal.Source, "openrouter")
+		}
+	})
+	t.Run("rate limit (openai_compat) carries its own source", func(t *testing.T) {
+		// The native runner serves both openrouter and openai_compat; the
+		// rate-limit signal must name the active auth method so downstream
+		// pause/retry and metrics aren't mis-attributed.
+		o := mapEngineOutcome(rle, agentloop.Result{}, false, "openai_compat")
+		if o.kind != outcomeRateLimited {
+			t.Fatalf("kind = %v, want outcomeRateLimited", o.kind)
+		}
+		if o.rateLimitSignal.Source != "openai_compat" {
+			t.Errorf("Source = %q, want %q", o.rateLimitSignal.Source, "openai_compat")
+		}
 	})
 	t.Run("context cancelled", func(t *testing.T) {
-		if o := mapEngineOutcome(context.Canceled, agentloop.Result{}, false); o.kind != outcomeCancelled {
+		if o := mapEngineOutcome(context.Canceled, agentloop.Result{}, false, "openrouter"); o.kind != outcomeCancelled {
 			t.Errorf("kind = %v, want outcomeCancelled", o.kind)
 		}
 	})
 	t.Run("generic error -> clear", func(t *testing.T) {
-		if o := mapEngineOutcome(errors.New("boom"), agentloop.Result{}, false); o.kind != outcomeClear {
+		if o := mapEngineOutcome(errors.New("boom"), agentloop.Result{}, false, "openrouter"); o.kind != outcomeClear {
 			t.Errorf("kind = %v, want outcomeClear", o.kind)
 		}
 	})
 	t.Run("car done -> completed", func(t *testing.T) {
-		o := mapEngineOutcome(nil, agentloop.Result{StopReason: agentloop.StopFinished}, true)
+		o := mapEngineOutcome(nil, agentloop.Result{StopReason: agentloop.StopFinished}, true, "openrouter")
 		if o.kind != outcomeCompleted {
 			t.Errorf("kind = %v, want outcomeCompleted", o.kind)
 		}
 	})
 	t.Run("max iterations, not done -> stall", func(t *testing.T) {
-		o := mapEngineOutcome(nil, agentloop.Result{StopReason: agentloop.StopMaxIterations}, false)
+		o := mapEngineOutcome(nil, agentloop.Result{StopReason: agentloop.StopMaxIterations}, false, "openrouter")
 		if o.kind != outcomeStall {
 			t.Fatalf("kind = %v, want outcomeStall", o.kind)
 		}
@@ -105,7 +120,7 @@ func TestMapEngineOutcome(t *testing.T) {
 		}
 	})
 	t.Run("finished, not done -> clear", func(t *testing.T) {
-		o := mapEngineOutcome(nil, agentloop.Result{StopReason: agentloop.StopFinished}, false)
+		o := mapEngineOutcome(nil, agentloop.Result{StopReason: agentloop.StopFinished}, false, "openrouter")
 		if o.kind != outcomeClear {
 			t.Errorf("kind = %v, want outcomeClear", o.kind)
 		}
@@ -129,7 +144,7 @@ func TestNativeSpawnRunner_CompletedWhenCarDone(t *testing.T) {
 		writeFileCall("c1", "out.txt", "hello world"),
 		stopRespWithUsage("I implemented the change and marked the car done.", 100, 25),
 	}}
-	runner := nativeSpawnRunner(db, c, 10, nil)
+	runner := nativeSpawnRunner(db, c, "openrouter", 10, nil)
 
 	sess, outcome, err := runner(context.Background(), engine.SpawnOpts{
 		EngineID:       "eng-1",
@@ -172,7 +187,7 @@ func TestNativeSpawnRunner_ClearWhenNotDone(t *testing.T) {
 	c := &loopFakeCompleter{responses: []agentloop.Response{
 		stopRespWithUsage("I think I'm done but forgot to mark it.", 10, 5),
 	}}
-	runner := nativeSpawnRunner(db, c, 10, nil)
+	runner := nativeSpawnRunner(db, c, "openrouter", 10, nil)
 
 	_, outcome, err := runner(context.Background(), engine.SpawnOpts{
 		EngineID: "eng-1", CarID: "car-1", ContextPayload: "sys", WorkDir: t.TempDir(),
@@ -195,7 +210,7 @@ func TestNativeSpawnRunner_StallOnMaxIterations(t *testing.T) {
 		noopBashCall("c1"), noopBashCall("c2"), noopBashCall("c3"),
 		noopBashCall("c4"), noopBashCall("c5"),
 	}}
-	runner := nativeSpawnRunner(db, c, 3, nil)
+	runner := nativeSpawnRunner(db, c, "openrouter", 3, nil)
 
 	_, outcome, err := runner(context.Background(), engine.SpawnOpts{
 		EngineID: "eng-1", CarID: "car-1", ContextPayload: "sys", WorkDir: t.TempDir(),
@@ -209,23 +224,33 @@ func TestNativeSpawnRunner_StallOnMaxIterations(t *testing.T) {
 }
 
 func TestNativeSpawnRunner_RateLimited(t *testing.T) {
-	db := engineTestDB(t)
-	db.Create(&models.Engine{ID: "eng-1"})
-	db.Create(&models.Car{ID: "car-1", Status: "in_progress"})
+	// The rate-limit signal's Source must equal the auth method that the
+	// runner was built for; mapEngineOutcome serves both openrouter and
+	// openai_compat, so the source can't be hardcoded.
+	for _, authMethod := range []string{"openrouter", "openai_compat"} {
+		t.Run(authMethod, func(t *testing.T) {
+			db := engineTestDB(t)
+			db.Create(&models.Engine{ID: "eng-1"})
+			db.Create(&models.Car{ID: "car-1", Status: "in_progress"})
 
-	c := &loopFakeCompleter{err: &agentloop.RateLimitError{RetryAfter: 3 * time.Second, Message: "429"}}
-	runner := nativeSpawnRunner(db, c, 10, nil)
+			c := &loopFakeCompleter{err: &agentloop.RateLimitError{RetryAfter: 3 * time.Second, Message: "429"}}
+			runner := nativeSpawnRunner(db, c, authMethod, 10, nil)
 
-	_, outcome, err := runner(context.Background(), engine.SpawnOpts{
-		EngineID: "eng-1", CarID: "car-1", ContextPayload: "sys", WorkDir: t.TempDir(),
-	})
-	if err != nil {
-		t.Fatalf("runner: %v", err)
-	}
-	if outcome.kind != outcomeRateLimited {
-		t.Fatalf("outcome = %v, want outcomeRateLimited", outcome.kind)
-	}
-	if outcome.rateLimitSignal.RetryAfter != 3*time.Second {
-		t.Errorf("RetryAfter = %v, want 3s", outcome.rateLimitSignal.RetryAfter)
+			_, outcome, err := runner(context.Background(), engine.SpawnOpts{
+				EngineID: "eng-1", CarID: "car-1", ContextPayload: "sys", WorkDir: t.TempDir(),
+			})
+			if err != nil {
+				t.Fatalf("runner: %v", err)
+			}
+			if outcome.kind != outcomeRateLimited {
+				t.Fatalf("outcome = %v, want outcomeRateLimited", outcome.kind)
+			}
+			if outcome.rateLimitSignal.RetryAfter != 3*time.Second {
+				t.Errorf("RetryAfter = %v, want 3s", outcome.rateLimitSignal.RetryAfter)
+			}
+			if outcome.rateLimitSignal.Source != authMethod {
+				t.Errorf("Source = %q, want %q", outcome.rateLimitSignal.Source, authMethod)
+			}
+		})
 	}
 }

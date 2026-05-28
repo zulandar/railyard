@@ -911,11 +911,17 @@ func (c *Config) validate() error {
 			errs = append(errs, "kubernetes.image is required when kubernetes is configured")
 		}
 	}
-	// Enforced only in Kubernetes mode — local operators manage their own env
-	// vars and may have intentionally chosen a different routing path. The
-	// chart is responsible for injecting `auth_method` into the application
-	// config.
-	if c.IsKubernetesMode() && MethodsRequiringAgentModel[c.AuthMethod] && c.AgentModel == "" {
+	// agent_model is required when the upstream API has no implicit default.
+	// Native-loop methods (openrouter / openai_compat) need it in ANY mode —
+	// the API rejects requests with an empty model — so local operators get
+	// a clear startup error instead of a deferred 400 on the first triage /
+	// dispatch / engine call. Other entries in MethodsRequiringAgentModel
+	// (do_inference, openrouter_skin) route through CLI providers that the
+	// chart configures; local operators manage those themselves, so the
+	// requirement stays K8s-only there.
+	requireAgentModel := MethodsRequiringAgentModel[c.AuthMethod] &&
+		(c.IsKubernetesMode() || agentloop.IsNativeLoopMethod(c.AuthMethod))
+	if requireAgentModel && c.AgentModel == "" {
 		errs = append(errs, fmt.Sprintf(
 			"agent_model is required when auth_method is %s (no implicit default model)",
 			c.AuthMethod,

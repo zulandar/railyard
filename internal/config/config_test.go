@@ -1767,8 +1767,11 @@ tracks:
 }
 
 func TestParse_AgentModelValidation_LocalSkipped(t *testing.T) {
-	// In local (non-k8s) mode, auth_method: do_inference + empty agent_model
-	// must NOT error — local operators manage their own env vars.
+	// In local (non-k8s) mode, non-native-loop methods like do_inference with an
+	// empty agent_model must NOT error — local operators manage their own env
+	// vars. Native-loop methods (openrouter / openai_compat) are covered
+	// separately below: their upstream API has no implicit default model so
+	// agent_model is required in any mode.
 	yaml := `
 owner: alice
 repo: git@github.com:org/app.git
@@ -1786,6 +1789,80 @@ tracks:
 	}
 	if cfg.AuthMethod != "do_inference" {
 		t.Errorf("AuthMethod = %q, want %q", cfg.AuthMethod, "do_inference")
+	}
+}
+
+func TestParse_AgentModelValidation_LocalOpenRouterMissingModel(t *testing.T) {
+	// Native-loop methods have no implicit default model upstream, so an empty
+	// agent_model must error in local mode too — otherwise the failure surfaces
+	// as a confusing 400 the first time triage/dispatch/engine actually calls
+	// the API. This is the local counterpart to
+	// TestParse_AgentModelValidation_K8sOpenRouterMissingModel.
+	t.Setenv("OPENROUTER_API_KEY", "sk-or-test")
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+auth_method: openrouter
+tracks:
+  - name: backend
+    language: go
+`
+	_, err := Parse([]byte(yaml))
+	if err == nil {
+		t.Fatal("expected validation error for local + openrouter + empty agent_model, got nil")
+	}
+	if !strings.Contains(err.Error(), "agent_model") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "agent_model")
+	}
+	if !strings.Contains(err.Error(), "openrouter") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "openrouter")
+	}
+}
+
+func TestParse_AgentModelValidation_LocalOpenAICompatMissingModel(t *testing.T) {
+	// openai_compat is also a native-loop method: empty agent_model must error
+	// in local mode for the same reason as openrouter above.
+	t.Setenv("OPENAI_API_KEY", "sk-test")
+	t.Setenv("OPENAI_BASE_URL", "https://api.example.com/v1")
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+auth_method: openai_compat
+tracks:
+  - name: backend
+    language: go
+`
+	_, err := Parse([]byte(yaml))
+	if err == nil {
+		t.Fatal("expected validation error for local + openai_compat + empty agent_model, got nil")
+	}
+	if !strings.Contains(err.Error(), "agent_model") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "agent_model")
+	}
+	if !strings.Contains(err.Error(), "openai_compat") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "openai_compat")
+	}
+}
+
+func TestParse_AgentModelValidation_LocalOpenRouterSkinSkipped(t *testing.T) {
+	// openrouter_skin is in MethodsRequiringAgentModel but is NOT a native-loop
+	// method — it routes through the claude CLI. Its agent_model requirement
+	// stays K8s-only (the CLI binary is chart-injected; local operators may
+	// have their own setup). Local mode with empty agent_model must still pass.
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+auth_method: openrouter_skin
+tracks:
+  - name: backend
+    language: go
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error in local mode (openrouter_skin should stay k8s-only): %v", err)
+	}
+	if cfg.AuthMethod != "openrouter_skin" {
+		t.Errorf("AuthMethod = %q, want openrouter_skin", cfg.AuthMethod)
 	}
 }
 

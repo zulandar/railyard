@@ -30,7 +30,12 @@ const nativeEngineMaxIterations = 80
 // the rate-limit pause-and-retry behavior is reused unchanged. Token usage comes
 // straight from the API usage block (no text-scraping), and the transcript is
 // persisted to agent_logs (redacted) for `ry logs` and outcome stats.
-func nativeSpawnRunner(db *gorm.DB, client agentloop.Completer, maxIterations int, cycleLog *slog.Logger) spawnRunner {
+//
+// authMethod identifies the active native-loop backend (openrouter /
+// openai_compat). It is carried through to RateLimitSignal.Source so downstream
+// pause/retry and metrics aren't mis-attributed when the runner serves a
+// non-openrouter native backend.
+func nativeSpawnRunner(db *gorm.DB, client agentloop.Completer, authMethod string, maxIterations int, cycleLog *slog.Logger) spawnRunner {
 	if cycleLog == nil {
 		cycleLog = slog.Default()
 	}
@@ -59,7 +64,7 @@ func nativeSpawnRunner(db *gorm.DB, client agentloop.Completer, maxIterations in
 		result, transcript, runErr := runNativeEngineLoop(ctx, loop, events)
 		persistNativeAgentLog(db, opts, sessionID, transcript, result, runErr)
 
-		outcome := mapEngineOutcome(runErr, result, carIsDone(db, opts.CarID))
+		outcome := mapEngineOutcome(runErr, result, carIsDone(db, opts.CarID), authMethod)
 		// The native runner does its own cleanup (Run already returned), so unlike
 		// the CLI runner there is no subprocess to terminate on rate-limit.
 		return &engine.Session{ID: sessionID, EngineID: opts.EngineID, CarID: opts.CarID}, outcome, nil
@@ -73,7 +78,10 @@ func nativeSpawnRunner(db *gorm.DB, client agentloop.Completer, maxIterations in
 //   - car marked done    -> outcomeCompleted
 //   - hit iteration cap  -> outcomeStall (ran out of steps; escalate, like a CLI stall)
 //   - finished, not done -> outcomeClear
-func mapEngineOutcome(runErr error, result agentloop.Result, carDone bool) sessionOutcome {
+//
+// source labels the rate-limit signal so the pause/retry wrapper and metrics
+// can tell native backends apart (openrouter vs openai_compat).
+func mapEngineOutcome(runErr error, result agentloop.Result, carDone bool, source string) sessionOutcome {
 	if runErr != nil {
 		if errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded) {
 			return sessionOutcome{kind: outcomeCancelled}
@@ -82,7 +90,7 @@ func mapEngineOutcome(runErr error, result agentloop.Result, carDone bool) sessi
 		if errors.As(runErr, &rle) {
 			return sessionOutcome{
 				kind:            outcomeRateLimited,
-				rateLimitSignal: engine.RateLimitSignal{Source: "openrouter", RetryAfter: rle.RetryAfter},
+				rateLimitSignal: engine.RateLimitSignal{Source: source, RetryAfter: rle.RetryAfter},
 			}
 		}
 		return sessionOutcome{kind: outcomeClear}
