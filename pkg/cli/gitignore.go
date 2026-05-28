@@ -344,38 +344,46 @@ func detectLanguages(root string) []string {
 	// both the single-module Android Studio layout and the nested ios/android
 	// layouts that Flutter, React Native, and Capacitor generate (railyard-7ea).
 	indicators := []struct {
-		paths []string // file/dir globs relative to root; any match counts
-		lang  string
+		paths   []string // file/dir globs relative to root; any match counts
+		lang    string
+		dirOnly bool // require a matched glob to be a directory (bundle markers)
 	}{
-		{[]string{"go.mod"}, "go"},
-		{[]string{"package.json"}, "typescript"},
-		{[]string{"Cargo.toml"}, "rust"},
-		{[]string{"setup.py"}, "python"},
-		{[]string{"pyproject.toml"}, "python"},
-		{[]string{"requirements.txt"}, "python"},
-		{[]string{"pubspec.yaml"}, "dart"},
+		{paths: []string{"go.mod"}, lang: "go"},
+		{paths: []string{"package.json"}, lang: "typescript"},
+		{paths: []string{"Cargo.toml"}, lang: "rust"},
+		{paths: []string{"setup.py"}, lang: "python"},
+		{paths: []string{"pyproject.toml"}, lang: "python"},
+		{paths: []string{"requirements.txt"}, lang: "python"},
+		{paths: []string{"pubspec.yaml"}, lang: "dart"},
 		// Android marker. Listed before the generic JVM entries; an explicit
 		// suppression pass below drops java when kotlin is detected so an
 		// Android repo doesn't also get the Java track/gitignore (railyard-382).
-		{[]string{
+		// The module dir isn't always "app": multi-module and Kotlin
+		// Multiplatform projects use other names (railyard-1ax).
+		{paths: []string{
 			"app/src/main/AndroidManifest.xml",         // single-module Android Studio
+			"mobile/src/main/AndroidManifest.xml",      // multi-module
+			"androidApp/src/main/AndroidManifest.xml",  // Kotlin Multiplatform
 			"android/app/src/main/AndroidManifest.xml", // Flutter / React Native
-		}, "kotlin"},
-		{[]string{"pom.xml"}, "java"},
-		{[]string{"build.gradle", "build.gradle.kts"}, "java"},
-		{[]string{"Package.swift"}, "swift"},
-		{[]string{
+		}, lang: "kotlin"},
+		{paths: []string{"pom.xml"}, lang: "java"},
+		{paths: []string{"build.gradle", "build.gradle.kts"}, lang: "java"},
+		{paths: []string{"Package.swift"}, lang: "swift"},
+		// .xcodeproj / .xcworkspace are always directory bundles; a regular
+		// file with that name must not trigger a phantom swift track
+		// (railyard-j63).
+		{paths: []string{
 			"*.xcodeproj", "*.xcworkspace", // repo root
 			"ios/*.xcodeproj", "ios/*.xcworkspace", // Flutter / React Native
 			"ios/*/*.xcodeproj", "ios/*/*.xcworkspace", // Capacitor / Cordova
-		}, "swift"},
-		{[]string{"Gemfile"}, "ruby"},
-		{[]string{"composer.json"}, "php"},
-		{[]string{"mix.exs"}, "elixir"},
-		{[]string{"CMakeLists.txt"}, "c"},
-		{[]string{"Makefile.am"}, "c"},
-		{[]string{"*.csproj"}, "csharp"},
-		{[]string{"*.sln"}, "csharp"},
+		}, lang: "swift", dirOnly: true},
+		{paths: []string{"Gemfile"}, lang: "ruby"},
+		{paths: []string{"composer.json"}, lang: "php"},
+		{paths: []string{"mix.exs"}, lang: "elixir"},
+		{paths: []string{"CMakeLists.txt"}, lang: "c"},
+		{paths: []string{"Makefile.am"}, lang: "c"},
+		{paths: []string{"*.csproj"}, lang: "csharp"},
+		{paths: []string{"*.sln"}, lang: "csharp"},
 	}
 
 	seen := map[string]bool{}
@@ -386,7 +394,7 @@ func detectLanguages(root string) []string {
 		if key == "" || seen[key] {
 			continue
 		}
-		if indicatorMatches(root, ind.paths) {
+		if indicatorMatches(root, ind.paths, ind.dirOnly) {
 			languages = append(languages, ind.lang)
 			seen[key] = true
 		}
@@ -399,11 +407,19 @@ func detectLanguages(root string) []string {
 
 // indicatorMatches reports whether any candidate path (literal or glob) exists
 // under root. filepath.Glob matches a metacharacter-free pattern as a literal
-// path, so it covers both cases.
-func indicatorMatches(root string, paths []string) bool {
+// path, so it covers both cases. When dirOnly is set, a match only counts if
+// it is a directory — used for bundle markers like *.xcodeproj that are always
+// directories, so a same-named regular file doesn't false-trigger detection.
+func indicatorMatches(root string, paths []string, dirOnly bool) bool {
 	for _, p := range paths {
-		if matches, _ := filepath.Glob(filepath.Join(root, p)); len(matches) > 0 {
-			return true
+		matches, _ := filepath.Glob(filepath.Join(root, p))
+		for _, m := range matches {
+			if !dirOnly {
+				return true
+			}
+			if info, err := os.Stat(m); err == nil && info.IsDir() {
+				return true
+			}
 		}
 	}
 	return false

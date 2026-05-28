@@ -321,8 +321,35 @@ func ensureDBRunning(out io.Writer, host string, port int, username, password st
 	return fmt.Errorf("database did not become ready within 30s — check: docker logs %s", containerName)
 }
 
+// pubspecHasFlutter reports whether the pubspec.yaml at root declares a Flutter
+// dependency or a top-level flutter: block — i.e. the project needs the Flutter
+// SDK rather than plain Dart. The match is anchored to a `flutter:` key so that
+// unrelated entries like `flutter_lints:` don't count (railyard-csp).
+var reFlutterKey = regexp.MustCompile(`(?m)^[ \t]*flutter[ \t]*:`)
+
+func pubspecHasFlutter(root string) bool {
+	data, err := os.ReadFile(filepath.Join(root, "pubspec.yaml"))
+	if err != nil {
+		return false
+	}
+	return reFlutterKey.Match(data)
+}
+
+// dartTestCommand picks the test command for a Dart project and explains why.
+// A Flutter project gets `flutter test`; a pure-Dart package (CLI, library,
+// server) gets `dart test` so init doesn't hand it a command its toolchain
+// can't run (railyard-csp).
+func dartTestCommand(root string) (cmd, reason string) {
+	if pubspecHasFlutter(root) {
+		return "flutter test", "Flutter dependency found in pubspec.yaml"
+	}
+	return "dart test", "no Flutter dependency in pubspec.yaml"
+}
+
 // languagePreset returns a sensible default TrackConfig for a given language.
-func languagePreset(lang string) config.TrackConfig {
+// root is the project root, used to tailor toolchain-specific defaults (e.g.
+// the Dart test command) to what the repo actually declares.
+func languagePreset(lang, root string) config.TrackConfig {
 	switch lang {
 	case "go":
 		return config.TrackConfig{
@@ -396,11 +423,12 @@ func languagePreset(lang string) config.TrackConfig {
 			TestCommand:  "./gradlew test",
 		}
 	case "dart":
+		testCmd, _ := dartTestCommand(root)
 		return config.TrackConfig{
 			Name: "mobile", Language: "dart",
 			FilePatterns: []string{"**/*.dart"},
 			EngineSlots:  2,
-			TestCommand:  "flutter test",
+			TestCommand:  testCmd,
 		}
 	default:
 		return config.TrackConfig{
@@ -411,13 +439,14 @@ func languagePreset(lang string) config.TrackConfig {
 }
 
 // generateTracks builds TrackConfig entries from detected languages,
-// resolving name conflicts by suffixing with the language name.
-func generateTracks(languages []string) []config.TrackConfig {
+// resolving name conflicts by suffixing with the language name. root is passed
+// through to languagePreset so toolchain-specific defaults can inspect the repo.
+func generateTracks(languages []string, root string) []config.TrackConfig {
 	var tracks []config.TrackConfig
 	usedNames := map[string]bool{}
 
 	for _, lang := range languages {
-		track := languagePreset(lang)
+		track := languagePreset(lang, root)
 		if usedNames[track.Name] {
 			track.Name = track.Name + "-" + lang
 		}
@@ -644,10 +673,19 @@ func runInit(cmd *cobra.Command, configPath string, yes, skipDB, skipCoco, skipT
 	}
 
 	// Generate tracks.
-	tracks := generateTracks(langs)
+	tracks := generateTracks(langs, gitRoot)
 	if len(tracks) == 0 {
 		tracks = []config.TrackConfig{
 			{Name: "default", Language: "mixed", EngineSlots: 2},
+		}
+	}
+
+	// Surface the Dart test-command decision so a pure-Dart package isn't
+	// silently handed a `flutter test` it can't run (railyard-csp).
+	for _, tr := range tracks {
+		if tr.Language == "dart" {
+			_, reason := dartTestCommand(gitRoot)
+			fmt.Fprintf(out, "Dart: using '%s' (%s)\n", tr.TestCommand, reason)
 		}
 	}
 
