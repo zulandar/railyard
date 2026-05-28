@@ -54,8 +54,20 @@ LANGUAGE_MAP = {
     "ruby": "ruby",
     "php": "php",
     "swift": "swift",
+    "kotlin": "kotlin",  # CocoIndex ships tree_sitter_kotlin_ng
+    # CocoIndex registers "dart" but ships NO tree-sitter grammar for it
+    # (rust/ops_text/src/prog_langs.rs: add("dart", &[".dart"], None)), so it
+    # falls back to text splitting. Mapped to None + a build-time warning until
+    # a grammar is available upstream (railyard-4e8).
+    "dart": None,
     "mixed": None,  # falls back to plain text splitting
 }
+
+# Track languages that are intentionally indexed as plain text — these are not
+# real source languages, so the "no tree-sitter grammar" warning is suppressed
+# for them. Any other language that resolves to no grammar is treated as a
+# degraded-indexing case worth warning about.
+PLAINTEXT_LANGUAGES = {"mixed"}
 
 # Patterns always excluded from indexing
 EXCLUDED_PATTERNS = [".*", "vendor", "node_modules", "dist", "__pycache__", ".git",
@@ -92,6 +104,20 @@ def make_flow_def(
         excluded = EXCLUDED_PATTERNS
 
     treesitter_lang = LANGUAGE_MAP.get(language) if language else None
+
+    # Warn when a real language was requested but no tree-sitter grammar is
+    # available, so the operator knows chunks are split as plain text rather
+    # than by AST — otherwise this degrades semantic search silently
+    # (railyard-4e8). "mixed" (and other plain-text pseudo-languages) are
+    # excluded since text splitting is the intended behavior there.
+    if language and not treesitter_lang and language not in PLAINTEXT_LANGUAGES:
+        print(
+            f"warning: no tree-sitter grammar available for language "
+            f"'{language}'; '{track_name}' will be chunked as plain text "
+            f"(semantic search quality may be reduced). See cocoindex's "
+            f"supported languages.",
+            file=sys.stderr,
+        )
 
     def flow_def(
         flow_builder: cocoindex.FlowBuilder, data_scope: cocoindex.DataScope
