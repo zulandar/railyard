@@ -42,26 +42,43 @@ func nativeSpawnRunner(db *gorm.DB, client agentloop.Completer, authMethod strin
 	if maxIterations <= 0 {
 		maxIterations = nativeEngineMaxIterations
 	}
+	// loop and events persist across the rate-limit retries for THIS car so a
+	// retry resumes the prior conversation instead of restarting from the
+	// kickoff message (railyard-qf1.4). The engine loop builds a fresh runner —
+	// and thus a fresh loop — per car claim, so cars never share state. The
+	// events channel is fully drained by runNativeEngineLoop before each call
+	// returns, so it is safe to reuse across attempts.
+	var loop *agentloop.Loop
+	events := make(chan agentloop.Event, 64)
 	return func(ctx context.Context, opts engine.SpawnOpts) (*engine.Session, sessionOutcome, error) {
 		sessionID, err := engine.GenerateSessionID()
 		if err != nil {
 			return nil, sessionOutcome{}, err
 		}
 
-		events := make(chan agentloop.Event, 64)
-		loop := agentloop.NewLoop(client, agentloop.LoopConfig{
-			Model:         opts.Model,
-			SystemPrompt:  opts.ContextPayload,
-			Tools:         agentloop.EngineTools(opts.WorkDir),
-			MaxIterations: maxIterations,
-			Events:        events,
-		})
+		// First attempt: build the loop and kick it off. Subsequent attempts
+		// (rate-limit retries) reuse the same loop — which still holds the
+		// accumulated conversation — and pass an empty input so the kickoff is
+		// not re-injected. A RateLimitError returns before the failing
+		// assistant turn is appended, so the conversation resumes cleanly.
+		userInput := nativeEngineKickoff
+		if loop == nil {
+			loop = agentloop.NewLoop(client, agentloop.LoopConfig{
+				Model:         opts.Model,
+				SystemPrompt:  opts.ContextPayload,
+				Tools:         agentloop.EngineTools(opts.WorkDir),
+				MaxIterations: maxIterations,
+				Events:        events,
+			})
+		} else {
+			userInput = ""
+		}
 
 		// Record the session id on the engine row for `ry logs` parity.
 		db.Model(&models.Engine{}).Where("id = ?", opts.EngineID).Update("session_id", sessionID)
 		cycleLog.Info("Native loop session", "session", sessionID, "car", opts.CarID, "model", opts.Model)
 
-		result, transcript, runErr := runNativeEngineLoop(ctx, loop, events)
+		result, transcript, runErr := runNativeEngineLoop(ctx, loop, events, userInput)
 		persistNativeAgentLog(db, opts, sessionID, transcript, result, runErr)
 
 		outcome := mapEngineOutcome(runErr, result, carIsDone(db, opts.CarID), authMethod)
@@ -113,7 +130,11 @@ func mapEngineOutcome(runErr error, result agentloop.Result, carDone bool, sourc
 // runNativeEngineLoop runs one loop turn, draining its events into a transcript
 // so the full agent activity can be persisted. The loop runs in a goroutine so
 // events stream concurrently; after it returns, any buffered events are drained.
-func runNativeEngineLoop(ctx context.Context, loop *agentloop.Loop, events <-chan agentloop.Event) (agentloop.Result, string, error) {
+//
+// userInput is the message that starts the turn: the kickoff on the first
+// attempt, or "" on a rate-limit retry so the loop resumes its existing
+// conversation rather than re-sending the kickoff.
+func runNativeEngineLoop(ctx context.Context, loop *agentloop.Loop, events <-chan agentloop.Event, userInput string) (agentloop.Result, string, error) {
 	var transcript strings.Builder
 	type runResult struct {
 		res agentloop.Result
@@ -121,7 +142,7 @@ func runNativeEngineLoop(ctx context.Context, loop *agentloop.Loop, events <-cha
 	}
 	resCh := make(chan runResult, 1)
 	go func() {
-		r, e := loop.Run(ctx, nativeEngineKickoff)
+		r, e := loop.Run(ctx, userInput)
 		resCh <- runResult{res: r, err: e}
 	}()
 
