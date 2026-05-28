@@ -301,6 +301,80 @@ func TestDetectLanguages_iOSXcodeProject(t *testing.T) {
 	}
 }
 
+// TestDetectLanguages_AndroidKotlinWithMaven verifies the Android signal
+// suppresses the generic JVM signal even when the JVM marker is pom.xml
+// (railyard-382): AndroidManifest.xml + pom.xml yields [kotlin] only, not
+// [java, kotlin].
+func TestDetectLanguages_AndroidKotlinWithMaven(t *testing.T) {
+	dir := t.TempDir()
+
+	manifestDir := filepath.Join(dir, "app", "src", "main")
+	if err := os.MkdirAll(manifestDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(manifestDir, "AndroidManifest.xml"), []byte("<manifest/>\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "pom.xml"), []byte("<project/>\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	languages := detectLanguages(dir)
+	if len(languages) != 1 || languages[0] != "kotlin" {
+		t.Errorf("expected [kotlin], got %v", languages)
+	}
+}
+
+// TestDetectLanguages_CrossPlatformMobile verifies the dominant Flutter/React
+// Native layout — Xcode bundle under ios/ and AndroidManifest under
+// android/app/src/main/ — is fully detected (railyard-7ea). A root-only glob
+// would miss swift and kotlin here.
+func TestDetectLanguages_CrossPlatformMobile(t *testing.T) {
+	dir := t.TempDir()
+
+	if err := os.WriteFile(filepath.Join(dir, "pubspec.yaml"), []byte("name: app\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "ios", "Runner.xcodeproj"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	androidManifest := filepath.Join(dir, "android", "app", "src", "main")
+	if err := os.MkdirAll(androidManifest, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(androidManifest, "AndroidManifest.xml"), []byte("<manifest/>\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	languages := detectLanguages(dir)
+	want := map[string]bool{"dart": true, "kotlin": true, "swift": true}
+	if len(languages) != 3 {
+		t.Fatalf("expected 3 languages [dart kotlin swift], got %v", languages)
+	}
+	for _, l := range languages {
+		if !want[l] {
+			t.Errorf("unexpected language %q in %v", l, languages)
+		}
+	}
+}
+
+// TestGenerateTracks_ThreeWayMobile verifies the mobile track-name collision
+// is resolved for a dart+kotlin+swift repo so all three tracks get unique
+// names (railyard-7ea acceptance #4).
+func TestGenerateTracks_ThreeWayMobile(t *testing.T) {
+	tracks := generateTracks([]string{"dart", "kotlin", "swift"})
+	if len(tracks) != 3 {
+		t.Fatalf("expected 3 tracks, got %d", len(tracks))
+	}
+	names := map[string]bool{}
+	for _, tr := range tracks {
+		if names[tr.Name] {
+			t.Errorf("duplicate track name %q", tr.Name)
+		}
+		names[tr.Name] = true
+	}
+}
+
 func TestSanitizeOwner(t *testing.T) {
 	tests := []struct {
 		input string

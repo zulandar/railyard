@@ -26,8 +26,10 @@ func TestCanonicalLanguage(t *testing.T) {
 		{"rust", "Rust"},
 		{"rs", "Rust"},
 		{"java", "Java"},
-		{"kotlin", "Java"},
+		{"kotlin", "Kotlin"},
 		{"swift", "Swift"},
+		{"dart", "Dart"},
+		{"flutter", "Dart"},
 		{"ruby", "Ruby"},
 		{"rb", "Ruby"},
 		{"php", "PHP"},
@@ -103,6 +105,83 @@ func TestCollectIgnoreGroups_MultipleLanguages(t *testing.T) {
 		if !labels[want] {
 			t.Errorf("missing group %q", want)
 		}
+	}
+}
+
+// TestCollectIgnoreGroups_Kotlin verifies that a kotlin track gets its own
+// Android-appropriate group rather than Java's patterns (railyard-382).
+func TestCollectIgnoreGroups_Kotlin(t *testing.T) {
+	groups := collectIgnoreGroups([]string{"kotlin"})
+
+	var kotlin *ignoreGroup
+	for i := range groups {
+		if groups[i].label == "Kotlin" {
+			kotlin = &groups[i]
+		}
+		if groups[i].label == "Java" {
+			t.Error("kotlin must not emit a Java group")
+		}
+	}
+	if kotlin == nil {
+		t.Fatal("missing Kotlin group")
+	}
+	has := map[string]bool{}
+	for _, p := range kotlin.patterns {
+		has[p] = true
+	}
+	// Android-specific entries that Java's block lacks.
+	for _, want := range []string{"local.properties", "*.apk", "*.aab"} {
+		if !has[want] {
+			t.Errorf("Kotlin group missing Android pattern %q", want)
+		}
+	}
+	// Java-only artifacts that don't belong to an Android project.
+	for _, unwanted := range []string{"*.jar", "*.war"} {
+		if has[unwanted] {
+			t.Errorf("Kotlin group should not contain Java artifact %q", unwanted)
+		}
+	}
+}
+
+// TestCollectIgnoreGroups_Dart verifies that a dart track actually emits
+// Dart-specific patterns instead of being silently dropped (railyard-4cr).
+func TestCollectIgnoreGroups_Dart(t *testing.T) {
+	groups := collectIgnoreGroups([]string{"dart"})
+
+	var dart *ignoreGroup
+	for i := range groups {
+		if groups[i].label == "Dart" {
+			dart = &groups[i]
+		}
+	}
+	if dart == nil {
+		t.Fatal("missing Dart group — patterns were silently dropped")
+	}
+	has := map[string]bool{}
+	for _, p := range dart.patterns {
+		has[p] = true
+	}
+	for _, want := range []string{".dart_tool/", "build/"} {
+		if !has[want] {
+			t.Errorf("Dart group missing %q", want)
+		}
+	}
+}
+
+// TestCollectIgnoreGroups_UnknownDoesNotConsumeDedupSlot guards the structural
+// bug in railyard-4cr: a language whose canonical has no patterns map entry
+// must not consume the dedup slot and suppress a later real group. "flutter"
+// and "dart" share the canonical "Dart"; the Dart group must still appear.
+func TestCollectIgnoreGroups_FlutterAndDartShareOneGroup(t *testing.T) {
+	groups := collectIgnoreGroups([]string{"flutter", "dart"})
+	dartCount := 0
+	for _, g := range groups {
+		if g.label == "Dart" {
+			dartCount++
+		}
+	}
+	if dartCount != 1 {
+		t.Errorf("expected exactly 1 Dart group, got %d", dartCount)
 	}
 }
 
