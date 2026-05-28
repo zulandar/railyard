@@ -83,19 +83,26 @@ repo: git@github.com:org/myproject.git
 # no default model). For standard Anthropic API, leave unset to use the CLI default.
 # agent_model: anthropic-claude-4.6-sonnet
 #
-# When using OpenRouter (auth.method: openrouter in the chart), use the
-# provider/model[:variant] naming form. Examples:
-#   agent_model: anthropic/claude-sonnet-4.5
-#   agent_model: meta-llama/llama-3.3-70b-instruct:free
-#   agent_model: deepseek/deepseek-r1:free
-# See charts/railyard/README.md for the full OpenRouter operator guide.
+# OpenRouter / OpenAI-compatible backends — two ways (see docs/openrouter.md):
 #
-# When using an OpenAI-compatible backend (auth.method: openai_compat in the
-# chart + agent_provider: codex), naming is backend-specific —
-#   DO Inference:      agent_model: gemma-4-31B-it
-#   OpenRouter:        agent_model: meta-llama/llama-3.3-70b-instruct:free
-#   Direct OpenAI:     agent_model: gpt-4
-# See charts/railyard/README.md for the full operator guide.
+#   auth_method: openrouter        # Approach A: Railyard's NATIVE agent loop
+#                                  # (recommended; works with weak AND capable
+#                                  # models). Reads OPENROUTER_API_KEY from env.
+#   auth_method: openai_compat     # Approach A for any OpenAI-compatible backend
+#                                  # (reads OPENAI_BASE_URL + OPENAI_API_KEY).
+#   auth_method: openrouter_skin   # Approach B: claude CLI via OpenRouter's
+#                                  # Anthropic skin (capable models ONLY — weak
+#                                  # models are derailed by the claude harness
+#                                  # prompt). Reads ANTHROPIC_BASE_URL +
+#                                  # ANTHROPIC_API_KEY; needs agent_provider: claude.
+# auth_method: openrouter
+#
+# Use OpenRouter's provider/model[:variant] naming form for agent_model. Examples:
+#   agent_model: openrouter/owl-alpha             # weak model (native loop only)
+#   agent_model: anthropic/claude-sonnet-4.5      # capable (either approach)
+#   agent_model: meta-llama/llama-3.3-70b-instruct:free
+# For other OpenAI-compatible backends, naming is backend-specific (DO Inference:
+# gemma-4-31B-it; direct OpenAI: gpt-4). See docs/openrouter.md for the full guide.
 
 # Codex CLI provider settings (only used when agent_provider: codex).
 # codex:

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/zulandar/railyard/internal/agentloop"
 	"github.com/zulandar/railyard/internal/car"
 	"github.com/zulandar/railyard/internal/config"
 	"github.com/zulandar/railyard/internal/db"
@@ -129,6 +130,20 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 	}
 	if providerName == "" {
 		providerName = "claude"
+	}
+
+	// When auth_method routes to the Railyard-owned native loop
+	// (openrouter/openai_compat), build the OpenAI-compatible client once; the
+	// per-cycle native runner reuses it. Credentials come from the environment.
+	useNativeLoop := agentloop.IsNativeLoopMethod(cfg.AuthMethod)
+	var loopClient agentloop.Completer
+	if useNativeLoop {
+		c, err := agentloop.NewClientFromEnv(cfg.AuthMethod)
+		if err != nil {
+			return fmt.Errorf("engine: native loop: %w", err)
+		}
+		loopClient = c
+		logger.Info("Engine using native agent loop", "auth_method", cfg.AuthMethod, "model", trackCfg.AgentModel)
 	}
 
 	// Construct an event bus for this engine pod. Plugin lifecycle is NOT
@@ -362,7 +377,17 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 			ProviderName:   providerName,
 			Model:          trackCfg.AgentModel,
 		}
-		sess, outcome, spawnErr := spawnAndMonitorWithRetry(ctx, gormDB, spawnOpts, stallCfg, cfg.Stall.RateLimitMaxRetries, cfg.Stall.RateLimitMaxWaitSec, cycle, cycleLog)
+		// Native loop and CLI subprocess paths share the same pause-and-retry
+		// wrapper; only the runner differs.
+		var sess *engine.Session
+		var outcome sessionOutcome
+		var spawnErr error
+		if useNativeLoop {
+			runner := nativeSpawnRunner(gormDB, loopClient, cfg.AuthMethod, nativeEngineMaxIterations, cycleLog)
+			sess, outcome, spawnErr = spawnAndMonitorWithRetryRunner(ctx, spawnOpts, cfg.Stall.RateLimitMaxRetries, cfg.Stall.RateLimitMaxWaitSec, cycleLog, runner)
+		} else {
+			sess, outcome, spawnErr = spawnAndMonitorWithRetry(ctx, gormDB, spawnOpts, stallCfg, cfg.Stall.RateLimitMaxRetries, cfg.Stall.RateLimitMaxWaitSec, cycle, cycleLog)
+		}
 		if spawnErr != nil {
 			// Transient spawn failure (binary missing, fork-limit, etc.) — log
 			// and let the next poll tick retry. The car is NOT blocked.

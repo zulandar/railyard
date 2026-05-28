@@ -12,6 +12,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/zulandar/railyard/internal/agentloop"
 	"github.com/zulandar/railyard/internal/models"
 )
 
@@ -55,10 +56,13 @@ type Config struct {
 	// own defaults.
 	Codex CodexConfig `yaml:"codex"`
 	// AuthMethod mirrors the chart's `auth.method` value (api_key, oauth_token,
-	// bedrock, vertex, foundry, do_inference, openrouter) when running in Kubernetes mode.
-	// The chart is responsible for injecting this into the application config;
-	// locally it is left unset. Used solely for startup validation — Go code
-	// does not switch behavior on this value.
+	// bedrock, vertex, foundry, do_inference, openrouter, openai_compat) when
+	// running in Kubernetes mode. The chart is responsible for injecting this
+	// into the application config; locally it is left unset. It drives startup
+	// validation and selects the agent backend: openrouter/openai_compat route
+	// agent roles through the Railyard-owned native loop (internal/agentloop)
+	// with credentials resolved from the environment, while other methods use
+	// the CLI providers. See agentloop.IsNativeLoopMethod.
 	AuthMethod string           `yaml:"auth_method"`
 	Yardmaster YardmasterConfig `yaml:"yardmaster"`
 
@@ -306,9 +310,10 @@ var KnownProviders = map[string]bool{
 // have no implicit default model — a request without one will fail at runtime.
 // Enforced in Kubernetes mode by Config.validate().
 var MethodsRequiringAgentModel = map[string]bool{
-	"do_inference":  true,
-	"openrouter":    true,
-	"openai_compat": true,
+	"do_inference":    true,
+	"openrouter":      true,
+	"openai_compat":   true,
+	"openrouter_skin": true, // Approach B: claude CLI -> OpenRouter skin (no default model)
 }
 
 // CocoIndexConfig holds settings for the CocoIndex semantic search integration.
@@ -906,24 +911,31 @@ func (c *Config) validate() error {
 			errs = append(errs, "kubernetes.image is required when kubernetes is configured")
 		}
 	}
-	// Enforced only in Kubernetes mode — local operators manage their own env
-	// vars and may have intentionally chosen a different routing path. The
-	// chart is responsible for injecting `auth_method` into the application
-	// config.
-	if c.IsKubernetesMode() && MethodsRequiringAgentModel[c.AuthMethod] && c.AgentModel == "" {
+	// agent_model is required when the upstream API has no implicit default.
+	// Native-loop methods (openrouter / openai_compat) need it in ANY mode —
+	// the API rejects requests with an empty model — so local operators get
+	// a clear startup error instead of a deferred 400 on the first triage /
+	// dispatch / engine call. Other entries in MethodsRequiringAgentModel
+	// (do_inference, openrouter_skin) route through CLI providers that the
+	// chart configures; local operators manage those themselves, so the
+	// requirement stays K8s-only there.
+	requireAgentModel := MethodsRequiringAgentModel[c.AuthMethod] &&
+		(c.IsKubernetesMode() || agentloop.IsNativeLoopMethod(c.AuthMethod))
+	if requireAgentModel && c.AgentModel == "" {
 		errs = append(errs, fmt.Sprintf(
 			"agent_model is required when auth_method is %s (no implicit default model)",
 			c.AuthMethod,
 		))
 	}
-	// auth_method=openai_compat is only wired through the codex agent provider.
-	// claude CLI cannot speak OpenAI-compat, so any other agent_provider is a
-	// misconfiguration.
-	if c.AuthMethod == "openai_compat" && c.AgentProvider != "codex" {
-		errs = append(errs, fmt.Sprintf(
-			"auth_method=openai_compat requires agent_provider=codex (claude CLI cannot speak OpenAI-compat), got %q",
-			c.AgentProvider,
-		))
+	// openrouter / openai_compat select the Railyard-owned native agent loop
+	// (internal/agentloop), so agent_provider is irrelevant for those methods —
+	// no specific CLI provider is required. Their credentials come from the
+	// environment (the chart injects them), so in Kubernetes mode require the
+	// API key (and base URL) to be present, with an actionable error.
+	if c.IsKubernetesMode() && agentloop.IsNativeLoopMethod(c.AuthMethod) {
+		if err := agentloop.ValidateEnv(c.AuthMethod); err != nil {
+			errs = append(errs, err.Error())
+		}
 	}
 	// Bull validation (only when enabled).
 	if c.Bull.Enabled {

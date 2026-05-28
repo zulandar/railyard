@@ -2,11 +2,13 @@
 package dispatch
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
 	"os/exec"
 
+	"github.com/zulandar/railyard/internal/agentloop"
 	"github.com/zulandar/railyard/internal/config"
 	"github.com/zulandar/railyard/internal/engine"
 )
@@ -56,6 +58,25 @@ func Start(opts StartOpts) error {
 		if err := WriteDispatchMCPConfig(workDir, opts.Config); err != nil {
 			log.Printf("dispatch: write MCP config warning: %v", err)
 		}
+	}
+
+	// Native-loop path: when auth_method selects the Railyard-owned loop
+	// (openrouter/openai_compat), drive an interactive stdin/stdout session
+	// against it instead of attaching to a CLI provider. Credentials are
+	// resolved from the environment (the chart injects them).
+	if agentloop.IsNativeLoopMethod(opts.Config.AuthMethod) {
+		client, err := agentloop.NewClientFromEnv(opts.Config.AuthMethod)
+		if err != nil {
+			return fmt.Errorf("dispatch: native loop: %w", err)
+		}
+		return runInteractiveLoop(context.Background(), interactiveLoopConfig{
+			Client:       client,
+			Model:        opts.Config.AgentModel,
+			SystemPrompt: prompt,
+			WorkDir:      workDir,
+			In:           os.Stdin,
+			Out:          os.Stdout,
+		})
 	}
 
 	// Resolve the agent provider from config (defaults to "claude").

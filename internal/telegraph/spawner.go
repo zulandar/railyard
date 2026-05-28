@@ -13,6 +13,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/zulandar/railyard/internal/agentloop"
 )
 
 // ClaudeSpawner implements ProcessSpawner by launching claude CLI subprocesses.
@@ -251,8 +253,17 @@ type LazySpawner struct {
 	WriteMCPConfig func(worktreeDir string) error
 	// ClaudeBinary is the path to the claude binary; defaults to "claude".
 	ClaudeBinary string
-	// Model is forwarded to the underlying ClaudeSpawner; see its docs.
+	// Model is forwarded to the underlying spawner; see its docs.
 	Model string
+
+	// UseNativeLoop routes dispatch through the Railyard-owned agent loop
+	// (OpenRouterSpawner) instead of the claude CLI. Set when auth_method is a
+	// native-loop method (openrouter/openai_compat). Requires Client.
+	UseNativeLoop bool
+	// Client is the OpenAI-compatible client used when UseNativeLoop is true.
+	Client agentloop.Completer
+	// MaxIterations bounds the native loop; 0 uses the agentloop default.
+	MaxIterations int
 }
 
 // Spawn performs full dispatch setup then delegates to ClaudeSpawner.
@@ -280,6 +291,21 @@ func (ls *LazySpawner) Spawn(ctx context.Context, prompt string) (Process, error
 		}
 	}
 
+	// Native-loop path: drive the Railyard-owned agent loop directly. It uses
+	// bash to run ry (no MCP client), so the claude-specific .mcp.json write is
+	// intentionally skipped here.
+	if ls.UseNativeLoop {
+		native := &OpenRouterSpawner{
+			SystemPrompt:  systemPrompt,
+			WorkDir:       worktreeDir,
+			Client:        ls.Client,
+			Model:         ls.Model,
+			MaxIterations: ls.MaxIterations,
+		}
+		return native.Spawn(ctx, prompt)
+	}
+
+	// claude CLI path: write the MCP config the CLI relies on, then delegate.
 	if ls.WriteMCPConfig != nil {
 		if err := ls.WriteMCPConfig(worktreeDir); err != nil {
 			log.Printf("telegraph: lazy spawn: write MCP config: %v (continuing without MCP)", err)
