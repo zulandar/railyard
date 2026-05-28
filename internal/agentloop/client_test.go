@@ -289,3 +289,63 @@ func TestClient_Complete_5xxExhaustsRetries(t *testing.T) {
 		t.Errorf("server calls = %d, want 3", calls)
 	}
 }
+
+// HTTP 200 with a JSON {"error":...} body is what stealth OpenRouter providers
+// like openrouter/owl-alpha return on transient upstream hiccups. The client
+// must treat this as retryable so a single bad turn doesn't bubble up to
+// `ry dispatch` (forcing a user retype) or to the engine native runner (where
+// it throws away the whole car cycle as outcomeClear). See railyard-0se.
+func TestClient_Complete_RetriesOn200WithErrorBodyThenSucceeds(t *testing.T) {
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Header().Set("Content-Type", "application/json")
+		if calls < 2 {
+			_, _ = io.WriteString(w, `{"error":{"message":"Provider returned error"}}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}`)
+	}))
+	defer srv.Close()
+
+	c := NewClient(Credentials{BaseURL: srv.URL, APIKey: "sk-test"},
+		WithMaxRetries(3), WithRetryBaseDelay(0))
+	resp, err := c.Complete(context.Background(), Request{Model: "m", Messages: []Message{{Role: "user", Content: "hi"}}})
+	if err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	if resp.Content != "ok" {
+		t.Errorf("Content = %q, want ok", resp.Content)
+	}
+	if calls != 2 {
+		t.Errorf("server calls = %d, want 2", calls)
+	}
+}
+
+func TestClient_Complete_200WithErrorBodyExhaustsRetries(t *testing.T) {
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"error":{"message":"Provider returned error"}}`)
+	}))
+	defer srv.Close()
+
+	c := NewClient(Credentials{BaseURL: srv.URL, APIKey: "sk-test"},
+		WithMaxRetries(2), WithRetryBaseDelay(0))
+	_, err := c.Complete(context.Background(), Request{Model: "m", Messages: []Message{{Role: "user", Content: "hi"}}})
+	if err == nil {
+		t.Fatal("expected error after exhausting retries, got nil")
+	}
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("error = %v (%T), want *APIError", err, err)
+	}
+	if apiErr.StatusCode != http.StatusOK {
+		t.Errorf("APIError.StatusCode = %d, want 200", apiErr.StatusCode)
+	}
+	// initial attempt + 2 retries = 3 calls
+	if calls != 3 {
+		t.Errorf("server calls = %d, want 3", calls)
+	}
+}
