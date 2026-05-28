@@ -18,7 +18,7 @@ against the codex fallback (Approach C).
 | Car marked done | `ry car show <id>` → status `done`/`merged`; engine logs `Car completed` |
 | Branch is mergeable | `git log origin/<base>..<car-branch>` has commits; no conflicts on merge |
 | Usage from API block | `ry logs --car <id>` shows a token count; `agent_logs.token_count` > 0 |
-| Rate-limit handling | On upstream 429, engine logs `Rate limit hit, pausing before retry` then respawns |
+| Rate-limit handling | On upstream 429, engine logs `Rate limit hit, pausing before retry` then resumes the same conversation (native loop preserves prior turns; see below) |
 | Stall handling | If the loop hits its iteration cap without `done`, engine logs `Stall detected` (type `max_iterations`) |
 
 ## Prerequisites
@@ -127,9 +127,22 @@ tool calls and a non-zero token count.
 - **Usage** — `agent_logs.token_count` for the car is non-zero and taken straight
   from the API `usage` block (not text-scraped). `ry logs --car <id>` surfaces it.
 - **Rate-limit** — hard to force deliberately; if the upstream returns HTTP 429
-  the engine log shows `Rate limit hit, pausing before retry` and respawns up to
-  `stall.rate_limit_max_retries`, then converts to a stall. (Unit-covered:
-  `pkg/cli` `TestNativeSpawnRunner_RateLimited`.)
+  the engine log shows `Rate limit hit, pausing before retry` and retries up to
+  `stall.rate_limit_max_retries`, then converts to a stall. On the **native
+  loop** path (OpenRouter / openai_compat), a retry **resumes the same
+  conversation** — prior assistant turns, tool calls, and tool results are
+  replayed as history, so the agent picks up where the rate limit hit rather
+  than restarting from the kickoff message. Work done before the 429 (reads,
+  edits, partial reasoning) is preserved. The 429 returns before the failing
+  assistant turn is recorded, so the resumed conversation is clean. Each attempt
+  still persists its own `agent_logs` row, so token usage across retries is
+  summed into the car's outcome stats. (Unit-covered: `pkg/cli`
+  `TestNativeSpawnRunner_RateLimited`,
+  `TestNativeSpawnRunner_ResumesConversationAfterRateLimit`,
+  `TestNativeSpawnRunner_PersistsEachRetryAttempt`.)
+  - **CLI subprocess path** (claude/codex providers) does **not** resume — a
+    retry re-spawns the subprocess from the kickoff message, so prior in-session
+    progress is restarted. Conversation resume is native-loop-only for now.
 - **Stall** — to see the stall path, give a car the model can't finish within the
   iteration cap (`nativeEngineMaxIterations`, currently 80); the engine logs
   `Stall detected` with `type=max_iterations` and escalates, exactly like a CLI

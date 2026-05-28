@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -61,6 +62,43 @@ func stopRespWithUsage(content string, prompt, completion int) agentloop.Respons
 		FinishReason: "stop",
 		Usage:        agentloop.Usage{PromptTokens: prompt, CompletionTokens: completion, TotalTokens: prompt + completion},
 	}
+}
+
+// recordingCompleter is a fake agentloop.Completer that scripts a per-call
+// sequence of either a response or an error, and records every Request it
+// received so a test can assert what conversation history was sent.
+type recordingCompleter struct {
+	steps []recordingStep
+
+	mu       sync.Mutex
+	calls    int
+	requests []agentloop.Request
+}
+
+type recordingStep struct {
+	resp agentloop.Response
+	err  error
+}
+
+func (c *recordingCompleter) Complete(_ context.Context, req agentloop.Request) (agentloop.Response, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.requests = append(c.requests, req)
+	i := c.calls
+	c.calls++
+	if i >= len(c.steps) {
+		return agentloop.Response{}, errors.New("recordingCompleter: out of steps")
+	}
+	if s := c.steps[i]; s.err != nil {
+		return agentloop.Response{}, s.err
+	}
+	return c.steps[i].resp, nil
+}
+
+func (c *recordingCompleter) lastRequest() agentloop.Request {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.requests[len(c.requests)-1]
 }
 
 // ---------------------------------------------------------------------------
@@ -220,6 +258,101 @@ func TestNativeSpawnRunner_StallOnMaxIterations(t *testing.T) {
 	}
 	if outcome.kind != outcomeStall {
 		t.Errorf("outcome = %v, want outcomeStall (hit iteration cap)", outcome.kind)
+	}
+}
+
+func TestNativeSpawnRunner_ResumesConversationAfterRateLimit(t *testing.T) {
+	db := engineTestDB(t)
+	db.Create(&models.Engine{ID: "eng-1"})
+	db.Create(&models.Car{ID: "car-1", Status: "in_progress"})
+
+	// Script: the agent makes a tool call, then the next model turn is
+	// rate-limited. On the retry the model finishes. The retry must resume the
+	// prior conversation, not restart from the kickoff message.
+	c := &recordingCompleter{steps: []recordingStep{
+		{resp: writeFileCall("c1", "out.txt", "partial work")},
+		{err: &agentloop.RateLimitError{RetryAfter: time.Second, Message: "429"}},
+		{resp: stopRespWithUsage("resumed and finished", 10, 5)},
+	}}
+	runner := nativeSpawnRunner(db, c, "openrouter", 10, nil)
+	opts := engine.SpawnOpts{
+		EngineID: "eng-1", CarID: "car-1", ContextPayload: "you are an engine", WorkDir: t.TempDir(), Model: "m",
+	}
+
+	// First invocation is rate-limited mid-conversation.
+	_, outcome1, err := runner(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("runner 1: %v", err)
+	}
+	if outcome1.kind != outcomeRateLimited {
+		t.Fatalf("first outcome = %v, want outcomeRateLimited", outcome1.kind)
+	}
+
+	// Second invocation is the retry (same runner, as the pause-and-retry
+	// wrapper does). It must resume rather than restart.
+	_, outcome2, err := runner(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("runner 2: %v", err)
+	}
+	if outcome2.kind != outcomeClear {
+		t.Fatalf("second outcome = %v, want outcomeClear (finished, car not marked done)", outcome2.kind)
+	}
+
+	// The retry's request must carry the full prior conversation: the system
+	// prompt, the original kickoff, the assistant tool call, and its result —
+	// proving resume. A restart-from-blank would send only [system, user].
+	gotRoles := []string{}
+	kickoffCount := 0
+	for _, m := range c.lastRequest().Messages {
+		gotRoles = append(gotRoles, m.Role)
+		if m.Role == "user" && m.Content == nativeEngineKickoff {
+			kickoffCount++
+		}
+	}
+	wantRoles := []string{"system", "user", "assistant", "tool"}
+	if !reflect.DeepEqual(gotRoles, wantRoles) {
+		t.Errorf("retry conversation roles = %v, want %v (resume, not restart)", gotRoles, wantRoles)
+	}
+	if kickoffCount != 1 {
+		t.Errorf("kickoff message appeared %d times, want exactly 1 (not re-injected on retry)", kickoffCount)
+	}
+}
+
+func TestNativeSpawnRunner_PersistsEachRetryAttempt(t *testing.T) {
+	// Work preservation means the rate-limited attempt's activity is not
+	// discarded: each attempt persists its own agent_logs row so the transcript
+	// and token usage survive into outcome stats.
+	db := engineTestDB(t)
+	db.Create(&models.Engine{ID: "eng-1"})
+	db.Create(&models.Car{ID: "car-1", Status: "in_progress"})
+
+	c := &recordingCompleter{steps: []recordingStep{
+		{resp: writeFileCall("c1", "out.txt", "partial work")},
+		{err: &agentloop.RateLimitError{RetryAfter: time.Second, Message: "429"}},
+		{resp: stopRespWithUsage("resumed and finished", 10, 5)},
+	}}
+	runner := nativeSpawnRunner(db, c, "openrouter", 10, nil)
+	opts := engine.SpawnOpts{
+		EngineID: "eng-1", CarID: "car-1", ContextPayload: "sys", WorkDir: t.TempDir(), Model: "m",
+	}
+
+	if _, _, err := runner(context.Background(), opts); err != nil {
+		t.Fatalf("runner 1: %v", err)
+	}
+	if _, _, err := runner(context.Background(), opts); err != nil {
+		t.Fatalf("runner 2: %v", err)
+	}
+
+	var rows int64
+	db.Model(&models.AgentLog{}).Where("car_id = ?", "car-1").Count(&rows)
+	if rows != 2 {
+		t.Fatalf("agent_logs rows = %d, want 2 (one per attempt)", rows)
+	}
+	// The successful retry's usage must be recorded for outcome stats.
+	var total int
+	db.Model(&models.AgentLog{}).Where("car_id = ?", "car-1").Select("COALESCE(SUM(token_count),0)").Scan(&total)
+	if total != 15 {
+		t.Errorf("summed TokenCount = %d, want 15 (10+5 from the retry)", total)
 	}
 }
 
