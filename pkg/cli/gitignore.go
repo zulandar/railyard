@@ -140,11 +140,14 @@ func collectIgnoreGroups(languages []string) []ignoreGroup {
 		if seen[key] {
 			continue
 		}
-		seen[key] = true
 		patterns, ok := languageIgnorePatterns[key]
 		if !ok {
+			// Don't mark the slot seen on a lookup miss: an unknown or
+			// patternless canonical must not suppress a later language that
+			// shares it (railyard-4cr).
 			continue
 		}
+		seen[key] = true
 		groups = append(groups, ignoreGroup{
 			label:    key,
 			patterns: patterns,
@@ -172,8 +175,10 @@ func canonicalLanguage(lang string) string {
 		return "Node / TypeScript"
 	case "rust", "rs":
 		return "Rust"
-	case "java", "kotlin":
+	case "java":
 		return "Java"
+	case "kotlin":
+		return "Kotlin"
 	case "swift":
 		return "Swift"
 	case "dart", "flutter":
@@ -234,6 +239,30 @@ var languageIgnorePatterns = map[string][]string{
 		"*.war",
 		".gradle/",
 		"build/",
+	},
+	"Kotlin": {
+		"*.class",
+		".gradle/",
+		"build/",
+		"local.properties",
+		"captures/",
+		".cxx/",
+		".externalNativeBuild/",
+		"*.apk",
+		"*.aab",
+		"*.ap_",
+		"*.dex",
+		"*.keystore",
+		"app/release/",
+	},
+	"Dart": {
+		".dart_tool/",
+		".packages",
+		"build/",
+		".flutter-plugins",
+		".flutter-plugins-dependencies",
+		".pub-cache/",
+		"*.dart.js",
 	},
 	"Swift": {
 		".build/",
@@ -310,63 +339,100 @@ func ideOSPatterns() []string {
 
 // detectLanguages scans the project root for language indicator files.
 func detectLanguages(root string) []string {
+	// Each indicator lists one or more candidate paths (globs are supported);
+	// the language is detected if ANY candidate matches. Mobile markers cover
+	// both the single-module Android Studio layout and the nested ios/android
+	// layouts that Flutter, React Native, and Capacitor generate (railyard-7ea).
 	indicators := []struct {
-		path string // file or dir relative to root
-		lang string
+		paths []string // file/dir globs relative to root; any match counts
+		lang  string
 	}{
-		{"go.mod", "go"},
-		{"package.json", "typescript"},
-		{"Cargo.toml", "rust"},
-		{"setup.py", "python"},
-		{"pyproject.toml", "python"},
-		{"requirements.txt", "python"},
-		{"pubspec.yaml", "dart"},
-		// Android marker (standard Android Studio layout). Listed before the
-		// generic JVM gradle entries so Android repos resolve to kotlin rather
-		// than being lumped under java.
-		{"app/src/main/AndroidManifest.xml", "kotlin"},
-		{"pom.xml", "java"},
-		{"build.gradle", "java"},
-		{"build.gradle.kts", "java"},
-		{"Package.swift", "swift"},
-		{"*.xcodeproj", "swift"},
-		{"*.xcworkspace", "swift"},
-		{"Gemfile", "ruby"},
-		{"composer.json", "php"},
-		{"mix.exs", "elixir"},
-		{"CMakeLists.txt", "c"},
-		{"Makefile.am", "c"},
-		{"*.csproj", "csharp"},
-		{"*.sln", "csharp"},
+		{[]string{"go.mod"}, "go"},
+		{[]string{"package.json"}, "typescript"},
+		{[]string{"Cargo.toml"}, "rust"},
+		{[]string{"setup.py"}, "python"},
+		{[]string{"pyproject.toml"}, "python"},
+		{[]string{"requirements.txt"}, "python"},
+		{[]string{"pubspec.yaml"}, "dart"},
+		// Android marker. Listed before the generic JVM entries; an explicit
+		// suppression pass below drops java when kotlin is detected so an
+		// Android repo doesn't also get the Java track/gitignore (railyard-382).
+		{[]string{
+			"app/src/main/AndroidManifest.xml",         // single-module Android Studio
+			"android/app/src/main/AndroidManifest.xml", // Flutter / React Native
+		}, "kotlin"},
+		{[]string{"pom.xml"}, "java"},
+		{[]string{"build.gradle", "build.gradle.kts"}, "java"},
+		{[]string{"Package.swift"}, "swift"},
+		{[]string{
+			"*.xcodeproj", "*.xcworkspace", // repo root
+			"ios/*.xcodeproj", "ios/*.xcworkspace", // Flutter / React Native
+			"ios/*/*.xcodeproj", "ios/*/*.xcworkspace", // Capacitor / Cordova
+		}, "swift"},
+		{[]string{"Gemfile"}, "ruby"},
+		{[]string{"composer.json"}, "php"},
+		{[]string{"mix.exs"}, "elixir"},
+		{[]string{"CMakeLists.txt"}, "c"},
+		{[]string{"Makefile.am"}, "c"},
+		{[]string{"*.csproj"}, "csharp"},
+		{[]string{"*.sln"}, "csharp"},
 	}
 
 	seen := map[string]bool{}
 	var languages []string
 
 	for _, ind := range indicators {
-		if strings.Contains(ind.path, "*") {
-			// Glob pattern.
-			matches, _ := filepath.Glob(filepath.Join(root, ind.path))
-			if len(matches) > 0 {
-				key := canonicalLanguage(ind.lang)
-				if key != "" && !seen[key] {
-					languages = append(languages, ind.lang)
-					seen[key] = true
-				}
-			}
-		} else {
-			if _, err := os.Stat(filepath.Join(root, ind.path)); err == nil {
-				key := canonicalLanguage(ind.lang)
-				if key != "" && !seen[key] {
-					languages = append(languages, ind.lang)
-					seen[key] = true
-				}
-			}
+		key := canonicalLanguage(ind.lang)
+		if key == "" || seen[key] {
+			continue
+		}
+		if indicatorMatches(root, ind.paths) {
+			languages = append(languages, ind.lang)
+			seen[key] = true
 		}
 	}
 
+	languages = suppressRedundantLanguages(languages)
 	sort.Strings(languages)
 	return languages
+}
+
+// indicatorMatches reports whether any candidate path (literal or glob) exists
+// under root. filepath.Glob matches a metacharacter-free pattern as a literal
+// path, so it covers both cases.
+func indicatorMatches(root string, paths []string) bool {
+	for _, p := range paths {
+		if matches, _ := filepath.Glob(filepath.Join(root, p)); len(matches) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// suppressRedundantLanguages removes detections that a more specific signal
+// makes redundant. Today: a kotlin (Android) project also carrying generic JVM
+// build files (pom.xml / build.gradle) should not additionally surface as java
+// — the Android signal wins (railyard-382). Previously this fell out of kotlin
+// and java sharing a canonical; now that they're distinct it is explicit.
+func suppressRedundantLanguages(languages []string) []string {
+	hasKotlin := false
+	for _, l := range languages {
+		if l == "kotlin" {
+			hasKotlin = true
+			break
+		}
+	}
+	if !hasKotlin {
+		return languages
+	}
+	filtered := languages[:0]
+	for _, l := range languages {
+		if l == "java" {
+			continue
+		}
+		filtered = append(filtered, l)
+	}
+	return filtered
 }
 
 // readGitIgnoreEntries reads the existing .gitignore and returns a set of
