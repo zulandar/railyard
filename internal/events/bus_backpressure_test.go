@@ -51,20 +51,18 @@ func TestBus_DropOldestBackpressure(t *testing.T) {
 	gate := make(chan struct{})
 	var received []int
 	var mu sync.Mutex
-	var processed atomic.Int64
 
 	unsub := bus.(*memBus).SubscribeNamed("flood-sub", "flood", func(payload any) {
 		<-gate
 		mu.Lock()
 		received = append(received, payload.(int))
 		mu.Unlock()
-		processed.Add(1)
 	})
 	defer unsub()
 
-	// Publish more events than the queue can hold. The first event is pulled
-	// off the channel by the drain goroutine (and blocks on <-gate), so the
-	// queue holds subscriberQueueSize more. Push well beyond that.
+	// Publish more events than the queue can hold. With the drain goroutine
+	// blocked in <-gate, evictOldest keeps the newest subscriberQueueSize
+	// events in the channel.
 	total := subscriberQueueSize * 3
 	for i := 0; i < total; i++ {
 		bus.Publish("flood", i)
@@ -73,16 +71,26 @@ func TestBus_DropOldestBackpressure(t *testing.T) {
 	// Release the handler; it now drains whatever survived eviction.
 	close(gate)
 
-	// The "in-flight" first event plus the queue (cap=subscriberQueueSize)
-	// is the upper bound on delivered events.
+	// Use unsubscribe as a deterministic barrier: it closes the channel and
+	// blocks on <-sub.done, which the drain goroutine closes only after the
+	// for-range over the channel has fully drained and the goroutine exits.
+	// This guarantees every event still in the channel has flowed through
+	// the handler before we read `received`.
+	//
+	// The earlier "waitFor(processed == len(received))" predicate was a
+	// racy snapshot — that condition holds transiently between every
+	// handler invocation, so the 2ms-poll waitFor could latch onto a
+	// mid-drain moment and return while events were still in flight (see
+	// railyard-a6v: CI flake at 2026-05-28 18:21Z, post-merge of #49).
+	unsub()
+
+	// expectedMax bounds delivered events: 1 in-flight first event plus the
+	// queue (cap=subscriberQueueSize). Whether the in-flight slot is occupied
+	// depends on drain scheduling — under tight GOMAXPROCS the drain may not
+	// receive its first event until after close(gate), in which case there
+	// is no in-flight slot and the queue alone (size subscriberQueueSize) is
+	// delivered. Either count is correct.
 	expectedMax := subscriberQueueSize + 1
-	if !waitFor(t, func() bool {
-		mu.Lock()
-		defer mu.Unlock()
-		return len(received) >= 1 && processed.Load() == int64(len(received))
-	}, 3*time.Second) {
-		t.Fatalf("drain never settled: processed=%d received=%d", processed.Load(), len(received))
-	}
 
 	mu.Lock()
 	got := append([]int(nil), received...)
