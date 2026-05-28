@@ -310,6 +310,48 @@ class TestMakeFlowDef:
         transform_call = content_mock.transform.call_args
         assert "language" not in transform_call[1]
 
+    def test_language_kotlin_includes_treesitter(self):
+        """CocoIndex ships tree_sitter_kotlin_ng, so kotlin gets AST chunking
+        (railyard-4e8)."""
+        flow_builder, data_scope, content_mock, _ = _build_flow_mocks()
+
+        fn = make_flow_def("mobile", ["*.kt"], "/repos/app", language="kotlin")
+        fn(flow_builder, data_scope)
+
+        transform_call = content_mock.transform.call_args
+        assert transform_call[1]["language"] == "kotlin"
+
+    def test_language_kotlin_no_warning(self, capsys):
+        """kotlin has a grammar, so it must NOT emit the no-grammar warning."""
+        flow_builder, data_scope, _, _ = _build_flow_mocks()
+
+        make_flow_def("mobile", ["*.kt"], "/repos/app", language="kotlin")(flow_builder, data_scope)
+
+        assert "warning" not in capsys.readouterr().err.lower()
+
+    def test_language_dart_omits_treesitter_and_warns(self, capsys):
+        """CocoIndex registers dart but ships no grammar, so it falls back to
+        text splitting and must warn the operator naming dart (railyard-4e8)."""
+        flow_builder, data_scope, content_mock, _ = _build_flow_mocks()
+
+        fn = make_flow_def("mobile", ["*.dart"], "/repos/app", language="dart")
+        fn(flow_builder, data_scope)
+
+        transform_call = content_mock.transform.call_args
+        assert "language" not in transform_call[1]
+
+        err = capsys.readouterr().err
+        assert "dart" in err.lower()
+        assert "warning" in err.lower()
+
+    def test_mixed_language_no_warning(self, capsys):
+        """'mixed' is intentionally plain text — it must not warn."""
+        flow_builder, data_scope, _, _ = _build_flow_mocks()
+
+        make_flow_def("infra", ["Makefile"], "/repos/app", language="mixed")(flow_builder, data_scope)
+
+        assert "warning" not in capsys.readouterr().err.lower()
+
     def test_chunk_params(self):
         """Chunk size=1500, overlap=300 per architecture spec."""
         flow_builder, data_scope, content_mock, _ = _build_flow_mocks()
@@ -474,6 +516,15 @@ class TestConstants:
 
     def test_language_map_mixed_is_none(self):
         assert LANGUAGE_MAP["mixed"] is None
+
+    def test_language_map_kotlin(self):
+        # CocoIndex ships tree_sitter_kotlin_ng — real AST chunking (railyard-4e8).
+        assert LANGUAGE_MAP["kotlin"] == "kotlin"
+
+    def test_language_map_dart_is_none(self):
+        # CocoIndex registers dart but ships no grammar, so it maps to None and
+        # the build warns rather than silently degrading (railyard-4e8).
+        assert LANGUAGE_MAP["dart"] is None
 
     def test_code_to_embedding_is_callable(self):
         assert callable(code_to_embedding)
