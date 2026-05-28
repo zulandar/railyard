@@ -362,7 +362,7 @@ func TestDetectLanguages_CrossPlatformMobile(t *testing.T) {
 // is resolved for a dart+kotlin+swift repo so all three tracks get unique
 // names (railyard-7ea acceptance #4).
 func TestGenerateTracks_ThreeWayMobile(t *testing.T) {
-	tracks := generateTracks([]string{"dart", "kotlin", "swift"})
+	tracks := generateTracks([]string{"dart", "kotlin", "swift"}, t.TempDir())
 	if len(tracks) != 3 {
 		t.Fatalf("expected 3 tracks, got %d", len(tracks))
 	}
@@ -372,6 +372,46 @@ func TestGenerateTracks_ThreeWayMobile(t *testing.T) {
 			t.Errorf("duplicate track name %q", tr.Name)
 		}
 		names[tr.Name] = true
+	}
+}
+
+// TestDetectLanguages_XcodeprojMustBeDirectory verifies that a regular file
+// named like an Xcode bundle does NOT trigger swift detection — .xcodeproj /
+// .xcworkspace are always directory bundles (railyard-j63).
+func TestDetectLanguages_XcodeprojMustBeDirectory(t *testing.T) {
+	dir := t.TempDir()
+
+	// A plain file, not a bundle directory.
+	if err := os.WriteFile(filepath.Join(dir, "Stub.xcodeproj"), []byte("not a bundle\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	languages := detectLanguages(dir)
+	if len(languages) != 0 {
+		t.Errorf("expected no languages (a file is not an Xcode bundle), got %v", languages)
+	}
+}
+
+// TestDetectLanguages_AndroidKotlinNonAppModule verifies multi-module / KMP
+// layouts whose Android module isn't literally named "app" are still detected
+// as kotlin (railyard-1ax).
+func TestDetectLanguages_AndroidKotlinNonAppModule(t *testing.T) {
+	for _, module := range []string{"androidApp", "mobile"} {
+		t.Run(module, func(t *testing.T) {
+			dir := t.TempDir()
+			manifestDir := filepath.Join(dir, module, "src", "main")
+			if err := os.MkdirAll(manifestDir, 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(manifestDir, "AndroidManifest.xml"), []byte("<manifest/>\n"), 0644); err != nil {
+				t.Fatal(err)
+			}
+
+			languages := detectLanguages(dir)
+			if len(languages) != 1 || languages[0] != "kotlin" {
+				t.Errorf("expected [kotlin], got %v", languages)
+			}
+		})
 	}
 }
 
@@ -558,12 +598,15 @@ func TestLanguagePreset(t *testing.T) {
 		{"rust", "backend", "cargo test", "**/*.rs"},
 		{"swift", "mobile", "swift test", "**/*.swift"},
 		{"kotlin", "mobile", "./gradlew test", "**/*.kt"},
-		{"dart", "mobile", "flutter test", "**/*.dart"},
+		// No pubspec.yaml in the test root, so dart defaults to plain `dart
+		// test` (the Flutter branch is covered by TestLanguagePreset_DartUsesPubspec).
+		{"dart", "mobile", "dart test", "**/*.dart"},
 		{"unknown-lang", "unknown-lang", "", ""},
 	}
+	root := t.TempDir()
 	for _, tt := range tests {
 		t.Run(tt.lang, func(t *testing.T) {
-			track := languagePreset(tt.lang)
+			track := languagePreset(tt.lang, root)
 			if track.Name != tt.wantName {
 				t.Errorf("Name = %q, want %q", track.Name, tt.wantName)
 			}
@@ -577,8 +620,59 @@ func TestLanguagePreset(t *testing.T) {
 	}
 }
 
+// TestDartTestCommand covers both branches of the Dart test-command choice
+// (railyard-csp): a Flutter project gets `flutter test`, a pure-Dart package
+// gets `dart test`. The pure case includes flutter_lints in dev_dependencies
+// to ensure a substring match doesn't wrongly classify it as Flutter.
+func TestDartTestCommand(t *testing.T) {
+	flutterRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(flutterRoot, "pubspec.yaml"),
+		[]byte("name: app\ndependencies:\n  flutter:\n    sdk: flutter\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if cmd, reason := dartTestCommand(flutterRoot); cmd != "flutter test" {
+		t.Errorf("flutter project: cmd = %q (%s), want 'flutter test'", cmd, reason)
+	}
+
+	pureRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(pureRoot, "pubspec.yaml"),
+		[]byte("name: mylib\ndependencies:\n  http: ^1.0.0\ndev_dependencies:\n  flutter_lints: ^3.0.0\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if cmd, reason := dartTestCommand(pureRoot); cmd != "dart test" {
+		t.Errorf("pure-dart project: cmd = %q (%s), want 'dart test' (flutter_lints must not count)", cmd, reason)
+	}
+
+	// No pubspec at all → safe default of plain dart.
+	if cmd, _ := dartTestCommand(t.TempDir()); cmd != "dart test" {
+		t.Errorf("missing pubspec: cmd = %q, want 'dart test'", cmd)
+	}
+}
+
+// TestLanguagePreset_DartUsesPubspec verifies the dart preset's TestCommand
+// reflects the pubspec inspection rather than always being 'flutter test'
+// (railyard-csp).
+func TestLanguagePreset_DartUsesPubspec(t *testing.T) {
+	flutterRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(flutterRoot, "pubspec.yaml"),
+		[]byte("dependencies:\n  flutter:\n    sdk: flutter\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if tr := languagePreset("dart", flutterRoot); tr.TestCommand != "flutter test" {
+		t.Errorf("flutter: TestCommand = %q, want 'flutter test'", tr.TestCommand)
+	}
+
+	pureRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(pureRoot, "pubspec.yaml"), []byte("name: lib\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if tr := languagePreset("dart", pureRoot); tr.TestCommand != "dart test" {
+		t.Errorf("pure-dart: TestCommand = %q, want 'dart test'", tr.TestCommand)
+	}
+}
+
 func TestGenerateTracks(t *testing.T) {
-	tracks := generateTracks([]string{"go", "typescript"})
+	tracks := generateTracks([]string{"go", "typescript"}, t.TempDir())
 	if len(tracks) != 2 {
 		t.Fatalf("expected 2 tracks, got %d", len(tracks))
 	}
@@ -591,7 +685,7 @@ func TestGenerateTracks(t *testing.T) {
 }
 
 func TestGenerateTracks_NamingConflict(t *testing.T) {
-	tracks := generateTracks([]string{"go", "python"})
+	tracks := generateTracks([]string{"go", "python"}, t.TempDir())
 	if len(tracks) != 2 {
 		t.Fatalf("expected 2 tracks, got %d", len(tracks))
 	}
@@ -605,7 +699,7 @@ func TestGenerateTracks_NamingConflict(t *testing.T) {
 }
 
 func TestGenerateTracks_Empty(t *testing.T) {
-	tracks := generateTracks(nil)
+	tracks := generateTracks(nil, t.TempDir())
 	if len(tracks) != 0 {
 		t.Errorf("expected 0 tracks, got %d", len(tracks))
 	}
