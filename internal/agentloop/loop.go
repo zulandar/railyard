@@ -192,8 +192,16 @@ func (l *Loop) Run(ctx context.Context, userInput string) (Result, error) {
 		}
 	}
 
-	// Iteration cap hit: return the last assistant text as a partial answer.
+	// Iteration cap hit: return the last assistant text as a partial answer. If
+	// the model only ever emitted tool calls (no assistant text — common for
+	// weak, tool-happy models), synthesize an explanatory message and emit it as
+	// assistant text so relay/interactive consumers surface something instead of
+	// a blank answer, and the transcript records why the run stopped.
 	final := lastAssistantText(l.messages)
+	if final == "" {
+		final = fmt.Sprintf("(stopped after %d iterations without a final answer)", l.maxIterations)
+		l.emit(ctx, Event{Type: EventAssistantText, Text: final})
+	}
 	l.emit(ctx, Event{Type: EventFinal, Text: final})
 	return Result{FinalText: final, Usage: agg, StopReason: StopMaxIterations, Iterations: l.maxIterations}, nil
 }

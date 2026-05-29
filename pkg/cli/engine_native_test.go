@@ -186,6 +186,38 @@ func TestMapEngineOutcome(t *testing.T) {
 	})
 }
 
+func TestCarIsDone(t *testing.T) {
+	db := engineTestDB(t)
+	if err := db.Create(&models.Car{ID: "done-car", Status: "done"}).Error; err != nil {
+		t.Fatalf("seed car: %v", err)
+	}
+	if err := db.Create(&models.Car{ID: "wip-car", Status: "in_progress"}).Error; err != nil {
+		t.Fatalf("seed car: %v", err)
+	}
+
+	t.Run("done car", func(t *testing.T) {
+		done, err := carIsDone(db, "done-car")
+		if err != nil || !done {
+			t.Errorf("carIsDone(done-car) = (%v, %v), want (true, nil)", done, err)
+		}
+	})
+	t.Run("not-done car", func(t *testing.T) {
+		done, err := carIsDone(db, "wip-car")
+		if err != nil || done {
+			t.Errorf("carIsDone(wip-car) = (%v, %v), want (false, nil)", done, err)
+		}
+	})
+	t.Run("missing car surfaces the error (not a silent false)", func(t *testing.T) {
+		done, err := carIsDone(db, "nope")
+		if err == nil {
+			t.Error("carIsDone on a missing car should return an error, not swallow it")
+		}
+		if done {
+			t.Error("carIsDone on a missing car must not report done")
+		}
+	})
+}
+
 // ---------------------------------------------------------------------------
 // nativeSpawnRunner (integration with sqlite + tempdir worktree)
 // ---------------------------------------------------------------------------

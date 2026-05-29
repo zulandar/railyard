@@ -75,13 +75,23 @@ func nativeSpawnRunner(db *gorm.DB, client agentloop.Completer, authMethod strin
 		}
 
 		// Record the session id on the engine row for `ry logs` parity.
-		db.Model(&models.Engine{}).Where("id = ?", opts.EngineID).Update("session_id", sessionID)
+		if err := db.Model(&models.Engine{}).Where("id = ?", opts.EngineID).Update("session_id", sessionID).Error; err != nil {
+			cycleLog.Warn("Could not record session id on engine row", "engine", opts.EngineID, "error", err)
+		}
 		cycleLog.Info("Native loop session", "session", sessionID, "car", opts.CarID, "model", opts.Model)
 
 		result, transcript, runErr := runNativeEngineLoop(ctx, loop, events, userInput)
-		persistNativeAgentLog(db, opts, sessionID, transcript, result, runErr)
+		persistNativeAgentLog(db, opts, sessionID, transcript, result, runErr, cycleLog)
 
-		outcome := mapEngineOutcome(runErr, result, carIsDone(db, opts.CarID), authMethod)
+		done, doneErr := carIsDone(db, opts.CarID)
+		if doneErr != nil {
+			// Can't confirm completion: fall back to not-done (safe — never
+			// falsely reports a car complete) but warn so the operator knows the
+			// outcome/stats for this cycle may be inaccurate.
+			cycleLog.Warn("Could not read car status; treating as not done (completion stats may be inaccurate)",
+				"car", opts.CarID, "error", doneErr)
+		}
+		outcome := mapEngineOutcome(runErr, result, done, authMethod)
 		// The native runner does its own cleanup (Run already returned), so unlike
 		// the CLI runner there is no subprocess to terminate on rate-limit.
 		return &engine.Session{ID: sessionID, EngineID: opts.EngineID, CarID: opts.CarID}, outcome, nil
@@ -202,7 +212,7 @@ func writeTranscriptEvent(b *strings.Builder, ev agentloop.Event) {
 
 // persistNativeAgentLog writes the transcript + usage to agent_logs (redacted),
 // keyed by car so queryCarOutcomeStats can sum tokens and `ry logs` can show it.
-func persistNativeAgentLog(db *gorm.DB, opts engine.SpawnOpts, sessionID, transcript string, result agentloop.Result, runErr error) {
+func persistNativeAgentLog(db *gorm.DB, opts engine.SpawnOpts, sessionID, transcript string, result agentloop.Result, runErr error, cycleLog *slog.Logger) {
 	content := transcript
 	if runErr != nil {
 		if content != "" {
@@ -213,7 +223,7 @@ func persistNativeAgentLog(db *gorm.DB, opts engine.SpawnOpts, sessionID, transc
 	if strings.TrimSpace(content) == "" && result.Usage.TotalTokens == 0 {
 		return
 	}
-	db.Create(&models.AgentLog{
+	if err := db.Create(&models.AgentLog{
 		EngineID:     opts.EngineID,
 		SessionID:    sessionID,
 		CarID:        opts.CarID,
@@ -224,14 +234,19 @@ func persistNativeAgentLog(db *gorm.DB, opts engine.SpawnOpts, sessionID, transc
 		TokenCount:   result.Usage.TotalTokens,
 		Model:        opts.Model,
 		CreatedAt:    time.Now(),
-	})
+	}).Error; err != nil {
+		cycleLog.Warn("Could not persist native agent log", "car", opts.CarID, "session", sessionID, "error", err)
+	}
 }
 
-// carIsDone reports whether the car has reached "done" status in the DB.
-func carIsDone(db *gorm.DB, carID string) bool {
+// carIsDone reports whether the car has reached "done" status in the DB. The
+// error is returned (not swallowed) so the caller can distinguish "car is not
+// done" from "could not read the car" — treating a failed read as not-done
+// silently mis-records a completed car as a clear cycle.
+func carIsDone(db *gorm.DB, carID string) (bool, error) {
 	var c models.Car
 	if err := db.Select("status").First(&c, "id = ?", carID).Error; err != nil {
-		return false
+		return false, err
 	}
-	return c.Status == "done"
+	return c.Status == "done", nil
 }

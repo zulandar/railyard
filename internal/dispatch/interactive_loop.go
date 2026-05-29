@@ -94,15 +94,20 @@ func runInteractiveTurn(ctx context.Context, loop *agentloop.Loop, input string,
 }
 
 // printLoopEvent renders a loop event to the interactive transcript. Assistant
-// text is printed as-is; tool calls surface as a 🔧 progress line. The final
-// event duplicates the last assistant text, and usage/tool-end are internal, so
-// they are dropped.
+// text is printed as-is; tool calls surface as a 🔧 progress line; tool failures
+// are shown so the operator sees why the agent is stuck. Successful tool results
+// stay summarized by the start line, and the final event (which duplicates the
+// last assistant text) plus usage are dropped.
 func printLoopEvent(out io.Writer, ev agentloop.Event) {
 	switch ev.Type {
 	case agentloop.EventAssistantText:
 		fmt.Fprintln(out, ev.Text)
 	case agentloop.EventToolCallStart:
 		fmt.Fprintln(out, formatToolProgress(ev.ToolName, ev.ToolArgs))
+	case agentloop.EventToolCallEnd:
+		if ev.ToolError != "" {
+			fmt.Fprintf(out, "⚠️ %s failed: %s\n", ev.ToolName, agentloop.Truncate(ev.ToolError, 200))
+		}
 	}
 }
 
