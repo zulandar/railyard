@@ -244,31 +244,11 @@ func TestOpenRouterSpawner_RateLimitRetriesExhausted(t *testing.T) {
 	if proc.ExitErr() == nil {
 		t.Error("ExitErr() = nil, want the rate-limit error after retries are exhausted")
 	}
-	// 1 initial attempt + dispatchRateLimitMaxRetries retries.
-	if want := 1 + dispatchRateLimitMaxRetries; c.callCount() != want {
+	// 1 initial attempt + DefaultRateLimitMaxRetries retries (the wait math and
+	// backoff are unit-tested in internal/agentloop).
+	if want := 1 + agentloop.DefaultRateLimitMaxRetries; c.callCount() != want {
 		t.Errorf("Complete call count = %d, want %d (initial + %d retries)",
-			c.callCount(), want, dispatchRateLimitMaxRetries)
-	}
-}
-
-func TestDispatchRetryWait(t *testing.T) {
-	tests := []struct {
-		name       string
-		retryAfter time.Duration
-		attempt    int
-		want       time.Duration
-	}{
-		{"honors retry-after under cap", 27 * time.Second, 0, 27 * time.Second},
-		{"backoff base when no retry-after", 0, 0, dispatchRateLimitBaseWait},
-		{"backoff doubles per attempt", 0, 1, 2 * dispatchRateLimitBaseWait},
-		{"retry-after capped", 5 * time.Minute, 0, dispatchRateLimitMaxWait},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := dispatchRetryWait(tt.retryAfter, tt.attempt); got != tt.want {
-				t.Errorf("dispatchRetryWait(%v, %d) = %v, want %v", tt.retryAfter, tt.attempt, got, tt.want)
-			}
-		})
+			c.callCount(), want, agentloop.DefaultRateLimitMaxRetries)
 	}
 }
 
