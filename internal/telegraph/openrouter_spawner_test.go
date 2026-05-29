@@ -41,6 +41,38 @@ func stopResp(content string) agentloop.Response {
 	return agentloop.Response{Content: content, FinishReason: "stop"}
 }
 
+// flakyCompleter returns a RateLimitError for the first failTimes Complete
+// calls, then returns final. It records the total call count so tests can
+// assert how many attempts the retry wrapper made.
+type flakyCompleter struct {
+	failTimes  int
+	retryAfter time.Duration
+	final      agentloop.Response
+
+	mu    sync.Mutex
+	calls int
+}
+
+func (c *flakyCompleter) Complete(_ context.Context, _ agentloop.Request) (agentloop.Response, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.calls++
+	if c.calls <= c.failTimes {
+		return agentloop.Response{}, &agentloop.RateLimitError{RetryAfter: c.retryAfter, Message: "slow down"}
+	}
+	return c.final, nil
+}
+
+func (c *flakyCompleter) callCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.calls
+}
+
+// noSleep is an injectable sleep that returns immediately, so rate-limit retry
+// tests don't wait on real backoff.
+func noSleep(context.Context, time.Duration) error { return nil }
+
 func bashCallResp(id, command string) agentloop.Response {
 	args, _ := json.Marshal(map[string]string{"command": command})
 	return agentloop.Response{
@@ -149,8 +181,10 @@ func TestOpenRouterSpawner_ToolCallProgressLine(t *testing.T) {
 func TestOpenRouterSpawner_ClientErrorSetsExitErr(t *testing.T) {
 	// An upstream error must surface via ExitErr (so the relay sends the
 	// empty/error-output warning rather than ghosting), not panic the loop.
+	// This completer 429s on every call; with rate-limit retry enabled we inject
+	// noSleep so the bounded retries don't wait on real backoff.
 	c := &scriptedCompleter{err: &agentloop.RateLimitError{RetryAfter: 5 * time.Second, Message: "slow down"}}
-	spawner := &OpenRouterSpawner{WorkDir: t.TempDir(), Client: c, Model: "m"}
+	spawner := &OpenRouterSpawner{WorkDir: t.TempDir(), Client: c, Model: "m", sleepFn: noSleep}
 
 	proc, err := spawner.Spawn(context.Background(), "go")
 	if err != nil {
@@ -163,6 +197,78 @@ func TestOpenRouterSpawner_ClientErrorSetsExitErr(t *testing.T) {
 
 	if proc.ExitErr() == nil {
 		t.Error("ExitErr() = nil, want non-nil after upstream error")
+	}
+}
+
+func TestOpenRouterSpawner_RetriesAfterRateLimit(t *testing.T) {
+	// A transient 429 followed by a successful response must NOT kill the turn:
+	// the dispatch loop pauses and retries, then relays the answer with no error.
+	c := &flakyCompleter{failTimes: 1, final: stopResp("Open cars: 3")}
+	spawner := &OpenRouterSpawner{WorkDir: t.TempDir(), Client: c, Model: "m", sleepFn: noSleep}
+
+	proc, err := spawner.Spawn(context.Background(), "what is the status?")
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	defer proc.Close()
+
+	lines := drain(t, proc)
+	<-proc.Done()
+
+	if proc.ExitErr() != nil {
+		t.Errorf("ExitErr() = %v, want nil after a transient 429 is retried", proc.ExitErr())
+	}
+	if !strings.Contains(strings.Join(lines, "\n"), "Open cars: 3") {
+		t.Errorf("relayed lines = %v, want the answer after retry", lines)
+	}
+	if c.callCount() != 2 {
+		t.Errorf("Complete call count = %d, want 2 (one 429 + one success)", c.callCount())
+	}
+}
+
+func TestOpenRouterSpawner_RateLimitRetriesExhausted(t *testing.T) {
+	// A persistent 429 is retried up to the bound, then surfaces via ExitErr so
+	// the relay still warns the user (rather than retrying forever).
+	c := &flakyCompleter{failTimes: 1000, final: stopResp("never reached")}
+	spawner := &OpenRouterSpawner{WorkDir: t.TempDir(), Client: c, Model: "m", sleepFn: noSleep}
+
+	proc, err := spawner.Spawn(context.Background(), "go")
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	defer proc.Close()
+
+	_ = drain(t, proc)
+	<-proc.Done()
+
+	if proc.ExitErr() == nil {
+		t.Error("ExitErr() = nil, want the rate-limit error after retries are exhausted")
+	}
+	// 1 initial attempt + dispatchRateLimitMaxRetries retries.
+	if want := 1 + dispatchRateLimitMaxRetries; c.callCount() != want {
+		t.Errorf("Complete call count = %d, want %d (initial + %d retries)",
+			c.callCount(), want, dispatchRateLimitMaxRetries)
+	}
+}
+
+func TestDispatchRetryWait(t *testing.T) {
+	tests := []struct {
+		name       string
+		retryAfter time.Duration
+		attempt    int
+		want       time.Duration
+	}{
+		{"honors retry-after under cap", 27 * time.Second, 0, 27 * time.Second},
+		{"backoff base when no retry-after", 0, 0, dispatchRateLimitBaseWait},
+		{"backoff doubles per attempt", 0, 1, 2 * dispatchRateLimitBaseWait},
+		{"retry-after capped", 5 * time.Minute, 0, dispatchRateLimitMaxWait},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := dispatchRetryWait(tt.retryAfter, tt.attempt); got != tt.want {
+				t.Errorf("dispatchRetryWait(%v, %d) = %v, want %v", tt.retryAfter, tt.attempt, got, tt.want)
+			}
+		})
 	}
 }
 

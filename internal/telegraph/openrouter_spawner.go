@@ -2,10 +2,31 @@ package telegraph
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log"
 	"sync"
+	"time"
 
 	"github.com/zulandar/railyard/internal/agentloop"
+)
+
+// Rate-limit retry tuning for the chat-dispatch native loop. The agentloop
+// client marks HTTP 429 non-retryable on purpose: the engine car-building path
+// relies on its own OUTER pause-and-retry wrapper (pkg/cli/engine.go's
+// spawnAndMonitorWithRetryRunner). The chat-dispatch path has no such wrapper,
+// so a bounded retry lives here instead — keeping retry external to
+// agentloop.Loop, matching the engine convention. (railyard-08t)
+const (
+	// dispatchRateLimitMaxRetries bounds how many times a dispatch turn is
+	// retried after an upstream 429 before the turn fails and the relay warns.
+	dispatchRateLimitMaxRetries = 2
+	// dispatchRateLimitBaseWait is the backoff base used when a 429 carries no
+	// Retry-After hint: 5s, 10s, ...
+	dispatchRateLimitBaseWait = 5 * time.Second
+	// dispatchRateLimitMaxWait caps a single pause so a bogus or hostile
+	// Retry-After can't stall a chat turn near the 15m process timeout.
+	dispatchRateLimitMaxWait = 60 * time.Second
 )
 
 // OpenRouterSpawner implements ProcessSpawner using the Railyard-owned native
@@ -28,6 +49,20 @@ type OpenRouterSpawner struct {
 	Model string
 	// MaxIterations bounds the loop; 0 uses the agentloop default.
 	MaxIterations int
+	// RateLimitMaxRetries bounds 429 pause-and-retry attempts for one dispatch
+	// turn; 0 uses dispatchRateLimitMaxRetries.
+	RateLimitMaxRetries int
+	// sleepFn waits the given duration honoring ctx cancellation. nil uses a
+	// real timer; tests inject a no-op to avoid waiting on real backoff.
+	sleepFn func(ctx context.Context, d time.Duration) error
+}
+
+// maxRetries returns the configured 429 retry bound, or the default.
+func (s *OpenRouterSpawner) maxRetries() int {
+	if s.RateLimitMaxRetries > 0 {
+		return s.RateLimitMaxRetries
+	}
+	return dispatchRateLimitMaxRetries
 }
 
 // Spawn starts a native-loop process. If prompt is non-empty it is the one-shot
@@ -49,13 +84,15 @@ func (s *OpenRouterSpawner) Spawn(ctx context.Context, prompt string) (Process, 
 	})
 
 	p := &loopProcess{
-		ctx:     loopCtx,
-		cancel:  cancel,
-		loop:    loop,
-		events:  events,
-		oneShot: prompt != "",
-		recvCh:  make(chan string, 64),
-		doneCh:  make(chan struct{}),
+		ctx:        loopCtx,
+		cancel:     cancel,
+		loop:       loop,
+		events:     events,
+		oneShot:    prompt != "",
+		recvCh:     make(chan string, 64),
+		doneCh:     make(chan struct{}),
+		maxRetries: s.maxRetries(),
+		sleepFn:    s.sleepFn,
 	}
 	if p.oneShot {
 		p.start(prompt)
@@ -76,6 +113,11 @@ type loopProcess struct {
 	recvCh  chan string
 	doneCh  chan struct{}
 
+	// maxRetries bounds 429 pause-and-retry attempts; sleepFn (nil = real timer)
+	// performs the backoff pause honoring ctx.
+	maxRetries int
+	sleepFn    func(ctx context.Context, d time.Duration) error
+
 	startOnce sync.Once
 
 	mu      sync.Mutex
@@ -92,10 +134,11 @@ func (p *loopProcess) start(input string) {
 
 // drive runs the loop and forwards its events to recv until completion.
 func (p *loopProcess) drive(input string) {
-	// Runner: execute the loop, then close the events channel so the pump below
-	// terminates. The run error becomes the process exit error.
+	// Runner: execute the loop (with rate-limit pause-and-retry), then close the
+	// events channel so the pump below terminates. The run error becomes the
+	// process exit error.
 	go func() {
-		_, err := p.loop.Run(p.ctx, input)
+		err := p.runWithRetry(input)
 		p.mu.Lock()
 		p.exitErr = err
 		if err != nil {
@@ -119,6 +162,73 @@ func (p *loopProcess) drive(input string) {
 	}
 	close(p.recvCh)
 	close(p.doneCh)
+}
+
+// runWithRetry runs the loop, pausing and retrying on upstream rate limits.
+// Only *agentloop.RateLimitError triggers a retry — non-429 errors and success
+// return immediately. On retry the loop is re-run with EMPTY input: Run appends
+// the user message to history only on the first call, and returns before
+// appending an assistant turn on a first-iteration 429, so the resend is
+// identical with no duplicate user message. After the bound is exhausted the
+// last rate-limit error is returned so the relay still warns the user instead
+// of retrying forever. (railyard-08t)
+func (p *loopProcess) runWithRetry(input string) error {
+	var lastErr error
+	for attempt := 0; ; attempt++ {
+		in := input
+		if attempt > 0 {
+			in = ""
+		}
+		_, err := p.loop.Run(p.ctx, in)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+
+		var rle *agentloop.RateLimitError
+		if !errors.As(lastErr, &rle) || attempt >= p.maxRetries {
+			return lastErr
+		}
+
+		wait := dispatchRetryWait(rle.RetryAfter, attempt)
+		log.Printf("telegraph: dispatch rate limited (attempt %d/%d) — pausing %s before retry",
+			attempt+1, p.maxRetries, wait)
+		if err := p.sleep(wait); err != nil {
+			// Context cancelled/expired during backoff: surface the rate-limit
+			// error (more informative than the bare context error).
+			return lastErr
+		}
+	}
+}
+
+// sleep waits d honoring loop-context cancellation. Tests inject sleepFn to
+// avoid waiting on real backoff.
+func (p *loopProcess) sleep(d time.Duration) error {
+	if p.sleepFn != nil {
+		return p.sleepFn(p.ctx, d)
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-p.ctx.Done():
+		return p.ctx.Err()
+	case <-t.C:
+		return nil
+	}
+}
+
+// dispatchRetryWait returns the pause before the next retry attempt (0-indexed).
+// It honors the upstream Retry-After when present, otherwise uses exponential
+// backoff from dispatchRateLimitBaseWait, capped at dispatchRateLimitMaxWait.
+func dispatchRetryWait(retryAfter time.Duration, attempt int) time.Duration {
+	wait := retryAfter
+	if wait <= 0 {
+		wait = dispatchRateLimitBaseWait << attempt // 5s, 10s, 20s, ...
+	}
+	if wait > dispatchRateLimitMaxWait {
+		wait = dispatchRateLimitMaxWait
+	}
+	return wait
 }
 
 // renderLoopEvent maps a loop event to a relay output line. Assistant text is
