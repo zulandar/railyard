@@ -149,7 +149,7 @@ func formatToolProgress(name, args string) string {
 			detail = asString(m["path"])
 		}
 	}
-	detail = truncateLine(detail, 200)
+	detail = agentloop.Truncate(detail, 200)
 	if detail == "" {
 		return "🔧 " + name
 	}
@@ -159,13 +159,6 @@ func formatToolProgress(name, args string) string {
 func asString(v any) string {
 	s, _ := v.(string)
 	return s
-}
-
-func truncateLine(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	return s[:max] + "…"
 }
 
 // Send supplies the one-shot input when the process was spawned with an empty

@@ -45,8 +45,10 @@ func Start(ctx context.Context, opts StartOpts) error {
 	// Create store from DB.
 	store := NewStore(opts.DB)
 
-	// Create AI provider from config.
-	ai, err := NewProviderAI(opts.Config.Inspect.AgentProvider, opts.Config.Inspect.AgentModel)
+	// Create the review AI backend. Native-loop auth methods
+	// (openrouter/openai_compat) drive the Railyard-owned loop with credentials
+	// from the environment; all other methods use the CLI agent provider.
+	ai, err := newReviewAI(opts.Config)
 	if err != nil {
 		return fmt.Errorf("inspect: create AI provider: %w", err)
 	}

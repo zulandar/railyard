@@ -202,7 +202,7 @@ func (l *Loop) Run(ctx context.Context, userInput string) (Result, error) {
 // textual result to feed back to the model. Unknown tools and execution errors
 // are converted into an error result (not a hard abort); the loop continues.
 func (l *Loop) execTool(ctx context.Context, tc ToolCall) string {
-	l.emit(ctx, Event{Type: EventToolCallStart, ToolName: tc.Name, ToolArgs: truncate(string(tc.Arguments), 512)})
+	l.emit(ctx, Event{Type: EventToolCallStart, ToolName: tc.Name, ToolArgs: Truncate(string(tc.Arguments), 512)})
 
 	tool, ok := l.toolByName[tc.Name]
 	if !ok {
@@ -241,9 +241,24 @@ func lastAssistantText(msgs []Message) string {
 	return ""
 }
 
-func truncate(s string, max int) string {
+// Truncate returns s clipped to at most max runes, appending "…" when it had to
+// cut. It is rune-safe — it never splits a multibyte UTF-8 sequence — so the
+// result is always valid UTF-8. That matters because tool args/results flow into
+// the persisted transcript (models.AgentLog.Content); a byte-sliced cut landing
+// mid-rune produces invalid UTF-8 that a utf8mb4-strict column rejects, silently
+// dropping the row. max <= 0 returns "".
+func Truncate(s string, max int) string {
+	if max <= 0 {
+		return ""
+	}
+	// Byte length is an upper bound on rune count, so a string within the byte
+	// budget never needs truncation — skip the []rune allocation in the common case.
 	if len(s) <= max {
 		return s
 	}
-	return s[:max] + "…"
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max]) + "…"
 }

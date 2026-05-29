@@ -89,12 +89,13 @@ func nativeSpawnRunner(db *gorm.DB, client agentloop.Completer, authMethod strin
 }
 
 // mapEngineOutcome maps a loop run result to the engine's outcome model:
-//   - rate-limit error  -> outcomeRateLimited (the retry wrapper pauses & respawns)
-//   - context cancelled -> outcomeCancelled (daemon shutting down)
-//   - other error       -> outcomeClear (failed attempt; reclaim next cycle)
-//   - car marked done    -> outcomeCompleted
-//   - hit iteration cap  -> outcomeStall (ran out of steps; escalate, like a CLI stall)
-//   - finished, not done -> outcomeClear
+//   - rate-limit error      -> outcomeRateLimited (the retry wrapper pauses & respawns)
+//   - context cancelled     -> outcomeCancelled (daemon shutting down)
+//   - credit/4xx API error  -> outcomeStall (permanent; block & surface, don't churn)
+//   - other error           -> outcomeClear (transient attempt; reclaim next cycle)
+//   - car marked done       -> outcomeCompleted
+//   - hit iteration cap     -> outcomeStall (ran out of steps; escalate, like a CLI stall)
+//   - finished, not done    -> outcomeClear
 //
 // source labels the rate-limit signal so the pause/retry wrapper and metrics
 // can tell native backends apart (openrouter vs openai_compat).
@@ -108,6 +109,25 @@ func mapEngineOutcome(runErr error, result agentloop.Result, carDone bool, sourc
 			return sessionOutcome{
 				kind:            outcomeRateLimited,
 				rateLimitSignal: engine.RateLimitSignal{Source: source, RetryAfter: rle.RetryAfter},
+			}
+		}
+		// Permanent backend failures won't resolve on retry, so treat them like a
+		// stall: the car is blocked and surfaced rather than silently reclaimed and
+		// re-run every poll forever. Out-of-credits (402) and 4xx client errors
+		// (e.g. an invalid model name or bad auth) are permanent; transient
+		// failures (exhausted 5xx, transport, decode) fall through to outcomeClear.
+		var ce *agentloop.CreditError
+		if errors.As(runErr, &ce) {
+			return sessionOutcome{
+				kind:        outcomeStall,
+				stallReason: engine.StallReason{Type: "credit_exhausted", Detail: ce.Error()},
+			}
+		}
+		var ae *agentloop.APIError
+		if errors.As(runErr, &ae) && ae.StatusCode >= 400 && ae.StatusCode < 500 {
+			return sessionOutcome{
+				kind:        outcomeStall,
+				stallReason: engine.StallReason{Type: "api_error", Detail: ae.Error()},
 			}
 		}
 		return sessionOutcome{kind: outcomeClear}
@@ -170,12 +190,12 @@ func writeTranscriptEvent(b *strings.Builder, ev agentloop.Event) {
 		b.WriteString(ev.Text)
 		b.WriteByte('\n')
 	case agentloop.EventToolCallStart:
-		fmt.Fprintf(b, "🔧 %s %s\n", ev.ToolName, truncateForLog(ev.ToolArgs, 200))
+		fmt.Fprintf(b, "🔧 %s %s\n", ev.ToolName, agentloop.Truncate(ev.ToolArgs, 200))
 	case agentloop.EventToolCallEnd:
 		if ev.ToolError != "" {
-			fmt.Fprintf(b, "→ error: %s\n", truncateForLog(ev.ToolError, 200))
+			fmt.Fprintf(b, "→ error: %s\n", agentloop.Truncate(ev.ToolError, 200))
 		} else {
-			fmt.Fprintf(b, "→ %s\n", truncateForLog(ev.ToolResult, 200))
+			fmt.Fprintf(b, "→ %s\n", agentloop.Truncate(ev.ToolResult, 200))
 		}
 	}
 }
@@ -214,11 +234,4 @@ func carIsDone(db *gorm.DB, carID string) bool {
 		return false
 	}
 	return c.Status == "done"
-}
-
-func truncateForLog(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	return s[:max] + "…"
 }

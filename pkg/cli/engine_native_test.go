@@ -142,6 +142,27 @@ func TestMapEngineOutcome(t *testing.T) {
 			t.Errorf("kind = %v, want outcomeClear", o.kind)
 		}
 	})
+	t.Run("credit error (402) -> stall, not infinite clear", func(t *testing.T) {
+		o := mapEngineOutcome(&agentloop.CreditError{Message: "out of credits"}, agentloop.Result{}, false, "openrouter")
+		if o.kind != outcomeStall {
+			t.Fatalf("kind = %v, want outcomeStall (permanent failure must block, not reclaim forever)", o.kind)
+		}
+		if o.stallReason.Type == "" {
+			t.Error("stallReason.Type should be set for a credit-exhausted stall")
+		}
+	})
+	t.Run("4xx API error -> stall", func(t *testing.T) {
+		o := mapEngineOutcome(&agentloop.APIError{StatusCode: 400, Message: "no such model"}, agentloop.Result{}, false, "openrouter")
+		if o.kind != outcomeStall {
+			t.Fatalf("kind = %v, want outcomeStall (4xx is permanent)", o.kind)
+		}
+	})
+	t.Run("5xx API error -> clear (transient, retry next cycle)", func(t *testing.T) {
+		o := mapEngineOutcome(&agentloop.APIError{StatusCode: 503, Message: "upstream down"}, agentloop.Result{}, false, "openrouter")
+		if o.kind != outcomeClear {
+			t.Errorf("kind = %v, want outcomeClear (5xx should not block the car)", o.kind)
+		}
+	})
 	t.Run("car done -> completed", func(t *testing.T) {
 		o := mapEngineOutcome(nil, agentloop.Result{StopReason: agentloop.StopFinished}, true, "openrouter")
 		if o.kind != outcomeCompleted {
