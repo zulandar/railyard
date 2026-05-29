@@ -42,6 +42,29 @@ func TestParseUsageFromContent_ModelExtraction(t *testing.T) {
 	}
 }
 
+func TestParseUsageFromContent_CountsCocoIndexToolUse(t *testing.T) {
+	content := `{"type":"assistant","message":{"model":"claude-x","content":[{"type":"tool_use","name":"mcp__railyard_cocoindex__search_code","input":{"query":"auth"}}]}}
+{"type":"assistant","message":{"model":"claude-x","content":[{"type":"text","text":"let me look"},{"type":"tool_use","name":"mcp__railyard_cocoindex__get_project_structure","input":{}}]}}
+{"type":"assistant","message":{"model":"claude-x","content":[{"type":"tool_use","name":"Bash","input":{"command":"ls"}}]}}
+{"type":"result","subtype":"success","usage":{"input_tokens":10,"output_tokens":5}}`
+	stats := ParseUsageFromContent(content)
+	if stats.CocoIndexCalls != 2 {
+		t.Errorf("CocoIndexCalls = %d, want 2 (both railyard_cocoindex tool_use blocks)", stats.CocoIndexCalls)
+	}
+	// The unrelated Bash tool_use must NOT be counted, and token usage still parses.
+	if stats.InputTokens != 10 || stats.OutputTokens != 5 {
+		t.Errorf("usage = %d/%d, want 10/5", stats.InputTokens, stats.OutputTokens)
+	}
+}
+
+func TestParseUsageFromContent_NoCocoIndexCallsWhenAbsent(t *testing.T) {
+	content := `{"type":"assistant","message":{"model":"claude-x","content":[{"type":"tool_use","name":"Bash","input":{"command":"grep -r foo"}}]}}
+{"type":"result","subtype":"success","usage":{"input_tokens":3,"output_tokens":1}}`
+	if stats := ParseUsageFromContent(content); stats.CocoIndexCalls != 0 {
+		t.Errorf("CocoIndexCalls = %d, want 0", stats.CocoIndexCalls)
+	}
+}
+
 func TestParseUsageFromContent_MixedContent(t *testing.T) {
 	content := `{"type":"assistant","message":{"model":"claude-opus-4-6","id":"msg_1"}}
 {"type":"content_block_start","index":0}

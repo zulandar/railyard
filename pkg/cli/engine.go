@@ -389,7 +389,10 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 			// hits that cap and maps to outcomeStall (see mapEngineOutcome). So the
 			// stall bound is structural — per-call HTTP timeout + iteration cap —
 			// rather than stdout-silence-based. (railyard-37x.9)
-			runner := nativeSpawnRunner(gormDB, loopClient, cfg.AuthMethod, nativeEngineMaxIterations, cycleLog)
+			// Engine codesearch targets this engine's main+overlay tables (nil
+			// when CocoIndex is unconfigured — same gate as WriteMCPConfig).
+			csParams := engine.EngineCodeSearchParams(workDir, eng.ID, trackCfg.Name, cfg)
+			runner := nativeSpawnRunner(gormDB, loopClient, cfg.AuthMethod, nativeEngineMaxIterations, csParams, cycleLog)
 			sess, outcome, spawnErr = spawnAndMonitorWithRetryRunner(ctx, spawnOpts, cfg.Stall.RateLimitMaxRetries, cfg.Stall.RateLimitMaxWaitSec, cycleLog, runner)
 		} else {
 			sess, outcome, spawnErr = spawnAndMonitorWithRetry(ctx, gormDB, spawnOpts, stallCfg, cfg.Stall.RateLimitMaxRetries, cfg.Stall.RateLimitMaxWaitSec, cycle, cycleLog)

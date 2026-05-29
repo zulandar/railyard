@@ -133,6 +133,7 @@ from mcp_server import (  # noqa: E402
     merge_results,
     query_table,
     refresh_overlay,
+    run_query_cli,
     search,
 )
 
@@ -685,3 +686,72 @@ class TestCreateServer:
         cfg = ServerConfig(database_url="postgresql://x")
         server = create_server(cfg)
         assert server.name == "railyard-cocoindex"
+
+
+# ===================================================================
+# query CLI (one-shot mode for the native Go agent loop)
+# ===================================================================
+
+
+class TestQueryCLI:
+    """run_query_cli is the one-shot query entrypoint the native Go agent loop
+    (internal/agentloop CodeSearchTool) shells out to: it reads COCOINDEX_* env
+    via load_server_config(), runs search(), prints the JSON result array to
+    stdout, and returns a process exit code."""
+
+    @mock.patch("mcp_server.search")
+    @mock.patch("mcp_server.load_server_config")
+    def test_prints_json_results(self, mock_load, mock_search, capsys):
+        mock_load.return_value = ServerConfig(
+            database_url="postgresql://x", main_table="main_backend_embeddings"
+        )
+        rows = [{"filename": "a.go", "code": "func A() {}", "location": "[1, 5)", "score": 0.9}]
+        mock_search.return_value = rows
+
+        rc = run_query_cli(["query", "--query", "auth handler"])
+
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert json.loads(out) == rows
+
+    @mock.patch("mcp_server.search")
+    @mock.patch("mcp_server.load_server_config")
+    def test_forwards_top_k_and_min_score(self, mock_load, mock_search, capsys):
+        mock_load.return_value = ServerConfig(
+            database_url="postgresql://x", main_table="main_backend_embeddings"
+        )
+        mock_search.return_value = []
+
+        rc = run_query_cli(
+            ["query", "--query", "needle", "--top-k", "3", "--min-score", "0.25"]
+        )
+
+        assert rc == 0
+        mock_search.assert_called_once()
+        args, kwargs = mock_search.call_args
+        # search(config, query, top_k=..., min_score=...)
+        assert args[1] == "needle"
+        assert kwargs["top_k"] == 3
+        assert kwargs["min_score"] == 0.25
+
+    @mock.patch("mcp_server.search")
+    @mock.patch("mcp_server.load_server_config")
+    def test_error_returns_nonzero_and_writes_stderr(self, mock_load, mock_search, capsys):
+        mock_load.return_value = ServerConfig(
+            database_url="postgresql://x", main_table="main_backend_embeddings"
+        )
+        mock_search.side_effect = RuntimeError("pgvector unavailable")
+
+        rc = run_query_cli(["query", "--query", "boom"])
+
+        assert rc != 0
+        captured = capsys.readouterr()
+        assert "pgvector unavailable" in captured.err
+        # stdout must stay clean (no partial/garbage JSON for the Go parser)
+        assert captured.out.strip() == ""
+
+    def test_missing_query_returns_nonzero(self, capsys):
+        # argparse exits with code 2 on a missing required arg.
+        with pytest.raises(SystemExit) as exc:
+            run_query_cli(["query"])
+        assert exc.value.code != 0

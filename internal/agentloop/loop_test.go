@@ -1,10 +1,12 @@
 package agentloop
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"testing"
 )
@@ -78,6 +80,34 @@ func TestLoop_StopsOnFinalText(t *testing.T) {
 		t.Errorf("messages[1] = %+v, want user/hi", msgs[1])
 	}
 	// Tool definitions must be advertised in the request.
+}
+
+func TestLoop_LogsToolCallsAlways(t *testing.T) {
+	fc := &fakeCompleter{responses: []Response{
+		toolCallResp("c1", "codesearch", `{"query":"auth"}`),
+		{Content: "done", FinishReason: "stop"},
+	}}
+	tool := fakeTool{name: "codesearch", fn: func(_ context.Context, _ json.RawMessage) (string, error) {
+		return "ok", nil
+	}}
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+	// Deliberately NO Events channel: the structured tool-call log must be
+	// always-on, independent of whether an event consumer is attached.
+	loop := NewLoop(fc, LoopConfig{Model: "m", Tools: []Tool{tool}, Logger: logger, Role: "dispatch"})
+	if _, err := loop.Run(context.Background(), "go"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "codesearch") {
+		t.Errorf("tool-call log missing the tool name; got:\n%s", out)
+	}
+	if !strings.Contains(out, "dispatch") {
+		t.Errorf("tool-call log missing the role attribute; got:\n%s", out)
+	}
 }
 
 func TestLoop_ExecutesToolCallThenStops(t *testing.T) {

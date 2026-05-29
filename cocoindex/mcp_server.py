@@ -19,9 +19,11 @@ Usage:
     COCOINDEX_DATABASE_URL=postgresql://... python mcp_server.py
 """
 
+import argparse
 import json
 import os
 import subprocess
+import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -466,10 +468,53 @@ def create_server(config: ServerConfig | None = None) -> "FastMCP":
 
 
 # ---------------------------------------------------------------------------
+# One-shot query CLI (for the native Go agent loop)
+# ---------------------------------------------------------------------------
+
+
+def run_query_cli(argv: list[str]) -> int:
+    """Run a single semantic search and print the JSON result array to stdout.
+
+    This is the one-shot entrypoint the native Go agent loop's CodeSearchTool
+    (internal/agentloop) shells out to — it mirrors the long-running MCP server's
+    search_code tool but runs once and exits, so the loop stays transport-unaware
+    (no MCP client). Server identity (database URL, main/overlay tables, track)
+    comes from the same COCOINDEX_* env vars load_server_config() reads, so the
+    Go callers reuse the exact table targeting the .mcp.json path already uses.
+
+    Usage: python mcp_server.py query --query "<text>" [--top-k N] [--min-score F]
+
+    Returns a process exit code: 0 on success, 1 on failure. On failure nothing
+    is written to stdout (the error goes to stderr) so the Go caller never has to
+    parse partial/garbage JSON.
+    """
+    parser = argparse.ArgumentParser(prog="mcp_server.py query")
+    parser.add_argument("command", choices=["query"])
+    parser.add_argument("--query", required=True, help="natural-language search query")
+    parser.add_argument("--top-k", type=int, default=10, dest="top_k")
+    parser.add_argument("--min-score", type=float, default=0.0, dest="min_score")
+    args = parser.parse_args(argv)
+
+    try:
+        config = load_server_config()
+        results = search(config, args.query, top_k=args.top_k, min_score=args.min_score)
+    except Exception as exc:  # noqa: BLE001 — surface any failure to the Go caller
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    print(json.dumps(results))
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
 
 if __name__ == "__main__":
+    # `query` runs the one-shot CLI (native Go loop); anything else launches the
+    # long-running stdio MCP server (claude CLI path).
+    if len(sys.argv) > 1 and sys.argv[1] == "query":
+        sys.exit(run_query_cli(sys.argv[1:]))
     server = create_server()
     server.run()

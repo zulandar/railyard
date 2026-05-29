@@ -1,8 +1,10 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -181,6 +183,34 @@ func TestLogWriter_WriteMultiple(t *testing.T) {
 
 	if got != "hello world" {
 		t.Errorf("buf = %q, want %q", got, "hello world")
+	}
+}
+
+func TestLogWriter_LogsCocoIndexCalls(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	defer slog.SetDefault(prev)
+
+	w := &logWriter{
+		engineID:  "eng-abc",
+		sessionID: "sess-1",
+		carID:     "car-9",
+		direction: "out",
+		parseFn:   ParseUsageFromContent,
+		writeFn:   func(models.AgentLog) error { return nil },
+	}
+	w.Write([]byte(`{"type":"assistant","message":{"model":"claude-x","content":[{"type":"tool_use","name":"mcp__railyard_cocoindex__search_code","input":{}}]}}`))
+	if err := w.Flush(); err != nil {
+		t.Fatalf("Flush: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, CocoIndexMCPServerName) {
+		t.Errorf("expected an always-on cocoindex tool-use log; got:\n%s", out)
+	}
+	if !strings.Contains(out, "car-9") {
+		t.Errorf("expected the car id in the cocoindex log; got:\n%s", out)
 	}
 }
 

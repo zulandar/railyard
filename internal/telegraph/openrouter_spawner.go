@@ -14,8 +14,9 @@ import (
 // agent loop (internal/agentloop) instead of the claude CLI. It is the
 // native-loop counterpart to ClaudeSpawner: given a system prompt, worktree,
 // model, and OpenAI-compatible client, each Spawn drives an agentloop.Loop with
-// the dispatch tool profile (bash + read_file) and adapts its events to the
-// Process I/O contract that SessionManager already consumes — so all existing
+// the dispatch tool profile (bash + read_file, plus codesearch when CocoIndex
+// is configured) and adapts its events to the Process I/O contract that
+// SessionManager already consumes — so all existing
 // relay / persistence / chunking / empty-output handling is reused unchanged.
 type OpenRouterSpawner struct {
 	// SystemPrompt is the dispatch system prompt (kept minimal — the same
@@ -28,6 +29,10 @@ type OpenRouterSpawner struct {
 	Client agentloop.Completer
 	// Model is the agent model name (e.g. openrouter/owl-alpha).
 	Model string
+	// CodeSearch enables the semantic codesearch tool when non-nil (CocoIndex
+	// configured); nil omits it. Chat-dispatch uses the dispatch profile (all
+	// track main tables, no overlay).
+	CodeSearch *agentloop.CodeSearchParams
 	// MaxIterations bounds the loop; 0 uses the agentloop default.
 	MaxIterations int
 	// RateLimitMaxRetries bounds 429 pause-and-retry attempts for one dispatch
@@ -51,9 +56,10 @@ func (s *OpenRouterSpawner) Spawn(ctx context.Context, prompt string) (Process, 
 	loop := agentloop.NewLoop(s.Client, agentloop.LoopConfig{
 		Model:         s.Model,
 		SystemPrompt:  s.SystemPrompt,
-		Tools:         agentloop.DispatchTools(s.WorkDir),
+		Tools:         agentloop.DispatchTools(s.WorkDir, s.CodeSearch),
 		MaxIterations: s.MaxIterations,
 		Events:        events,
+		Role:          "telegraph",
 	})
 
 	p := &loopProcess{

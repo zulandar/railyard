@@ -235,7 +235,7 @@ func TestNativeSpawnRunner_CompletedWhenCarDone(t *testing.T) {
 		writeFileCall("c1", "out.txt", "hello world"),
 		stopRespWithUsage("I implemented the change and marked the car done.", 100, 25),
 	}}
-	runner := nativeSpawnRunner(db, c, "openrouter", 10, nil)
+	runner := nativeSpawnRunner(db, c, "openrouter", 10, nil, nil)
 
 	sess, outcome, err := runner(context.Background(), engine.SpawnOpts{
 		EngineID:       "eng-1",
@@ -278,7 +278,7 @@ func TestNativeSpawnRunner_ClearWhenNotDone(t *testing.T) {
 	c := &loopFakeCompleter{responses: []agentloop.Response{
 		stopRespWithUsage("I think I'm done but forgot to mark it.", 10, 5),
 	}}
-	runner := nativeSpawnRunner(db, c, "openrouter", 10, nil)
+	runner := nativeSpawnRunner(db, c, "openrouter", 10, nil, nil)
 
 	_, outcome, err := runner(context.Background(), engine.SpawnOpts{
 		EngineID: "eng-1", CarID: "car-1", ContextPayload: "sys", WorkDir: t.TempDir(),
@@ -301,7 +301,7 @@ func TestNativeSpawnRunner_StallOnMaxIterations(t *testing.T) {
 		noopBashCall("c1"), noopBashCall("c2"), noopBashCall("c3"),
 		noopBashCall("c4"), noopBashCall("c5"),
 	}}
-	runner := nativeSpawnRunner(db, c, "openrouter", 3, nil)
+	runner := nativeSpawnRunner(db, c, "openrouter", 3, nil, nil)
 
 	_, outcome, err := runner(context.Background(), engine.SpawnOpts{
 		EngineID: "eng-1", CarID: "car-1", ContextPayload: "sys", WorkDir: t.TempDir(),
@@ -327,7 +327,7 @@ func TestNativeSpawnRunner_ResumesConversationAfterRateLimit(t *testing.T) {
 		{err: &agentloop.RateLimitError{RetryAfter: time.Second, Message: "429"}},
 		{resp: stopRespWithUsage("resumed and finished", 10, 5)},
 	}}
-	runner := nativeSpawnRunner(db, c, "openrouter", 10, nil)
+	runner := nativeSpawnRunner(db, c, "openrouter", 10, nil, nil)
 	opts := engine.SpawnOpts{
 		EngineID: "eng-1", CarID: "car-1", ContextPayload: "you are an engine", WorkDir: t.TempDir(), Model: "m",
 	}
@@ -384,7 +384,7 @@ func TestNativeSpawnRunner_PersistsEachRetryAttempt(t *testing.T) {
 		{err: &agentloop.RateLimitError{RetryAfter: time.Second, Message: "429"}},
 		{resp: stopRespWithUsage("resumed and finished", 10, 5)},
 	}}
-	runner := nativeSpawnRunner(db, c, "openrouter", 10, nil)
+	runner := nativeSpawnRunner(db, c, "openrouter", 10, nil, nil)
 	opts := engine.SpawnOpts{
 		EngineID: "eng-1", CarID: "car-1", ContextPayload: "sys", WorkDir: t.TempDir(), Model: "m",
 	}
@@ -420,7 +420,7 @@ func TestNativeSpawnRunner_RateLimited(t *testing.T) {
 			db.Create(&models.Car{ID: "car-1", Status: "in_progress"})
 
 			c := &loopFakeCompleter{err: &agentloop.RateLimitError{RetryAfter: 3 * time.Second, Message: "429"}}
-			runner := nativeSpawnRunner(db, c, authMethod, 10, nil)
+			runner := nativeSpawnRunner(db, c, authMethod, 10, nil, nil)
 
 			_, outcome, err := runner(context.Background(), engine.SpawnOpts{
 				EngineID: "eng-1", CarID: "car-1", ContextPayload: "sys", WorkDir: t.TempDir(),

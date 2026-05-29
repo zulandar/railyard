@@ -238,17 +238,41 @@ func (t *EditFileTool) Execute(_ context.Context, args json.RawMessage) (string,
 
 // --- toolset profiles ---
 
-// DispatchTools is the dispatch/telegraph profile: bash + read_file.
-func DispatchTools(workdir string) []Tool {
-	return []Tool{NewBashTool(workdir), NewReadFileTool(workdir)}
+// DispatchTools is the dispatch/telegraph profile: bash + read_file, plus
+// codesearch when cs is non-nil (CocoIndex configured). Passing nil omits the
+// codesearch tool cleanly, so non-cocoindex setups are unaffected.
+func DispatchTools(workdir string, cs *CodeSearchParams) []Tool {
+	tools := []Tool{NewBashTool(workdir), NewReadFileTool(workdir)}
+	if cs != nil {
+		tools = append(tools, NewCodeSearchTool(*cs))
+	}
+	return tools
 }
 
-// EngineTools is the engine profile: bash + read_file + write_file + edit_file.
-func EngineTools(workdir string) []Tool {
-	return []Tool{
+// ReadOnlyTools is the triage/review profile: read_file plus codesearch when cs
+// is non-nil (CocoIndex configured). It deliberately excludes bash, write_file
+// and edit_file so triage (bull) and review (inspect) agents can look up code
+// but can never run arbitrary shell commands or mutate the tree. (codesearch
+// shells out only to a fixed, read-only query CLI — not a general-purpose shell.)
+func ReadOnlyTools(workdir string, cs *CodeSearchParams) []Tool {
+	tools := []Tool{NewReadFileTool(workdir)}
+	if cs != nil {
+		tools = append(tools, NewCodeSearchTool(*cs))
+	}
+	return tools
+}
+
+// EngineTools is the engine profile: bash + read_file + write_file + edit_file,
+// plus codesearch when cs is non-nil (CocoIndex configured).
+func EngineTools(workdir string, cs *CodeSearchParams) []Tool {
+	tools := []Tool{
 		NewBashTool(workdir),
 		NewReadFileTool(workdir),
 		NewWriteFileTool(workdir),
 		NewEditFileTool(workdir),
 	}
+	if cs != nil {
+		tools = append(tools, NewCodeSearchTool(*cs))
+	}
+	return tools
 }

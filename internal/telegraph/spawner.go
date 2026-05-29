@@ -262,6 +262,11 @@ type LazySpawner struct {
 	UseNativeLoop bool
 	// Client is the OpenAI-compatible client used when UseNativeLoop is true.
 	Client agentloop.Completer
+	// CodeSearch enables the native loop's semantic codesearch tool when non-nil
+	// (CocoIndex configured). Built in the wiring layer (it needs config) and
+	// forwarded to OpenRouterSpawner; nil omits the tool. Like the .mcp.json the
+	// claude path relies on, this is the native loop's route to semantic search.
+	CodeSearch *agentloop.CodeSearchParams
 	// MaxIterations bounds the native loop; 0 uses the agentloop default.
 	MaxIterations int
 }
@@ -300,6 +305,7 @@ func (ls *LazySpawner) Spawn(ctx context.Context, prompt string) (Process, error
 			WorkDir:       worktreeDir,
 			Client:        ls.Client,
 			Model:         ls.Model,
+			CodeSearch:    ls.CodeSearch,
 			MaxIterations: ls.MaxIterations,
 		}
 		return native.Spawn(ctx, prompt)

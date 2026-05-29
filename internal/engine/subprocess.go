@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"regexp"
@@ -256,6 +257,17 @@ func (w *logWriter) Flush() error {
 		log.TokenCount = usage.InputTokens + usage.OutputTokens
 		if usage.Model != "" {
 			log.Model = usage.Model
+		}
+		// Always-on positive signal that the CLI agent used cocoindex codesearch
+		// (parity with the native loop's per-tool-call log) — confirmable from
+		// logs without grepping the raw transcript. (railyard-cpn)
+		if usage.CocoIndexCalls > 0 {
+			slog.Info("claude MCP codesearch call",
+				"server", CocoIndexMCPServerName,
+				"calls", usage.CocoIndexCalls,
+				"engine", w.engineID,
+				"session", w.sessionID,
+				"car", w.carID)
 		}
 	}
 
