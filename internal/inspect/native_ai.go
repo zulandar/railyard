@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/zulandar/railyard/internal/agentbackend"
 	"github.com/zulandar/railyard/internal/agentloop"
 	"github.com/zulandar/railyard/internal/config"
 )
@@ -41,11 +42,11 @@ func (a *NativeAI) RunPrompt(ctx context.Context, prompt string) (string, error)
 // CLI agent provider (unchanged behavior). Mirrors bull.newTriageAI so the
 // inspect role follows the same native-vs-CLI routing as every other role.
 func newReviewAI(cfg *config.Config) (ReviewAI, error) {
-	if agentloop.IsNativeLoopMethod(cfg.AuthMethod) {
-		client, err := agentloop.NewClientFromEnv(cfg.AuthMethod)
-		if err != nil {
-			return nil, fmt.Errorf("inspect: native loop: %w", err)
-		}
+	client, useNative, err := agentbackend.Resolve(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("inspect: native loop: %w", err)
+	}
+	if useNative {
 		return NewNativeAI(client, cfg.Inspect.AgentModel), nil
 	}
 	return NewProviderAI(cfg.Inspect.AgentProvider, cfg.Inspect.AgentModel)

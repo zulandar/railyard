@@ -165,13 +165,6 @@ Include in pod spec volumes.
 - name: claude-home
   emptyDir: {}
 {{- end }}
-{{- if eq .Values.auth.method "openai_compat" }}
-- name: codex-config
-  configMap:
-    name: {{ include "railyard.fullname" . }}-codex-config
-- name: codex-home
-  emptyDir: {}
-{{- end }}
 {{- if and (eq .Values.auth.method "vertex") .Values.auth.vertex.credentialsSecret }}
 - name: gcp-credentials
   secret:
@@ -187,10 +180,6 @@ Include in container volumeMounts.
 {{- if eq .Values.auth.method "oauth_token" }}
 - name: claude-home
   mountPath: /home/railyard/.claude
-{{- end }}
-{{- if eq .Values.auth.method "openai_compat" }}
-- name: codex-home
-  mountPath: /home/railyard/.codex
 {{- end }}
 {{- if and (eq .Values.auth.method "vertex") .Values.auth.vertex.credentialsSecret }}
 - name: gcp-credentials
@@ -225,22 +214,6 @@ Include in pod spec initContainers.
       readOnly: true
     - name: claude-home
       mountPath: /home/railyard/.claude
-{{- end }}
-{{- if eq .Values.auth.method "openai_compat" }}
-- name: copy-codex-config
-  image: {{ include "railyard.image" . }}
-  command: ["sh", "-c"]
-  args:
-    - |
-      mkdir -p /codex-home
-      cp /codex-config/config.toml /codex-home/config.toml 2>/dev/null || true
-      chmod 600 /codex-home/config.toml 2>/dev/null || true
-  volumeMounts:
-    - name: codex-config
-      mountPath: /codex-config
-      readOnly: true
-    - name: codex-home
-      mountPath: /codex-home
 {{- end }}
 {{- end }}
 

@@ -147,7 +147,10 @@ func (l *Loop) Run(ctx context.Context, userInput string) (Result, error) {
 	var agg Usage
 	for iter := 1; iter <= l.maxIterations; iter++ {
 		if err := ctx.Err(); err != nil {
-			return Result{Usage: agg, StopReason: StopMaxIterations, Iterations: iter - 1}, err
+			// Cancellation/deadline: leave StopReason unset (this is not an
+			// iteration-cap stop), matching the Complete-error path below. The
+			// returned error is what callers key on.
+			return Result{Usage: agg, Iterations: iter - 1}, err
 		}
 
 		resp, err := l.client.Complete(ctx, Request{
@@ -269,4 +272,31 @@ func Truncate(s string, max int) string {
 		return s
 	}
 	return string(r[:max]) + "…"
+}
+
+// FormatToolProgress renders a concise "🔧" progress line for a tool call,
+// surfacing the bash command or file path from the (JSON) arguments when
+// present. Shared by the dispatch and telegraph relays so their progress lines
+// stay identical.
+func FormatToolProgress(name, args string) string {
+	detail := args
+	var m map[string]any
+	if json.Unmarshal([]byte(args), &m) == nil {
+		switch {
+		case asString(m["command"]) != "":
+			detail = asString(m["command"])
+		case asString(m["path"]) != "":
+			detail = asString(m["path"])
+		}
+	}
+	detail = Truncate(detail, 200)
+	if detail == "" {
+		return "🔧 " + name
+	}
+	return fmt.Sprintf("🔧 %s: %s", name, detail)
+}
+
+func asString(v any) string {
+	s, _ := v.(string)
+	return s
 }

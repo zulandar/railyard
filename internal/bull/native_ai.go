@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/zulandar/railyard/internal/agentbackend"
 	"github.com/zulandar/railyard/internal/agentloop"
 	"github.com/zulandar/railyard/internal/config"
 )
@@ -40,11 +41,11 @@ func (a *NativeAI) RunPrompt(ctx context.Context, prompt string) (string, error)
 // auth_method routes to it (credentials from the environment), otherwise the
 // CLI agent provider (unchanged behavior).
 func newTriageAI(cfg *config.Config) (TriageAI, error) {
-	if agentloop.IsNativeLoopMethod(cfg.AuthMethod) {
-		client, err := agentloop.NewClientFromEnv(cfg.AuthMethod)
-		if err != nil {
-			return nil, fmt.Errorf("bull: native loop: %w", err)
-		}
+	client, useNative, err := agentbackend.Resolve(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("bull: native loop: %w", err)
+	}
+	if useNative {
 		return NewNativeAI(client, cfg.Bull.AgentModel), nil
 	}
 	return NewProviderAI(cfg.Bull.AgentProvider, cfg.Bull.AgentModel)

@@ -51,7 +51,7 @@ helm install railyard ./charts/railyard \
 
 | Value | Description | Default |
 |-------|-------------|---------|
-| `auth.method` | Auth method: `api_key`, `oauth_token`, `bedrock`, `vertex`, `foundry`, `do_inference`, `openrouter`, `openai_compat` | `api_key` |
+| `auth.method` | Auth method: `api_key`, `oauth_token`, `bedrock`, `vertex`, `foundry`, `do_inference`, `openrouter`, `openrouter_skin`, `openai_compat` | `api_key` |
 | `auth.existingSecret` | Use an existing Secret instead of creating one | `""` |
 | `auth.apiKey` | API key (for `api_key` method) | `""` |
 | `auth.oauthToken` | OAuth token from `claude setup-token` (for `oauth_token` method) | `""` |
@@ -64,10 +64,10 @@ helm install railyard ./charts/railyard \
 | `auth.foundry.apiKey` | Azure API key (for `foundry` method) | `""` |
 | `auth.foundry.endpoint` | Azure endpoint | `""` |
 | `auth.doInference.apiKey` | DigitalOcean model access key or PAT (for `do_inference` method) | `""` |
-| `auth.openrouter.apiKey` | OpenRouter API key (for `openrouter` method) | `""` |
+| `auth.openrouter.apiKey` | OpenRouter API key (for `openrouter` / `openrouter_skin` methods) | `""` |
+| `auth.openrouter.baseURL` | Optional base URL override for the native loop (`openrouter` method); defaults to `https://openrouter.ai/api/v1` | `""` |
 | `auth.openaiCompat.baseURL` | OpenAI-compatible endpoint URL (for `openai_compat` method, e.g. `https://inference.do-ai.run/v1`) | `""` |
 | `auth.openaiCompat.apiKey` | API key for the OpenAI-compatible backend (for `openai_compat` method) | `""` |
-| `auth.openaiCompat.providerName` | Optional codex provider key (defaults to `openai_compat`) | `""` |
 | `auth.githubToken` | GitHub PAT for PR operations (requires `requirePR`). Sets `GH_TOKEN` env var | `""` |
 | `auth.copilot.token` | GitHub PAT for Copilot CLI (overrides `githubToken` for Copilot) | `""` |
 | `auth.apiKeyHelper` | Command for dynamic key rotation | `""` |
@@ -391,14 +391,20 @@ configured model name does not exist in DO's catalog — pod logs will show a
 
 ### Install with OpenRouter
 
-`auth.method: openrouter` routes the `claude` CLI to OpenRouter's unified
-inference gateway (`https://openrouter.ai/api`) by injecting
-`ANTHROPIC_BASE_URL` and `ANTHROPIC_API_KEY` into the engine pod. OpenRouter
+`auth.method: openrouter` drives OpenRouter through **Railyard's native agent
+loop** (Approach A): Railyard talks to OpenRouter's OpenAI-compatible endpoint
+directly, injecting `OPENROUTER_API_KEY` into the pod (and optionally
+`OPENROUTER_BASE_URL`). `agent_provider` is irrelevant for this method. OpenRouter
 fronts ~100+ models from Anthropic, OpenAI, Google, Meta, DeepSeek, Mistral,
-Qwen, and others behind a single Anthropic-compatible endpoint. Like DO
-inference, OpenRouter has **no implicit default model** — every request must
-specify one — so `agent_model` is required at the application config layer
-(top-level in `railyard.yaml`). Startup validation fails if it is missing.
+Qwen, and others. It has **no implicit default model** — every request must
+specify one — so `agent_model` is required at the application config layer.
+Startup validation fails if it is missing.
+
+> **v0.9.14 (breaking):** before the native loop, `openrouter` meant "claude CLI
+> via the Anthropic skin." That behavior is now `auth.method: openrouter_skin`
+> (capable models only). Existing `openrouter` installs switch to the native loop
+> on upgrade — set `openrouter_skin` to keep the old behavior. See
+> [docs/openrouter.md](../../docs/openrouter.md).
 
 See the [OpenRouter docs](https://openrouter.ai/docs) for the full model
 catalog and to obtain an API key.
@@ -432,9 +438,9 @@ auth:
   openrouter:
     apiKey: "sk-or-v1-..."
 engine:
-  agentProvider: claude
   # agent_model must be set in OpenRouter's provider/model[:variant] form.
   # This surfaces in the rendered railyard.yaml as top-level agent_model.
+  # (agentProvider is ignored by the native loop.)
   agentModel: "meta-llama/llama-3.3-70b-instruct:free"
 ```
 
@@ -443,33 +449,35 @@ The `agentModel` value renders as the top-level `agent_model` field in
 other auth method. See the commented `agent_model` block in
 `railyard.example.yaml` for the override pattern.
 
-### Install with an OpenAI-compatible backend (codex)
+### Install with an OpenAI-compatible backend (native loop)
 
-`auth.method: openai_compat` routes the `codex` CLI to any OpenAI-compatible
-backend — DigitalOcean Inference's `/v1/chat/completions`, OpenRouter's
-OpenAI-compat endpoint, direct OpenAI, a local LM Studio, etc. — by injecting
-`OPENAI_API_KEY` and a `~/.codex/config.toml` ConfigMap into the engine pod
-that selects the backend's `base_url`. This unlocks non-Anthropic catalogs
-(Gemma, Llama, DeepSeek, Qwen, GPT, …) that the existing `do_inference` and
-`openrouter` methods cannot reach, since both of those speak the Anthropic
-Messages API and route the `claude` CLI only.
+`auth.method: openai_compat` drives any OpenAI-compatible backend —
+DigitalOcean Inference's `/v1/chat/completions`, OpenRouter's OpenAI-compat
+endpoint, direct OpenAI, a local LM Studio, etc. — through **Railyard's native
+agent loop** (Approach A). The chart injects `OPENAI_BASE_URL` and
+`OPENAI_API_KEY` into the pod and the loop calls the backend directly. This
+unlocks non-Anthropic catalogs (Gemma, Llama, DeepSeek, Qwen, GPT, …).
+
+> **v0.9.14 (breaking):** `openai_compat` previously routed the `codex` CLI via
+> a `~/.codex/config.toml` ConfigMap and required `agent_provider=codex`. It now
+> uses the native loop; `agent_provider` is ignored and the codex ConfigMap is no
+> longer rendered. Set `auth.openaiCompat.baseURL` + `apiKey` (the base URL is
+> now read from the env, not a codex config).
 
 Key facts:
 
-- **`engine.agentProvider: codex` is required.** The `claude` CLI cannot speak
-  OpenAI-compat. Startup config validation enforces this.
-- **`engine.agentModel` is required** — the chart and codex have no implicit
+- **`agent_provider` is irrelevant** — the native loop talks OpenAI-compat
+  directly; no CLI provider is involved.
+- **`engine.agentModel` is required** — these endpoints have no implicit
   default model. Startup validation fails fast if it is missing.
+- **`auth.openaiCompat.baseURL` is required** — it is injected as
+  `OPENAI_BASE_URL` for the loop.
 - **Naming is backend-specific** — railyard does not parse or translate model
   names. Consult your backend's docs:
   - DO Inference: bare names like `gemma-4-31B-it`
   - OpenRouter: `provider/model[:variant]` like
     `meta-llama/llama-3.3-70b-instruct:free`
   - Direct OpenAI: bare names like `gpt-4`, `gpt-4o`
-- **codex `web_search` is disabled automatically.** codex enables web search
-  by default but most non-OpenAI backends reject the tool. The chart's
-  `codex-config.yaml` ConfigMap sets `web_search = "disabled"` for you; no
-  manual configuration needed.
 - **Per-key guardrails (recommended):** Configure model allowlists, provider
   allowlists, and budget caps **on the backend's own dashboard per API key**
   (DO's *Model Access Keys* page, OpenRouter's API key settings, etc.).
@@ -487,7 +495,6 @@ auth:
     baseURL: "https://inference.do-ai.run/v1"
     apiKey: "doo_v1_..."
 engine:
-  agentProvider: codex
   agentModel: "gemma-4-31B-it"
 ```
 
@@ -503,7 +510,6 @@ auth:
     baseURL: "https://openrouter.ai/api/v1"
     apiKey: "sk-or-v1-..."
 engine:
-  agentProvider: codex
   agentModel: "meta-llama/llama-3.3-70b-instruct:free"
 ```
 

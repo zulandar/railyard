@@ -10,7 +10,7 @@ import (
 	"syscall"
 
 	"github.com/spf13/cobra"
-	"github.com/zulandar/railyard/internal/agentloop"
+	"github.com/zulandar/railyard/internal/agentbackend"
 	"github.com/zulandar/railyard/internal/config"
 	"github.com/zulandar/railyard/internal/db"
 	"github.com/zulandar/railyard/internal/dispatch"
@@ -189,14 +189,9 @@ func runTelegraphStart(cmd *cobra.Command, configPath string) error {
 	// When auth_method routes to the native agent loop (openrouter/openai_compat),
 	// dispatch is driven by the Railyard-owned loop instead of the claude CLI.
 	// Credentials are resolved from the environment (the chart injects them).
-	useNativeLoop := agentloop.IsNativeLoopMethod(cfg.AuthMethod)
-	var loopClient agentloop.Completer
-	if useNativeLoop {
-		client, err := agentloop.NewClientFromEnv(cfg.AuthMethod)
-		if err != nil {
-			return fmt.Errorf("telegraph: native loop: %w", err)
-		}
-		loopClient = client
+	loopClient, useNativeLoop, err := agentbackend.Resolve(cfg)
+	if err != nil {
+		return fmt.Errorf("telegraph: native loop: %w", err)
 	}
 
 	var spawner telegraph.ProcessSpawner = &telegraph.LazySpawner{

@@ -3,7 +3,6 @@ package dispatch
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
@@ -103,35 +102,10 @@ func printLoopEvent(out io.Writer, ev agentloop.Event) {
 	case agentloop.EventAssistantText:
 		fmt.Fprintln(out, ev.Text)
 	case agentloop.EventToolCallStart:
-		fmt.Fprintln(out, formatToolProgress(ev.ToolName, ev.ToolArgs))
+		fmt.Fprintln(out, agentloop.FormatToolProgress(ev.ToolName, ev.ToolArgs))
 	case agentloop.EventToolCallEnd:
 		if ev.ToolError != "" {
 			fmt.Fprintf(out, "⚠️ %s failed: %s\n", ev.ToolName, agentloop.Truncate(ev.ToolError, 200))
 		}
 	}
-}
-
-// formatToolProgress renders a concise "🔧" progress line, surfacing the bash
-// command or file path when present.
-func formatToolProgress(name, args string) string {
-	detail := args
-	var m map[string]any
-	if json.Unmarshal([]byte(args), &m) == nil {
-		switch {
-		case asString(m["command"]) != "":
-			detail = asString(m["command"])
-		case asString(m["path"]) != "":
-			detail = asString(m["path"])
-		}
-	}
-	detail = agentloop.Truncate(detail, 200)
-	if detail == "" {
-		return "🔧 " + name
-	}
-	return fmt.Sprintf("🔧 %s: %s", name, detail)
-}
-
-func asString(v any) string {
-	s, _ := v.(string)
-	return s
 }

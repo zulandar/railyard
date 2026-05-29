@@ -321,3 +321,21 @@ func TestLoop_SynthesizesFinalTextWhenToolOnlyHitsCap(t *testing.T) {
 		t.Error("synthesized final text was not emitted as EventAssistantText")
 	}
 }
+
+func TestLoop_CancelDoesNotReportMaxIterations(t *testing.T) {
+	// A cancelled run must not be mislabeled as an iteration-cap stop; the
+	// returned error is what callers key on (railyard-37x.10).
+	fc := &fakeCompleter{responses: []Response{toolCallResp("c1", "noop", `{}`)}}
+	noop := fakeTool{name: "noop", fn: func(_ context.Context, _ json.RawMessage) (string, error) { return "ok", nil }}
+	loop := NewLoop(fc, LoopConfig{Model: "m", Tools: []Tool{noop}, MaxIterations: 5})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel before the loop starts a turn
+	res, err := loop.Run(ctx, "go")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	if res.StopReason == StopMaxIterations {
+		t.Error("StopReason = StopMaxIterations on cancellation; want unset")
+	}
+}

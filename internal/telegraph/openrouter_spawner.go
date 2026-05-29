@@ -2,7 +2,6 @@ package telegraph
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sync"
 
@@ -132,7 +131,7 @@ func renderLoopEvent(ev agentloop.Event) string {
 	case agentloop.EventAssistantText:
 		return ev.Text
 	case agentloop.EventToolCallStart:
-		return formatToolProgress(ev.ToolName, ev.ToolArgs)
+		return agentloop.FormatToolProgress(ev.ToolName, ev.ToolArgs)
 	case agentloop.EventToolCallEnd:
 		if ev.ToolError != "" {
 			return fmt.Sprintf("⚠️ %s failed: %s", ev.ToolName, agentloop.Truncate(ev.ToolError, 200))
@@ -141,31 +140,6 @@ func renderLoopEvent(ev agentloop.Event) string {
 	default:
 		return ""
 	}
-}
-
-// formatToolProgress renders a concise "🔧" progress line for a tool call,
-// surfacing the bash command or file path when present.
-func formatToolProgress(name, args string) string {
-	detail := args
-	var m map[string]any
-	if json.Unmarshal([]byte(args), &m) == nil {
-		switch {
-		case asString(m["command"]) != "":
-			detail = asString(m["command"])
-		case asString(m["path"]) != "":
-			detail = asString(m["path"])
-		}
-	}
-	detail = agentloop.Truncate(detail, 200)
-	if detail == "" {
-		return "🔧 " + name
-	}
-	return fmt.Sprintf("🔧 %s: %s", name, detail)
-}
-
-func asString(v any) string {
-	s, _ := v.(string)
-	return s
 }
 
 // Send supplies the one-shot input when the process was spawned with an empty

@@ -2941,3 +2941,29 @@ tracks:
 		t.Errorf("YardID = %q, want empty string when yard_id key is absent", cfg.YardID)
 	}
 }
+
+func TestParse_AgentModelValidation_PerTrackModelNoTopLevel(t *testing.T) {
+	// A native method with an empty top-level agent_model but a per-track model
+	// set is valid — the engine consumes the per-track model. Previously the
+	// validation required the top-level default and rejected this (railyard-37x.12).
+	t.Setenv("OPENROUTER_API_KEY", "sk-or-test")
+	yaml := `
+owner: alice
+repo: git@github.com:org/app.git
+auth_method: openrouter
+tracks:
+  - name: backend
+    language: go
+    agent_model: openrouter/owl-alpha
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error for per-track model with empty top-level: %v", err)
+	}
+	if cfg.AgentModel != "" {
+		t.Errorf("top-level AgentModel = %q, want empty", cfg.AgentModel)
+	}
+	if cfg.Tracks[0].AgentModel != "openrouter/owl-alpha" {
+		t.Errorf("Tracks[0].AgentModel = %q, want openrouter/owl-alpha", cfg.Tracks[0].AgentModel)
+	}
+}
