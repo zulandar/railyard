@@ -217,15 +217,33 @@ func TestFileTools_RejectPathEscape(t *testing.T) {
 
 func TestProfileToolSets(t *testing.T) {
 	dir := t.TempDir()
-	// dispatch/telegraph profile: bash + read_file.
-	dispatch := DispatchTools(dir)
-	if names := toolNames(dispatch); names != "bash,read_file" {
-		t.Errorf("DispatchTools = %s, want bash,read_file", names)
+	// Without CocoIndex params, codesearch is NOT registered (gating).
+	if names := toolNames(DispatchTools(dir, nil)); names != "bash,read_file" {
+		t.Errorf("DispatchTools(nil) = %s, want bash,read_file", names)
 	}
-	// engine profile: bash + read_file + write_file + edit_file.
-	engine := EngineTools(dir)
-	if names := toolNames(engine); names != "bash,read_file,write_file,edit_file" {
-		t.Errorf("EngineTools = %s, want bash,read_file,write_file,edit_file", names)
+	if names := toolNames(EngineTools(dir, nil)); names != "bash,read_file,write_file,edit_file" {
+		t.Errorf("EngineTools(nil) = %s, want bash,read_file,write_file,edit_file", names)
+	}
+	// With CocoIndex params, codesearch is appended to each profile.
+	cs := &CodeSearchParams{PythonPath: "/x/python", ScriptPath: "/x/mcp_server.py"}
+	if names := toolNames(DispatchTools(dir, cs)); names != "bash,read_file,codesearch" {
+		t.Errorf("DispatchTools(params) = %s, want bash,read_file,codesearch", names)
+	}
+	if names := toolNames(EngineTools(dir, cs)); names != "bash,read_file,write_file,edit_file,codesearch" {
+		t.Errorf("EngineTools(params) = %s, want bash,read_file,write_file,edit_file,codesearch", names)
+	}
+}
+
+func TestReadOnlyToolSet(t *testing.T) {
+	dir := t.TempDir()
+	// Triage/review profile: read_file only (no bash/write/edit), plus codesearch
+	// when configured. It must never expose a tool that can mutate the tree.
+	if names := toolNames(ReadOnlyTools(dir, nil)); names != "read_file" {
+		t.Errorf("ReadOnlyTools(nil) = %s, want read_file", names)
+	}
+	cs := &CodeSearchParams{PythonPath: "/x/python", ScriptPath: "/x/mcp_server.py"}
+	if names := toolNames(ReadOnlyTools(dir, cs)); names != "read_file,codesearch" {
+		t.Errorf("ReadOnlyTools(params) = %s, want read_file,codesearch", names)
 	}
 }
 

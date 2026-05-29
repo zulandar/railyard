@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 )
 
 // defaultMaxIterations bounds runaway tool/answer cycles (and token burn) when
@@ -89,6 +90,13 @@ type LoopConfig struct {
 	MaxIterations int          // <=0 uses defaultMaxIterations
 	ToolChoice    string       // optional; "" lets the provider default (auto)
 	Events        chan<- Event // optional; nil disables event emission
+	// Logger receives an always-on structured Info line per tool call (tool name
+	// + Role), independent of Events — so tool usage (e.g. codesearch) is visible
+	// in logs even when no event consumer is attached. nil uses slog.Default().
+	Logger *slog.Logger
+	// Role labels the consumer (e.g. "dispatch", "telegraph", "engine") on each
+	// tool-call log line so usage can be attributed per role. Optional.
+	Role string
 }
 
 // Loop is the agentic driver. It maintains the conversation history across
@@ -102,6 +110,8 @@ type Loop struct {
 	toolChoice    string
 	maxIterations int
 	events        chan<- Event
+	logger        *slog.Logger
+	role          string
 
 	// messages is the running conversation (system + seed + accumulated turns).
 	messages []Message
@@ -114,6 +124,10 @@ func NewLoop(client Completer, cfg LoopConfig) *Loop {
 	if maxIter <= 0 {
 		maxIter = defaultMaxIterations
 	}
+	logger := cfg.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
 	l := &Loop{
 		client:        client,
 		model:         cfg.Model,
@@ -121,6 +135,8 @@ func NewLoop(client Completer, cfg LoopConfig) *Loop {
 		toolChoice:    cfg.ToolChoice,
 		maxIterations: maxIter,
 		events:        cfg.Events,
+		logger:        logger,
+		role:          cfg.Role,
 		toolByName:    make(map[string]Tool, len(cfg.Tools)),
 	}
 	for _, t := range cfg.Tools {
@@ -213,6 +229,16 @@ func (l *Loop) Run(ctx context.Context, userInput string) (Result, error) {
 // textual result to feed back to the model. Unknown tools and execution errors
 // are converted into an error result (not a hard abort); the loop continues.
 func (l *Loop) execTool(ctx context.Context, tc ToolCall) string {
+	// Always-on structured record of the tool call (name + role), independent of
+	// the Events channel — so tool usage (e.g. codesearch) is confirmable from
+	// logs alone even when no event consumer drains the channel. Args/results are
+	// deliberately not logged at Info; they go (redacted) to the transcript.
+	if l.role != "" {
+		l.logger.Info("agent tool call", "tool", tc.Name, "role", l.role)
+	} else {
+		l.logger.Info("agent tool call", "tool", tc.Name)
+	}
+
 	l.emit(ctx, Event{Type: EventToolCallStart, ToolName: tc.Name, ToolArgs: Truncate(string(tc.Arguments), 512)})
 
 	tool, ok := l.toolByName[tc.Name]

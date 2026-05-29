@@ -74,8 +74,12 @@ func Start(opts StartOpts) error {
 			Model:        opts.Config.AgentModel,
 			SystemPrompt: prompt,
 			WorkDir:      workDir,
-			In:           os.Stdin,
-			Out:          os.Stdout,
+			// Native loop has no MCP client, so give it the codesearch tool
+			// directly (nil when CocoIndex is unconfigured — same gate as the
+			// .mcp.json write above).
+			CodeSearch: engine.MainIndexCodeSearchParams(opts.Config),
+			In:         os.Stdin,
+			Out:        os.Stdout,
 		})
 	}
 

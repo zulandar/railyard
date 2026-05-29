@@ -114,6 +114,19 @@ func CleanupOverlay(engineID string, cfg *config.Config) error {
 	return nil
 }
 
+// CocoIndexMCPServerName is the single source of truth for the cocoindex MCP
+// server's name. It is the .mcp.json server key the claude CLI reads AND the
+// basis for the tool_use prefix below, so the .mcp.json writers (dispatch +
+// engine) and the stream-json observability detector cannot drift apart.
+// (railyard-cpn)
+const CocoIndexMCPServerName = "railyard_cocoindex"
+
+// CocoIndexMCPToolPrefix is the prefix claude assigns MCP tool_use blocks from
+// the cocoindex server (e.g. mcp__railyard_cocoindex__search_code). Matching it
+// in the stream-json gives a positive "codesearch was called" signal on the
+// claude CLI path without grepping raw transcript text.
+const CocoIndexMCPToolPrefix = "mcp__" + CocoIndexMCPServerName + "__"
+
 // MCPServerConfig represents the .mcp.json file written to each engine worktree.
 type MCPServerConfig struct {
 	MCPServers map[string]MCPServer `json:"mcpServers"`
@@ -136,25 +149,13 @@ func WriteMCPConfig(workDir, engineID, track string, cfg *config.Config) error {
 		return nil // no pgvector configured, skip MCP config
 	}
 
-	pythonPath, _ := filepath.Abs(filepath.Join(cfg.CocoIndex.VenvPath, "bin", "python"))
-	scriptPath, _ := filepath.Abs(filepath.Join(cfg.CocoIndex.ScriptsPath, "mcp_server.py"))
-
-	mainTable := fmt.Sprintf("main_%s_embeddings", track)
-	overlayTable := OverlayTableName(engineID)
-
+	pythonPath, scriptPath := CocoIndexPaths(cfg)
 	mcpCfg := MCPServerConfig{
 		MCPServers: map[string]MCPServer{
-			"railyard_cocoindex": {
+			CocoIndexMCPServerName: {
 				Command: pythonPath,
 				Args:    []string{scriptPath},
-				Env: map[string]string{
-					"COCOINDEX_DATABASE_URL":  cfg.CocoIndex.DatabaseURL,
-					"COCOINDEX_ENGINE_ID":     engineID,
-					"COCOINDEX_MAIN_TABLE":    mainTable,
-					"COCOINDEX_OVERLAY_TABLE": overlayTable,
-					"COCOINDEX_TRACK":         track,
-					"COCOINDEX_WORKTREE":      workDir,
-				},
+				Env:     engineCocoIndexEnv(workDir, engineID, track, cfg),
 			},
 		},
 	}

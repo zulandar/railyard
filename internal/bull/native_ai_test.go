@@ -77,6 +77,65 @@ func TestNativeAI_RunPrompt_Error(t *testing.T) {
 	}
 }
 
+func TestNativeAI_RunPrompt_WithCodeSearch_ExposesReadOnlyToolsOnly(t *testing.T) {
+	c := &fakeCompleter{resp: agentloop.Response{Content: "DECISION: approve", FinishReason: "stop"}}
+	cs := &agentloop.CodeSearchParams{PythonPath: "/x/python", ScriptPath: "/x/mcp_server.py"}
+	ai := NewNativeAIWithCodeSearch(c, "m", t.TempDir(), cs)
+
+	out, err := ai.RunPrompt(context.Background(), "triage this issue")
+	if err != nil {
+		t.Fatalf("RunPrompt: %v", err)
+	}
+	if out != "DECISION: approve" {
+		t.Errorf("RunPrompt = %q, want %q", out, "DECISION: approve")
+	}
+
+	var names []string
+	for _, td := range c.gotReq.Tools {
+		names = append(names, td.Name)
+	}
+	has := func(n string) bool {
+		for _, x := range names {
+			if x == n {
+				return true
+			}
+		}
+		return false
+	}
+	// Triage may look up code (read-only) but must never get write/edit/bash.
+	if !has("codesearch") || !has("read_file") {
+		t.Errorf("tools = %v, want read_file + codesearch", names)
+	}
+	for _, forbidden := range []string{"bash", "write_file", "edit_file"} {
+		if has(forbidden) {
+			t.Errorf("tools = %v, must NOT expose %q to triage", names, forbidden)
+		}
+	}
+}
+
+func TestNewTriageAI_NativeWiresCodeSearchWhenConfigured(t *testing.T) {
+	t.Setenv("OPENROUTER_API_KEY", "sk-or-test")
+	t.Setenv("OPENROUTER_BASE_URL", "")
+	cfg := &config.Config{
+		AuthMethod: "openrouter",
+		CocoIndex:  config.CocoIndexConfig{DatabaseURL: "postgresql://x", VenvPath: "cocoindex/.venv", ScriptsPath: "cocoindex"},
+		Tracks:     []config.TrackConfig{{Name: "backend"}},
+	}
+	cfg.Bull.AgentModel = "openrouter/owl-alpha"
+
+	ai, err := newTriageAI(cfg)
+	if err != nil {
+		t.Fatalf("newTriageAI: %v", err)
+	}
+	native, ok := ai.(*NativeAI)
+	if !ok {
+		t.Fatalf("newTriageAI returned %T, want *NativeAI", ai)
+	}
+	if native.codeSearch == nil {
+		t.Error("native triage AI should be wired with codesearch when CocoIndex is configured")
+	}
+}
+
 func TestNewTriageAI_DefaultsToCLIProvider(t *testing.T) {
 	cfg := &config.Config{AgentProvider: "claude"}
 	cfg.Bull.AgentProvider = "claude"

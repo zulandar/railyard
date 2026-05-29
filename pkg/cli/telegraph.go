@@ -211,6 +211,10 @@ func runTelegraphStart(cmd *cobra.Command, configPath string) error {
 		Model:         cfg.AgentModel,
 		UseNativeLoop: useNativeLoop,
 		Client:        loopClient,
+		// Native loop has no MCP client; give it the codesearch tool directly
+		// (main-index profile: all track main tables). nil when CocoIndex is
+		// unconfigured, so the tool is simply absent.
+		CodeSearch: engine.MainIndexCodeSearchParams(cfg),
 	}
 	if useNativeLoop {
 		fmt.Fprintf(out, "telegraph: dispatch enabled (native %s loop, model=%s)\n", cfg.AuthMethod, cfg.AgentModel)

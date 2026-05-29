@@ -156,7 +156,7 @@ func TestLive_OpenRouter_EngineToolsWriteFile(t *testing.T) {
 	loop := NewLoop(client, LoopConfig{
 		Model:         model,
 		SystemPrompt:  "You are a coding engine. Use the provided file and shell tools to complete the task in the working directory. When done, briefly confirm.",
-		Tools:         EngineTools(workDir),
+		Tools:         EngineTools(workDir, nil),
 		MaxIterations: 12,
 	})
 
@@ -176,4 +176,137 @@ func TestLive_OpenRouter_EngineToolsWriteFile(t *testing.T) {
 		t.Errorf("greeting.txt = %q, want it to contain the requested text", got)
 	}
 	t.Logf("engine-tools smoke OK: model=%s usage=%+v file=%q", model, res.Usage, string(got))
+}
+
+// TestLive_OpenRouter_CodeSearch validates the native-loop codesearch tool
+// (railyard-agx) end-to-end against a REAL populated CocoIndex/pgvector index: a
+// weak tool-capable model must actually CALL codesearch (not bash grep) and the
+// tool must return real ranked snippets from the index. This is the mandatory
+// pre-ship smoke gate for the native codesearch work.
+//
+// Gated on a live OpenRouter key AND a live index, supplied via env:
+//
+//	RAILYARD_LIVE_COCOINDEX_DB     postgres URL of the populated pgvector index
+//	RAILYARD_LIVE_COCOINDEX_PYTHON venv python that can run mcp_server.py
+//	RAILYARD_LIVE_COCOINDEX_SCRIPT path to cocoindex/mcp_server.py
+//	RAILYARD_LIVE_COCOINDEX_TABLE  COCOINDEX_MAIN_TABLE (comma-separated allowed)
+//
+// It skips cleanly when any of these are absent (so CI stays green) and when the
+// upstream model is unavailable.
+func TestLive_OpenRouter_CodeSearch(t *testing.T) {
+	key := liveKey()
+	if key == "" {
+		t.Skip("no live key: set RAILYARD_LIVE_OPENROUTER_KEY (or provide /tmp/or_test_key) to run")
+	}
+	db := strings.TrimSpace(os.Getenv("RAILYARD_LIVE_COCOINDEX_DB"))
+	python := strings.TrimSpace(os.Getenv("RAILYARD_LIVE_COCOINDEX_PYTHON"))
+	script := strings.TrimSpace(os.Getenv("RAILYARD_LIVE_COCOINDEX_SCRIPT"))
+	table := strings.TrimSpace(os.Getenv("RAILYARD_LIVE_COCOINDEX_TABLE"))
+	if db == "" || python == "" || script == "" || table == "" {
+		t.Skip("no live index: set RAILYARD_LIVE_COCOINDEX_{DB,PYTHON,SCRIPT,TABLE} to run")
+	}
+
+	model := os.Getenv("RAILYARD_LIVE_OPENROUTER_MODEL")
+	if model == "" {
+		model = "openrouter/owl-alpha"
+	}
+
+	t.Setenv("OPENROUTER_API_KEY", key)
+	t.Setenv("OPENROUTER_BASE_URL", "")
+	client, err := NewClientFromEnv("openrouter",
+		WithHTTPClient(&http.Client{Timeout: 60 * time.Second}),
+		WithMaxRetries(1),
+		WithRetryBaseDelay(time.Second),
+	)
+	if err != nil {
+		t.Fatalf("NewClientFromEnv: %v", err)
+	}
+
+	cs := &CodeSearchParams{
+		PythonPath: python,
+		ScriptPath: script,
+		Env: map[string]string{
+			"COCOINDEX_DATABASE_URL": db,
+			"COCOINDEX_MAIN_TABLE":   table,
+		},
+	}
+
+	// Cover both native-loop toolset shapes that carry codesearch: the
+	// dispatch/telegraph/engine profile (railyard-agx) and the read-only
+	// triage/review profile bull & inspect use (railyard-tsy). Both must let a
+	// real weak model actually call codesearch and get real ranked results.
+	profiles := []struct {
+		name  string
+		role  string
+		tools []Tool
+	}{
+		{"dispatch_profile", "dispatch", DispatchTools(t.TempDir(), cs)},
+		{"readonly_profile", "inspect", ReadOnlyTools(t.TempDir(), cs)},
+	}
+	for _, p := range profiles {
+		t.Run(p.name, func(t *testing.T) {
+			runCodeSearchSmoke(t, client, model, p.role, p.tools)
+		})
+	}
+}
+
+// runCodeSearchSmoke drives one native-loop turn with the given toolset against a
+// real model + index, asserting the model actually invoked codesearch and the
+// tool returned real ranked results (not a "no results" miss or an error).
+func runCodeSearchSmoke(t *testing.T, client *Client, model, role string, tools []Tool) {
+	t.Helper()
+
+	events := make(chan Event, 256)
+	var called bool
+	var resultText, toolErr string
+	drained := make(chan struct{})
+	go func() {
+		defer close(drained)
+		for ev := range events {
+			switch ev.Type {
+			case EventToolCallStart:
+				if ev.ToolName == CodeSearchToolName {
+					called = true
+				}
+			case EventToolCallEnd:
+				if ev.ToolName == CodeSearchToolName {
+					resultText = ev.ToolResult
+					toolErr = ev.ToolError
+				}
+			}
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+
+	loop := NewLoop(client, LoopConfig{
+		Model:         model,
+		SystemPrompt:  "You are a coding assistant. Use the codesearch tool to look up code in the indexed codebase, then answer concisely.",
+		Tools:         tools,
+		Role:          role,
+		MaxIterations: 6,
+		Events:        events,
+	})
+
+	res, runErr := loop.Run(ctx, "Use the codesearch tool to search the codebase for \"user authentication\". Report the filename of the top result.")
+	close(events)
+	<-drained
+
+	if runErr != nil {
+		if upstreamUnavailable(runErr) {
+			t.Skipf("upstream model %q unavailable, skipping codesearch smoke: %v", model, runErr)
+		}
+		t.Fatalf("live codesearch loop run: %v", runErr)
+	}
+	if !called {
+		t.Fatalf("model never called codesearch; final text = %q", res.FinalText)
+	}
+	if toolErr != "" {
+		t.Fatalf("codesearch tool errored against the live index: %s", toolErr)
+	}
+	if strings.TrimSpace(resultText) == "" || strings.Contains(resultText, "No results found") {
+		t.Fatalf("codesearch returned no real results from the live index: %q", resultText)
+	}
+	t.Logf("codesearch smoke OK: model=%s usage=%+v\nresult snippet:\n%s", model, res.Usage, Truncate(resultText, 400))
 }

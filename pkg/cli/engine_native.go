@@ -35,7 +35,11 @@ const nativeEngineMaxIterations = 80
 // openai_compat). It is carried through to RateLimitSignal.Source so downstream
 // pause/retry and metrics aren't mis-attributed when the runner serves a
 // non-openrouter native backend.
-func nativeSpawnRunner(db *gorm.DB, client agentloop.Completer, authMethod string, maxIterations int, cycleLog *slog.Logger) spawnRunner {
+// csParams, when non-nil (CocoIndex configured), adds the semantic codesearch
+// tool to the engine profile — built per-car by the caller from config + the
+// engine's id/track/worktree so its table targeting (main + this engine's
+// overlay) matches the .mcp.json the claude path writes. nil omits the tool.
+func nativeSpawnRunner(db *gorm.DB, client agentloop.Completer, authMethod string, maxIterations int, csParams *agentloop.CodeSearchParams, cycleLog *slog.Logger) spawnRunner {
 	if cycleLog == nil {
 		cycleLog = slog.Default()
 	}
@@ -66,9 +70,11 @@ func nativeSpawnRunner(db *gorm.DB, client agentloop.Completer, authMethod strin
 			loop = agentloop.NewLoop(client, agentloop.LoopConfig{
 				Model:         opts.Model,
 				SystemPrompt:  opts.ContextPayload,
-				Tools:         agentloop.EngineTools(opts.WorkDir),
+				Tools:         agentloop.EngineTools(opts.WorkDir, csParams),
 				MaxIterations: maxIterations,
 				Events:        events,
+				Role:          "engine",
+				Logger:        cycleLog,
 			})
 		} else {
 			userInput = ""

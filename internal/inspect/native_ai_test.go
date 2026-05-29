@@ -59,6 +59,65 @@ func TestNativeAI_RunPrompt_Error(t *testing.T) {
 	}
 }
 
+func TestNativeAI_RunPrompt_WithCodeSearch_ExposesReadOnlyToolsOnly(t *testing.T) {
+	c := &fakeCompleter{resp: agentloop.Response{Content: "APPROVE", FinishReason: "stop"}}
+	cs := &agentloop.CodeSearchParams{PythonPath: "/x/python", ScriptPath: "/x/mcp_server.py"}
+	ai := NewNativeAIWithCodeSearch(c, "m", t.TempDir(), cs)
+
+	out, err := ai.RunPrompt(context.Background(), "review this PR")
+	if err != nil {
+		t.Fatalf("RunPrompt: %v", err)
+	}
+	if out != "APPROVE" {
+		t.Errorf("RunPrompt = %q, want %q", out, "APPROVE")
+	}
+
+	var names []string
+	for _, td := range c.gotReq.Tools {
+		names = append(names, td.Name)
+	}
+	has := func(n string) bool {
+		for _, x := range names {
+			if x == n {
+				return true
+			}
+		}
+		return false
+	}
+	// Review may look up code (read-only) but must never get write/edit/bash.
+	if !has("codesearch") || !has("read_file") {
+		t.Errorf("tools = %v, want read_file + codesearch", names)
+	}
+	for _, forbidden := range []string{"bash", "write_file", "edit_file"} {
+		if has(forbidden) {
+			t.Errorf("tools = %v, must NOT expose %q to review", names, forbidden)
+		}
+	}
+}
+
+func TestNewReviewAI_NativeWiresCodeSearchWhenConfigured(t *testing.T) {
+	t.Setenv("OPENROUTER_API_KEY", "sk-or-test")
+	t.Setenv("OPENROUTER_BASE_URL", "")
+	cfg := &config.Config{
+		AuthMethod: "openrouter",
+		CocoIndex:  config.CocoIndexConfig{DatabaseURL: "postgresql://x", VenvPath: "cocoindex/.venv", ScriptsPath: "cocoindex"},
+		Tracks:     []config.TrackConfig{{Name: "backend"}},
+	}
+	cfg.Inspect.AgentModel = "openrouter/owl-alpha"
+
+	ai, err := newReviewAI(cfg)
+	if err != nil {
+		t.Fatalf("newReviewAI: %v", err)
+	}
+	native, ok := ai.(*NativeAI)
+	if !ok {
+		t.Fatalf("newReviewAI returned %T, want *NativeAI", ai)
+	}
+	if native.codeSearch == nil {
+		t.Error("native review AI should be wired with codesearch when CocoIndex is configured")
+	}
+}
+
 func TestNewReviewAI_DefaultsToCLIProvider(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Inspect.AgentProvider = "claude"

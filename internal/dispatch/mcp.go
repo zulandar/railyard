@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/zulandar/railyard/internal/config"
+	"github.com/zulandar/railyard/internal/engine"
 )
 
 // mcpServerConfig represents a .mcp.json file.
@@ -50,22 +50,11 @@ func WriteDispatchMCPConfig(workDir string, cfg *config.Config) error {
 		mcpCfg.MCPServers = make(map[string]mcpServer)
 	}
 
-	// Build comma-separated list of all track main tables.
-	var tables []string
-	for _, t := range cfg.Tracks {
-		tables = append(tables, fmt.Sprintf("main_%s_embeddings", t.Name))
-	}
-
-	pythonPath, _ := filepath.Abs(filepath.Join(cfg.CocoIndex.VenvPath, "bin", "python"))
-	scriptPath, _ := filepath.Abs(filepath.Join(cfg.CocoIndex.ScriptsPath, "mcp_server.py"))
-
-	mcpCfg.MCPServers["railyard_cocoindex"] = mcpServer{
+	pythonPath, scriptPath := engine.CocoIndexPaths(cfg)
+	mcpCfg.MCPServers[engine.CocoIndexMCPServerName] = mcpServer{
 		Command: pythonPath,
 		Args:    []string{scriptPath},
-		Env: map[string]string{
-			"COCOINDEX_DATABASE_URL": cfg.CocoIndex.DatabaseURL,
-			"COCOINDEX_MAIN_TABLE":   strings.Join(tables, ","),
-		},
+		Env:     engine.MainIndexCocoIndexEnv(cfg),
 	}
 
 	data, err := json.MarshalIndent(mcpCfg, "", "  ")

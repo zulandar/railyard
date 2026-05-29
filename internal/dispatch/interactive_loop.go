@@ -18,8 +18,11 @@ type interactiveLoopConfig struct {
 	SystemPrompt  string
 	WorkDir       string // dispatch worktree; bash/read_file are scoped to it
 	MaxIterations int    // 0 uses the agentloop default
-	In            io.Reader
-	Out           io.Writer
+	// CodeSearch enables the semantic codesearch tool when non-nil (CocoIndex
+	// configured); nil omits it. Dispatch searches all track main tables.
+	CodeSearch *agentloop.CodeSearchParams
+	In         io.Reader
+	Out        io.Writer
 	// sleep waits the given duration honoring ctx during rate-limit backoff;
 	// nil uses a real timer. Tests inject a no-op to avoid waiting on backoff.
 	sleep func(ctx context.Context, d time.Duration) error
@@ -35,9 +38,10 @@ func runInteractiveLoop(ctx context.Context, cfg interactiveLoopConfig) error {
 	loop := agentloop.NewLoop(cfg.Client, agentloop.LoopConfig{
 		Model:         cfg.Model,
 		SystemPrompt:  cfg.SystemPrompt,
-		Tools:         agentloop.DispatchTools(cfg.WorkDir),
+		Tools:         agentloop.DispatchTools(cfg.WorkDir, cfg.CodeSearch),
 		MaxIterations: cfg.MaxIterations,
 		Events:        events,
+		Role:          "dispatch",
 	})
 
 	fmt.Fprintf(cfg.Out, "Railyard dispatch (native loop, model=%s).\n", cfg.Model)

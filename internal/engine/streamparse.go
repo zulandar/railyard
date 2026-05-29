@@ -10,6 +10,10 @@ type UsageStats struct {
 	InputTokens  int
 	OutputTokens int
 	Model        string
+	// CocoIndexCalls counts tool_use blocks naming the cocoindex MCP server
+	// (mcp__railyard_cocoindex__*) observed in the stream-json — a positive
+	// "codesearch was used" signal for the claude CLI path. (railyard-cpn)
+	CocoIndexCalls int
 }
 
 // streamEvent is used for initial type dispatch.
@@ -25,10 +29,16 @@ type resultEvent struct {
 	} `json:"usage"`
 }
 
-// assistantEvent extracts the model from assistant events.
+// assistantEvent extracts the model and content blocks from assistant events.
+// Content blocks carry tool_use entries (with a name), which is how MCP tool
+// calls (e.g. mcp__railyard_cocoindex__*) appear in the claude stream-json.
 type assistantEvent struct {
 	Message struct {
-		Model string `json:"model"`
+		Model   string `json:"model"`
+		Content []struct {
+			Type string `json:"type"`
+			Name string `json:"name"`
+		} `json:"content"`
 	} `json:"message"`
 }
 
@@ -57,8 +67,15 @@ func ParseUsageFromContent(content string) UsageStats {
 			}
 		case "assistant":
 			var a assistantEvent
-			if err := json.Unmarshal([]byte(line), &a); err == nil && a.Message.Model != "" {
-				stats.Model = a.Message.Model
+			if err := json.Unmarshal([]byte(line), &a); err == nil {
+				if a.Message.Model != "" {
+					stats.Model = a.Message.Model
+				}
+				for _, block := range a.Message.Content {
+					if block.Type == "tool_use" && strings.HasPrefix(block.Name, CocoIndexMCPToolPrefix) {
+						stats.CocoIndexCalls++
+					}
+				}
 			}
 		}
 	}
