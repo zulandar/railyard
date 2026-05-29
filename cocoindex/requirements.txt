@@ -3,7 +3,7 @@
 #
 # Requires Python >= 3.13
 
-cocoindex==0.3.33
+cocoindex==0.3.34
 psycopg2-binary>=2.9
 sentence-transformers>=2.2
 numpy>=1.24
