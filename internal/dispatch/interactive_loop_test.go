@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/zulandar/railyard/internal/agentloop"
 )
@@ -177,24 +178,58 @@ func TestInteractiveLoop_SkipsBlankLines(t *testing.T) {
 	}
 }
 
-func TestInteractiveLoop_RunErrorPrintedAndContinues(t *testing.T) {
+func TestInteractiveLoop_RetriesAfterRateLimit(t *testing.T) {
+	// A transient 429 on a turn must be retried in place (not abandoned): the
+	// turn recovers and prints the answer, with a retry notice and no error line.
 	c := &scriptedCompleter{
 		responses: []agentloop.Response{{}, stopResp("recovered answer")},
 		errs:      []error{&agentloop.RateLimitError{Message: "slow down"}, nil},
+	}
+	var out strings.Builder
+	in := strings.NewReader("first\nexit\n")
+
+	if err := runInteractiveLoop(context.Background(), interactiveLoopConfig{
+		Client: c, Model: "m", WorkDir: t.TempDir(), In: in, Out: &out,
+		sleep: func(context.Context, time.Duration) error { return nil },
+	}); err != nil {
+		t.Fatalf("runInteractiveLoop: %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "recovered answer") {
+		t.Errorf("turn should recover after a transient 429:\n%s", got)
+	}
+	if !strings.Contains(strings.ToLower(got), "rate limited") {
+		t.Errorf("expected a retry notice:\n%s", got)
+	}
+	if strings.Contains(got, "error:") {
+		t.Errorf("a recovered turn must not print an error line:\n%s", got)
+	}
+	if c.callCount() != 2 {
+		t.Errorf("model calls = %d, want 2 (one 429 + one success)", c.callCount())
+	}
+}
+
+func TestInteractiveLoop_NonRateLimitErrorPrintedAndContinues(t *testing.T) {
+	// A non-429 error is NOT retried: it prints an error and the REPL continues
+	// to the next turn (preserving the pre-existing fail-soft behavior).
+	c := &scriptedCompleter{
+		responses: []agentloop.Response{{}, stopResp("second answer")},
+		errs:      []error{&agentloop.APIError{StatusCode: 400, Message: "bad request"}, nil},
 	}
 	var out strings.Builder
 	in := strings.NewReader("first\nsecond\nexit\n")
 
 	if err := runInteractiveLoop(context.Background(), interactiveLoopConfig{
 		Client: c, Model: "m", WorkDir: t.TempDir(), In: in, Out: &out,
+		sleep: func(context.Context, time.Duration) error { return nil },
 	}); err != nil {
 		t.Fatalf("runInteractiveLoop: %v", err)
 	}
 	got := out.String()
 	if !strings.Contains(strings.ToLower(got), "error") {
-		t.Errorf("output should report the turn error:\n%s", got)
+		t.Errorf("output should report the non-retryable turn error:\n%s", got)
 	}
-	if !strings.Contains(got, "recovered answer") {
+	if !strings.Contains(got, "second answer") {
 		t.Errorf("loop should continue to the next turn after an error:\n%s", got)
 	}
 	if c.callCount() != 2 {
