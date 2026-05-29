@@ -2,7 +2,6 @@ package telegraph
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sync"
 
@@ -123,49 +122,24 @@ func (p *loopProcess) drive(input string) {
 }
 
 // renderLoopEvent maps a loop event to a relay output line. Assistant text is
-// relayed as-is; tool calls surface as a progress line. Other events (usage,
-// tool-call end, final — final duplicates the last assistant text) are dropped.
+// relayed as-is; tool calls surface as a progress line; tool failures surface so
+// the relay user sees why the agent is stuck. Successful tool results stay
+// summarized by the start line (full output would spam the relay), and usage /
+// final events (final duplicates the last assistant text) are dropped.
 func renderLoopEvent(ev agentloop.Event) string {
 	switch ev.Type {
 	case agentloop.EventAssistantText:
 		return ev.Text
 	case agentloop.EventToolCallStart:
-		return formatToolProgress(ev.ToolName, ev.ToolArgs)
+		return agentloop.FormatToolProgress(ev.ToolName, ev.ToolArgs)
+	case agentloop.EventToolCallEnd:
+		if ev.ToolError != "" {
+			return fmt.Sprintf("⚠️ %s failed: %s", ev.ToolName, agentloop.Truncate(ev.ToolError, 200))
+		}
+		return ""
 	default:
 		return ""
 	}
-}
-
-// formatToolProgress renders a concise "🔧" progress line for a tool call,
-// surfacing the bash command or file path when present.
-func formatToolProgress(name, args string) string {
-	detail := args
-	var m map[string]any
-	if json.Unmarshal([]byte(args), &m) == nil {
-		switch {
-		case asString(m["command"]) != "":
-			detail = asString(m["command"])
-		case asString(m["path"]) != "":
-			detail = asString(m["path"])
-		}
-	}
-	detail = truncateLine(detail, 200)
-	if detail == "" {
-		return "🔧 " + name
-	}
-	return fmt.Sprintf("🔧 %s: %s", name, detail)
-}
-
-func asString(v any) string {
-	s, _ := v.(string)
-	return s
-}
-
-func truncateLine(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	return s[:max] + "…"
 }
 
 // Send supplies the one-shot input when the process was spawned with an empty

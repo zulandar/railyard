@@ -342,3 +342,26 @@ func TestOpenRouterSpawner_EndToEndRelaysSummary(t *testing.T) {
 		t.Errorf("persisted assistant content = %q, want the summary", conv.Content)
 	}
 }
+
+func TestRenderLoopEvent_SurfacesToolError(t *testing.T) {
+	line := renderLoopEvent(agentloop.Event{
+		Type:      agentloop.EventToolCallEnd,
+		ToolName:  "bash",
+		ToolError: "exit status 1",
+	})
+	if !strings.Contains(line, "bash") || !strings.Contains(line, "exit status 1") {
+		t.Errorf("renderLoopEvent = %q, want it to surface the bash tool error", line)
+	}
+}
+
+func TestRenderLoopEvent_DropsSuccessfulToolEnd(t *testing.T) {
+	// Successful tool results stay summarized by the start line; rendering full
+	// output here would spam the relay.
+	if line := renderLoopEvent(agentloop.Event{
+		Type:       agentloop.EventToolCallEnd,
+		ToolName:   "bash",
+		ToolResult: "lots of output",
+	}); line != "" {
+		t.Errorf("renderLoopEvent = %q, want empty for a successful tool-end", line)
+	}
+}

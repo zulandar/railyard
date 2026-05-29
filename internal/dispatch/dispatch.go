@@ -8,7 +8,7 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/zulandar/railyard/internal/agentloop"
+	"github.com/zulandar/railyard/internal/agentbackend"
 	"github.com/zulandar/railyard/internal/config"
 	"github.com/zulandar/railyard/internal/engine"
 )
@@ -64,11 +64,11 @@ func Start(opts StartOpts) error {
 	// (openrouter/openai_compat), drive an interactive stdin/stdout session
 	// against it instead of attaching to a CLI provider. Credentials are
 	// resolved from the environment (the chart injects them).
-	if agentloop.IsNativeLoopMethod(opts.Config.AuthMethod) {
-		client, err := agentloop.NewClientFromEnv(opts.Config.AuthMethod)
-		if err != nil {
-			return fmt.Errorf("dispatch: native loop: %w", err)
-		}
+	client, useNativeLoop, err := agentbackend.Resolve(opts.Config)
+	if err != nil {
+		return fmt.Errorf("dispatch: native loop: %w", err)
+	}
+	if useNativeLoop {
 		return runInteractiveLoop(context.Background(), interactiveLoopConfig{
 			Client:       client,
 			Model:        opts.Config.AgentModel,

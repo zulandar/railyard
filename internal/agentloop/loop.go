@@ -147,7 +147,10 @@ func (l *Loop) Run(ctx context.Context, userInput string) (Result, error) {
 	var agg Usage
 	for iter := 1; iter <= l.maxIterations; iter++ {
 		if err := ctx.Err(); err != nil {
-			return Result{Usage: agg, StopReason: StopMaxIterations, Iterations: iter - 1}, err
+			// Cancellation/deadline: leave StopReason unset (this is not an
+			// iteration-cap stop), matching the Complete-error path below. The
+			// returned error is what callers key on.
+			return Result{Usage: agg, Iterations: iter - 1}, err
 		}
 
 		resp, err := l.client.Complete(ctx, Request{
@@ -192,8 +195,16 @@ func (l *Loop) Run(ctx context.Context, userInput string) (Result, error) {
 		}
 	}
 
-	// Iteration cap hit: return the last assistant text as a partial answer.
+	// Iteration cap hit: return the last assistant text as a partial answer. If
+	// the model only ever emitted tool calls (no assistant text — common for
+	// weak, tool-happy models), synthesize an explanatory message and emit it as
+	// assistant text so relay/interactive consumers surface something instead of
+	// a blank answer, and the transcript records why the run stopped.
 	final := lastAssistantText(l.messages)
+	if final == "" {
+		final = fmt.Sprintf("(stopped after %d iterations without a final answer)", l.maxIterations)
+		l.emit(ctx, Event{Type: EventAssistantText, Text: final})
+	}
 	l.emit(ctx, Event{Type: EventFinal, Text: final})
 	return Result{FinalText: final, Usage: agg, StopReason: StopMaxIterations, Iterations: l.maxIterations}, nil
 }
@@ -202,7 +213,7 @@ func (l *Loop) Run(ctx context.Context, userInput string) (Result, error) {
 // textual result to feed back to the model. Unknown tools and execution errors
 // are converted into an error result (not a hard abort); the loop continues.
 func (l *Loop) execTool(ctx context.Context, tc ToolCall) string {
-	l.emit(ctx, Event{Type: EventToolCallStart, ToolName: tc.Name, ToolArgs: truncate(string(tc.Arguments), 512)})
+	l.emit(ctx, Event{Type: EventToolCallStart, ToolName: tc.Name, ToolArgs: Truncate(string(tc.Arguments), 512)})
 
 	tool, ok := l.toolByName[tc.Name]
 	if !ok {
@@ -241,9 +252,51 @@ func lastAssistantText(msgs []Message) string {
 	return ""
 }
 
-func truncate(s string, max int) string {
+// Truncate returns s clipped to at most max runes, appending "…" when it had to
+// cut. It is rune-safe — it never splits a multibyte UTF-8 sequence — so the
+// result is always valid UTF-8. That matters because tool args/results flow into
+// the persisted transcript (models.AgentLog.Content); a byte-sliced cut landing
+// mid-rune produces invalid UTF-8 that a utf8mb4-strict column rejects, silently
+// dropping the row. max <= 0 returns "".
+func Truncate(s string, max int) string {
+	if max <= 0 {
+		return ""
+	}
+	// Byte length is an upper bound on rune count, so a string within the byte
+	// budget never needs truncation — skip the []rune allocation in the common case.
 	if len(s) <= max {
 		return s
 	}
-	return s[:max] + "…"
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max]) + "…"
+}
+
+// FormatToolProgress renders a concise "🔧" progress line for a tool call,
+// surfacing the bash command or file path from the (JSON) arguments when
+// present. Shared by the dispatch and telegraph relays so their progress lines
+// stay identical.
+func FormatToolProgress(name, args string) string {
+	detail := args
+	var m map[string]any
+	if json.Unmarshal([]byte(args), &m) == nil {
+		switch {
+		case asString(m["command"]) != "":
+			detail = asString(m["command"])
+		case asString(m["path"]) != "":
+			detail = asString(m["path"])
+		}
+	}
+	detail = Truncate(detail, 200)
+	if detail == "" {
+		return "🔧 " + name
+	}
+	return fmt.Sprintf("🔧 %s: %s", name, detail)
+}
+
+func asString(v any) string {
+	s, _ := v.(string)
+	return s
 }

@@ -922,10 +922,31 @@ func (c *Config) validate() error {
 	requireAgentModel := MethodsRequiringAgentModel[c.AuthMethod] &&
 		(c.IsKubernetesMode() || agentloop.IsNativeLoopMethod(c.AuthMethod))
 	if requireAgentModel && c.AgentModel == "" {
-		errs = append(errs, fmt.Sprintf(
-			"agent_model is required when auth_method is %s (no implicit default model)",
-			c.AuthMethod,
-		))
+		// applyDefaults cascades the top-level agent_model into Bull/Inspect/Tracks
+		// only when those are empty, so a config that sets models per-role (with no
+		// top-level default) is valid. Flag only the roles whose effective model is
+		// still empty; if no role is configured, require the top-level default.
+		var missing []string
+		for _, t := range c.Tracks {
+			if t.AgentModel == "" {
+				missing = append(missing, fmt.Sprintf("tracks[%q]", t.Name))
+			}
+		}
+		if c.Bull.Enabled && c.Bull.AgentModel == "" {
+			missing = append(missing, "bull")
+		}
+		if c.Inspect.Enabled && c.Inspect.AgentModel == "" {
+			missing = append(missing, "inspect")
+		}
+		if len(c.Tracks) == 0 && !c.Bull.Enabled && !c.Inspect.Enabled {
+			missing = append(missing, "agent_model (top level)")
+		}
+		if len(missing) > 0 {
+			errs = append(errs, fmt.Sprintf(
+				"agent_model is required when auth_method is %s (no implicit default model); missing for: %s",
+				c.AuthMethod, strings.Join(missing, ", "),
+			))
+		}
 	}
 	// openrouter / openai_compat select the Railyard-owned native agent loop
 	// (internal/agentloop), so agent_provider is irrelevant for those methods —

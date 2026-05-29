@@ -13,7 +13,7 @@ the app config).
 | Env (chart-injected) | `OPENROUTER_API_KEY` / `OPENAI_BASE_URL`+`OPENAI_API_KEY` | `ANTHROPIC_BASE_URL`+`ANTHROPIC_API_KEY` |
 | Works with weak models (e.g. owl-alpha) | **yes** | **no** (see limitation) |
 | Works with capable models | yes | yes |
-| Roles covered | telegraph, `ry dispatch`, bull, engines | all (via the claude CLI) |
+| Roles covered | telegraph, `ry dispatch`, bull, engines, inspect (PR review) | all (via the claude CLI) |
 | Extra code | Railyard-owned loop | near-zero (reuses claude CLI) |
 
 **Default recommendation: Approach A (native loop).** It is the only path that
@@ -21,10 +21,20 @@ works across *all* roles and *both* weak and capable models, and it is
 self-contained (no coupling to the claude CLI or skin fidelity). Use Approach B
 only if you run capable models exclusively and prefer to lean on the claude CLI.
 
-> **Migration note:** before the native loop, `auth_method: openrouter` meant
-> "claude CLI via the Anthropic skin." That behavior is now `openrouter_skin`.
-> If you were on `openrouter` for the skin, either switch to `openrouter_skin`
-> (same behavior) or move to the native loop (recommended).
+> **⚠️ Upgrading to v0.9.14 — `openrouter` changed meaning (breaking).** Before
+> the native loop, `auth_method: openrouter` meant "claude CLI via the Anthropic
+> skin." As of v0.9.14 it means the **native loop**, and the old behavior moved
+> to the new value `openrouter_skin`.
+>
+> What this means for existing deployments:
+> - **Helm:** an existing `auth.method: openrouter` install switches backend on
+>   `helm upgrade` — the chart now injects `OPENROUTER_API_KEY` (native loop)
+>   instead of `ANTHROPIC_BASE_URL`+`ANTHROPIC_API_KEY` (claude skin). To keep
+>   the prior behavior, set `auth.method: openrouter_skin` before upgrading.
+> - **`openai_compat`** likewise now uses the native loop (it no longer requires
+>   `agent_provider: codex`); set `auth.openaiCompat.baseURL` + `apiKey`.
+> - **Recommended:** move to the native loop — it covers all roles (including
+>   PR review/inspect as of v0.9.14) and works with weak *and* capable models.
 
 ---
 

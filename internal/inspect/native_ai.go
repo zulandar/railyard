@@ -1,4 +1,4 @@
-package bull
+package inspect
 
 import (
 	"context"
@@ -10,21 +10,21 @@ import (
 	"github.com/zulandar/railyard/internal/config"
 )
 
-// NativeAI implements TriageAI using the Railyard-owned agent loop's client for
+// NativeAI implements ReviewAI using the Railyard-owned agent loop's client for
 // a single one-shot completion (no tools). It is selected when auth_method
-// routes to the native loop (openrouter/openai_compat); triage is a pure
+// routes to the native loop (openrouter/openai_compat); review is a pure
 // text-in/text-out decision, so no tool dispatch is needed.
 type NativeAI struct {
 	client agentloop.Completer
 	model  string
 }
 
-// NewNativeAI creates a TriageAI backed by an OpenAI-compatible client.
+// NewNativeAI creates a ReviewAI backed by an OpenAI-compatible client.
 func NewNativeAI(client agentloop.Completer, model string) *NativeAI {
 	return &NativeAI{client: client, model: model}
 }
 
-// RunPrompt sends the triage prompt as a single user message and returns the
+// RunPrompt sends the review prompt as a single user message and returns the
 // model's trimmed text response — matching ProviderAI.RunPrompt's contract.
 func (a *NativeAI) RunPrompt(ctx context.Context, prompt string) (string, error) {
 	resp, err := a.client.Complete(ctx, agentloop.Request{
@@ -32,21 +32,22 @@ func (a *NativeAI) RunPrompt(ctx context.Context, prompt string) (string, error)
 		Messages: []agentloop.Message{{Role: "user", Content: prompt}},
 	})
 	if err != nil {
-		return "", fmt.Errorf("bull: native run prompt: %w", err)
+		return "", fmt.Errorf("inspect: native run prompt: %w", err)
 	}
 	return strings.TrimSpace(resp.Content), nil
 }
 
-// newTriageAI selects the triage AI backend: the native agent loop when
+// newReviewAI selects the review AI backend: the native agent loop when
 // auth_method routes to it (credentials from the environment), otherwise the
-// CLI agent provider (unchanged behavior).
-func newTriageAI(cfg *config.Config) (TriageAI, error) {
+// CLI agent provider (unchanged behavior). Mirrors bull.newTriageAI so the
+// inspect role follows the same native-vs-CLI routing as every other role.
+func newReviewAI(cfg *config.Config) (ReviewAI, error) {
 	client, useNative, err := agentbackend.Resolve(cfg)
 	if err != nil {
-		return nil, fmt.Errorf("bull: native loop: %w", err)
+		return nil, fmt.Errorf("inspect: native loop: %w", err)
 	}
 	if useNative {
-		return NewNativeAI(client, cfg.Bull.AgentModel), nil
+		return NewNativeAI(client, cfg.Inspect.AgentModel), nil
 	}
-	return NewProviderAI(cfg.Bull.AgentProvider, cfg.Bull.AgentModel)
+	return NewProviderAI(cfg.Inspect.AgentProvider, cfg.Inspect.AgentModel)
 }

@@ -285,3 +285,57 @@ func TestLoop_EmitsEvents(t *testing.T) {
 		t.Errorf("event types = %v, want to include tool_call_start, tool_call_end, final", types)
 	}
 }
+
+func TestLoop_SynthesizesFinalTextWhenToolOnlyHitsCap(t *testing.T) {
+	// Model only ever emits tool calls (no assistant text), then hits the cap —
+	// the common weak-model failure that previously yielded a blank FinalText.
+	fc := &fakeCompleter{responses: []Response{
+		toolCallResp("c1", "noop", `{}`),
+		toolCallResp("c2", "noop", `{}`),
+	}}
+	noop := fakeTool{name: "noop", fn: func(_ context.Context, _ json.RawMessage) (string, error) { return "ok", nil }}
+	events := make(chan Event, 64)
+	loop := NewLoop(fc, LoopConfig{Model: "m", Tools: []Tool{noop}, MaxIterations: 2, Events: events})
+
+	res, err := loop.Run(context.Background(), "go")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	close(events)
+
+	if res.StopReason != StopMaxIterations {
+		t.Fatalf("StopReason = %q, want %q", res.StopReason, StopMaxIterations)
+	}
+	if res.FinalText == "" {
+		t.Error("FinalText is empty; want a synthesized 'stopped after N iterations' message")
+	}
+	// The synthesized text must also reach consumers as assistant text (the relay
+	// and interactive renderers drop EventFinal).
+	var sawAssistantFinal bool
+	for ev := range events {
+		if ev.Type == EventAssistantText && ev.Text == res.FinalText {
+			sawAssistantFinal = true
+		}
+	}
+	if !sawAssistantFinal {
+		t.Error("synthesized final text was not emitted as EventAssistantText")
+	}
+}
+
+func TestLoop_CancelDoesNotReportMaxIterations(t *testing.T) {
+	// A cancelled run must not be mislabeled as an iteration-cap stop; the
+	// returned error is what callers key on (railyard-37x.10).
+	fc := &fakeCompleter{responses: []Response{toolCallResp("c1", "noop", `{}`)}}
+	noop := fakeTool{name: "noop", fn: func(_ context.Context, _ json.RawMessage) (string, error) { return "ok", nil }}
+	loop := NewLoop(fc, LoopConfig{Model: "m", Tools: []Tool{noop}, MaxIterations: 5})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel before the loop starts a turn
+	res, err := loop.Run(ctx, "go")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	if res.StopReason == StopMaxIterations {
+		t.Error("StopReason = StopMaxIterations on cancellation; want unset")
+	}
+}

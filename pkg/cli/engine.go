@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/zulandar/railyard/internal/agentloop"
+	"github.com/zulandar/railyard/internal/agentbackend"
 	"github.com/zulandar/railyard/internal/car"
 	"github.com/zulandar/railyard/internal/config"
 	"github.com/zulandar/railyard/internal/db"
@@ -135,14 +135,11 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 	// When auth_method routes to the Railyard-owned native loop
 	// (openrouter/openai_compat), build the OpenAI-compatible client once; the
 	// per-cycle native runner reuses it. Credentials come from the environment.
-	useNativeLoop := agentloop.IsNativeLoopMethod(cfg.AuthMethod)
-	var loopClient agentloop.Completer
+	loopClient, useNativeLoop, err := agentbackend.Resolve(cfg)
+	if err != nil {
+		return fmt.Errorf("engine: native loop: %w", err)
+	}
 	if useNativeLoop {
-		c, err := agentloop.NewClientFromEnv(cfg.AuthMethod)
-		if err != nil {
-			return fmt.Errorf("engine: native loop: %w", err)
-		}
-		loopClient = c
 		logger.Info("Engine using native agent loop", "auth_method", cfg.AuthMethod, "model", trackCfg.AgentModel)
 	}
 
@@ -383,6 +380,15 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 		var outcome sessionOutcome
 		var spawnErr error
 		if useNativeLoop {
+			// The native runner is deliberately NOT given stallCfg. The CLI
+			// stdout-silence detector exists to catch a subprocess that hangs
+			// producing no output and never exits — a failure mode the native loop
+			// does not have. Each native iteration is a single HTTP request bounded
+			// by the agentloop client timeout (5m), and the whole run is bounded by
+			// nativeEngineMaxIterations; a model that loops calling tools forever
+			// hits that cap and maps to outcomeStall (see mapEngineOutcome). So the
+			// stall bound is structural — per-call HTTP timeout + iteration cap —
+			// rather than stdout-silence-based. (railyard-37x.9)
 			runner := nativeSpawnRunner(gormDB, loopClient, cfg.AuthMethod, nativeEngineMaxIterations, cycleLog)
 			sess, outcome, spawnErr = spawnAndMonitorWithRetryRunner(ctx, spawnOpts, cfg.Stall.RateLimitMaxRetries, cfg.Stall.RateLimitMaxWaitSec, cycleLog, runner)
 		} else {
