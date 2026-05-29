@@ -12,6 +12,13 @@ import (
 	"github.com/zulandar/railyard/internal/engine"
 )
 
+// nativeReviewMaxIterations bounds the read-only review loop. Review is a
+// look-up-then-decide task (a few codesearch/read_file calls before answering),
+// so the cap sits well below the engine's coding budget. Hitting it means the
+// model never converged, and RunPrompt surfaces that as an error rather than a
+// placeholder the review parser would silently reject.
+const nativeReviewMaxIterations = 16
+
 // NativeAI implements ReviewAI using the Railyard-owned agent loop. When
 // CocoIndex is configured it runs a tool-capable loop with a READ-ONLY toolset
 // (read_file + codesearch — no bash/write/edit) so the model can look up related
@@ -59,13 +66,20 @@ func (a *NativeAI) RunPrompt(ctx context.Context, prompt string) (string, error)
 	}
 
 	loop := agentloop.NewLoop(a.client, agentloop.LoopConfig{
-		Model: a.model,
-		Tools: agentloop.ReadOnlyTools(a.workDir, a.codeSearch),
-		Role:  "inspect",
+		Model:         a.model,
+		Tools:         agentloop.ReadOnlyTools(a.workDir, a.codeSearch),
+		MaxIterations: nativeReviewMaxIterations,
+		Role:          "inspect",
 	})
 	res, err := loop.Run(ctx, prompt)
 	if err != nil {
 		return "", fmt.Errorf("inspect: native run prompt: %w", err)
+	}
+	// A max-iterations stop means the model never produced a decision; its
+	// FinalText is a synthesized placeholder, not a review result. Surface it as
+	// an error so the caller doesn't try to parse a non-decision.
+	if res.StopReason == agentloop.StopMaxIterations {
+		return "", fmt.Errorf("inspect: native run prompt: agent did not finish within %d iterations", res.Iterations)
 	}
 	return strings.TrimSpace(res.FinalText), nil
 }

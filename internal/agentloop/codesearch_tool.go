@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -20,9 +21,10 @@ const CodeSearchToolName = "codesearch"
 // CodeSearchParams is everything the codesearch tool needs to run a query,
 // expressed as plain primitives so the agentloop package stays transport- and
 // config-unaware (it imports no other Railyard package). Callers translate
-// their config into these (e.g. engine.EngineCodeSearchParams,
-// dispatch.DispatchCodeSearchParams), choosing the table targeting via Env —
-// the same COCOINDEX_* env the .mcp.json path already uses.
+// their config into these (e.g. engine.EngineCodeSearchParams for an engine's
+// own table + overlay, engine.MainIndexCodeSearchParams for the all-tracks main
+// index), choosing the table targeting via Env — the same COCOINDEX_* env the
+// .mcp.json path already uses.
 type CodeSearchParams struct {
 	// PythonPath is the interpreter that runs ScriptPath (the cocoindex venv).
 	PythonPath string
@@ -104,9 +106,12 @@ func (t *CodeSearchTool) Execute(ctx context.Context, args json.RawMessage) (str
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		// Surface the subprocess stderr as the tool error (fed back to the model
-		// by the loop, which continues rather than aborting).
+		// by the loop, which continues rather than aborting). Redact first: the
+		// codesearch subprocess connects to the CocoIndex Postgres/pgvector
+		// database, and a connection failure can embed the full DSN — including
+		// credentials — in psycopg2's error text.
 		if msg := strings.TrimSpace(stderr.String()); msg != "" {
-			return "", fmt.Errorf("codesearch: %s", msg)
+			return "", fmt.Errorf("codesearch: %s", redactCredentials(msg))
 		}
 		return "", fmt.Errorf("codesearch: %w", err)
 	}
@@ -116,6 +121,19 @@ func (t *CodeSearchTool) Execute(ctx context.Context, args json.RawMessage) (str
 		return "", fmt.Errorf("codesearch: parse results: %w", err)
 	}
 	return formatCodeSearchResults(a.Query, results), nil
+}
+
+// dsnCredentialRE matches user:password@host credential substrings (URL-form
+// DSNs). It mirrors the DSN pattern in engine.RedactSecrets — duplicated rather
+// than imported because agentloop deliberately stays free of other railyard
+// imports (see CodeSearchParams).
+var dsnCredentialRE = regexp.MustCompile(`(\w+):([^@\s]{8,})@[a-zA-Z0-9.]`)
+
+// redactCredentials strips credential-bearing substrings from text before it is
+// surfaced to the model as a tool result, so a subprocess error that echoes the
+// CocoIndex database DSN does not leak its password.
+func redactCredentials(s string) string {
+	return dsnCredentialRE.ReplaceAllString(s, "[REDACTED]")
 }
 
 // formatCodeSearchResults renders ranked snippets into a compact, model-readable

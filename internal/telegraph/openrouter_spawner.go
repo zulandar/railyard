@@ -14,8 +14,9 @@ import (
 // agent loop (internal/agentloop) instead of the claude CLI. It is the
 // native-loop counterpart to ClaudeSpawner: given a system prompt, worktree,
 // model, and OpenAI-compatible client, each Spawn drives an agentloop.Loop with
-// the dispatch tool profile (bash + read_file) and adapts its events to the
-// Process I/O contract that SessionManager already consumes — so all existing
+// the dispatch tool profile (bash + read_file, plus codesearch when CocoIndex
+// is configured) and adapts its events to the Process I/O contract that
+// SessionManager already consumes — so all existing
 // relay / persistence / chunking / empty-output handling is reused unchanged.
 type OpenRouterSpawner struct {
 	// SystemPrompt is the dispatch system prompt (kept minimal — the same

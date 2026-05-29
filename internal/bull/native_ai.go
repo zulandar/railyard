@@ -12,6 +12,13 @@ import (
 	"github.com/zulandar/railyard/internal/engine"
 )
 
+// nativeTriageMaxIterations bounds the read-only triage loop. Triage is a
+// look-up-then-decide task (a few codesearch/read_file calls before answering),
+// so the cap sits well below the engine's coding budget. Hitting it means the
+// model never converged, and RunPrompt surfaces that as an error rather than a
+// placeholder the triage parser would silently reject.
+const nativeTriageMaxIterations = 16
+
 // NativeAI implements TriageAI using the Railyard-owned agent loop. When
 // CocoIndex is configured it runs a tool-capable loop with a READ-ONLY toolset
 // (read_file + codesearch — no bash/write/edit) so the model can look up related
@@ -59,13 +66,20 @@ func (a *NativeAI) RunPrompt(ctx context.Context, prompt string) (string, error)
 	}
 
 	loop := agentloop.NewLoop(a.client, agentloop.LoopConfig{
-		Model: a.model,
-		Tools: agentloop.ReadOnlyTools(a.workDir, a.codeSearch),
-		Role:  "bull",
+		Model:         a.model,
+		Tools:         agentloop.ReadOnlyTools(a.workDir, a.codeSearch),
+		MaxIterations: nativeTriageMaxIterations,
+		Role:          "bull",
 	})
 	res, err := loop.Run(ctx, prompt)
 	if err != nil {
 		return "", fmt.Errorf("bull: native run prompt: %w", err)
+	}
+	// A max-iterations stop means the model never produced a decision; its
+	// FinalText is a synthesized placeholder, not a triage result. Surface it as
+	// an error so the caller doesn't try to parse a non-decision.
+	if res.StopReason == agentloop.StopMaxIterations {
+		return "", fmt.Errorf("bull: native run prompt: agent did not finish within %d iterations", res.Iterations)
 	}
 	return strings.TrimSpace(res.FinalText), nil
 }

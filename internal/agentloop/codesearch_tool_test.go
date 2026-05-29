@@ -116,6 +116,31 @@ func TestCodeSearchToolExecuteError(t *testing.T) {
 	}
 }
 
+func TestCodeSearchToolExecuteRedactsCredentials(t *testing.T) {
+	side := filepath.Join(t.TempDir(), "side.txt")
+	// A psycopg2-style connection failure that embeds the full DSN, including the
+	// password — exactly what the codesearch subprocess can emit when the
+	// CocoIndex database is unreachable or rejects the credentials.
+	failMsg := "could not connect to server: FATAL connection to postgresql://coco:s3cr3tpassword@db.internal:5432/cocoindex failed"
+	py := writeFakePython(t, side, "", failMsg)
+	tool := NewCodeSearchTool(CodeSearchParams{PythonPath: py, ScriptPath: "/fake/s.py", Env: map[string]string{"SIDECHANNEL": side}})
+
+	_, err := tool.Execute(context.Background(), []byte(`{"query":"boom"}`))
+	if err == nil {
+		t.Fatal("Execute should return an error when the query subprocess exits non-zero")
+	}
+	// The error is fed back to the model as a tool result: it must not leak the
+	// database password.
+	if strings.Contains(err.Error(), "s3cr3tpassword") {
+		t.Errorf("error leaks DB credentials to the model: %q", err.Error())
+	}
+	// The non-secret diagnostic must still surface so the model/operator can see
+	// why the search failed.
+	if !strings.Contains(err.Error(), "could not connect") {
+		t.Errorf("error dropped the non-secret diagnostic: %q", err.Error())
+	}
+}
+
 func TestCodeSearchToolRejectsEmptyQuery(t *testing.T) {
 	tool := NewCodeSearchTool(CodeSearchParams{PythonPath: "/bin/true", ScriptPath: "/fake/s.py"})
 	if _, err := tool.Execute(context.Background(), []byte(`{"query":""}`)); err == nil {

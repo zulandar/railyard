@@ -2,6 +2,7 @@ package inspect
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -92,6 +93,23 @@ func TestNativeAI_RunPrompt_WithCodeSearch_ExposesReadOnlyToolsOnly(t *testing.T
 		if has(forbidden) {
 			t.Errorf("tools = %v, must NOT expose %q to review", names, forbidden)
 		}
+	}
+}
+
+func TestNativeAI_RunPrompt_WithCodeSearch_MaxIterationsReturnsError(t *testing.T) {
+	// A model that only ever calls a tool (never producing a final answer) drives
+	// the read-only loop to its iteration cap. RunPrompt must surface that as an
+	// error rather than returning the loop's placeholder text as if it were a
+	// review decision (which would fail to parse and silently drop the result).
+	c := &fakeCompleter{resp: agentloop.Response{
+		ToolCalls: []agentloop.ToolCall{{ID: "1", Name: "read_file", Arguments: json.RawMessage(`{"path":"missing.txt"}`)}},
+	}}
+	cs := &agentloop.CodeSearchParams{PythonPath: "/x/python", ScriptPath: "/x/mcp_server.py"}
+	ai := NewNativeAIWithCodeSearch(c, "m", t.TempDir(), cs)
+
+	out, err := ai.RunPrompt(context.Background(), "review this change")
+	if err == nil {
+		t.Fatalf("RunPrompt should error when the loop hits the iteration cap; got %q", out)
 	}
 }
 

@@ -252,7 +252,8 @@ func DispatchTools(workdir string, cs *CodeSearchParams) []Tool {
 // ReadOnlyTools is the triage/review profile: read_file plus codesearch when cs
 // is non-nil (CocoIndex configured). It deliberately excludes bash, write_file
 // and edit_file so triage (bull) and review (inspect) agents can look up code
-// but can never mutate — or shell out against — the tree.
+// but can never run arbitrary shell commands or mutate the tree. (codesearch
+// shells out only to a fixed, read-only query CLI — not a general-purpose shell.)
 func ReadOnlyTools(workdir string, cs *CodeSearchParams) []Tool {
 	tools := []Tool{NewReadFileTool(workdir)}
 	if cs != nil {
