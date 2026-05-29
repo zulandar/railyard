@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -659,6 +660,38 @@ func TestEnsureCocoIndexScripts_RemovesStaleInitPy(t *testing.T) {
 
 	if _, err := os.Stat(staleInit); !os.IsNotExist(err) {
 		t.Error("stale __init__.py should have been removed")
+	}
+}
+
+func TestEmbeddedRequirements_CocoIndexExactlyPinned(t *testing.T) {
+	// The embedded requirements file is written out by `ry cocoindex init`. A
+	// floating cocoindex pin (e.g. ">=0.1.44") lets a fresh install pip-install a
+	// newer, API-incompatible release against the bundled 0.3.33-era scripts,
+	// breaking indexing on first run (railyard-f4y.1). Enforce an exact "==" pin
+	// so a floating pin can never ship again.
+	specRe := regexp.MustCompile(`^cocoindex(\[[^\]]*\])?\s*(===|==|>=|<=|~=|!=|>|<)\s*(\S+)`)
+
+	var found bool
+	for _, raw := range strings.Split(embeddedRequirements, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		m := specRe.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		found = true
+		if op := m[2]; op != "==" {
+			t.Errorf("embedded cocoindex requirement uses %q (line %q); want an exact %q pin — a floating pin breaks fresh installs", op, line, "==")
+		}
+		if m[3] == "" {
+			t.Errorf("embedded cocoindex requirement %q has no version", line)
+		}
+	}
+
+	if !found {
+		t.Fatalf("no cocoindex requirement line found in embedded requirements:\n%s", embeddedRequirements)
 	}
 }
 
