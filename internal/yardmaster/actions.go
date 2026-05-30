@@ -110,6 +110,30 @@ func handleRetryMergeWithBus(db *gorm.DB, msg models.Message, logger *slog.Logge
 		return
 	}
 
+	// Guard against futile retry loops. Early retries are always allowed — a
+	// config/environment fix is a legitimate retry and does not change the
+	// branch HEAD — but once a car has been re-armed maxMergeRetries times and
+	// keeps failing the merge gate, the cause is almost certainly deterministic
+	// (e.g. a test-environment gap). Alert a human instead of looping silently.
+	if retries := countMergeRetries(db, msg.CarID); retries >= maxMergeRetries {
+		logger.Warn("Action retry-merge: retry limit reached, escalating to human instead of re-arming",
+			"car", msg.CarID, "retries", retries, "reason", msg.Body)
+		if err := writeProgressNote(db, msg.CarID, "dispatch",
+			fmt.Sprintf("Retry merge refused after %d attempts — escalating to human: %s", retries, msg.Body)); err != nil {
+			logger.Error("Action retry-merge: progress note failed", "error", err)
+		}
+		if _, err := messaging.Send(db, YardmasterID, "human", "escalate",
+			fmt.Sprintf("Car %s has been retried %d times and keeps failing the merge gate. The cause is likely deterministic (e.g. a test-environment gap), not transient — human intervention needed. Latest reason: %s", msg.CarID, retries, msg.Body),
+			messaging.SendOpts{CarID: msg.CarID, Priority: "urgent"}); err != nil {
+			logger.Error("Action retry-merge: human escalation message failed", "car", msg.CarID, "error", err)
+		}
+		publish(bus, plugin.YardmasterAction, plugin.YardmasterActionEvent{
+			TargetID:   msg.CarID,
+			ActionType: "escalate",
+		})
+		return
+	}
+
 	logger.Info("Action retry-merge: setting car back to done", "car", msg.CarID, "reason", msg.Body)
 
 	if err := db.Model(&models.Car{}).Where("id = ?", msg.CarID).Updates(map[string]interface{}{
@@ -128,6 +152,23 @@ func handleRetryMergeWithBus(db *gorm.DB, msg models.Message, logger *slog.Logge
 		TargetID:   msg.CarID,
 		ActionType: "retry-merge",
 	})
+}
+
+// maxMergeRetries bounds how many times a car may be re-armed for merge via the
+// retry-merge action before the loop is treated as futile and handed to a human.
+const maxMergeRetries = 3
+
+// countMergeRetries returns how many times a retry-merge has already been
+// requested for a car, counted from its retry progress notes.
+func countMergeRetries(db *gorm.DB, carID string) int {
+	var count int64
+	if err := db.Model(&models.CarProgress{}).
+		Where("car_id = ? AND note LIKE ?", carID, "Retry merge requested:%").
+		Count(&count).Error; err != nil {
+		slog.Error("countMergeRetries", "car", carID, "error", err)
+		return 0
+	}
+	return int(count)
 }
 
 // handleRequeueCar is a thin wrapper around [handleRequeueCarWithBus] that

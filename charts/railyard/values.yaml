@@ -229,6 +229,19 @@ auth:
 #       repository: ghcr.io/myorg/railyard-php
 #       tag: "8.2"    # defaults to global image tag if omitted
 #     testCommand: "vendor/bin/phpunit"
+#
+# ── MERGE-GATE TEST ENVIRONMENT ──
+# The yardmaster runs each track's preTestCommand + testCommand inside a
+# DEDICATED git worktree (.railyard/yardmaster/), which contains only files
+# TRACKED by git. Anything .gitignore'd (.env, app keys, a local SQLite DB,
+# vendor/, node_modules) is ABSENT until preTestCommand recreates it — so a
+# suite that passes in a dev checkout can mass-error here from a missing
+# environment. Use preTestCommand to provision a clean, runnable environment:
+#   Go:      preTestCommand: "go mod download"
+#   Node:    preTestCommand: "npm ci"
+#   Laravel: preTestCommand: "composer install --no-interaction --prefer-dist && cp -n .env.example .env && php artisan key:generate --force && php artisan migrate --force"
+# Runs that error on a missing app key / DB driver / DB connection are
+# classified as infrastructure (not code) failures so escalation points here.
 tracks:
   - name: backend
     engineSlots: 3
@@ -236,6 +249,7 @@ tracks:
     maxReplicas: 3
     language: go
     testCommand: "go test ./..."
+    # preTestCommand: "go mod download"   # provisions the merge-gate worktree (see note above)
     # Playwright PR demo (opt-in, per-track). When enabled, the engine prompt
     # instructs the agent to commit a Playwright spec demonstrating the
     # user-visible behavior of its change, and the PR body links to it.
