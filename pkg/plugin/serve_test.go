@@ -135,6 +135,46 @@ func TestAdapterLifecycle(t *testing.T) {
 	}
 }
 
+// TestAdapterInitReportsSDKVersion verifies the plugin reports its SDK
+// version in the InitResponse so the host can surface it in
+// `ry plugins status` (railyard-77h.8).
+func TestAdapterInitReportsSDKVersion(t *testing.T) {
+	t.Parallel()
+
+	impl := &fakePlugin{name: "ver"}
+	adapter, _ := newTestAdapter(impl)
+	resp, err := adapter.Init(context.Background(), &protov1.InitRequest{PluginName: "ver"})
+	if err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if resp.SdkVersion != SDKVersion {
+		t.Errorf("resp.SdkVersion = %q, want %q", resp.SdkVersion, SDKVersion)
+	}
+}
+
+// TestAdapterInitStashesSupportedTopics verifies the host's Init-time
+// topic advertisement is recorded on the hostClient so subsequent
+// Subscribe calls can detect unknown topics (railyard-77h.8).
+func TestAdapterInitStashesSupportedTopics(t *testing.T) {
+	t.Parallel()
+
+	impl := &fakePlugin{name: "neg"}
+	adapter, hc := newTestAdapter(impl)
+	_, err := adapter.Init(context.Background(), &protov1.InitRequest{
+		PluginName:           "neg",
+		SupportedEventTopics: []string{string(CarCreated), string(CarClaimed)},
+	})
+	if err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if hc.unknownTopic(string(CarCreated)) {
+		t.Error("advertised topic CarCreated flagged as unknown")
+	}
+	if !hc.unknownTopic("Frobnicate") {
+		t.Error("un-advertised topic Frobnicate should be flagged unknown")
+	}
+}
+
 // TestAdapterInitError verifies that a user Init returning an error is
 // surfaced as a gRPC FailedPrecondition status, which the host treats
 // as "skip this plugin" per the proto contract.

@@ -57,6 +57,48 @@ func TestPluginsStatusTableOutput(t *testing.T) {
 	}
 }
 
+// TestPluginsStatusSDKColumn asserts the rendered table carries an SDK
+// column populated from PluginStatus.SDKVersion, with a dash for rows
+// that report no version (railyard-77h.8).
+func TestPluginsStatusSDKColumn(t *testing.T) {
+	withStubConfigLoad(t, func(string) (*config.Config, error) {
+		return &config.Config{Yardmaster: config.YardmasterConfig{HealthPort: 8081}}, nil
+	})
+	withStubStatusFetch(t, func(ctx context.Context, url string, timeout time.Duration) (*pluginhost.Snapshot, error) {
+		return &pluginhost.Snapshot{
+			Plugins: []pluginhost.PluginStatus{
+				{Name: "trainmaster", Status: pluginhost.StatusRunning, SDKVersion: "1.0.0", PID: 7},
+				{Name: "legacy", Status: pluginhost.StatusRunning, PID: 8},
+			},
+		}, nil
+	})
+
+	root := newRootCmd()
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	root.SetArgs([]string{"plugins", "status"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "SDK") {
+		t.Errorf("expected SDK column header, got:\n%s", got)
+	}
+	if !strings.Contains(got, "1.0.0") {
+		t.Errorf("expected trainmaster SDK version 1.0.0 in output:\n%s", got)
+	}
+	lines := strings.Split(got, "\n")
+	for _, l := range lines {
+		if strings.HasPrefix(strings.TrimSpace(l), "legacy ") {
+			// legacy reports no SDK version -> dash placeholder.
+			if !strings.Contains(l, "-") {
+				t.Errorf("expected dash for empty SDK version on legacy row:\n%s", l)
+			}
+		}
+	}
+}
+
 // TestPluginsStatusErrorColumn asserts the rendered table surfaces
 // PluginStatus.Error for non-running plugins so operators can diagnose
 // failed/disabled rows without falling back to --json. See railyard-kag.

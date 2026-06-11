@@ -10,6 +10,8 @@ import (
 	"time"
 
 	protov1 "github.com/zulandar/railyard/pkg/plugin/proto/v1"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"gopkg.in/yaml.v3"
@@ -58,6 +60,16 @@ type hostClient struct {
 	subMu              sync.Mutex
 	subscribedTopics   []string
 	subscribedTopicSet map[string]struct{}
+
+	// supportedTopics is the set of event topics the host advertised it
+	// can deliver, captured from the Init handshake
+	// (InitRequest.supported_event_topics, railyard-77h.8).
+	// topicNegotiated is true only when the host advertised a non-empty
+	// set; an old host that advertises nothing leaves it false and
+	// disables the unknown-topic check so new plugins keep working
+	// against old hosts. Both are guarded by subMu.
+	supportedTopics map[string]struct{}
+	topicNegotiated bool
 
 	// logger is the slog.Logger handed to the plugin via Logger(). It
 	// forwards records to the host through HostService.Log.
@@ -129,6 +141,18 @@ func (h *hostClient) Subscribe(topic EventType, handler EventHandler) Unsubscrib
 		return func() {}
 	}
 	h.recordSubscribedTopic(string(topic))
+	// Negotiation guard (railyard-77h.8): when the host advertised the
+	// topics it supports, a subscription to a topic outside that set will
+	// never deliver. Surface a clear, distinct WARN ("unknown-topic")
+	// rather than letting it fail silently — distinct from the
+	// allow-list denial surfaced in runSubscribeLoop ("allowlist-denied").
+	if h.unknownTopic(string(topic)) && h.logger != nil {
+		h.logger.Warn(
+			"plugin: subscribing to a topic the host does not advertise; it will never deliver — check host/SDK version compatibility",
+			slog.String("topic", string(topic)),
+			slog.String("reason", "unknown-topic"),
+		)
+	}
 	ctx, cancel := context.WithCancel(h.rootCtx)
 	stream, err := h.hsc.Subscribe(ctx, &protov1.SubscribeRequest{Topics: []string{string(topic)}})
 	if err != nil {
@@ -157,6 +181,43 @@ func (h *hostClient) recordSubscribedTopic(topic string) {
 	}
 	h.subscribedTopicSet[topic] = struct{}{}
 	h.subscribedTopics = append(h.subscribedTopics, topic)
+}
+
+// setSupportedTopics records the host's Init-time topic advertisement
+// (InitRequest.supported_event_topics). A non-empty list enables the
+// unknown-topic check in [hostClient.Subscribe]; an empty list (an old
+// host that predates negotiation) leaves the check disabled
+// (railyard-77h.8).
+func (h *hostClient) setSupportedTopics(topics []string) {
+	h.subMu.Lock()
+	defer h.subMu.Unlock()
+	if len(topics) == 0 {
+		h.topicNegotiated = false
+		h.supportedTopics = nil
+		return
+	}
+	h.topicNegotiated = true
+	h.supportedTopics = make(map[string]struct{}, len(topics))
+	for _, t := range topics {
+		if t == "" {
+			continue
+		}
+		h.supportedTopics[t] = struct{}{}
+	}
+}
+
+// unknownTopic reports whether topic is one the host did NOT advertise
+// at Init time. It returns false when topic negotiation is inactive
+// (the host advertised nothing), so a new plugin keeps working against
+// an old host (railyard-77h.8).
+func (h *hostClient) unknownTopic(topic string) bool {
+	h.subMu.Lock()
+	defer h.subMu.Unlock()
+	if !h.topicNegotiated {
+		return false
+	}
+	_, ok := h.supportedTopics[topic]
+	return !ok
 }
 
 // advertisedTopics returns a snapshot of every topic the plugin has
@@ -193,6 +254,17 @@ func (h *hostClient) runSubscribeLoop(ctx context.Context, topic EventType, stre
 		ev, err := stream.Recv()
 		if err != nil {
 			if errors.Is(err, io.EOF) || ctx.Err() != nil {
+				return
+			}
+			// Distinguish an allow-list denial (railyard-77h.8) from a
+			// generic stream close so operators can tell "your config
+			// blocks this topic" apart from "the host went away".
+			if st, ok := status.FromError(err); ok && st.Code() == codes.PermissionDenied {
+				h.logger.Warn("plugin: subscription denied by host allow-list",
+					slog.String("topic", string(topic)),
+					slog.String("reason", "allowlist-denied"),
+					slog.String("err", err.Error()),
+				)
 				return
 			}
 			h.logger.Warn("plugin: subscribe stream closed",

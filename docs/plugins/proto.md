@@ -47,17 +47,40 @@ active module so buf does not try to compile two copies of every type.
 
 ## Capability handshake
 
-`InitRequest.capabilities` carries the plugin's wish-list:
+`InitRequest` carries the plugin's wish-list plus the host's topic
+advertisement:
 
-- `subscribe_events` — `EventType` names the plugin wants
-- `provide_commands` — `CommandSchema` entries the plugin wishes to register
-- `sdk_version` — pkg/plugin version the plugin was built against
+- `capabilities.subscribe_events` — `EventType` names the plugin wants
+- `capabilities.provide_commands` — `CommandSchema` entries the plugin wishes to register
+- `capabilities.sdk_version` — unused (see note below)
+- `supported_event_topics` — the host's canonical list of topics it can
+  deliver, the string form of `plugin.CoreEventTypes()`. The SDK uses it
+  to warn on a subscription to a topic the host does not know about. An
+  empty list means the host predates negotiation, and the SDK disables
+  the check.
 
-`InitResponse` carries the host's answer:
+`InitResponse` carries the host's answer plus the plugin's reported version:
 
 - `allowed_events` — the subset of `subscribe_events` permitted by the allow-list
 - `allowed_commands` — the subset of command names the plugin may dispatch
 - `denials` — structured `{kind, name, reason}` for anything refused, so the plugin can log it at WARN
+- `sdk_version` — the value of `plugin.SDKVersion` the plugin was built
+  against; the host surfaces it in `ry plugins status`
+
+> **Why `sdk_version` lives on `InitResponse`, not `InitRequest`.**
+> go-plugin makes the *host* the client that calls `PluginService.Init`,
+> so the host fills `InitRequest`. Only the plugin knows its own SDK
+> version, so it can only report it on the response side. The
+> `capabilities.sdk_version` field on `InitRequest` is therefore vestigial
+> and left unused (additive policy: it cannot be removed without a v2).
+
+**Event topics are additive.** Adding a new `EventType` enum value (and
+its oneof arm + payload message) is a minor, wire-compatible change. A
+plugin built against an older SDK simply never subscribes to a topic it
+does not know about; a plugin built against a newer SDK gets a WARN from
+the host's `supported_event_topics` advertisement rather than a silently
+dead subscription. New topics MUST be appended to `plugin.CoreEventTypes()`
+so the host advertises them.
 
 `Subscribe(topics)` is intersected with `allowed_events` — the plugin
 cannot receive a topic it was denied at Init, even if it later asks for

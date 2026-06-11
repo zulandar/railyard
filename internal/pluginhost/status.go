@@ -35,6 +35,7 @@ type YardmasterInfo struct {
 type PluginStatus struct {
 	Name              string    `json:"name"`
 	Status            string    `json:"status"` // running | disabled | failed | skipped
+	SDKVersion        string    `json:"sdk_version,omitempty"`
 	RestartCount      int       `json:"restart_count"`
 	SubscriptionCount int       `json:"subscription_count"`
 	CommandCount      int       `json:"command_count"`
@@ -107,6 +108,7 @@ func (h *Host) Status() Snapshot {
 		plugins = append(plugins, PluginStatus{
 			Name:              lp.name,
 			Status:            StatusRunning,
+			SDKVersion:        lp.sdkVersion,
 			RestartCount:      lp.restartCount,
 			SubscriptionCount: h.subscriptions[lp.name],
 			CommandCount:      len(lp.capabilities.provideCommands),

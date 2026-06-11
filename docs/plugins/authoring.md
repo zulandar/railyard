@@ -310,6 +310,21 @@ safe to call multiple times.
 subscriber. Plugins that need ground truth under sustained load should
 also call `Snapshot` periodically.
 
+**Topic negotiation.** Event topics are an *additive* surface: adding a
+new `EventType` to the SDK is a minor change, not a major-version break.
+At Init the host advertises the set of topics it can deliver (the string
+form of `plugin.CoreEventTypes()`), and the SDK records it. If you
+`Subscribe` to a topic the running host did not advertise — e.g. your
+plugin was built against a newer SDK than the host — the SDK logs a
+distinct WARN (`reason=unknown-topic`) instead of leaving a silently
+dead subscription. This is separate from an allow-list denial, which the
+host reports as `PermissionDenied` and the SDK logs with
+`reason=allowlist-denied`. An older host that predates negotiation
+advertises nothing, in which case the SDK skips the check entirely and
+the subscription behaves exactly as before. The plugin's own
+`plugin.SDKVersion` is reported back to the host at Init and shown in the
+`SDK` column of `ry plugins status`.
+
 ### Snapshot
 
 Returns the current full operational state in a single read

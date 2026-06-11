@@ -386,9 +386,17 @@ type InitRequest struct {
 	// key the host looked up to launch this process.
 	PluginName string `protobuf:"bytes,1,opt,name=plugin_name,json=pluginName,proto3" json:"plugin_name,omitempty"`
 	// capabilities is the plugin's wish-list.
-	Capabilities  *Capabilities `protobuf:"bytes,2,opt,name=capabilities,proto3" json:"capabilities,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Capabilities *Capabilities `protobuf:"bytes,2,opt,name=capabilities,proto3" json:"capabilities,omitempty"`
+	// supported_event_topics is the host's canonical list of event topic
+	// names it can deliver on the Subscribe stream (the string form of the
+	// pkg/plugin.EventType constants, e.g. "CarCreated"). The host fills
+	// it from pkg/plugin.CoreEventTypes() so the advertised set cannot
+	// drift from the SDK constants. An empty list means the host predates
+	// topic negotiation; a new plugin then skips its unknown-topic check
+	// so it keeps working against an old host (railyard-77h.8).
+	SupportedEventTopics []string `protobuf:"bytes,3,rep,name=supported_event_topics,json=supportedEventTopics,proto3" json:"supported_event_topics,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *InitRequest) Reset() {
@@ -435,6 +443,13 @@ func (x *InitRequest) GetCapabilities() *Capabilities {
 	return nil
 }
 
+func (x *InitRequest) GetSupportedEventTopics() []string {
+	if x != nil {
+		return x.SupportedEventTopics
+	}
+	return nil
+}
+
 type InitResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// allowed_events is the subset of capabilities.subscribe_events the
@@ -445,7 +460,17 @@ type InitResponse struct {
 	AllowedCommands []string `protobuf:"bytes,2,rep,name=allowed_commands,json=allowedCommands,proto3" json:"allowed_commands,omitempty"`
 	// denials lists every requested-but-refused capability with a reason
 	// for diagnostics.
-	Denials       []*CapabilityDenial `protobuf:"bytes,3,rep,name=denials,proto3" json:"denials,omitempty"`
+	Denials []*CapabilityDenial `protobuf:"bytes,3,rep,name=denials,proto3" json:"denials,omitempty"`
+	// sdk_version is the pkg/plugin SDK version string the plugin was
+	// built against (the value of pkg/plugin.SDKVersion). The host stores
+	// it and surfaces it in `ry plugins status` for support diagnostics.
+	// An empty value means the plugin predates version reporting
+	// (railyard-77h.8).
+	//
+	// NOTE: Capabilities.sdk_version (on InitRequest) is unused for this
+	// purpose — go-plugin makes the host the Init *client*, so the plugin
+	// can only report its own version on the response side.
+	SdkVersion    string `protobuf:"bytes,4,opt,name=sdk_version,json=sdkVersion,proto3" json:"sdk_version,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -499,6 +524,13 @@ func (x *InitResponse) GetDenials() []*CapabilityDenial {
 		return x.Denials
 	}
 	return nil
+}
+
+func (x *InitResponse) GetSdkVersion() string {
+	if x != nil {
+		return x.SdkVersion
+	}
+	return ""
 }
 
 type StartRequest struct {
@@ -2734,15 +2766,18 @@ const file_plugin_proto_rawDesc = "" +
 	"\x10KIND_UNSPECIFIED\x10\x00\x12\x0e\n" +
 	"\n" +
 	"KIND_EVENT\x10\x01\x12\x10\n" +
-	"\fKIND_COMMAND\x10\x02\"t\n" +
+	"\fKIND_COMMAND\x10\x02\"\xaa\x01\n" +
 	"\vInitRequest\x12\x1f\n" +
 	"\vplugin_name\x18\x01 \x01(\tR\n" +
 	"pluginName\x12D\n" +
-	"\fcapabilities\x18\x02 \x01(\v2 .railyard.plugin.v1.CapabilitiesR\fcapabilities\"\xa0\x01\n" +
+	"\fcapabilities\x18\x02 \x01(\v2 .railyard.plugin.v1.CapabilitiesR\fcapabilities\x124\n" +
+	"\x16supported_event_topics\x18\x03 \x03(\tR\x14supportedEventTopics\"\xc1\x01\n" +
 	"\fInitResponse\x12%\n" +
 	"\x0eallowed_events\x18\x01 \x03(\tR\rallowedEvents\x12)\n" +
 	"\x10allowed_commands\x18\x02 \x03(\tR\x0fallowedCommands\x12>\n" +
-	"\adenials\x18\x03 \x03(\v2$.railyard.plugin.v1.CapabilityDenialR\adenials\"\x0e\n" +
+	"\adenials\x18\x03 \x03(\v2$.railyard.plugin.v1.CapabilityDenialR\adenials\x12\x1f\n" +
+	"\vsdk_version\x18\x04 \x01(\tR\n" +
+	"sdkVersion\"\x0e\n" +
 	"\fStartRequest\"\x0f\n" +
 	"\rStartResponse\"7\n" +
 	"\vStopRequest\x12(\n" +

@@ -21,6 +21,7 @@ func newStatusFixtureHost(t *testing.T) *Host {
 				pid:          12345,
 				restartCount: 0,
 				lastActivity: time.Unix(1_700_000_050, 0),
+				sdkVersion:   "9.9.9",
 				capabilities: pluginCapabilities{provideCommands: []string{"do_a", "do_b"}},
 			},
 		},
@@ -114,6 +115,29 @@ func TestStatusRunningFieldsPopulated(t *testing.T) {
 	}
 	if got.Error != "" {
 		t.Errorf("running plugin Error = %q, want empty", got.Error)
+	}
+	if got.SDKVersion != "9.9.9" {
+		t.Errorf("SDKVersion = %q, want 9.9.9", got.SDKVersion)
+	}
+}
+
+// TestStatusSDKVersionOnlyForRunning asserts the reported SDK version is
+// surfaced for running plugins and omitted for the other states, which
+// never observe an InitResponse (railyard-77h.8).
+func TestStatusSDKVersionOnlyForRunning(t *testing.T) {
+	h := newStatusFixtureHost(t)
+	snap := h.Status()
+	for _, p := range snap.Plugins {
+		switch p.Name {
+		case "running-plugin":
+			if p.SDKVersion != "9.9.9" {
+				t.Errorf("running SDKVersion = %q, want 9.9.9", p.SDKVersion)
+			}
+		default:
+			if p.SDKVersion != "" {
+				t.Errorf("%s SDKVersion = %q, want empty", p.Name, p.SDKVersion)
+			}
+		}
 	}
 }
 

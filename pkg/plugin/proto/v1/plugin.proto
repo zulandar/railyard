@@ -164,6 +164,15 @@ message InitRequest {
 
   // capabilities is the plugin's wish-list.
   Capabilities capabilities = 2;
+
+  // supported_event_topics is the host's canonical list of event topic
+  // names it can deliver on the Subscribe stream (the string form of the
+  // pkg/plugin.EventType constants, e.g. "CarCreated"). The host fills
+  // it from pkg/plugin.CoreEventTypes() so the advertised set cannot
+  // drift from the SDK constants. An empty list means the host predates
+  // topic negotiation; a new plugin then skips its unknown-topic check
+  // so it keeps working against an old host (railyard-77h.8).
+  repeated string supported_event_topics = 3;
 }
 
 message InitResponse {
@@ -178,6 +187,17 @@ message InitResponse {
   // denials lists every requested-but-refused capability with a reason
   // for diagnostics.
   repeated CapabilityDenial denials = 3;
+
+  // sdk_version is the pkg/plugin SDK version string the plugin was
+  // built against (the value of pkg/plugin.SDKVersion). The host stores
+  // it and surfaces it in `ry plugins status` for support diagnostics.
+  // An empty value means the plugin predates version reporting
+  // (railyard-77h.8).
+  //
+  // NOTE: Capabilities.sdk_version (on InitRequest) is unused for this
+  // purpose — go-plugin makes the host the Init *client*, so the plugin
+  // can only report its own version on the response side.
+  string sdk_version = 4;
 }
 
 // -----------------------------------------------------------------------------

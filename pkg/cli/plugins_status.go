@@ -120,11 +120,12 @@ func runPluginsStatus(cmd *cobra.Command, configPath, urlFlag string, jsonOut bo
 // ("3m ago", "just now", "-" for zero).
 func renderStatusTable(out io.Writer, snap *pluginhost.Snapshot) error {
 	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "NAME\tSTATUS\tRESTARTS\tSUBS\tCMDS\tLAST-ACTIVITY\tPID\tPATH\tERROR")
+	fmt.Fprintln(w, "NAME\tSTATUS\tSDK\tRESTARTS\tSUBS\tCMDS\tLAST-ACTIVITY\tPID\tPATH\tERROR")
 	for _, p := range snap.Plugins {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			p.Name,
 			p.Status,
+			dashIfEmpty(p.SDKVersion),
 			dashIfZero(p.RestartCount),
 			dashIfZero(p.SubscriptionCount),
 			dashIfZero(p.CommandCount),

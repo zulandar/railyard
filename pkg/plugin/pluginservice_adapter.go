@@ -65,6 +65,11 @@ func (a *pluginServiceAdapter) Init(ctx context.Context, req *protov1.InitReques
 		a.mu.Lock()
 		a.hc = hc
 		a.mu.Unlock()
+		// Capture the host's Init-time topic advertisement BEFORE the
+		// user's Init runs, so any Subscribe call made during Init can be
+		// checked against it (railyard-77h.8). req is nil-safe via the
+		// generated getter.
+		hc.setSupportedTopics(req.GetSupportedEventTopics())
 		initErr = a.callUser("Init", func() error {
 			return a.impl.Init(ctx, hc)
 		})
@@ -81,7 +86,7 @@ func (a *pluginServiceAdapter) Init(ctx context.Context, req *protov1.InitReques
 	// applies its allow-list (railyard-fll.4) and stores its filtered
 	// view internally; the response we hand back here describes what the
 	// plugin TRIED to register so the host can compute denials.
-	resp := &protov1.InitResponse{}
+	resp := &protov1.InitResponse{SdkVersion: SDKVersion}
 	a.mu.Lock()
 	hc := a.hc
 	a.mu.Unlock()

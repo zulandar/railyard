@@ -11,6 +11,7 @@ import (
 	"time"
 
 	goplugin "github.com/hashicorp/go-plugin"
+	"github.com/zulandar/railyard/pkg/plugin"
 	protov1 "github.com/zulandar/railyard/pkg/plugin/proto/v1"
 )
 
@@ -53,6 +54,12 @@ type launchedPlugin struct {
 	// confirm the plugin actually advertised the command before
 	// routing.
 	capabilities pluginCapabilities
+
+	// sdkVersion is the pkg/plugin SDK version the plugin reported in its
+	// InitResponse (railyard-77h.8). Empty for a plugin built before
+	// version reporting. Set once at Init; surfaced by Status(). Read
+	// under [Host.mu].
+	sdkVersion string
 
 	// allow is the per-plugin capability allow-list resolved from
 	// railyard.yaml at Init time (railyard-fll.4). It is consulted on
@@ -303,8 +310,9 @@ func (h *Host) initOne(ctx context.Context, c candidate, parentLogger *slog.Logg
 	initCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	resp, err := lp.pluginRPC.Init(initCtx, &protov1.InitRequest{
-		PluginName:   c.name,
-		Capabilities: &protov1.Capabilities{},
+		PluginName:           c.name,
+		Capabilities:         &protov1.Capabilities{},
+		SupportedEventTopics: canonicalEventTopics(),
 	})
 	if err != nil {
 		pluginLogger.Warn(
@@ -356,6 +364,12 @@ func (h *Host) initOne(ctx context.Context, c candidate, parentLogger *slog.Logg
 		provideCommands: allowedCmds,
 	}
 
+	// Record the plugin's reported SDK version (railyard-77h.8). Set
+	// before startSupervisor inserts lp into h.launched, so there is no
+	// concurrent reader yet. Empty for plugins built before version
+	// reporting.
+	lp.sdkVersion = resp.SdkVersion
+
 	// Register command ownership BEFORE spawning the supervisor so a
 	// crash-restart race cannot leave a window where the plugin's
 	// commands look unowned.
@@ -398,6 +412,20 @@ func (h *Host) initOne(ctx context.Context, c candidate, parentLogger *slog.Logg
 	// future code path adds in-place re-init (e.g. config reload), it
 	// will need to clear initFailures itself in the same lock acquisition
 	// that re-inserts into h.launched.
+}
+
+// canonicalEventTopics returns the host's advertised event-topic list
+// for the Init handshake, derived from the SDK's
+// pkg/plugin.CoreEventTypes() so the advertised set cannot drift from
+// the SDK constants (railyard-77h.8). The plugin uses it to warn on a
+// subscription to a topic the host cannot deliver.
+func canonicalEventTopics() []string {
+	core := plugin.CoreEventTypes()
+	out := make([]string, 0, len(core))
+	for _, et := range core {
+		out = append(out, string(et))
+	}
+	return out
 }
 
 // resolveAllowList builds the per-plugin AllowList from the loaded
