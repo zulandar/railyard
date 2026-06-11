@@ -283,6 +283,50 @@ func TestMarkPermanentlyDisabledSurfacesViaStatus(t *testing.T) {
 	}
 }
 
+// TestMarkPermanentlyDisabledClearsCmdSpecs proves the disable path drops
+// the doomed plugin's typed arg specs in lockstep with its command
+// ownership (railyard-uv8.2). Otherwise a disable -> ry plugins restart
+// cycle with a binary that changed/dropped a spec would validate dispatched
+// args against the stale schema. removeLaunched already does both; the
+// supervisor's disable path must match the documented invariant.
+func TestMarkPermanentlyDisabledClearsCmdSpecs(t *testing.T) {
+	h := &Host{
+		bootedAt:      time.Unix(1_700_000_000, 0),
+		clock:         func() time.Time { return time.Unix(1_700_000_100, 0) },
+		launched:      map[string]*launchedPlugin{},
+		subscriptions: map[string]int{},
+		initFailures:  map[string]initFailure{},
+		disabled:      map[string]*disabledPlugin{},
+		pluginCmds:    map[string]string{"do_a": "doomed-plugin", "keep": "other-plugin"},
+		pluginCmdSpecs: map[string]*protov1.CommandSchema{
+			"do_a": {Name: "do_a", Args: []*protov1.ArgSpec{{Name: "x", Type: protov1.ArgType_ARG_TYPE_STRING, Required: true}}},
+			"keep": {Name: "keep"},
+		},
+	}
+	lp := &launchedPlugin{
+		name:         "doomed-plugin",
+		path:         "/etc/railyard/plugins.d/doomed-plugin",
+		capabilities: pluginCapabilities{provideCommands: []string{"do_a"}},
+	}
+	h.launched["doomed-plugin"] = lp
+
+	h.markPermanentlyDisabled(lp)
+
+	if _, ok := h.pluginCmds["do_a"]; ok {
+		t.Error("pluginCmds entry for disabled plugin's command must be cleared")
+	}
+	if _, ok := h.pluginCmdSpecs["do_a"]; ok {
+		t.Error("pluginCmdSpecs entry for disabled plugin's command must be cleared in lockstep")
+	}
+	// Another plugin's command + spec must survive.
+	if _, ok := h.pluginCmds["keep"]; !ok {
+		t.Error("another plugin's command ownership must not be touched")
+	}
+	if _, ok := h.pluginCmdSpecs["keep"]; !ok {
+		t.Error("another plugin's spec must not be touched")
+	}
+}
+
 // TestStatusSurfacesRuntimeCounters asserts the per-plugin lifetime
 // counters living on launchedPlugin (railyard-77h.14) are read out of
 // the atomics and surfaced on the running plugin's PluginStatus row.

@@ -329,9 +329,16 @@ func (h *Host) markPermanentlyDisabled(lp *launchedPlugin) {
 		commandCount:   len(lp.capabilities.provideCommands),
 	}
 	delete(h.launched, lp.name)
+	// Drop command ownership AND the typed arg specs in lockstep — the
+	// pluginCmds/pluginCmdSpecs invariant (host.go) requires both to be
+	// cleaned up together, exactly as removeLaunched does. Leaving a stale
+	// spec behind would make a disable -> ry plugins restart cycle with a
+	// changed binary validate dispatched args against the old schema
+	// (railyard-uv8.2).
 	for cmd, owner := range h.pluginCmds {
 		if owner == lp.name {
 			delete(h.pluginCmds, cmd)
+			delete(h.pluginCmdSpecs, cmd)
 		}
 	}
 }
