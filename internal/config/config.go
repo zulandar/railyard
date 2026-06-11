@@ -8,6 +8,7 @@ import (
 	"os"
 	"reflect"
 	"regexp"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -43,7 +44,12 @@ type Config struct {
 	Inspect           InspectConfig       `yaml:"inspect"`
 	Telegraph         TelegraphConfig     `yaml:"telegraph"`
 	Kubernetes        KubernetesConfig    `yaml:"kubernetes"`
-	AgentProvider     string              `yaml:"agent_provider"`
+	// MCPServers declares additional MCP servers (keyed by server name) to
+	// merge into the .mcp.json written to dispatch/engine worktrees. The
+	// name "railyard_cocoindex" is reserved for the built-in codesearch
+	// server.
+	MCPServers    map[string]MCPServerConfig `yaml:"mcp_servers"`
+	AgentProvider string                     `yaml:"agent_provider"`
 	// AgentModel selects a specific model for the configured agent provider.
 	// Unlike AgentProvider (which defaults to "claude"), AgentModel has no
 	// default — empty means "let the provider's CLI choose". The value
@@ -402,6 +408,23 @@ type TrackConfig struct {
 	Playwright            *models.PlaywrightConfig `yaml:"playwright,omitempty"`
 }
 
+// ReservedMCPServerName is the .mcp.json server key Railyard owns for its
+// built-in CocoIndex codesearch server. User-configured mcp_servers entries
+// may not use it. engine.CocoIndexMCPServerName aliases this value so the
+// writers and the config validation cannot drift apart.
+const ReservedMCPServerName = "railyard_cocoindex"
+
+// MCPServerConfig declares a user-supplied MCP server to expose to CLI-based
+// agent providers. Entries are merged into the .mcp.json written to each
+// dispatch/engine worktree, alongside Railyard's own cocoindex server. Only
+// providers that discover project .mcp.json files (the claude CLI) consume
+// these; the native loop and other provider CLIs ignore them.
+type MCPServerConfig struct {
+	Command string            `yaml:"command"`
+	Args    []string          `yaml:"args"`
+	Env     map[string]string `yaml:"env"`
+}
+
 // BullCommentsConfig controls Bull's issue commenting behavior.
 type BullCommentsConfig struct {
 	Enabled         bool   `yaml:"enabled"`
@@ -671,6 +694,13 @@ func (c *Config) applyDefaults() {
 	c.Database.TLS.CACert = resolveEnvVars(c.Database.TLS.CACert)
 	c.Database.TLS.ClientCert = resolveEnvVars(c.Database.TLS.ClientCert)
 	c.Database.TLS.ClientKey = resolveEnvVars(c.Database.TLS.ClientKey)
+	// MCP server env blocks typically carry tokens — resolve ${VAR} there
+	// like the other credential fields above.
+	for _, srv := range c.MCPServers {
+		for k, v := range srv.Env {
+			srv.Env[k] = resolveEnvVars(v)
+		}
+	}
 	if c.Stall.StdoutTimeoutSec <= 0 {
 		c.Stall.StdoutTimeoutSec = 120
 	}
@@ -903,6 +933,21 @@ func (c *Config) validate() error {
 			if t.Playwright.SpecPath == "" {
 				errs = append(errs, fmt.Sprintf("track %q has playwright.enabled but missing spec_path", t.Name))
 			}
+		}
+	}
+	// mcp_servers validation — sorted for deterministic error output.
+	mcpNames := make([]string, 0, len(c.MCPServers))
+	for name := range c.MCPServers {
+		mcpNames = append(mcpNames, name)
+	}
+	sort.Strings(mcpNames)
+	for _, name := range mcpNames {
+		if name == ReservedMCPServerName {
+			errs = append(errs, fmt.Sprintf("mcp_servers: name %q is reserved for Railyard's built-in codesearch server", ReservedMCPServerName))
+			continue
+		}
+		if c.MCPServers[name].Command == "" {
+			errs = append(errs, fmt.Sprintf("mcp_servers[%q]: command is required", name))
 		}
 	}
 	// Kubernetes validation (only when namespace or image is set).

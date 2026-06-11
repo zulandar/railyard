@@ -127,6 +127,88 @@ func TestWriteDispatchMCPConfig_PreservesExistingServers(t *testing.T) {
 	}
 }
 
+// TestWriteDispatchMCPConfig_IncludesConfiguredServers verifies railyard.yaml
+// mcp_servers entries are written alongside the cocoindex entry.
+func TestWriteDispatchMCPConfig_IncludesConfiguredServers(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.Config{
+		CocoIndex: config.CocoIndexConfig{
+			DatabaseURL: "postgresql://x",
+			VenvPath:    "cocoindex/.venv",
+			ScriptsPath: "cocoindex",
+		},
+		MCPServers: map[string]config.MCPServerConfig{
+			"internal_repo": {
+				Command: "/usr/local/bin/internal-mcp",
+				Args:    []string{"--repo", "platform"},
+				Env:     map[string]string{"INTERNAL_TOKEN": "abc123"},
+			},
+		},
+		Tracks: []config.TrackConfig{
+			{Name: "backend", Language: "go"},
+		},
+	}
+
+	if err := WriteDispatchMCPConfig(tmpDir, cfg); err != nil {
+		t.Fatalf("WriteDispatchMCPConfig() error: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(tmpDir, ".mcp.json"))
+	if err != nil {
+		t.Fatalf("read .mcp.json: %v", err)
+	}
+	var result mcpServerConfig
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("unmarshal .mcp.json: %v", err)
+	}
+
+	srv, ok := result.MCPServers["internal_repo"]
+	if !ok {
+		t.Fatal("configured internal_repo server missing from .mcp.json")
+	}
+	if srv.Command != "/usr/local/bin/internal-mcp" {
+		t.Errorf("Command = %q, want %q", srv.Command, "/usr/local/bin/internal-mcp")
+	}
+	if srv.Env["INTERNAL_TOKEN"] != "abc123" {
+		t.Errorf("Env[INTERNAL_TOKEN] = %q, want %q", srv.Env["INTERNAL_TOKEN"], "abc123")
+	}
+	if _, ok := result.MCPServers["railyard_cocoindex"]; !ok {
+		t.Error("railyard_cocoindex entry missing alongside configured servers")
+	}
+}
+
+// TestWriteDispatchMCPConfig_NoCocoIndex_WritesConfiguredServers verifies
+// configured mcp_servers are written even when cocoindex is unconfigured
+// (previously the writer returned early and wrote nothing).
+func TestWriteDispatchMCPConfig_NoCocoIndex_WritesConfiguredServers(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.Config{
+		MCPServers: map[string]config.MCPServerConfig{
+			"internal_repo": {Command: "/usr/local/bin/internal-mcp"},
+		},
+	}
+
+	if err := WriteDispatchMCPConfig(tmpDir, cfg); err != nil {
+		t.Fatalf("WriteDispatchMCPConfig() error: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(tmpDir, ".mcp.json"))
+	if err != nil {
+		t.Fatalf("read .mcp.json: %v", err)
+	}
+	var result mcpServerConfig
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("unmarshal .mcp.json: %v", err)
+	}
+
+	if _, ok := result.MCPServers["internal_repo"]; !ok {
+		t.Fatal("configured internal_repo server missing from .mcp.json")
+	}
+	if _, ok := result.MCPServers["railyard_cocoindex"]; ok {
+		t.Error("railyard_cocoindex entry written despite no database_url")
+	}
+}
+
 func TestWriteDispatchMCPConfig_SingleTrack(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := &config.Config{
