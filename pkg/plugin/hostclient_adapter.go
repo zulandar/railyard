@@ -140,6 +140,27 @@ func (h *hostClient) Subscribe(topic EventType, handler EventHandler) Unsubscrib
 	if handler == nil {
 		return func() {}
 	}
+	// Adapt to the meta-aware path, discarding the metadata. Plain
+	// Subscribe behaviour is unchanged (railyard-77h.10).
+	return h.subscribeInternal(topic, func(t EventType, payload any, _ EventMeta) {
+		handler(t, payload)
+	})
+}
+
+// SubscribeWithMeta implements Host.SubscribeWithMeta. It shares the
+// same stream wiring as Subscribe but surfaces the per-stream sequence
+// number and cumulative drop count to the handler (railyard-77h.10).
+func (h *hostClient) SubscribeWithMeta(topic EventType, handler MetaEventHandler) Unsubscribe {
+	if handler == nil {
+		return func() {}
+	}
+	return h.subscribeInternal(topic, handler)
+}
+
+// subscribeInternal is the shared implementation behind Subscribe and
+// SubscribeWithMeta. The handler always receives [EventMeta]; the plain
+// Subscribe wrapper discards it.
+func (h *hostClient) subscribeInternal(topic EventType, handler MetaEventHandler) Unsubscribe {
 	h.recordSubscribedTopic(string(topic))
 	// Negotiation guard (railyard-77h.8): when the host advertised the
 	// topics it supports, a subscription to a topic outside that set will
@@ -241,7 +262,7 @@ func (h *hostClient) advertisedCommandNames() []string {
 	return out
 }
 
-func (h *hostClient) runSubscribeLoop(ctx context.Context, topic EventType, stream protov1.HostService_SubscribeClient, handler EventHandler) {
+func (h *hostClient) runSubscribeLoop(ctx context.Context, topic EventType, stream protov1.HostService_SubscribeClient, handler MetaEventHandler) {
 	defer func() {
 		if r := recover(); r != nil {
 			h.logger.Error("plugin: subscribe handler panic recovered",
@@ -284,6 +305,7 @@ func (h *hostClient) runSubscribeLoop(ctx context.Context, topic EventType, stre
 		// Run inside an inline recover so a panicking handler does not
 		// terminate the goroutine — the SDK is the sole owner of this
 		// goroutine's lifetime.
+		meta := EventMeta{Seq: ev.Seq, Dropped: ev.Dropped}
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
@@ -293,7 +315,7 @@ func (h *hostClient) runSubscribeLoop(ctx context.Context, topic EventType, stre
 					)
 				}
 			}()
-			handler(decoded.topic, decoded.payload)
+			handler(decoded.topic, decoded.payload, meta)
 		}()
 	}
 }

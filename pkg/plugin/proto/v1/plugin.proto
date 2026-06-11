@@ -413,6 +413,18 @@ message Event {
   EventType type = 1;
   google.protobuf.Timestamp emitted_at = 2;
 
+  // seq is a per-subscription delivery counter, incremented for every
+  // event DELIVERED on this stream, starting at 1. It resets to 1 when a
+  // plugin reopens its stream (e.g. after a relaunch), which the plugin
+  // treats as "reconcile via Snapshot first" (railyard-77h.10).
+  uint64 seq = 3;
+
+  // dropped is the cumulative count of events dropped on this
+  // subscription since the stream opened. A gap is visible when dropped
+  // increases between two consecutively received events; the plugin
+  // should then re-Snapshot to reconcile (railyard-77h.10).
+  uint64 dropped = 4;
+
   oneof payload {
     CarCreatedEvent car_created = 10;
     CarClaimedEvent car_claimed = 11;

@@ -3,6 +3,7 @@ package pluginhost
 import (
 	"context"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -116,6 +117,137 @@ func TestSubscribeDeliversEvents(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("Subscribe did not exit after context cancel")
+	}
+}
+
+// gatedSubscribeStream blocks inside the FIRST Send until its gate is
+// released, recording every event sent. This lets a test wedge the
+// drain loop, flood the bus to force host-side drop-oldest, then
+// release and inspect the seq/dropped stamps on subsequently delivered
+// events (railyard-77h.10).
+type gatedSubscribeStream struct {
+	protov1.HostService_SubscribeServer
+
+	ctx context.Context
+
+	mu        sync.Mutex
+	received  []*protov1.Event
+	gate      chan struct{}
+	firstSent chan struct{}
+	once      sync.Once
+}
+
+func (s *gatedSubscribeStream) Context() context.Context { return s.ctx }
+
+func (s *gatedSubscribeStream) Send(ev *protov1.Event) error {
+	s.mu.Lock()
+	s.received = append(s.received, ev)
+	first := len(s.received) == 1
+	s.mu.Unlock()
+	if first {
+		s.once.Do(func() { close(s.firstSent) })
+		select {
+		case <-s.gate:
+		case <-s.ctx.Done():
+		}
+	}
+	return nil
+}
+
+func (s *gatedSubscribeStream) snapshot() []*protov1.Event {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]*protov1.Event, len(s.received))
+	copy(out, s.received)
+	return out
+}
+
+// TestSubscribeStampsSeqAndDropped forces the host-side drop-oldest path
+// by wedging the drain loop on its first Send, floods the bus, then
+// releases and asserts the delivered events carry a monotonic per-stream
+// seq (continuous over DELIVERED events, starting at 1) and a cumulative
+// dropped count that grows once backpressure fired (railyard-77h.10).
+func TestSubscribeStampsSeqAndDropped(t *testing.T) {
+	bus := events.NewBus()
+	defer bus.(interface{ Close() }).Close()
+	host := NewHost(Dependencies{Bus: bus, Cfg: permissivePluginCfg("p1")})
+	hs := newHostService(host, "p1")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := &gatedSubscribeStream{
+		ctx:       ctx,
+		gate:      make(chan struct{}),
+		firstSent: make(chan struct{}),
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- hs.Subscribe(&protov1.SubscribeRequest{
+			Topics: []string{string(plugin.CarCreated)},
+		}, stream)
+	}()
+
+	// Wait for the subscription to wire up.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		host.mu.Lock()
+		n := host.subscriptions["p1"]
+		host.mu.Unlock()
+		if n == 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Publish one event so the drain loop picks it up and wedges in Send.
+	bus.Publish(string(plugin.CarCreated), plugin.CarCreatedEvent{CarID: "0"})
+	select {
+	case <-stream.firstSent:
+	case <-time.After(2 * time.Second):
+		t.Fatal("drain loop never entered first Send")
+	}
+
+	// Flood while the drain loop is wedged. The host queue (cap 256) fills
+	// and subsequent events hit the host-side drop-oldest path.
+	for i := 1; i <= 4000; i++ {
+		bus.Publish(string(plugin.CarCreated), plugin.CarCreatedEvent{CarID: strconv.Itoa(i)})
+	}
+	// Give the bus a moment to drain its deliveries into the host queue
+	// (and trigger drops) before releasing.
+	time.Sleep(200 * time.Millisecond)
+
+	// Release the drain loop.
+	close(stream.gate)
+
+	// Let delivery proceed.
+	time.Sleep(300 * time.Millisecond)
+
+	recv := stream.snapshot()
+	if len(recv) < 2 {
+		t.Fatalf("expected at least 2 delivered events, got %d", len(recv))
+	}
+	// seq is continuous over delivered events starting at 1.
+	for i, ev := range recv {
+		if ev.Seq != uint64(i+1) {
+			t.Errorf("delivered[%d].Seq = %d, want %d", i, ev.Seq, i+1)
+		}
+	}
+	// First delivered event predates any drop.
+	if recv[0].Dropped != 0 {
+		t.Errorf("first delivered event Dropped = %d, want 0", recv[0].Dropped)
+	}
+	// Backpressure fired: the last delivered event reports drops.
+	last := recv[len(recv)-1]
+	if last.Dropped == 0 {
+		t.Errorf("expected last delivered event to report Dropped > 0, got 0 (delivered=%d)", len(recv))
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Subscribe did not exit after cancel")
 	}
 }
 

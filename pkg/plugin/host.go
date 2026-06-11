@@ -21,6 +21,30 @@ type EventHandler func(topic EventType, payload any)
 // are no-ops. It is safe to call from within the handler itself.
 type Unsubscribe func()
 
+// EventMeta carries per-event stream metadata delivered alongside the
+// payload to handlers registered via [Host.SubscribeWithMeta]. It lets
+// a consumer detect gaps in an at-most-once event stream and reconcile
+// via [Host.Snapshot] (railyard-77h.10).
+type EventMeta struct {
+	// Seq is the per-subscription delivery counter: 1 for the first
+	// event delivered on the stream, incrementing by one per delivered
+	// event. It RESETS to 1 when the stream is reopened (e.g. after a
+	// plugin relaunch), which the consumer should treat as "take a fresh
+	// Snapshot before trusting subsequent events".
+	Seq uint64
+
+	// Dropped is the cumulative number of events the host dropped on this
+	// subscription since the stream opened (drop-oldest backpressure). An
+	// increase in Dropped between two received events signals a gap;
+	// re-Snapshot to reconcile. Exactly-once delivery is out of scope.
+	Dropped uint64
+}
+
+// MetaEventHandler is the handler signature for [Host.SubscribeWithMeta].
+// It receives the same topic and payload as an [EventHandler] plus the
+// [EventMeta] describing stream position and drops.
+type MetaEventHandler func(topic EventType, payload any, meta EventMeta)
+
 // Host is the single interface plugins use to interact with railyard
 // core. Implementations live in the railyard internal/pluginhost
 // package; the in-plugin gRPC client adapter satisfies this interface
@@ -51,6 +75,13 @@ type Host interface {
 	// subscriber and topic; consumers that need every event should
 	// not do heavy work inside the handler.
 	Subscribe(topic EventType, h EventHandler) Unsubscribe
+
+	// SubscribeWithMeta is like [Host.Subscribe] but additionally hands
+	// the handler an [EventMeta] describing the per-stream sequence
+	// number and cumulative drop count, so consumers can detect gaps and
+	// reconcile via [Host.Snapshot]. Plain Subscribe remains available
+	// unchanged for consumers that do not need gap detection.
+	SubscribeWithMeta(topic EventType, h MetaEventHandler) Unsubscribe
 
 	// Snapshot returns the current full yard state in a single read
 	// transaction. It is intended for heartbeat-style consumers that

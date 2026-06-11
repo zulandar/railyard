@@ -325,6 +325,34 @@ the subscription behaves exactly as before. The plugin's own
 `plugin.SDKVersion` is reported back to the host at Init and shown in the
 `SDK` column of `ry plugins status`.
 
+**Gap detection with `SubscribeWithMeta`.** Event delivery is
+at-most-once: under sustained backpressure the host drops the oldest
+queued events, and everything in flight during a plugin crash/relaunch
+window is lost. Plain `Subscribe` gives you no way to tell. Use
+`SubscribeWithMeta` to receive an `EventMeta{Seq, Dropped}` alongside
+each payload:
+
+```go
+h.SubscribeWithMeta(plugin.CarStatusChanged, func(topic plugin.EventType, payload any, meta plugin.EventMeta) {
+    if meta.Dropped > lastDropped {
+        // A gap opened — reconcile from ground truth before trusting
+        // subsequent events.
+        reconcileViaSnapshot(ctx, h)
+    }
+    lastDropped = meta.Dropped
+    // ... handle payload ...
+})
+```
+
+The reconcile pattern: on `Start` (a fresh stream) take a `Snapshot`
+first, then consume events; whenever `meta.Dropped` increases between two
+received events, re-`Snapshot` to catch up. `meta.Seq` is a per-stream
+delivery counter starting at 1; it **resets to 1 when the stream is
+reopened** (e.g. after a relaunch), which you should treat as "take a
+fresh Snapshot". Exactly-once delivery is explicitly out of scope — the
+SDK gives you gap *visibility*, not gap *prevention*. Plain `Subscribe`
+is unchanged for consumers that do not need this.
+
 ### Snapshot
 
 Returns the current full operational state in a single read

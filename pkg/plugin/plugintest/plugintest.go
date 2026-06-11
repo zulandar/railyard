@@ -74,10 +74,17 @@ type RecordedSubscription struct {
 	// Topic is the [plugin.EventType] the plugin subscribed to.
 	Topic plugin.EventType
 
-	// Handler is the handler the plugin registered. Tests rarely call
-	// this directly — prefer [FakeHost.DriveEvent], which fires every
-	// matching subscription and respects unsubscribes.
+	// Handler is the handler the plugin registered via Subscribe. Nil for
+	// subscriptions registered via [FakeHost.SubscribeWithMeta] (see
+	// MetaHandler). Tests rarely call this directly — prefer
+	// [FakeHost.DriveEvent].
 	Handler plugin.EventHandler
+
+	// MetaHandler is the handler registered via [FakeHost.SubscribeWithMeta].
+	// Nil for plain Subscribe registrations. Fired by
+	// [FakeHost.DriveEventWithMeta] (and by [FakeHost.DriveEvent] with a
+	// zero [plugin.EventMeta]).
+	MetaHandler plugin.MetaEventHandler
 
 	// Unsubscribed reports whether the subscription's [plugin.Unsubscribe]
 	// has been called. [FakeHost.DriveEvent] skips records where this
@@ -194,6 +201,23 @@ func (h *FakeHost) YardInfo() plugin.YardInfo {
 func (h *FakeHost) Subscribe(topic plugin.EventType, handler plugin.EventHandler) plugin.Unsubscribe {
 	h.mu.Lock()
 	rec := &RecordedSubscription{Topic: topic, Handler: handler}
+	h.subscriptions = append(h.subscriptions, rec)
+	h.mu.Unlock()
+
+	return func() {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		rec.Unsubscribed = true
+	}
+}
+
+// SubscribeWithMeta records a meta-aware subscription and returns an
+// [plugin.Unsubscribe] that marks it unsubscribed. The recorded handler
+// is fired by [FakeHost.DriveEventWithMeta] (with the supplied
+// [plugin.EventMeta]) and by [FakeHost.DriveEvent] (with a zero meta).
+func (h *FakeHost) SubscribeWithMeta(topic plugin.EventType, handler plugin.MetaEventHandler) plugin.Unsubscribe {
+	h.mu.Lock()
+	rec := &RecordedSubscription{Topic: topic, MetaHandler: handler}
 	h.subscriptions = append(h.subscriptions, rec)
 	h.mu.Unlock()
 
@@ -353,6 +377,23 @@ func (h *FakeHost) Logs() []CapturedLog {
 //
 // Returns the number of handlers that were invoked.
 func (h *FakeHost) DriveEvent(topic plugin.EventType, payload any) int {
+	return h.driveEvent(topic, payload, plugin.EventMeta{})
+}
+
+// DriveEventWithMeta is like [FakeHost.DriveEvent] but delivers the
+// supplied [plugin.EventMeta] to meta-aware subscriptions registered via
+// [FakeHost.SubscribeWithMeta]. Plain Subscribe handlers still fire
+// (they receive only topic+payload). Returns the number of handlers
+// invoked (railyard-77h.10).
+func (h *FakeHost) DriveEventWithMeta(topic plugin.EventType, payload any, meta plugin.EventMeta) int {
+	return h.driveEvent(topic, payload, meta)
+}
+
+// driveEvent is the shared dispatch loop behind DriveEvent and
+// DriveEventWithMeta. It fires each active subscription's handler for
+// the topic: plain [plugin.EventHandler]s get topic+payload,
+// [plugin.MetaEventHandler]s additionally get meta.
+func (h *FakeHost) driveEvent(topic plugin.EventType, payload any, meta plugin.EventMeta) int {
 	h.mu.Lock()
 	snap := make([]*RecordedSubscription, len(h.subscriptions))
 	copy(snap, h.subscriptions)
@@ -366,9 +407,16 @@ func (h *FakeHost) DriveEvent(topic plugin.EventType, payload any) int {
 			continue
 		}
 		handler := sub.Handler
+		metaHandler := sub.MetaHandler
 		h.mu.Unlock()
-		handler(topic, payload)
-		invoked++
+		switch {
+		case metaHandler != nil:
+			metaHandler(topic, payload, meta)
+			invoked++
+		case handler != nil:
+			handler(topic, payload)
+			invoked++
+		}
 	}
 	return invoked
 }

@@ -106,6 +106,14 @@ func (s *hostService) Subscribe(req *protov1.SubscribeRequest, stream protov1.Ho
 	drops := newDropCounter(s.pluginName, s.logger)
 	warner := newDropWarner(s.logger)
 
+	// droppedTotal is the per-subscription cumulative drop count stamped
+	// onto every outgoing Event so the plugin can detect gaps and
+	// reconcile via Snapshot (railyard-77h.10). It is bumped from the
+	// bus-callback goroutines (one per topic) on the drop-oldest path, so
+	// it MUST be atomic; the drain loop reads it with a plain Load. No
+	// mutex is taken on the event hot path.
+	var droppedTotal atomic.Uint64
+
 	// Wire each allowed topic to the bus. incrSubscription per topic
 	// matches the in-process Host.Subscribe shim's per-topic accounting,
 	// so Status() reports the right SubscriptionCount for subprocess
@@ -133,6 +141,7 @@ func (s *hostService) Subscribe(req *protov1.SubscribeRequest, stream protov1.Ho
 				default:
 				}
 				drops.record(t)
+				droppedTotal.Add(1)
 				warner.recordDrop(s.pluginName, t)
 			}
 		})
@@ -154,6 +163,12 @@ func (s *hostService) Subscribe(req *protov1.SubscribeRequest, stream protov1.Ho
 
 	// Drain loop on the calling goroutine. Returning from this function
 	// causes go-plugin's stream wrapper to close the stream cleanly.
+	//
+	// seq counts events DELIVERED on this stream (starting at 1); it is
+	// touched only here, on a single goroutine, so it needs no
+	// synchronization. dropped is the cumulative drop count at delivery
+	// time (railyard-77h.10).
+	var seq uint64
 	for {
 		select {
 		case <-streamCtx.Done():
@@ -162,6 +177,9 @@ func (s *hostService) Subscribe(req *protov1.SubscribeRequest, stream protov1.Ho
 			if !ok {
 				return nil
 			}
+			seq++
+			ev.Seq = seq
+			ev.Dropped = droppedTotal.Load()
 			if err := stream.Send(ev); err != nil {
 				return err
 			}

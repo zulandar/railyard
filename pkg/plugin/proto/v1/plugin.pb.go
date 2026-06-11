@@ -1909,6 +1909,16 @@ type Event struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	Type      EventType              `protobuf:"varint,1,opt,name=type,proto3,enum=railyard.plugin.v1.EventType" json:"type,omitempty"`
 	EmittedAt *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=emitted_at,json=emittedAt,proto3" json:"emitted_at,omitempty"`
+	// seq is a per-subscription delivery counter, incremented for every
+	// event DELIVERED on this stream, starting at 1. It resets to 1 when a
+	// plugin reopens its stream (e.g. after a relaunch), which the plugin
+	// treats as "reconcile via Snapshot first" (railyard-77h.10).
+	Seq uint64 `protobuf:"varint,3,opt,name=seq,proto3" json:"seq,omitempty"`
+	// dropped is the cumulative count of events dropped on this
+	// subscription since the stream opened. A gap is visible when dropped
+	// increases between two consecutively received events; the plugin
+	// should then re-Snapshot to reconcile (railyard-77h.10).
+	Dropped uint64 `protobuf:"varint,4,opt,name=dropped,proto3" json:"dropped,omitempty"`
 	// Types that are valid to be assigned to Payload:
 	//
 	//	*Event_CarCreated
@@ -1969,6 +1979,20 @@ func (x *Event) GetEmittedAt() *timestamppb.Timestamp {
 		return x.EmittedAt
 	}
 	return nil
+}
+
+func (x *Event) GetSeq() uint64 {
+	if x != nil {
+		return x.Seq
+	}
+	return 0
+}
+
+func (x *Event) GetDropped() uint64 {
+	if x != nil {
+		return x.Dropped
+	}
+	return 0
 }
 
 func (x *Event) GetPayload() isEvent_Payload {
@@ -2884,11 +2908,13 @@ const file_plugin_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\r\n" +
 	"\vLogResponse\"*\n" +
 	"\x10SubscribeRequest\x12\x16\n" +
-	"\x06topics\x18\x01 \x03(\tR\x06topics\"\xdb\a\n" +
+	"\x06topics\x18\x01 \x03(\tR\x06topics\"\x87\b\n" +
 	"\x05Event\x121\n" +
 	"\x04type\x18\x01 \x01(\x0e2\x1d.railyard.plugin.v1.EventTypeR\x04type\x129\n" +
 	"\n" +
-	"emitted_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\temittedAt\x12F\n" +
+	"emitted_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\temittedAt\x12\x10\n" +
+	"\x03seq\x18\x03 \x01(\x04R\x03seq\x12\x18\n" +
+	"\adropped\x18\x04 \x01(\x04R\adropped\x12F\n" +
 	"\vcar_created\x18\n" +
 	" \x01(\v2#.railyard.plugin.v1.CarCreatedEventH\x00R\n" +
 	"carCreated\x12F\n" +

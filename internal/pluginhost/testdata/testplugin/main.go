@@ -54,11 +54,53 @@ type testPlugin struct {
 	slowSleep   time.Duration
 	slowLogDir  string
 	slowEnabled bool
+
+	// Meta-mode state (railyard-77h.10). Subscribes to CarCreated via
+	// SubscribeWithMeta and logs "<seq> <dropped>" per delivery so the
+	// host-side e2e can observe gap detection end-to-end.
+	metaMu      sync.Mutex
+	metaEnabled bool
+	metaOut     *os.File
+	metaSleep   time.Duration
+	metaUnsub   plugin.Unsubscribe
 }
 
 func (p *testPlugin) Name() string { return "testplugin" }
 
 func (p *testPlugin) Init(_ context.Context, h plugin.Host) error {
+	// Meta mode (railyard-77h.10). Subscribe to CarCreated with stream
+	// metadata and record "<seq> <dropped>" per delivery, sleeping to
+	// induce backpressure so the host-side e2e can observe a gap.
+	if os.Getenv("RAILYARD_TESTPLUGIN_META") == "1" {
+		p.metaEnabled = true
+		ms := 2
+		if raw := os.Getenv("RAILYARD_TESTPLUGIN_META_SLEEP_MS"); raw != "" {
+			if v, err := strconv.Atoi(raw); err == nil && v >= 0 {
+				ms = v
+			}
+		}
+		p.metaSleep = time.Duration(ms) * time.Millisecond
+		path := os.Getenv("RAILYARD_TESTPLUGIN_META_LOG")
+		if path == "" {
+			return fmt.Errorf("testplugin: meta mode requires RAILYARD_TESTPLUGIN_META_LOG")
+		}
+		f, err := os.Create(path)
+		if err != nil {
+			return fmt.Errorf("testplugin: create meta log: %w", err)
+		}
+		p.metaOut = f
+		p.metaUnsub = h.SubscribeWithMeta(plugin.CarCreated, func(_ plugin.EventType, _ any, meta plugin.EventMeta) {
+			p.metaMu.Lock()
+			fmt.Fprintf(p.metaOut, "%d %d\n", meta.Seq, meta.Dropped)
+			_ = p.metaOut.Sync()
+			p.metaMu.Unlock()
+			if p.metaSleep > 0 {
+				time.Sleep(p.metaSleep)
+			}
+		})
+		return nil
+	}
+
 	// Slow-burst mode (railyard-fll.5.3). Detected up front so default
 	// mode below stays a no-op for slow-only env state.
 	if os.Getenv("RAILYARD_TESTPLUGIN_SLOW") == "1" {
@@ -193,6 +235,21 @@ func (p *testPlugin) Stop(_ context.Context) error {
 		_ = p.out.Sync()
 		_ = p.out.Close()
 	}
+	// Meta-mode shutdown: unsubscribe then close the meta log under the
+	// same mutex the handler uses for its writes.
+	if p.metaEnabled {
+		if p.metaUnsub != nil {
+			p.metaUnsub()
+		}
+		p.metaMu.Lock()
+		if p.metaOut != nil {
+			_ = p.metaOut.Sync()
+			_ = p.metaOut.Close()
+			p.metaOut = nil
+		}
+		p.metaMu.Unlock()
+	}
+
 	// Slow-mode shutdown: unsubscribe each topic then close every
 	// per-topic file. Mutex protects the close against an in-flight
 	// drain goroutine (slowHandle takes the same mutex around its

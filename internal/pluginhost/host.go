@@ -315,6 +315,21 @@ func (h *Host) Subscribe(topic plugin.EventType, handler plugin.EventHandler) pl
 	return h.subscribeFor("", topic, handler)
 }
 
+// SubscribeWithMeta satisfies the [plugin.Host] contract. The bare
+// in-process *Host is a direct bus passthrough with no per-stream
+// sequence or drop accounting (that lives on the gRPC Subscribe path in
+// subscribe.go), so it delivers a zero [plugin.EventMeta]. Subprocess
+// plugins reach the meta-bearing path through HostService.Subscribe
+// (railyard-77h.10).
+func (h *Host) SubscribeWithMeta(topic plugin.EventType, handler plugin.MetaEventHandler) plugin.Unsubscribe {
+	if handler == nil {
+		return func() {}
+	}
+	return h.subscribeFor("", topic, func(t plugin.EventType, payload any) {
+		handler(t, payload, plugin.EventMeta{})
+	})
+}
+
 // subscribeFor is the per-plugin-tracked Subscribe implementation used
 // by in-process callers via *Host.Subscribe. Subprocess plugins use the
 // gRPC Subscribe path implemented in subscribe.go.
