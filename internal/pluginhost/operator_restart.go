@@ -309,11 +309,7 @@ func (h *Host) launchAndSuperviseForRestart(ctx context.Context, c candidate) er
 	allow := h.resolveAllowList(c.name)
 	lp.allow = allow
 
-	resp, err := lp.pluginRPC.Init(ctx, &protov1.InitRequest{
-		PluginName:           c.name,
-		Capabilities:         &protov1.Capabilities{},
-		SupportedEventTopics: canonicalEventTopics(),
-	})
+	resp, err := lp.pluginRPC.Init(ctx, hostInitRequest(c.name))
 	if err != nil {
 		lp.client.Kill()
 		removeSocket(lp.socketPath)
@@ -321,58 +317,26 @@ func (h *Host) launchAndSuperviseForRestart(ctx context.Context, c candidate) er
 		return fmt.Errorf("Init RPC: %w", err)
 	}
 
-	// Intersect advertised caps with the allow-list, mirroring initOne.
-	allowedEvents, _ := filterAllowedEvents(append([]string(nil), resp.AllowedEvents...), allow)
-	allowedCmds, _ := filterAllowedCommands(append([]string(nil), resp.AllowedCommands...), allow)
-	lp.capabilities = pluginCapabilities{
-		subscribeEvents: allowedEvents,
-		provideCommands: allowedCmds,
-	}
-	lp.sdkVersion = resp.SdkVersion
-
-	specByName := make(map[string]*protov1.CommandSchema, len(resp.CommandSpecs))
-	for _, cs := range resp.CommandSpecs {
-		if cs == nil || cs.Name == "" {
-			continue
-		}
-		specByName[cs.Name] = cs
-	}
-
-	// Register command ownership BEFORE spawning the supervisor (matches
-	// initOne's ordering so a crash-restart race cannot leave commands
-	// unowned). In the same critical section, clear any stale disabled /
-	// init-failure entry for this name: prepareRestart already cleared
-	// those for the disabled/failed paths, but a RUNNING plugin can be
-	// concurrently permanent-disabled by its supervisor during the
-	// teardown window (between prepareRestart releasing the lock and
-	// stopRunningForRestart marking stopping). Dropping the stale entries
-	// here guarantees Status() shows exactly one row for the freshly
-	// launched plugin.
+	// Clear any stale disabled / init-failure entry for this name BEFORE
+	// re-registering: prepareRestart already cleared those for the
+	// disabled/failed paths, but a RUNNING plugin can be concurrently
+	// permanent-disabled by its supervisor during the teardown window
+	// (between prepareRestart releasing the lock and stopRunningForRestart
+	// marking stopping). Dropping the stale entries guarantees Status()
+	// never shows the freshly launched plugin alongside a disabled/failed
+	// ghost of itself.
 	h.mu.Lock()
 	delete(h.disabled, c.name)
 	delete(h.initFailures, c.name)
-	for _, cmd := range allowedCmds {
-		if cmd == "" {
-			continue
-		}
-		if _, taken := h.allowed[cmd]; taken {
-			logger.Warn("pluginhost: plugin command conflicts with core allow-list — ignoring",
-				slog.String("command", cmd))
-			continue
-		}
-		if existing, taken := h.pluginCmds[cmd]; taken {
-			logger.Warn("pluginhost: plugin command name collision — keeping first registration",
-				slog.String("command", cmd),
-				slog.String("first_plugin", existing),
-				slog.String("second_plugin", lp.name))
-			continue
-		}
-		h.pluginCmds[cmd] = lp.name
-		if spec, ok := specByName[cmd]; ok && len(spec.Args) > 0 {
-			h.pluginCmdSpecs[cmd] = spec
-		}
-	}
 	h.mu.Unlock()
+
+	// Apply the fresh response — capabilities, SDK version, and command
+	// registry (ownership + arg specs) — through the same shared path the
+	// crash-relaunch uses (railyard-uv8.7), so the two launch paths cannot
+	// drift. Registration happens before startSupervisor below, matching
+	// initOne's ordering so a crash-restart race cannot leave commands
+	// unowned.
+	h.applyInitResponse(lp, resp)
 
 	// If the host is already started, drive Start so the relaunched plugin
 	// is fully live (mirrors the supervisor's relaunch + initOne→Start).

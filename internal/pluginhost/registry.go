@@ -543,6 +543,84 @@ func canonicalEventTopics() []string {
 	return out
 }
 
+// hostInitRequest builds the InitRequest the host sends on every launch
+// path — first boot, crash-relaunch, and operator restart. Centralising it
+// guarantees the host always advertises its supported event topics
+// (railyard-77h.8) so a relaunch re-negotiates exactly like the first boot
+// rather than degrading to a bare request (railyard-uv8.7).
+func hostInitRequest(name string) *protov1.InitRequest {
+	return &protov1.InitRequest{
+		PluginName:           name,
+		Capabilities:         &protov1.Capabilities{},
+		SupportedEventTopics: canonicalEventTopics(),
+	}
+}
+
+// applyInitResponse intersects a freshly-received InitResponse's advertised
+// capabilities with lp.allow, records the filtered surface + reported SDK
+// version on lp, and refreshes the host command registry for lp.name: it
+// first drops every command ownership AND arg spec this plugin currently
+// holds, then re-registers from the response. Clearing first means a
+// relaunched binary that dropped, renamed, or re-typed a command cannot
+// leave stale ownership or a stale arg schema behind (railyard-uv8.7,
+// compounding railyard-uv8.2). It is the shared response-application step
+// for the crash-relaunch and operator-restart paths; initOne keeps its own
+// first-boot variant because it additionally WARN-logs each denied cap.
+//
+// Holds h.mu for the registry mutation.
+func (h *Host) applyInitResponse(lp *launchedPlugin, resp *protov1.InitResponse) {
+	allowedEvents, _ := filterAllowedEvents(append([]string(nil), resp.AllowedEvents...), lp.allow)
+	allowedCmds, _ := filterAllowedCommands(append([]string(nil), resp.AllowedCommands...), lp.allow)
+
+	specByName := make(map[string]*protov1.CommandSchema, len(resp.CommandSpecs))
+	for _, cs := range resp.CommandSpecs {
+		if cs == nil || cs.Name == "" {
+			continue
+		}
+		specByName[cs.Name] = cs
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	lp.capabilities = pluginCapabilities{
+		subscribeEvents: allowedEvents,
+		provideCommands: allowedCmds,
+	}
+	lp.sdkVersion = resp.SdkVersion
+
+	// Drop this plugin's previous ownership + specs so a changed command
+	// set cannot leave stale entries.
+	for cmd, owner := range h.pluginCmds {
+		if owner == lp.name {
+			delete(h.pluginCmds, cmd)
+			delete(h.pluginCmdSpecs, cmd)
+		}
+	}
+
+	for _, cmd := range allowedCmds {
+		if cmd == "" {
+			continue
+		}
+		if _, taken := h.allowed[cmd]; taken {
+			lp.logger.Warn("pluginhost: plugin command conflicts with core allow-list — ignoring",
+				slog.String("command", cmd))
+			continue
+		}
+		if existing, taken := h.pluginCmds[cmd]; taken {
+			lp.logger.Warn("pluginhost: plugin command name collision — keeping first registration",
+				slog.String("command", cmd),
+				slog.String("first_plugin", existing),
+				slog.String("second_plugin", lp.name))
+			continue
+		}
+		h.pluginCmds[cmd] = lp.name
+		if spec, ok := specByName[cmd]; ok && len(spec.Args) > 0 {
+			h.pluginCmdSpecs[cmd] = spec
+		}
+	}
+}
+
 // resolveAllowList builds the per-plugin AllowList from the loaded
 // config. A plugin without a settings entry receives the strict default
 // (zero-value AllowList; every cap denied).

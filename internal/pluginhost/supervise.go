@@ -358,18 +358,24 @@ func (h *Host) relaunch(ctx context.Context, c candidate, lp *launchedPlugin) er
 		return fmt.Errorf("launch: %w", err)
 	}
 
-	// Re-run Init. Capabilities are re-advertised; we trust the
-	// allow-list intersection already cached on lp.allow.
+	// Re-run Init advertising the host's supported event topics, exactly
+	// like the first boot — a bare request would silently degrade topic
+	// negotiation after the first crash (railyard-uv8.7).
 	initCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	if _, err := fresh.pluginRPC.Init(initCtx, &protov1.InitRequest{
-		PluginName:   c.name,
-		Capabilities: &protov1.Capabilities{},
-	}); err != nil {
+	resp, err := fresh.pluginRPC.Init(initCtx, hostInitRequest(c.name))
+	if err != nil {
 		fresh.client.Kill()
 		removeSocket(fresh.socketPath)
 		return fmt.Errorf("Init RPC after relaunch: %w", err)
 	}
+
+	// Refresh capabilities, SDK version, and the command registry from the
+	// fresh response so a relaunched binary that changed its command set or
+	// arg schemas does not leave the host validating against a stale spec
+	// (railyard-uv8.7). lp.allow is preserved across relaunch, so the
+	// intersection uses the same configured allow-list.
+	h.applyInitResponse(lp, resp)
 
 	// If the host has already been Started, re-Start the plugin.
 	// Otherwise leave it Init-only — host.Start will pick it up in
