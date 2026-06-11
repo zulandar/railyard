@@ -439,6 +439,15 @@ Validation failures land as `Success: false` with `Error` set; the Go
 dispatchable core commands is in the operator guide
 (`railyard-fll.9.3`).
 
+`scale_track` adapts to the deployment mode. In local (tmux) mode it
+creates or kills per-engine tmux sessions via the orchestrator. In
+Kubernetes mode (railyard.yaml carries a `kubernetes.namespace`) it
+scales the track's engine Deployment replicas
+(`<release>-engine-<track>`) instead — a plugin dispatching
+`scale_track` does not need to know which mode it is running in. The
+mysql/pgvector StatefulSets are data stores and are never touched by a
+track-level scale.
+
 ### Logger
 
 Returns a `*slog.Logger` scoped with `plugin=<name>`. Use this for
