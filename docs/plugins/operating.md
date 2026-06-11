@@ -497,6 +497,7 @@ above).
 | WARN "plugin name collision"                         | Same plugin in two scanned dirs                     | Remove one; later directory wins                                               |
 | ERROR "plugin permanently disabled"                  | Crash budget exceeded (4 crashes in 60 s)           | Check plugin logs, fix the crash, then `ry plugins restart <name>` to revive it without restarting the yard (or restart railyard) |
 | ERROR `SO_PEERCRED` mismatch                         | Connecting peer's pid/uid did not match launched    | Security check tripped; the plugin will not be retried until railyard restarts |
+| WARN "integrity check FAILED" / disabled `integrity-mismatch` | Binary's sha256 ≠ configured `plugins.<name>.sha256` | Restore the pinned binary, or update the pin to the new binary's hash, then restart railyard (see [Pinning](#pinning-plugin-binaries-sha256)) |
 | ERROR "incompatible protocol version" at handshake   | Plugin built against a different railyard version   | Rebuild the plugin against this railyard release                               |
 | Plugin runs but does nothing                         | No `allow` block → all caps denied (strict default) | Add an `allow:` block under `plugins.<name>` listing the caps you want         |
 | WARN "capability denied by allow-list"               | Plugin advertised a cap your allow-list doesn't list | Add the cap to `allow.events` / `allow.commands`, or accept the denial         |
@@ -539,6 +540,88 @@ standard migration — no operator action is required to enable the store.
 
 ---
 
+## Pinning plugin binaries (`sha256`)
+
+By default the host launches whatever executable it discovers under the
+configured plugin name — a swapped binary inherits the original's
+allow-list and receives yard-wide snapshot data. The `SO_PEERCRED` check
+authenticates the connecting *process*, not the binary *content*.
+Optional sha256 pinning closes that supply-chain gap for operators who
+want it.
+
+Set the expected hash under the per-plugin settings block:
+
+```yaml
+plugins:
+  enabled: [trainmaster]
+
+  trainmaster:
+    sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    allow:
+      events: ["*"]
+```
+
+The value must be exactly 64 hex characters (upper or lower case;
+normalized to lowercase at config load). An absent `sha256` means **no
+check** — the default, unchanged behavior.
+
+### Computing the hash
+
+```bash
+sha256sum /etc/railyard/plugins.d/trainmaster
+# e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  trainmaster
+```
+
+Copy the first field into `plugins.<name>.sha256`. (`shasum -a 256` on
+macOS produces the same value.)
+
+### Behavior on mismatch
+
+The host recomputes the binary's SHA-256 **on every launch — first boot
+*and* every supervisor relaunch after a crash** — and compares it to the
+pin *before* spawning the subprocess. On a mismatch the host:
+
+- does **not** exec the binary;
+- permanently disables the plugin for the rest of the railyard process
+  lifetime with the status reason **`integrity-mismatch`** (visible in
+  `ry plugins status` in the `ERROR` column);
+- logs a WARN containing both the **expected** and **actual** hashes.
+
+Re-verifying on relaunch is deliberate: a binary swapped between restarts
+must not slip through just because it passed at first boot.
+
+### Rotation on upgrade
+
+When you legitimately upgrade a pinned plugin:
+
+1. Drop the new binary in place.
+2. `sha256sum` the new binary.
+3. Update `plugins.<name>.sha256` to the new hash.
+4. Restart railyard (a pin mismatch disables the plugin until the next
+   process restart — there is no live "re-pin" path).
+
+If you update the binary without updating the pin, the plugin lands in the
+`integrity-mismatch` disabled state on next launch — by design.
+
+### Auditing coverage
+
+`ry plugins list` includes a **PINNED** column (`yes`/`no`) so you can see
+at a glance which enabled plugins are integrity-pinned.
+
+### Residual race (TOCTOU)
+
+Hashing-then-exec-by-path is inherently racy: go-plugin re-opens and execs
+the binary **by path**, so an attacker who can rewrite the file in the
+narrow window between the host's hash and go-plugin's exec can still defeat
+the check. The host mitigates by hashing from a single open file
+descriptor (no stat-then-open gap), but a perfect fix would require handing
+go-plugin our fd (unsupported) or an `fexecve`-style dance outside its
+control — out of scope. **Treat pinning as integrity-against-drift (catching
+an operator-visible binary swap across restarts), not as a sandbox.** The
+allow-list remains the principal runtime trust knob.
+
+---
+
 ## Security notes
 
 - **Plugins run as the railyard uid.** They are not sandboxed beyond
@@ -563,6 +646,12 @@ standard migration — no operator action is required to enable the store.
   default + an explicit per-plugin `allow` block as the rule, an
   attacker who replaces a plugin binary can still only exercise the
   caps the operator granted. Be intentional with `"*"`.
+- **Optional sha256 binary pinning.** `plugins.<name>.sha256` makes the
+  host refuse to launch a binary whose hash does not match the pin,
+  re-verified on every launch (first boot and crash relaunch). It is
+  integrity-against-drift, not a sandbox — go-plugin execs by path, so a
+  residual TOCTOU race remains. See
+  [Pinning plugin binaries](#pinning-plugin-binaries-sha256).
 
 ---
 

@@ -21,6 +21,7 @@ package pluginhost
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -149,6 +150,17 @@ func (h *Host) supervise(ctx context.Context, c candidate, lp *launchedPlugin) {
 		// count the failure as a crash (it leaves the plugin
 		// down just as a runtime exit would) and continue the loop.
 		if err := h.relaunch(ctx, c, lp); err != nil {
+			// A failed sha256 pin (railyard-77h.15) on relaunch is the
+			// CRITICAL re-verify case: the on-disk binary changed since
+			// first boot. This is NOT a transient crash — looping would
+			// just keep refusing the same swapped binary. Permanently
+			// disable immediately with the distinct integrity-mismatch
+			// reason (verifyBinaryPin already WARN-logged both hashes).
+			var integ *integrityMismatchError
+			if errors.As(err, &integ) {
+				h.handleIntegrityDisable(lp)
+				return
+			}
 			lp.logger.Warn(
 				fmt.Sprintf("plugin %s: relaunch attempt failed: %v", c.name, err),
 				slog.String("error", err.Error()),
@@ -265,6 +277,35 @@ func (h *Host) handlePermanentDisable(lp *launchedPlugin, finalCount int) {
 	lp.client.Kill()
 	removeSocket(lp.socketPath)
 
+	h.markPermanentlyDisabled(lp)
+}
+
+// handleIntegrityDisable is the relaunch-path teardown when a supervisor
+// relaunch is refused because the on-disk binary's sha256 no longer matches
+// the configured pin (railyard-77h.15). Unlike handlePermanentDisable it is
+// NOT a crash-budget exhaustion — the binary changed under us — so it logs
+// the integrity framing (verifyBinaryPin already WARN-logged both hashes)
+// and records the disabled snapshot with the integrity-mismatch reason. The
+// dead subprocess is already gone (the crash that triggered this relaunch),
+// but we kill + clean its socket defensively, exactly as the crash-budget
+// path does.
+func (h *Host) handleIntegrityDisable(lp *launchedPlugin) {
+	h.mu.Lock()
+	lp.lastExitReason = integrityMismatchReason
+	h.mu.Unlock()
+
+	lp.logger.Error(
+		fmt.Sprintf(
+			"plugin permanently disabled: binary sha256 no longer matches the configured pin on relaunch; restart railyard after restoring the pinned binary. plugin=%s reason=%s",
+			lp.name, integrityMismatchReason,
+		),
+		slog.String("plugin", lp.name),
+		slog.String("reason", integrityMismatchReason),
+	)
+
+	h.cancelPluginSubscriptions(lp)
+	lp.client.Kill()
+	removeSocket(lp.socketPath)
 	h.markPermanentlyDisabled(lp)
 }
 

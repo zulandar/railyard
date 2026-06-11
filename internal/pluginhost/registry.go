@@ -2,6 +2,7 @@ package pluginhost
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -360,6 +361,23 @@ func (h *Host) initOne(ctx context.Context, c candidate, parentLogger *slog.Logg
 
 	lp, err := h.launchPluginOnce(ctx, c, pluginLogger)
 	if err != nil {
+		// A failed sha256 pin (railyard-77h.15) is a permanent, distinct
+		// disable — NOT an ordinary init failure. No launchedPlugin exists
+		// yet on this first-boot refusal, so record a disabled entry
+		// directly with the integrity-mismatch reason (the relaunch path
+		// reuses the existing launchedPlugin via handlePermanentDisable
+		// instead). verifyBinaryPin already WARN-logged both hashes.
+		var integ *integrityMismatchError
+		if errors.As(err, &integ) {
+			h.mu.Lock()
+			h.disabled[c.name] = &disabledPlugin{
+				name:           c.name,
+				path:           c.path,
+				lastExitReason: integrityMismatchReason,
+			}
+			h.mu.Unlock()
+			return
+		}
 		pluginLogger.Warn(
 			"plugin "+c.name+": launch failed — skipped ("+err.Error()+")",
 			slog.String("error", err.Error()),

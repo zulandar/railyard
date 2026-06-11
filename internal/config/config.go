@@ -173,6 +173,18 @@ type PluginSettings struct {
 	// Allow is the capability allow-list for the plugin. Empty struct
 	// (the zero value) denies every advertised capability.
 	Allow AllowConfig `yaml:"allow"`
+
+	// Sha256 optionally pins the SHA-256 hash of the plugin binary the host
+	// is allowed to launch (railyard-77h.15). When set it must be exactly
+	// 64 hex characters; config load normalizes it to lowercase. The host
+	// recomputes the binary's hash on EVERY launch (first boot and every
+	// supervisor relaunch) and refuses to exec a binary whose hash does not
+	// match, permanently disabling the plugin with the "integrity-mismatch"
+	// reason. Empty (the zero value) disables the check — the default,
+	// preserving prior behavior. This is an integrity-against-drift control,
+	// not a sandbox: see internal/pluginhost/launch.go for the residual
+	// TOCTOU note.
+	Sha256 string `yaml:"sha256"`
 }
 
 // AllowConfig is the capability allow-list for one plugin.
@@ -261,6 +273,15 @@ func (p *PluginsConfig) UnmarshalYAML(node *yaml.Node) error {
 		if err := validateAllowConfig(name, s.Allow); err != nil {
 			return err
 		}
+		// Validate + normalize the optional sha256 binary pin
+		// (railyard-77h.15). Normalization (lowercasing) is written back
+		// onto the stored settings struct so the host's compare is
+		// case-insensitive without re-folding at launch time.
+		normalized, err := validateSha256(name, s.Sha256)
+		if err != nil {
+			return err
+		}
+		s.Sha256 = normalized
 		p.Settings[name] = s
 	}
 	return nil
@@ -289,6 +310,27 @@ func validateAllowConfig(plugin string, a AllowConfig) error {
 		}
 	}
 	return nil
+}
+
+// validateSha256 validates the optional per-plugin binary pin
+// (railyard-77h.15). An empty value is valid (no pin configured → no
+// check). A non-empty value must be exactly 64 hex characters (upper or
+// lower); it is returned normalized to lowercase. Anything else is
+// rejected with a clear, plugin-scoped config error.
+func validateSha256(plugin, sha string) (string, error) {
+	if sha == "" {
+		return "", nil
+	}
+	if len(sha) != 64 {
+		return "", fmt.Errorf("plugins.%s.sha256: must be exactly 64 hex characters, got %d", plugin, len(sha))
+	}
+	for _, r := range sha {
+		isHex := (r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')
+		if !isHex {
+			return "", fmt.Errorf("plugins.%s.sha256: must be hex (0-9a-fA-F); invalid character %q", plugin, r)
+		}
+	}
+	return strings.ToLower(sha), nil
 }
 
 // validateEventToken accepts "*" alone or a literal topic name with no

@@ -473,6 +473,107 @@ plugins:
 	}
 }
 
+// TestPluginsConfig_Sha256_ValidNormalizes verifies a valid 64-hex sha256
+// pin parses and is normalized to lowercase (railyard-77h.15).
+func TestPluginsConfig_Sha256_ValidNormalizes(t *testing.T) {
+	// Mixed-case 64-hex string; must normalize to lowercase.
+	const mixed = "ABCdef0123456789ABCDEF0123456789abcdef0123456789ABCDEF0123456789"
+	const lower = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+	yamlSrc := `
+owner: alice
+repo: git@github.com:org/app.git
+tracks:
+  - name: backend
+    language: go
+plugins:
+  enabled: [trainmaster]
+  trainmaster:
+    sha256: "` + mixed + `"
+`
+	cfg, err := Parse([]byte(yamlSrc))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	s, ok := cfg.Plugins.Settings["trainmaster"]
+	if !ok {
+		t.Fatal("Settings missing trainmaster entry")
+	}
+	if s.Sha256 != lower {
+		t.Errorf("Sha256 = %q, want normalized lowercase %q", s.Sha256, lower)
+	}
+}
+
+// TestPluginsConfig_Sha256_AbsentEmpty verifies a plugin with no sha256
+// key parses with an empty Sha256 (default = no check; railyard-77h.15).
+func TestPluginsConfig_Sha256_AbsentEmpty(t *testing.T) {
+	yamlSrc := `
+owner: alice
+repo: git@github.com:org/app.git
+tracks:
+  - name: backend
+    language: go
+plugins:
+  enabled: [trainmaster]
+  trainmaster:
+    allow:
+      events: ["*"]
+`
+	cfg, err := Parse([]byte(yamlSrc))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	s := cfg.Plugins.Settings["trainmaster"]
+	if s.Sha256 != "" {
+		t.Errorf("Sha256 = %q, want empty (no pin configured)", s.Sha256)
+	}
+}
+
+// TestPluginsConfig_RejectsBadSha256 covers the malformed sha256 shapes:
+// wrong length and non-hex characters (railyard-77h.15).
+func TestPluginsConfig_RejectsBadSha256(t *testing.T) {
+	cases := []struct {
+		name     string
+		sha      string
+		wantText string
+	}{
+		{
+			name:     "too_short",
+			sha:      "abcdef", // 6 chars, not 64
+			wantText: "sha256",
+		},
+		{
+			name:     "too_long",
+			sha:      "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789ff", // 66 chars
+			wantText: "sha256",
+		},
+		{
+			name:     "non_hex",
+			sha:      "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz", // 64 chars, all 'z'
+			wantText: "sha256",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			yamlSrc := `
+owner: alice
+repo: r
+tracks: [{name: t, language: go}]
+plugins:
+  enabled: [p]
+  p:
+    sha256: "` + tc.sha + `"
+`
+			_, err := Parse([]byte(yamlSrc))
+			if err == nil {
+				t.Fatalf("expected parse error for %s", tc.name)
+			}
+			if !strings.Contains(err.Error(), tc.wantText) {
+				t.Errorf("error = %q, want substring %q", err.Error(), tc.wantText)
+			}
+		})
+	}
+}
+
 // TestPluginsConfig_MultiplePlugins covers two plugin entries in
 // the same plugins: block.
 func TestPluginsConfig_MultiplePlugins(t *testing.T) {

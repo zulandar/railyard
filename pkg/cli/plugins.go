@@ -104,11 +104,11 @@ func runPluginsList(cmd *cobra.Command, configPath string, verbose bool) error {
 	}
 
 	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	if verbose {
-		fmt.Fprintln(w, "NAME\tENABLED\tEXECUTABLE\tEVENTS\tCOMMANDS\tPATH")
-	} else {
-		fmt.Fprintln(w, "NAME\tENABLED\tEXECUTABLE\tEVENTS\tCOMMANDS\tPATH")
-	}
+	// PINNED reports whether a sha256 integrity pin is configured for the
+	// plugin (railyard-77h.15) so operators can audit pin coverage at a
+	// glance. Both verbose and non-verbose share the same column set; the
+	// flag only changes how EVENTS/COMMANDS render.
+	fmt.Fprintln(w, "NAME\tENABLED\tEXECUTABLE\tPINNED\tEVENTS\tCOMMANDS\tPATH")
 	for _, c := range candidates {
 		path := c.Path
 		if path == "" {
@@ -122,10 +122,11 @@ func runPluginsList(cmd *cobra.Command, configPath string, verbose bool) error {
 			events = fmt.Sprintf("%d", len(c.AllowEvents))
 			commands = fmt.Sprintf("%d", len(c.AllowCommands))
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			c.Name,
 			yesNo(c.Enabled),
 			yesNo(c.Executable),
+			yesNo(c.Pinned),
 			events,
 			commands,
 			path,
