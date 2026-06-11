@@ -249,6 +249,7 @@ type Host interface {
     Config(name string) yaml.Node
     YardInfo() YardInfo
     Subscribe(topic EventType, h EventHandler) Unsubscribe
+    SubscribeWithMeta(topic EventType, h MetaEventHandler) Unsubscribe
     Snapshot(ctx context.Context) (*Snapshot, error)
     RegisterCommand(name string, h CommandHandler) error
     DispatchCommand(ctx context.Context, name string, args CommandArgs) (CommandResult, error)
