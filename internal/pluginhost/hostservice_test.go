@@ -2,9 +2,11 @@ package pluginhost
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"gopkg.in/yaml.v3"
@@ -13,6 +15,149 @@ import (
 	"github.com/zulandar/railyard/pkg/plugin"
 	protov1 "github.com/zulandar/railyard/pkg/plugin/proto/v1"
 )
+
+// fakePluginRPC is a stub PluginServiceClient used to exercise the
+// plugin-routed branch of DispatchCommand without a real subprocess. Only
+// HandleCommand is wired; the other lifecycle RPCs are unimplemented and
+// never invoked by these tests.
+type fakePluginRPC struct {
+	protov1.PluginServiceClient
+	resp *protov1.HandleCommandResponse
+	err  error
+	// delay is slept before returning so latency accumulation is
+	// observable (> 0 micros).
+	delay time.Duration
+	calls int
+}
+
+func (f *fakePluginRPC) HandleCommand(_ context.Context, _ *protov1.HandleCommandRequest, _ ...grpc.CallOption) (*protov1.HandleCommandResponse, error) {
+	f.calls++
+	if f.delay > 0 {
+		time.Sleep(f.delay)
+	}
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.resp, nil
+}
+
+// registerPluginCommand wires a launchedPlugin owning `cmd` with the given
+// fake RPC into the host registry so DispatchCommand routes to it.
+func registerPluginCommand(t *testing.T, h *Host, pluginName, cmd string, rpc protov1.PluginServiceClient) *launchedPlugin {
+	t.Helper()
+	lp := &launchedPlugin{name: pluginName, pluginRPC: rpc}
+	h.mu.Lock()
+	h.launched[pluginName] = lp
+	h.pluginCmds[cmd] = pluginName
+	h.mu.Unlock()
+	return lp
+}
+
+// TestDispatchCommandCountsHandledAndLatency drives the plugin-routed
+// branch of DispatchCommand and asserts a successful HandleCommand bumps
+// commandsHandled and accumulates non-zero latency on the owning plugin
+// (railyard-77h.14).
+func TestDispatchCommandCountsHandledAndLatency(t *testing.T) {
+	host := NewHost(Dependencies{
+		Cfg: &config.Config{
+			Plugins: config.PluginsConfig{
+				Enabled: []string{"caller", "owner"},
+				Settings: map[string]config.PluginSettings{
+					"caller": {Allow: config.AllowConfig{Commands: []string{"*"}}},
+				},
+			},
+		},
+	})
+	rpc := &fakePluginRPC{
+		resp:  &protov1.HandleCommandResponse{Success: true},
+		delay: 2 * time.Millisecond,
+	}
+	owner := registerPluginCommand(t, host, "owner", "do_thing", rpc)
+
+	hs := newHostService(host, "caller")
+	resp, err := hs.DispatchCommand(context.Background(), &protov1.DispatchCommandRequest{Name: "do_thing"})
+	if err != nil {
+		t.Fatalf("DispatchCommand: %v", err)
+	}
+	if !resp.Success {
+		t.Errorf("Success = false, want true; Error=%q", resp.Error)
+	}
+	if got := owner.commandsHandled.Load(); got != 1 {
+		t.Errorf("commandsHandled = %d, want 1", got)
+	}
+	if got := owner.commandsFailed.Load(); got != 0 {
+		t.Errorf("commandsFailed = %d, want 0", got)
+	}
+	if got := owner.commandLatencyTotalMicros.Load(); got == 0 {
+		t.Errorf("commandLatencyTotalMicros = 0, want > 0 (delay was %v)", rpc.delay)
+	}
+}
+
+// TestDispatchCommandCountsTransportFailure asserts a transport error from
+// HandleCommand increments commandsFailed (and still counts handled, since
+// the plugin was invoked) (railyard-77h.14).
+func TestDispatchCommandCountsTransportFailure(t *testing.T) {
+	host := NewHost(Dependencies{
+		Cfg: &config.Config{
+			Plugins: config.PluginsConfig{
+				Enabled: []string{"caller", "owner"},
+				Settings: map[string]config.PluginSettings{
+					"caller": {Allow: config.AllowConfig{Commands: []string{"*"}}},
+				},
+			},
+		},
+	})
+	rpc := &fakePluginRPC{err: errors.New("boom")}
+	owner := registerPluginCommand(t, host, "owner", "do_thing", rpc)
+
+	hs := newHostService(host, "caller")
+	resp, err := hs.DispatchCommand(context.Background(), &protov1.DispatchCommandRequest{Name: "do_thing"})
+	if err != nil {
+		t.Fatalf("unexpected gRPC error: %v", err)
+	}
+	if resp.Success {
+		t.Error("Success = true, want false on transport error")
+	}
+	if got := owner.commandsFailed.Load(); got != 1 {
+		t.Errorf("commandsFailed = %d, want 1", got)
+	}
+	if got := owner.commandsHandled.Load(); got != 1 {
+		t.Errorf("commandsHandled = %d, want 1 (plugin was invoked)", got)
+	}
+}
+
+// TestDispatchCommandCountsLogicalFailure asserts a !Success response from
+// HandleCommand (a logical failure, not a transport error) increments
+// commandsFailed (railyard-77h.14).
+func TestDispatchCommandCountsLogicalFailure(t *testing.T) {
+	host := NewHost(Dependencies{
+		Cfg: &config.Config{
+			Plugins: config.PluginsConfig{
+				Enabled: []string{"caller", "owner"},
+				Settings: map[string]config.PluginSettings{
+					"caller": {Allow: config.AllowConfig{Commands: []string{"*"}}},
+				},
+			},
+		},
+	})
+	rpc := &fakePluginRPC{resp: &protov1.HandleCommandResponse{Success: false, Error: "nope"}}
+	owner := registerPluginCommand(t, host, "owner", "do_thing", rpc)
+
+	hs := newHostService(host, "caller")
+	resp, err := hs.DispatchCommand(context.Background(), &protov1.DispatchCommandRequest{Name: "do_thing"})
+	if err != nil {
+		t.Fatalf("unexpected gRPC error: %v", err)
+	}
+	if resp.Success {
+		t.Error("Success = true, want false")
+	}
+	if got := owner.commandsHandled.Load(); got != 1 {
+		t.Errorf("commandsHandled = %d, want 1", got)
+	}
+	if got := owner.commandsFailed.Load(); got != 1 {
+		t.Errorf("commandsFailed = %d, want 1 on !Success", got)
+	}
+}
 
 // TestHostServiceYardInfo confirms the wire response mirrors what
 // Host.YardInfo() returns.

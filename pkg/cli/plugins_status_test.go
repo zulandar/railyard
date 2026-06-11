@@ -175,6 +175,66 @@ func TestPluginsStatusErrorColumn(t *testing.T) {
 	}
 }
 
+// TestPluginsStatusVerboseShowsCounters asserts the -v/--verbose flag
+// renders the per-plugin runtime counters (events delivered/dropped,
+// commands handled/failed, avg latency) that the default table omits to
+// stay readable (railyard-77h.14).
+func TestPluginsStatusVerboseShowsCounters(t *testing.T) {
+	withStubConfigLoad(t, func(string) (*config.Config, error) {
+		return &config.Config{Yardmaster: config.YardmasterConfig{HealthPort: 8081}}, nil
+	})
+	snap := &pluginhost.Snapshot{
+		Plugins: []pluginhost.PluginStatus{
+			{
+				Name: "trainmaster", Status: pluginhost.StatusRunning, PID: 42,
+				EventsDelivered: 100, EventsDropped: 7,
+				CommandsHandled: 4, CommandsFailed: 1,
+				CommandLatencyTotalMicros: 8000, CommandLatencyAvgMicros: 2000,
+			},
+		},
+	}
+
+	// Default table: counters NOT shown.
+	withStubStatusFetch(t, func(_ context.Context, _ string, _ time.Duration) (*pluginhost.Snapshot, error) {
+		return snap, nil
+	})
+	root := newRootCmd()
+	var def bytes.Buffer
+	root.SetOut(&def)
+	root.SetErr(&def)
+	root.SetArgs([]string{"plugins", "status"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute default: %v", err)
+	}
+	if strings.Contains(def.String(), "EVENTS-DELIVERED") || strings.Contains(def.String(), "events delivered") {
+		t.Errorf("default table should NOT include counter detail, got:\n%s", def.String())
+	}
+
+	// Verbose: counters shown.
+	for _, flag := range []string{"-v", "--verbose"} {
+		withStubStatusFetch(t, func(_ context.Context, _ string, _ time.Duration) (*pluginhost.Snapshot, error) {
+			return snap, nil
+		})
+		vroot := newRootCmd()
+		var vb bytes.Buffer
+		vroot.SetOut(&vb)
+		vroot.SetErr(&vb)
+		vroot.SetArgs([]string{"plugins", "status", flag})
+		if err := vroot.Execute(); err != nil {
+			t.Fatalf("execute %s: %v", flag, err)
+		}
+		got := vb.String()
+		// Counter values: events delivered/dropped, commands handled/failed,
+		// and the avg latency rendered as a human-readable duration
+		// (2000us -> "2ms").
+		for _, want := range []string{"trainmaster", "100", "7", "4", "1", "2ms"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("verbose (%s) output missing %q:\n%s", flag, want, got)
+			}
+		}
+	}
+}
+
 func TestPluginsStatusJSONOutput(t *testing.T) {
 	withStubConfigLoad(t, func(string) (*config.Config, error) {
 		return &config.Config{Yardmaster: config.YardmasterConfig{HealthPort: 8081}}, nil

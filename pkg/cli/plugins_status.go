@@ -57,6 +57,7 @@ func newPluginsStatusCmd() *cobra.Command {
 		configPath string
 		urlFlag    string
 		jsonOut    bool
+		verbose    bool
 		timeout    time.Duration
 	)
 	cmd := &cobra.Command{
@@ -73,17 +74,18 @@ func newPluginsStatusCmd() *cobra.Command {
 		// a confusing block of flag help.
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runPluginsStatus(cmd, configPath, urlFlag, jsonOut, timeout)
+			return runPluginsStatus(cmd, configPath, urlFlag, jsonOut, verbose, timeout)
 		},
 	}
 	cmd.Flags().StringVarP(&configPath, "config", "c", "railyard.yaml", "path to Railyard config file")
 	cmd.Flags().StringVar(&urlFlag, "url", "", "override the target URL (default: http://127.0.0.1:<HealthPort>/plugins/status)")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "emit the raw JSON response instead of a table")
+	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "after the table, print per-plugin lifetime counters (events delivered/dropped, commands handled/failed, avg latency)")
 	cmd.Flags().DurationVar(&timeout, "timeout", 2*time.Second, "HTTP timeout")
 	return cmd
 }
 
-func runPluginsStatus(cmd *cobra.Command, configPath, urlFlag string, jsonOut bool, timeout time.Duration) error {
+func runPluginsStatus(cmd *cobra.Command, configPath, urlFlag string, jsonOut, verbose bool, timeout time.Duration) error {
 	url := urlFlag
 	if url == "" {
 		cfg, err := pluginsListLoadConfig(configPath)
@@ -112,7 +114,44 @@ func runPluginsStatus(cmd *cobra.Command, configPath, urlFlag string, jsonOut bo
 		return enc.Encode(snap)
 	}
 
-	return renderStatusTable(cmd.OutOrStdout(), snap)
+	if err := renderStatusTable(cmd.OutOrStdout(), snap); err != nil {
+		return err
+	}
+	if verbose {
+		return renderStatusCounters(cmd.OutOrStdout(), snap)
+	}
+	return nil
+}
+
+// renderStatusCounters prints the per-plugin lifetime runtime counters
+// (railyard-77h.14) below the default table. Kept out of the main table
+// so the default view stays narrow and readable; -v opts into the detail.
+// Counters are process-lifetime (reset on yard restart) but survive a
+// plugin relaunch.
+func renderStatusCounters(out io.Writer, snap *pluginhost.Snapshot) error {
+	fmt.Fprintln(out, "\nRUNTIME COUNTERS (process-lifetime; reset on yardmaster restart):")
+	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "NAME\tEVENTS-DELIVERED\tEVENTS-DROPPED\tCMDS-HANDLED\tCMDS-FAILED\tAVG-LATENCY")
+	for _, p := range snap.Plugins {
+		fmt.Fprintf(w, "%s\t%d\t%d\t%d\t%d\t%s\n",
+			p.Name,
+			p.EventsDelivered,
+			p.EventsDropped,
+			p.CommandsHandled,
+			p.CommandsFailed,
+			formatAvgLatency(p.CommandLatencyAvgMicros, p.CommandsHandled),
+		)
+	}
+	return w.Flush()
+}
+
+// formatAvgLatency renders the derived average command latency. With zero
+// commands handled there is no meaningful average, so we print a dash.
+func formatAvgLatency(avgMicros, handled uint64) string {
+	if handled == 0 {
+		return "-"
+	}
+	return (time.Duration(avgMicros) * time.Microsecond).String()
 }
 
 // renderStatusTable writes a tab-aligned table mirroring the look of

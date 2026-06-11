@@ -91,8 +91,16 @@ func (s *hostService) Subscribe(req *protov1.SubscribeRequest, stream protov1.Ho
 	defer streamCancel()
 
 	// Register cancel with the launched plugin so Host.Stop can tear us
-	// down before draining the plugin's PluginService.Stop.
-	if lp := s.host.lookupPluginByName(s.pluginName); lp != nil {
+	// down before draining the plugin's PluginService.Stop. We also keep
+	// the resolved *launchedPlugin so the per-event loop can bump its
+	// lifetime counters (railyard-77h.14) with lock-free atomics — the
+	// pointer is captured ONCE here and reused below; the loop never takes
+	// h.mu. lp may be nil for the brief window where a plugin's own Init
+	// subscribes before the registry entry is recorded (newHostService is
+	// wired before startSupervisor inserts into h.launched); the counter
+	// bumps below nil-check it.
+	lp := s.host.lookupPluginByName(s.pluginName)
+	if lp != nil {
 		lp.subMu.Lock()
 		lp.subCancels = append(lp.subCancels, streamCancel)
 		lp.subMu.Unlock()
@@ -143,6 +151,11 @@ func (s *hostService) Subscribe(req *protov1.SubscribeRequest, stream protov1.Ho
 				}
 				drops.record(t)
 				droppedTotal.Add(1)
+				if lp != nil {
+					// Per-plugin lifetime drop counter (railyard-77h.14).
+					// Atomic only — this runs on a bus-callback goroutine.
+					lp.eventsDropped.Add(1)
+				}
 				warner.recordDrop(s.pluginName, t)
 			}
 		})
@@ -183,6 +196,11 @@ func (s *hostService) Subscribe(req *protov1.SubscribeRequest, stream protov1.Ho
 			ev.Dropped = droppedTotal.Load()
 			if err := stream.Send(ev); err != nil {
 				return err
+			}
+			if lp != nil {
+				// Per-plugin lifetime delivery counter (railyard-77h.14).
+				// Atomic only — NO h.mu on this hot path.
+				lp.eventsDelivered.Add(1)
 			}
 		}
 	}

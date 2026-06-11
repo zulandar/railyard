@@ -128,9 +128,21 @@ func (s *hostService) DispatchCommand(ctx context.Context, req *protov1.Dispatch
 	// 2) Plugin-registered surface.
 	if owner := s.host.lookupPluginByCommand(req.Name); owner != nil {
 		hcReq := &protov1.HandleCommandRequest{Name: req.Name, Args: req.Args}
+		// Per-plugin command counters (railyard-77h.14). We count
+		// handled-by-plugin: every invocation of the owner's
+		// HandleCommand bumps commandsHandled and accumulates wall-clock
+		// latency; a transport error OR a logical failure
+		// (!hcResp.Success) bumps commandsFailed. Atomics only — no h.mu.
+		start := time.Now()
 		hcResp, err := owner.pluginRPC.HandleCommand(ctx, hcReq)
+		owner.commandsHandled.Add(1)
+		owner.commandLatencyTotalMicros.Add(uint64(time.Since(start).Microseconds()))
 		if err != nil {
+			owner.commandsFailed.Add(1)
 			return &protov1.DispatchCommandResponse{Success: false, Error: err.Error()}, nil
+		}
+		if !hcResp.Success {
+			owner.commandsFailed.Add(1)
 		}
 		// DispatchCommand success: bump BOTH the dispatching plugin (it just
 		// did an RPC) and the owning plugin (its code just ran) under one

@@ -43,6 +43,18 @@ type PluginStatus struct {
 	PID               int       `json:"pid"`
 	Path              string    `json:"path"`
 	Error             string    `json:"error,omitempty"`
+
+	// Per-plugin lifetime runtime counters (railyard-77h.14). These are
+	// process-lifetime cumulative (reset on yard restart) but survive a
+	// plugin relaunch. Populated only for running plugins; other states
+	// never observe events or commands. CommandLatencyAvgMicros is derived
+	// at snapshot time (total / handled, 0 when handled == 0).
+	EventsDelivered           uint64 `json:"events_delivered"`
+	EventsDropped             uint64 `json:"events_dropped"`
+	CommandsHandled           uint64 `json:"commands_handled"`
+	CommandsFailed            uint64 `json:"commands_failed"`
+	CommandLatencyTotalMicros uint64 `json:"command_latency_total_micros"`
+	CommandLatencyAvgMicros   uint64 `json:"command_latency_avg_micros"`
 }
 
 // Snapshot status string constants. Strings — not iota ints — because
@@ -105,6 +117,16 @@ func (h *Host) Status() Snapshot {
 	plugins := make([]PluginStatus, 0, len(h.launched)+len(h.disabled)+len(h.initFailures)+len(h.skipped))
 
 	for _, lp := range h.launched {
+		// Read the lifetime counters with lock-free atomic Loads. We are
+		// already under h.mu.RLock here, but the counters themselves are
+		// mutated only via sync/atomic (never under the lock) so Load is
+		// the correct, consistent read. Avg latency is derived now.
+		handled := lp.commandsHandled.Load()
+		totalMicros := lp.commandLatencyTotalMicros.Load()
+		var avgMicros uint64
+		if handled > 0 {
+			avgMicros = totalMicros / handled
+		}
 		plugins = append(plugins, PluginStatus{
 			Name:              lp.name,
 			Status:            StatusRunning,
@@ -115,6 +137,13 @@ func (h *Host) Status() Snapshot {
 			LastActivity:      lp.lastActivity,
 			PID:               lp.pid,
 			Path:              lp.path,
+
+			EventsDelivered:           lp.eventsDelivered.Load(),
+			EventsDropped:             lp.eventsDropped.Load(),
+			CommandsHandled:           handled,
+			CommandsFailed:            lp.commandsFailed.Load(),
+			CommandLatencyTotalMicros: totalMicros,
+			CommandLatencyAvgMicros:   avgMicros,
 		})
 	}
 

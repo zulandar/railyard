@@ -194,6 +194,57 @@ func TestRestartLoop_ExitsAreRestartedUpToBudget(t *testing.T) {
 	host.Stop(stopCtx)
 }
 
+// TestRestartPreservesRuntimeCounters asserts that the per-plugin
+// lifetime counters (railyard-77h.14) live on the registry entry and so
+// survive a relaunch — the supervisor reuses the same *launchedPlugin and
+// only swaps the dead subprocess's go-plugin handles in place. A relaunch
+// bumps restartCount (surfaced as RESTARTS) but MUST NOT reset the event /
+// command counters. We drive the supervisor's in-place
+// restartCount bump under h.mu rather than spawning a real subprocess.
+func TestRestartPreservesRuntimeCounters(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	h := &Host{
+		clock:    func() time.Time { return now },
+		launched: map[string]*launchedPlugin{},
+	}
+	lp := &launchedPlugin{name: "p1"}
+	lp.eventsDelivered.Store(50)
+	lp.eventsDropped.Store(3)
+	lp.commandsHandled.Store(9)
+	lp.commandsFailed.Store(2)
+	lp.commandLatencyTotalMicros.Store(12345)
+	h.launched["p1"] = lp
+
+	// Mirror the supervisor's post-relaunch bookkeeping (supervise.go):
+	// restartCount++ and lastActivity under h.mu, reusing the same entry.
+	h.mu.Lock()
+	if relaunchLP, ok := h.launched["p1"]; ok {
+		relaunchLP.restartCount++
+		relaunchLP.lastActivity = h.clock()
+	}
+	h.mu.Unlock()
+
+	if lp.restartCount != 1 {
+		t.Errorf("restartCount = %d, want 1", lp.restartCount)
+	}
+	// The hot-path counters must be untouched by the relaunch bookkeeping.
+	if got := lp.eventsDelivered.Load(); got != 50 {
+		t.Errorf("eventsDelivered = %d, want 50 (must survive relaunch)", got)
+	}
+	if got := lp.eventsDropped.Load(); got != 3 {
+		t.Errorf("eventsDropped = %d, want 3 (must survive relaunch)", got)
+	}
+	if got := lp.commandsHandled.Load(); got != 9 {
+		t.Errorf("commandsHandled = %d, want 9 (must survive relaunch)", got)
+	}
+	if got := lp.commandsFailed.Load(); got != 2 {
+		t.Errorf("commandsFailed = %d, want 2 (must survive relaunch)", got)
+	}
+	if got := lp.commandLatencyTotalMicros.Load(); got != 12345 {
+		t.Errorf("commandLatencyTotalMicros = %d, want 12345 (must survive relaunch)", got)
+	}
+}
+
 // TestRestartLoop_BackoffSleepShortCircuitsOnStop is a focused
 // concurrency probe — confirms that closing the host's shutdown channel
 // short-circuits the supervisor's backoff sleep, so Stop never has to

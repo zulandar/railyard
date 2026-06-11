@@ -333,6 +333,54 @@ On `SIGTERM` or `SIGINT` to railyard:
    `SIGKILL`ed.
 3. Sockets are removed.
 
+### Inspecting runtime state
+
+`ry plugins status` queries a running yardmaster over HTTP and prints a
+table of per-plugin runtime state. (Use `ry plugins list` for the
+build-time view of what is on disk.)
+
+The default table is kept narrow for readability:
+
+```
+NAME  STATUS  SDK  RESTARTS  SUBS  CMDS  LAST-ACTIVITY  PID  PATH  ERROR
+```
+
+| Column          | Meaning                                                            |
+|-----------------|--------------------------------------------------------------------|
+| `STATUS`        | `running` / `disabled` / `failed` / `skipped`                      |
+| `RESTARTS`      | Successful supervisor relaunches since the yard booted             |
+| `SUBS`          | Active event-stream subscriptions the plugin currently holds       |
+| `CMDS`          | Commands the plugin registered (capability count, not invocations) |
+| `LAST-ACTIVITY` | Relative time since the plugin last did something host-observed    |
+
+#### Verbose runtime counters (`-v` / `--verbose`)
+
+`ry plugins status -v` prints an additional block below the table with
+per-plugin **lifetime runtime counters**:
+
+```
+RUNTIME COUNTERS (process-lifetime; reset on yardmaster restart):
+NAME  EVENTS-DELIVERED  EVENTS-DROPPED  CMDS-HANDLED  CMDS-FAILED  AVG-LATENCY
+```
+
+| Counter            | Meaning                                                                        |
+|--------------------|--------------------------------------------------------------------------------|
+| `EVENTS-DELIVERED` | Events successfully sent on the plugin's subscription stream(s)                |
+| `EVENTS-DROPPED`   | Events dropped on the drop-oldest backpressure path before reaching the plugin |
+| `CMDS-HANDLED`     | Commands dispatched into the plugin's `HandleCommand` (counts every invocation) |
+| `CMDS-FAILED`      | Of those, the ones that returned a transport error or a logical failure        |
+| `AVG-LATENCY`      | Mean `HandleCommand` wall-clock latency, derived from the cumulative total      |
+
+The raw fields (including `command_latency_total_micros` and
+`command_latency_avg_micros`) are always present in `--json` output.
+
+**Reset semantics.** These counters are **process-lifetime**: they
+accumulate from the moment the yardmaster process boots and are reset
+only when that process restarts. They **survive a plugin relaunch** — a
+crashing plugin that the supervisor restarts keeps its accumulated
+counters (and `RESTARTS` increments), because the counters live on the
+host's per-plugin registry entry, not on the subprocess.
+
 ### Logging
 
 Every log line emitted by or about a plugin carries the structured

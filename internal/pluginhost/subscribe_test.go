@@ -162,6 +162,130 @@ func (s *gatedSubscribeStream) snapshot() []*protov1.Event {
 	return out
 }
 
+// registerLaunchedForSubscribe inserts a bare launchedPlugin entry under
+// `name` so the Subscribe RPC's lookupPluginByName resolves to a registry
+// entry whose per-plugin counters (railyard-77h.14) can be asserted.
+func registerLaunchedForSubscribe(t *testing.T, h *Host, name string) *launchedPlugin {
+	t.Helper()
+	lp := &launchedPlugin{name: name}
+	h.mu.Lock()
+	h.launched[name] = lp
+	h.mu.Unlock()
+	return lp
+}
+
+// TestSubscribeIncrementsEventsDelivered asserts normal delivery bumps
+// the per-plugin eventsDelivered counter that survives across
+// subscriptions/relaunches (railyard-77h.14).
+func TestSubscribeIncrementsEventsDelivered(t *testing.T) {
+	bus := events.NewBus()
+	defer bus.(interface{ Close() }).Close()
+	host := NewHost(Dependencies{Bus: bus, Cfg: permissivePluginCfg("p1")})
+	lp := registerLaunchedForSubscribe(t, host, "p1")
+	hs := newHostService(host, "p1")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := &fakeSubscribeStream{ctx: ctx}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- hs.Subscribe(&protov1.SubscribeRequest{
+			Topics: []string{string(plugin.CarCreated)},
+		}, stream)
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+	bus.Publish(string(plugin.CarCreated), plugin.CarCreatedEvent{CarID: "car-abc"})
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if lp.eventsDelivered.Load() >= 1 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if got := lp.eventsDelivered.Load(); got != 1 {
+		t.Errorf("eventsDelivered = %d, want 1", got)
+	}
+	if got := lp.eventsDropped.Load(); got != 0 {
+		t.Errorf("eventsDropped = %d, want 0", got)
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Subscribe did not exit after context cancel")
+	}
+}
+
+// TestSubscribeIncrementsEventsDropped forces the host-side drop-oldest
+// path (same wedge technique as TestSubscribeStampsSeqAndDropped) and
+// asserts the per-plugin eventsDropped counter grows once backpressure
+// fires (railyard-77h.14).
+func TestSubscribeIncrementsEventsDropped(t *testing.T) {
+	bus := events.NewBus()
+	defer bus.(interface{ Close() }).Close()
+	host := NewHost(Dependencies{Bus: bus, Cfg: permissivePluginCfg("p1")})
+	lp := registerLaunchedForSubscribe(t, host, "p1")
+	hs := newHostService(host, "p1")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := &gatedSubscribeStream{
+		ctx:       ctx,
+		gate:      make(chan struct{}),
+		firstSent: make(chan struct{}),
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- hs.Subscribe(&protov1.SubscribeRequest{
+			Topics: []string{string(plugin.CarCreated)},
+		}, stream)
+	}()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		host.mu.Lock()
+		n := host.subscriptions["p1"]
+		host.mu.Unlock()
+		if n == 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	bus.Publish(string(plugin.CarCreated), plugin.CarCreatedEvent{CarID: "0"})
+	select {
+	case <-stream.firstSent:
+	case <-time.After(2 * time.Second):
+		t.Fatal("drain loop never entered first Send")
+	}
+
+	for i := 1; i <= 4000; i++ {
+		bus.Publish(string(plugin.CarCreated), plugin.CarCreatedEvent{CarID: strconv.Itoa(i)})
+	}
+	time.Sleep(200 * time.Millisecond)
+	close(stream.gate)
+	time.Sleep(300 * time.Millisecond)
+
+	if got := lp.eventsDropped.Load(); got == 0 {
+		t.Errorf("expected eventsDropped > 0 after backpressure, got 0")
+	}
+	if got := lp.eventsDelivered.Load(); got == 0 {
+		t.Errorf("expected eventsDelivered > 0, got 0")
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Subscribe did not exit after cancel")
+	}
+}
+
 // TestSubscribeStampsSeqAndDropped forces the host-side drop-oldest path
 // by wedging the drain loop on its first Send, floods the bus, then
 // releases and asserts the delivered events carry a monotonic per-stream

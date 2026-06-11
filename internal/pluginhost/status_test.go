@@ -282,6 +282,67 @@ func TestMarkPermanentlyDisabledSurfacesViaStatus(t *testing.T) {
 	}
 }
 
+// TestStatusSurfacesRuntimeCounters asserts the per-plugin lifetime
+// counters living on launchedPlugin (railyard-77h.14) are read out of
+// the atomics and surfaced on the running plugin's PluginStatus row.
+// CommandLatencyAvgMicros is derived at display time as
+// commandLatencyTotalMicros / commandsHandled.
+func TestStatusSurfacesRuntimeCounters(t *testing.T) {
+	h := newStatusFixtureHost(t)
+	lp := h.launched["running-plugin"]
+	lp.eventsDelivered.Store(100)
+	lp.eventsDropped.Store(7)
+	lp.commandsHandled.Store(4)
+	lp.commandsFailed.Store(1)
+	lp.commandLatencyTotalMicros.Store(8000) // avg = 2000us over 4 handled
+
+	snap := h.Status()
+	var got *PluginStatus
+	for i := range snap.Plugins {
+		if snap.Plugins[i].Name == "running-plugin" {
+			got = &snap.Plugins[i]
+			break
+		}
+	}
+	if got == nil {
+		t.Fatal("running-plugin missing from snapshot")
+	}
+	if got.EventsDelivered != 100 {
+		t.Errorf("EventsDelivered = %d, want 100", got.EventsDelivered)
+	}
+	if got.EventsDropped != 7 {
+		t.Errorf("EventsDropped = %d, want 7", got.EventsDropped)
+	}
+	if got.CommandsHandled != 4 {
+		t.Errorf("CommandsHandled = %d, want 4", got.CommandsHandled)
+	}
+	if got.CommandsFailed != 1 {
+		t.Errorf("CommandsFailed = %d, want 1", got.CommandsFailed)
+	}
+	if got.CommandLatencyTotalMicros != 8000 {
+		t.Errorf("CommandLatencyTotalMicros = %d, want 8000", got.CommandLatencyTotalMicros)
+	}
+	if got.CommandLatencyAvgMicros != 2000 {
+		t.Errorf("CommandLatencyAvgMicros = %d, want 2000", got.CommandLatencyAvgMicros)
+	}
+}
+
+// TestStatusCounterAvgZeroWhenNoCommands asserts the derived average is
+// zero (not a divide-by-zero panic) when no commands have been handled.
+func TestStatusCounterAvgZeroWhenNoCommands(t *testing.T) {
+	h := newStatusFixtureHost(t)
+	snap := h.Status()
+	for _, p := range snap.Plugins {
+		if p.Name == "running-plugin" {
+			if p.CommandLatencyAvgMicros != 0 {
+				t.Errorf("CommandLatencyAvgMicros = %d, want 0 with zero handled", p.CommandLatencyAvgMicros)
+			}
+			return
+		}
+	}
+	t.Fatal("running-plugin missing")
+}
+
 func TestStatusYardmasterInfoPopulated(t *testing.T) {
 	h := newStatusFixtureHost(t)
 	h.deps.RailyardVersion = "1.2.3"

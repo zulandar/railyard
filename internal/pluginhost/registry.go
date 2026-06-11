@@ -7,6 +7,7 @@ import (
 	"os"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -131,6 +132,44 @@ type launchedPlugin struct {
 	// delivery into the plugin's subscription stream does NOT bump
 	// this field (hot path). Read/written under [Host.mu].
 	lastActivity time.Time
+
+	// --- Per-plugin lifetime runtime counters (railyard-77h.14) ---
+	//
+	// HOT-PATH RULE: these counters are touched on the per-event delivery
+	// path (subscribe.go) and the command-dispatch path (hostservice.go).
+	// They MUST be mutated with sync/atomic ONLY — NEVER acquire [Host.mu]
+	// in the per-event loop to bump them. They live on launchedPlugin (not
+	// on the subprocess or a per-subscription value) so they are
+	// process-lifetime cumulative AND survive a plugin relaunch (the
+	// supervisor reuses the same *launchedPlugin and only swaps the dead
+	// subprocess's handles in place — see supervise.go relaunch). They
+	// reset only when the yard process itself restarts.
+	//
+	// Status() reads them with a lock-free Load() (cheap); it may do so
+	// while already holding [Host.mu.RLock], which is fine — the rule is
+	// only that the EVENT loop adds no locking.
+
+	// eventsDelivered counts events successfully sent on this plugin's
+	// subscription stream(s) over the host's lifetime.
+	eventsDelivered atomic.Uint64
+
+	// eventsDropped counts events dropped on the drop-oldest backpressure
+	// path before reaching this plugin.
+	eventsDropped atomic.Uint64
+
+	// commandsHandled counts commands routed into this plugin's
+	// PluginService.HandleCommand (counted once the RPC is invoked,
+	// regardless of outcome).
+	commandsHandled atomic.Uint64
+
+	// commandsFailed counts HandleCommand invocations that returned a
+	// transport error OR a logical failure (resp.Success == false).
+	commandsFailed atomic.Uint64
+
+	// commandLatencyTotalMicros is the cumulative wall-clock time spent in
+	// PluginService.HandleCommand, in microseconds. The display layer
+	// derives the average as commandLatencyTotalMicros / commandsHandled.
+	commandLatencyTotalMicros atomic.Uint64
 }
 
 // pluginCapabilities is the host's view of the negotiated capability
