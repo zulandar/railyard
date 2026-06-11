@@ -127,6 +127,19 @@ func (s *hostService) DispatchCommand(ctx context.Context, req *protov1.Dispatch
 
 	// 2) Plugin-registered surface.
 	if owner := s.host.lookupPluginByCommand(req.Name); owner != nil {
+		// Host-side arg validation (railyard-77h.16). When the owning
+		// plugin declared a typed schema via RegisterCommandSpec, validate
+		// the dispatched args against it BEFORE issuing the HandleCommand
+		// RPC: required keys must be present and each present value must
+		// type-check. A violation returns an in-band failure WITHOUT
+		// touching the plugin — the RPC is never issued. A command with no
+		// stored spec (a bare RegisterCommand, or an old plugin) has a nil
+		// spec and skips validation entirely (unchanged behaviour).
+		if spec := s.host.lookupPluginCmdSpec(req.Name); spec != nil {
+			if err := validatePluginArgs(spec, args); err != nil {
+				return &protov1.DispatchCommandResponse{Success: false, Error: err.Error()}, nil
+			}
+		}
 		hcReq := &protov1.HandleCommandRequest{Name: req.Name, Args: req.Args}
 		// Per-plugin command counters (railyard-77h.14). We count
 		// handled-by-plugin: every invocation of the owner's

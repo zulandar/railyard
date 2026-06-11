@@ -67,6 +67,85 @@ func TestHostClientUnknownTopic(t *testing.T) {
 	})
 }
 
+// TestHostClientRegisterCommandSpec covers the SDK registration surface
+// for typed command schemas (railyard-77h.16). A command registered via
+// RegisterCommandSpec is advertised both as a name AND as a wire
+// CommandSchema with its typed args; a bare RegisterCommand is advertised
+// only as a name and contributes no spec.
+func TestHostClientRegisterCommandSpec(t *testing.T) {
+	t.Parallel()
+
+	hc := &hostClient{
+		rootCtx:         context.Background(),
+		commandHandlers: make(map[string]CommandHandler),
+		commandSpecs:    make(map[string]CommandSpec),
+	}
+	handler := func(context.Context, CommandArgs) (CommandResult, error) {
+		return CommandResult{Success: true}, nil
+	}
+
+	spec := CommandSpec{
+		Name: "scale",
+		Args: []ArgSpec{
+			{Name: "Track", Type: ArgString, Required: true},
+			{Name: "Count", Type: ArgInt, Required: true},
+			{Name: "Force", Type: ArgBool, Required: false, Description: "skip safety checks"},
+		},
+	}
+	if err := hc.RegisterCommandSpec(spec, handler); err != nil {
+		t.Fatalf("RegisterCommandSpec: %v", err)
+	}
+	// A bare command shares the name space but contributes no spec.
+	if err := hc.RegisterCommand("bare", handler); err != nil {
+		t.Fatalf("RegisterCommand: %v", err)
+	}
+
+	// Both names are advertised.
+	names := hc.advertisedCommandNames()
+	if len(names) != 2 {
+		t.Fatalf("advertisedCommandNames = %v, want 2 entries", names)
+	}
+
+	// Exactly one spec is advertised, and it round-trips the typed args.
+	specs := hc.advertisedCommandSpecs()
+	if len(specs) != 1 {
+		t.Fatalf("advertisedCommandSpecs = %d, want 1 (bare command contributes none)", len(specs))
+	}
+	got := specs[0]
+	if got.Name != "scale" {
+		t.Errorf("spec name = %q, want scale", got.Name)
+	}
+	if len(got.Args) != 3 {
+		t.Fatalf("spec args = %d, want 3", len(got.Args))
+	}
+	want := []struct {
+		name string
+		typ  protov1.ArgType
+		req  bool
+	}{
+		{"Track", protov1.ArgType_ARG_TYPE_STRING, true},
+		{"Count", protov1.ArgType_ARG_TYPE_INT, true},
+		{"Force", protov1.ArgType_ARG_TYPE_BOOL, false},
+	}
+	for i, w := range want {
+		a := got.Args[i]
+		if a.Name != w.name || a.Type != w.typ || a.Required != w.req {
+			t.Errorf("arg[%d] = {%q %v %v}, want {%q %v %v}", i, a.Name, a.Type, a.Required, w.name, w.typ, w.req)
+		}
+	}
+
+	// Re-registering a name (bare or typed) is rejected.
+	if err := hc.RegisterCommandSpec(spec, handler); err == nil {
+		t.Error("RegisterCommandSpec on a duplicate name must error")
+	}
+	if err := hc.RegisterCommandSpec(CommandSpec{}, handler); err == nil {
+		t.Error("RegisterCommandSpec with empty name must error")
+	}
+	if err := hc.RegisterCommandSpec(CommandSpec{Name: "x"}, nil); err == nil {
+		t.Error("RegisterCommandSpec with nil handler must error")
+	}
+}
+
 // TestDecodeEventCustom decodes a plugin-published dynamic event: the
 // custom Struct arm + topic_name become a map[string]any payload under
 // the namespaced EventType (railyard-77h.9).

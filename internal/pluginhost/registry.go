@@ -268,6 +268,18 @@ func (h *Host) lookupPluginByCommand(cmdName string) *launchedPlugin {
 	return h.launched[owner]
 }
 
+// lookupPluginCmdSpec returns the typed argument schema a subprocess
+// plugin declared for cmdName via RegisterCommandSpec (railyard-77h.16),
+// or nil if the command has no stored spec (a bare RegisterCommand, or a
+// plugin built before spec reporting). A nil return tells
+// DispatchCommand to skip arg validation for that command. Holds the lock
+// for the duration of the read.
+func (h *Host) lookupPluginCmdSpec(cmdName string) *protov1.CommandSchema {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.pluginCmdSpecs[cmdName]
+}
+
 // removeLaunched deletes the launched-plugin entry for name and returns
 // the removed struct (or nil). Idempotent.
 func (h *Host) removeLaunched(name string) *launchedPlugin {
@@ -278,10 +290,12 @@ func (h *Host) removeLaunched(name string) *launchedPlugin {
 		return nil
 	}
 	delete(h.launched, name)
-	// Also drop any command-registry rows owned by this plugin.
+	// Also drop any command-registry rows owned by this plugin, including
+	// the typed arg specs stored alongside them (railyard-77h.16).
 	for cmd, owner := range h.pluginCmds {
 		if owner == name {
 			delete(h.pluginCmds, cmd)
+			delete(h.pluginCmdSpecs, cmd)
 		}
 	}
 	return lp
@@ -435,6 +449,19 @@ func (h *Host) initOne(ctx context.Context, c candidate, parentLogger *slog.Logg
 	// reporting.
 	lp.sdkVersion = resp.SdkVersion
 
+	// Index the typed arg specs the plugin reported (railyard-77h.16) by
+	// command name so the ownership loop below can stash the matching
+	// spec alongside h.pluginCmds. A command with no entry here (a bare
+	// RegisterCommand, or a plugin built before spec reporting) is dispatched
+	// without arg validation, exactly as before.
+	specByName := make(map[string]*protov1.CommandSchema, len(resp.CommandSpecs))
+	for _, cs := range resp.CommandSpecs {
+		if cs == nil || cs.Name == "" {
+			continue
+		}
+		specByName[cs.Name] = cs
+	}
+
 	// Register command ownership BEFORE spawning the supervisor so a
 	// crash-restart race cannot leave a window where the plugin's
 	// commands look unowned.
@@ -460,6 +487,11 @@ func (h *Host) initOne(ctx context.Context, c candidate, parentLogger *slog.Logg
 			continue
 		}
 		h.pluginCmds[cmd] = lp.name
+		// Stash the typed arg spec (if the plugin declared one via
+		// RegisterCommandSpec) so DispatchCommand validates against it.
+		if spec, ok := specByName[cmd]; ok && len(spec.Args) > 0 {
+			h.pluginCmdSpecs[cmd] = spec
+		}
 	}
 	h.mu.Unlock()
 

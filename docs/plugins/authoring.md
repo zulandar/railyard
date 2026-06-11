@@ -466,6 +466,47 @@ succeeds locally, the host only dispatches commands the operator has
 explicitly allowed — see [Capabilities and
 allow-listing](#capabilities-and-allow-listing).
 
+A command registered with `RegisterCommand` carries **no argument
+schema**: the host forwards dispatched args verbatim and your handler is
+responsible for every presence/type check (the `args["name"].(string)`
+assertion above).
+
+#### RegisterCommandSpec (host-validated args)
+
+`RegisterCommandSpec` is the typed variant (railyard-77h.16). You declare
+the command's argument signature; the host validates dispatched args
+against it — required keys must be present and every present value must
+type-check — **before** your handler runs. A violation returns
+`CommandResult{Success: false, Error: <violation>}` to the caller and the
+RPC into your plugin is never issued, so your handler only ever sees args
+that already satisfy the spec.
+
+```go
+func (p *MyPlugin) Init(ctx context.Context, h plugin.Host) error {
+    return h.RegisterCommandSpec(plugin.CommandSpec{
+        Name: "my-plugin.scale",
+        Args: []plugin.ArgSpec{
+            {Name: "Track", Type: plugin.ArgString, Required: true},
+            {Name: "Count", Type: plugin.ArgInt, Required: true},
+            {Name: "Force", Type: plugin.ArgBool, Required: false,
+                Description: "skip safety checks"},
+        },
+    }, p.onScale)
+}
+```
+
+`ArgType` is one of `ArgString`, `ArgInt`, `ArgBool`, `ArgFloat`. Type
+checking follows the wire encoding (args round-trip through a
+`google.protobuf.Struct`, so every JSON number arrives as a `float64`):
+an `ArgInt` accepts a `float64` only when it is integral (`5.0` ok, `5.5`
+rejected); an `ArgFloat` accepts any number; `ArgString` accepts a
+string; `ArgBool` accepts a bool. Optional args (`Required: false`) are
+type-checked only when present. The declared signature is surfaced in
+`ry plugins status -v` as `name(arg:type, ...)`.
+
+`RegisterCommand` stays available unchanged for commands that take no
+declared args or that prefer to validate args themselves.
+
 ### DispatchCommand
 
 Invokes a command by name. The host first checks the core allow-list; if
@@ -494,6 +535,22 @@ Validation failures land as `Success: false` with `Error` set; the Go
 `error` return is reserved for transport failures. The full set of
 dispatchable core commands is in the operator guide
 (`railyard-fll.9.3`).
+
+Argument validation runs **host-side** for two classes of command and is
+uniform across both (railyard-77h.16):
+
+- **Core allow-list commands** (e.g. `scale_track`) carry a built-in
+  required-key/type schema the host enforces before invoking the binding.
+- **Plugin commands registered with `RegisterCommandSpec`** carry the
+  typed schema their author declared; the host validates dispatched args
+  against it before forwarding to the owning plugin's handler.
+
+In both cases a missing required arg yields `missing required argument
+"X"` and a present-but-wrong-typed arg yields `argument "X" has wrong
+type`, returned as `Success: false` **without** the command's
+implementation ever running. Plugin commands registered with the bare
+`RegisterCommand` (no spec) are forwarded unvalidated — exactly as
+before.
 
 `scale_track` adapts to the deployment mode. In local (tmux) mode it
 creates or kills per-engine tmux sessions via the orchestrator. In
@@ -802,6 +859,7 @@ Per-plugin fields:
 | `restart_count` | Cumulative supervisor relaunches since the host booted. |
 | `subscription_count` | Live event subscriptions the plugin owns. |
 | `command_count` | Plugin-registered commands the host routes to it. |
+| `command_signatures` | Each owned command rendered `name(arg:type, ...)` from its declared `RegisterCommandSpec` schema (bare commands render `name()`). Shown in `ry plugins status -v`. |
 | `last_activity` | Last lifecycle or dispatch event timestamp. NOT bumped by event delivery — see below. |
 | `pid` | Subprocess PID (0 when not running). |
 | `path` | Discovered binary path. |

@@ -41,3 +41,63 @@ type CommandResult struct {
 // error is equivalent to returning a CommandResult with Success=false
 // and Error set to err.Error(); the host translates the two forms.
 type CommandHandler func(ctx context.Context, args CommandArgs) (CommandResult, error)
+
+// ArgType is the primitive value type a command argument carries. A
+// plugin declares one per argument in a [CommandSpec] via
+// [Host.RegisterCommandSpec]; the host type-checks dispatched args
+// against it before forwarding to the plugin's handler
+// (railyard-77h.16).
+//
+// The JSON-ish coercion rules the host applies mirror the wire encoding
+// (see pkg/plugin/convert.go): values round-trip through
+// google.protobuf.Struct, so every JSON number arrives as a float64. An
+// [ArgInt] therefore accepts a float64 only when it is integral; an
+// [ArgFloat] accepts any float64; [ArgString] accepts a string;
+// [ArgBool] accepts a bool.
+type ArgType int
+
+const (
+	// ArgString validates the value is a string.
+	ArgString ArgType = iota
+	// ArgInt validates the value is an integer (an integral float64 on
+	// the wire is accepted; a non-integral float64 is rejected).
+	ArgInt
+	// ArgBool validates the value is a bool.
+	ArgBool
+	// ArgFloat validates the value is a float64.
+	ArgFloat
+)
+
+// ArgSpec declares one typed argument in a command's signature. Required
+// args must be present at dispatch; optional args are type-checked only
+// when present.
+type ArgSpec struct {
+	// Name is the argument key in the [CommandArgs] map.
+	Name string
+
+	// Type is the expected primitive value type.
+	Type ArgType
+
+	// Required reports whether the arg must be present. A missing
+	// required arg fails host validation before the handler is invoked.
+	Required bool
+
+	// Description is an optional human-readable summary surfaced in
+	// `ry plugins status -v` and documentation tooling.
+	Description string
+}
+
+// CommandSpec is the typed registration shape passed to
+// [Host.RegisterCommandSpec]. It pairs a command name with the typed
+// argument signature the host validates dispatched args against before
+// forwarding to the handler (railyard-77h.16). A spec with no Args
+// validates nothing beyond the command name, matching bare
+// [Host.RegisterCommand] behaviour.
+type CommandSpec struct {
+	// Name is the command name (unique across the host).
+	Name string
+
+	// Args is the typed argument signature. Empty means no declared
+	// args — the command behaves like a bare RegisterCommand.
+	Args []ArgSpec
+}

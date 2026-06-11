@@ -94,7 +94,25 @@ type Host interface {
 	// Returns an error if the name conflicts with a previously
 	// registered command (whether plugin-provided or a core
 	// allow-list entry).
+	//
+	// A command registered this way carries no argument schema: the host
+	// forwards dispatched args verbatim without validation. Use
+	// [Host.RegisterCommandSpec] to declare a typed signature the host
+	// validates before invoking the handler.
 	RegisterCommand(name string, h CommandHandler) error
+
+	// RegisterCommandSpec is the typed-schema variant of
+	// [Host.RegisterCommand] (railyard-77h.16). The plugin declares the
+	// command's argument signature via [CommandSpec]; the host stores it
+	// and validates dispatched args against it — required keys must be
+	// present and each present value must match its declared [ArgType] —
+	// BEFORE the handler is invoked. A spec with no Args validates only
+	// the command name, identical to RegisterCommand.
+	//
+	// Returns an error on an empty name, a nil handler, or a name that
+	// conflicts with a previously registered command (plugin-provided or
+	// a core allow-list entry).
+	RegisterCommandSpec(spec CommandSpec, h CommandHandler) error
 
 	// DispatchCommand invokes a command by name. The host first looks
 	// up the name in the Phase 1 core allow-list (see spec §7.3); if

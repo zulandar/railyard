@@ -294,6 +294,58 @@ func TestPluginsStatusVerboseShowsCounters(t *testing.T) {
 	}
 }
 
+// TestPluginsStatusVerboseShowsCommandSignatures asserts the -v block
+// renders each plugin's command signatures as "name(arg:type, ...)" and
+// that the default table does NOT (railyard-77h.16).
+func TestPluginsStatusVerboseShowsCommandSignatures(t *testing.T) {
+	withStubConfigLoad(t, func(string) (*config.Config, error) {
+		return &config.Config{Yardmaster: config.YardmasterConfig{HealthPort: 8081}}, nil
+	})
+	snap := &pluginhost.Snapshot{
+		Plugins: []pluginhost.PluginStatus{
+			{
+				Name: "trainmaster", Status: pluginhost.StatusRunning, PID: 42,
+				CommandSignatures: []string{"scale(Track:string, Count:int)", "ping()"},
+			},
+		},
+	}
+
+	// Default table: signatures NOT shown.
+	withStubStatusFetch(t, func(_ context.Context, _ string, _ time.Duration) (*pluginhost.Snapshot, error) {
+		return snap, nil
+	})
+	root := newRootCmd()
+	var def bytes.Buffer
+	root.SetOut(&def)
+	root.SetErr(&def)
+	root.SetArgs([]string{"plugins", "status"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute default: %v", err)
+	}
+	if strings.Contains(def.String(), "COMMAND SIGNATURES") || strings.Contains(def.String(), "scale(Track:string") {
+		t.Errorf("default table should NOT include command signatures, got:\n%s", def.String())
+	}
+
+	// Verbose: signatures shown.
+	withStubStatusFetch(t, func(_ context.Context, _ string, _ time.Duration) (*pluginhost.Snapshot, error) {
+		return snap, nil
+	})
+	vroot := newRootCmd()
+	var vb bytes.Buffer
+	vroot.SetOut(&vb)
+	vroot.SetErr(&vb)
+	vroot.SetArgs([]string{"plugins", "status", "-v"})
+	if err := vroot.Execute(); err != nil {
+		t.Fatalf("execute -v: %v", err)
+	}
+	got := vb.String()
+	for _, want := range []string{"COMMAND SIGNATURES", "trainmaster", "scale(Track:string, Count:int)", "ping()"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("verbose output missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestPluginsStatusJSONOutput(t *testing.T) {
 	withStubConfigLoad(t, func(string) (*config.Config, error) {
 		return &config.Config{Yardmaster: config.YardmasterConfig{HealthPort: 8081}}, nil

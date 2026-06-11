@@ -27,6 +27,7 @@ import (
 	"github.com/zulandar/railyard/internal/config"
 	"github.com/zulandar/railyard/internal/events"
 	"github.com/zulandar/railyard/pkg/plugin"
+	protov1 "github.com/zulandar/railyard/pkg/plugin/proto/v1"
 )
 
 // Dependencies bundles the inputs required to construct a [*Host]. Wiring
@@ -106,6 +107,16 @@ type Host struct {
 	// capabilities. HostService.DispatchCommand consults this map after
 	// the core allow-list misses.
 	pluginCmds map[string]string
+
+	// pluginCmdSpecs maps a plugin-registered command name to the typed
+	// argument schema the owning plugin reported in
+	// InitResponse.command_specs (railyard-77h.16). Populated alongside
+	// pluginCmds in initOne and cleaned up in removeLaunched in lockstep.
+	// HostService.DispatchCommand validates dispatched args against the
+	// stored spec before forwarding to HandleCommand; a command with no
+	// entry here (a bare RegisterCommand, or an old plugin) skips
+	// validation entirely. Read/written under h.mu.
+	pluginCmdSpecs map[string]*protov1.CommandSchema
 
 	// inProcCmds holds in-process command handlers registered via
 	// [Host.RegisterCommand]. Subprocess plugins do NOT use this path —
@@ -200,14 +211,15 @@ var _ plugin.Host = (*Host)(nil)
 // plugins until [Host.Init] is called.
 func NewHost(deps Dependencies) *Host {
 	h := &Host{
-		deps:         deps,
-		pluginCmds:   make(map[string]string),
-		inProcCmds:   make(map[string]plugin.CommandHandler),
-		launched:     make(map[string]*launchedPlugin),
-		shutdownCh:   make(chan struct{}),
-		clock:        time.Now,
-		initFailures: make(map[string]initFailure),
-		disabled:     make(map[string]*disabledPlugin),
+		deps:           deps,
+		pluginCmds:     make(map[string]string),
+		pluginCmdSpecs: make(map[string]*protov1.CommandSchema),
+		inProcCmds:     make(map[string]plugin.CommandHandler),
+		launched:       make(map[string]*launchedPlugin),
+		shutdownCh:     make(chan struct{}),
+		clock:          time.Now,
+		initFailures:   make(map[string]initFailure),
+		disabled:       make(map[string]*disabledPlugin),
 		// `skipped` starts nil; populated by Init when there are missing plugins.
 	}
 	// bootedAt MUST come from h.clock so tests that stub the clock can

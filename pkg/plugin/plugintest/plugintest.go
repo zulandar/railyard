@@ -92,15 +92,23 @@ type RecordedSubscription struct {
 	Unsubscribed bool
 }
 
-// RecordedRegistration captures one call to [FakeHost.RegisterCommand].
-// Tests can assert that a plugin registered the expected command name
-// without invoking the underlying handler.
+// RecordedRegistration captures one call to [FakeHost.RegisterCommand]
+// or [FakeHost.RegisterCommandSpec]. Tests can assert that a plugin
+// registered the expected command name — and, for the typed variant, the
+// expected argument signature — without invoking the underlying handler.
 type RecordedRegistration struct {
 	// Name is the command name the plugin registered.
 	Name string
 
 	// Handler is the [plugin.CommandHandler] the plugin supplied.
 	Handler plugin.CommandHandler
+
+	// Spec is the typed [plugin.CommandSpec] for registrations made via
+	// [FakeHost.RegisterCommandSpec] (railyard-77h.16). For a bare
+	// [FakeHost.RegisterCommand] it is the zero value with Spec.Name set
+	// to Name and Spec.Args nil, so tests can read Spec.Args == nil to
+	// tell the two registration paths apart.
+	Spec plugin.CommandSpec
 }
 
 // RecordedEmit captures one call to [FakeHost.Emit] so tests can assert
@@ -275,7 +283,11 @@ func (h *FakeHost) Snapshot(_ context.Context) (*plugin.Snapshot, error) {
 func (h *FakeHost) RegisterCommand(name string, handler plugin.CommandHandler) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.registrations = append(h.registrations, RecordedRegistration{Name: name, Handler: handler})
+	h.registrations = append(h.registrations, RecordedRegistration{
+		Name:    name,
+		Handler: handler,
+		Spec:    plugin.CommandSpec{Name: name},
+	})
 	if h.RegisterCommandErr != nil {
 		return h.RegisterCommandErr
 	}
@@ -288,6 +300,37 @@ func (h *FakeHost) RegisterCommand(name string, handler plugin.CommandHandler) e
 	for _, prev := range h.registrations[:len(h.registrations)-1] {
 		if prev.Name == name {
 			return fmt.Errorf("pluginhost: command %q is already registered", name)
+		}
+	}
+	return nil
+}
+
+// RegisterCommandSpec records a typed registration and returns errors in
+// the same situations as [FakeHost.RegisterCommand], keyed off
+// spec.Name. The full [plugin.CommandSpec] (including Args) is recorded
+// on [RecordedRegistration.Spec] so tests can assert on the declared
+// argument signature. A non-nil [FakeHost.RegisterCommandErr] takes
+// precedence over the validation errors (railyard-77h.16).
+func (h *FakeHost) RegisterCommandSpec(spec plugin.CommandSpec, handler plugin.CommandHandler) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.registrations = append(h.registrations, RecordedRegistration{
+		Name:    spec.Name,
+		Handler: handler,
+		Spec:    spec,
+	})
+	if h.RegisterCommandErr != nil {
+		return h.RegisterCommandErr
+	}
+	if spec.Name == "" {
+		return errors.New("pluginhost: command name must not be empty")
+	}
+	if handler == nil {
+		return errors.New("pluginhost: command handler must not be nil")
+	}
+	for _, prev := range h.registrations[:len(h.registrations)-1] {
+		if prev.Name == spec.Name {
+			return fmt.Errorf("pluginhost: command %q is already registered", spec.Name)
 		}
 	}
 	return nil

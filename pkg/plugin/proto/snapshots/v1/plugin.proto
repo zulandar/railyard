@@ -121,22 +121,66 @@ service HostService {
 // Init / capabilities handshake
 // -----------------------------------------------------------------------------
 
+// ArgType is the primitive value type a command argument carries. The
+// host type-checks dispatched args against it before forwarding to the
+// plugin (railyard-77h.16). Numeric ordering has no semantic meaning;
+// new types append at the tail.
+enum ArgType {
+  // ARG_TYPE_UNSPECIFIED is the proto3 zero value. A spec that leaves a
+  // type unspecified is treated by the host as "no type check" — only
+  // presence (when required) is enforced.
+  ARG_TYPE_UNSPECIFIED = 0;
+  ARG_TYPE_STRING = 1;
+  ARG_TYPE_INT = 2;
+  ARG_TYPE_BOOL = 3;
+  ARG_TYPE_FLOAT = 4;
+}
+
+// ArgSpec is one typed argument in a command's declared signature
+// (railyard-77h.16). It supersedes CommandSchema.required_args for new
+// plugins: the host validates dispatched args against the ArgSpec list —
+// required keys must be present and every present value must type-check
+// per the ArgType. Optional args (required=false) are only type-checked
+// when present.
+message ArgSpec {
+  // name is the argument key in the CommandArgs map.
+  string name = 1;
+
+  // type is the expected primitive value type.
+  ArgType type = 2;
+
+  // required reports whether the arg must be present. A missing required
+  // arg fails host validation before HandleCommand is invoked.
+  bool required = 3;
+
+  // description is an optional human-readable summary surfaced in
+  // `ry plugins status -v` and documentation tooling.
+  string description = 4;
+}
+
 // CommandSchema is the plugin's declared shape for a command it wishes
-// to register. Phase 1 supports a required-keys schema only: each entry
-// in `required_args` names a key and the expected primitive type as a
-// string (one of "string", "int", "float", "bool"). This is enough for
-// the host to reject obviously malformed args before HandleCommand.
+// to register. The original required_args map (key -> primitive type
+// name) is retained for wire compatibility; new plugins declare typed
+// args via the `args` list (railyard-77h.16), which the host validates
+// before forwarding to HandleCommand.
 message CommandSchema {
   // name is the command name (unique across the host).
   string name = 1;
 
   // required_args is key -> primitive type name. Empty map means the
-  // command takes no required arguments.
+  // command takes no required arguments. Retained for wire
+  // compatibility; new code uses `args`.
   map<string, string> required_args = 2;
 
   // description is an optional human-readable summary surfaced in
   // documentation tooling.
   string description = 3;
+
+  // args is the typed argument signature (railyard-77h.16). When
+  // non-empty the host validates dispatched args against it. An empty
+  // list means the command takes no declared args and skips host-side
+  // validation entirely (bare-command behaviour, unchanged).
+  repeated ArgSpec args = 4;
 }
 
 // Capabilities is the plugin's advertised wish-list at Init time.
@@ -218,6 +262,16 @@ message InitResponse {
   // purpose — go-plugin makes the host the Init *client*, so the plugin
   // can only report its own version on the response side.
   string sdk_version = 4;
+
+  // command_specs carries the typed argument signatures the plugin
+  // registered via the SDK's RegisterCommandSpec (railyard-77h.16). The
+  // host stores the per-command spec and validates dispatched args
+  // against it before forwarding to HandleCommand. Commands registered
+  // with the bare RegisterCommand carry no spec here and are advertised
+  // only as names in allowed_commands — they keep their unvalidated
+  // behaviour. Like allowed_commands, this travels plugin->host on the
+  // Init RESPONSE because go-plugin makes the host the Init client.
+  repeated CommandSchema command_specs = 5;
 }
 
 // -----------------------------------------------------------------------------

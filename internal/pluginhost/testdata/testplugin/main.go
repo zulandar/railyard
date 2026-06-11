@@ -75,13 +75,54 @@ type testPlugin struct {
 	emitUnsub    plugin.Unsubscribe
 	emitStopCh   chan struct{}
 	emitStopOnce sync.Once
+
+	// Command-spec mode state (railyard-77h.16). Registers a typed command
+	// via RegisterCommandSpec and logs each handled invocation's args so
+	// the host-side e2e can prove host-validated args reach the handler.
+	cmdMu      sync.Mutex
+	cmdEnabled bool
+	cmdOut     *os.File
 }
 
 const emitTopic = "testplugin.ping"
 
 func (p *testPlugin) Name() string { return "testplugin" }
 
+// cmdTopic is the name the command-mode plugin registers a typed spec for.
+const cmdTopic = "testplugin.scale"
+
 func (p *testPlugin) Init(_ context.Context, h plugin.Host) error {
+	// Command-spec mode (railyard-77h.16). Register a command with a typed
+	// argument schema via RegisterCommandSpec and record every invocation's
+	// args to a log file. The host validates dispatched args against the
+	// declared spec BEFORE calling this handler, so the host-side e2e can
+	// prove valid args reach the plugin (and, indirectly, that invalid args
+	// would not — they are rejected before the RPC).
+	if os.Getenv("RAILYARD_TESTPLUGIN_CMD") == "1" {
+		p.cmdEnabled = true
+		path := os.Getenv("RAILYARD_TESTPLUGIN_CMD_LOG")
+		if path == "" {
+			return fmt.Errorf("testplugin: cmd mode requires RAILYARD_TESTPLUGIN_CMD_LOG")
+		}
+		f, err := os.Create(path)
+		if err != nil {
+			return fmt.Errorf("testplugin: create cmd log: %w", err)
+		}
+		p.cmdOut = f
+		return h.RegisterCommandSpec(plugin.CommandSpec{
+			Name: cmdTopic,
+			Args: []plugin.ArgSpec{
+				{Name: "Track", Type: plugin.ArgString, Required: true},
+				{Name: "Count", Type: plugin.ArgInt, Required: true},
+			},
+		}, func(_ context.Context, args plugin.CommandArgs) (plugin.CommandResult, error) {
+			p.cmdMu.Lock()
+			fmt.Fprintf(p.cmdOut, "handled Track=%v Count=%v\n", args["Track"], args["Count"])
+			_ = p.cmdOut.Sync()
+			p.cmdMu.Unlock()
+			return plugin.CommandResult{Success: true, Data: map[string]any{"ok": true}}, nil
+		})
+	}
 	// Emit mode (railyard-77h.9). Subscribe to our own namespaced topic
 	// and record each received dynamic payload; Start drives the emit.
 	if os.Getenv("RAILYARD_TESTPLUGIN_EMIT") == "1" {
@@ -310,6 +351,18 @@ func (p *testPlugin) Stop(_ context.Context) error {
 			p.emitOut = nil
 		}
 		p.emitMu.Unlock()
+	}
+
+	// Command-spec mode shutdown: close the command log under the same
+	// mutex the handler uses for its writes (railyard-77h.16).
+	if p.cmdEnabled {
+		p.cmdMu.Lock()
+		if p.cmdOut != nil {
+			_ = p.cmdOut.Sync()
+			_ = p.cmdOut.Close()
+			p.cmdOut = nil
+		}
+		p.cmdMu.Unlock()
 	}
 
 	// Meta-mode shutdown: unsubscribe then close the meta log under the

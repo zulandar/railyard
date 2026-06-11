@@ -5,6 +5,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	protov1 "github.com/zulandar/railyard/pkg/plugin/proto/v1"
 )
 
 // Snapshot is the runtime-state projection returned by [Host.Status].
@@ -55,6 +57,15 @@ type PluginStatus struct {
 	Health          string    `json:"health,omitempty"`
 	HealthMessage   string    `json:"health_message,omitempty"`
 	HealthCheckedAt time.Time `json:"health_checked_at,omitzero"`
+
+	// CommandSignatures renders each command the plugin owns as a compact
+	// "name(arg:type, ...)" string (railyard-77h.16). Commands a plugin
+	// registered with a typed schema (RegisterCommandSpec) show their
+	// declared args; bare commands (RegisterCommand) render as "name()".
+	// Sorted by command name for deterministic output. Populated only for
+	// running plugins; omitted when empty so non-running rows stay clean.
+	// Surfaced by `ry plugins status -v`.
+	CommandSignatures []string `json:"command_signatures,omitempty"`
 
 	// Per-plugin lifetime runtime counters (railyard-77h.14). These are
 	// process-lifetime cumulative (reset on yard restart) but survive a
@@ -117,6 +128,67 @@ type skippedPlugin struct {
 	searched []string
 }
 
+// commandSignaturesLocked renders a plugin's owned command names as
+// compact "name(arg:type, ...)" signatures (railyard-77h.16). A command
+// with a stored typed schema (RegisterCommandSpec) shows its declared
+// args; a bare command renders as "name()". Output is sorted by command
+// name for deterministic display.
+//
+// Caller MUST hold h.mu (R or W) — it reads h.pluginCmdSpecs.
+func (h *Host) commandSignaturesLocked(cmds []string) []string {
+	if len(cmds) == 0 {
+		return nil
+	}
+	sorted := append([]string(nil), cmds...)
+	sort.Strings(sorted)
+	out := make([]string, 0, len(sorted))
+	for _, cmd := range sorted {
+		out = append(out, formatCommandSignature(cmd, h.pluginCmdSpecs[cmd]))
+	}
+	return out
+}
+
+// formatCommandSignature renders one command as "name(arg:type, ...)".
+// A nil/empty spec (a bare command, or one with no declared args) renders
+// as "name()". Arg types use the lowercase short names string/int/bool/
+// float; an unspecified type renders as "any".
+func formatCommandSignature(name string, spec *protov1.CommandSchema) string {
+	var b strings.Builder
+	b.WriteString(name)
+	b.WriteByte('(')
+	if spec != nil {
+		for i, a := range spec.Args {
+			if a == nil {
+				continue
+			}
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			b.WriteString(a.Name)
+			b.WriteByte(':')
+			b.WriteString(argTypeShortName(a.Type))
+		}
+	}
+	b.WriteByte(')')
+	return b.String()
+}
+
+// argTypeShortName maps a wire ArgType to its compact display name.
+func argTypeShortName(t protov1.ArgType) string {
+	switch t {
+	case protov1.ArgType_ARG_TYPE_STRING:
+		return "string"
+	case protov1.ArgType_ARG_TYPE_INT:
+		return "int"
+	case protov1.ArgType_ARG_TYPE_BOOL:
+		return "bool"
+	case protov1.ArgType_ARG_TYPE_FLOAT:
+		return "float"
+	default:
+		return "any"
+	}
+}
+
 // Status returns a point-in-time snapshot of every configured plugin's
 // runtime state. The returned struct is a deep copy — callers may
 // mutate it freely. Safe for concurrent use.
@@ -153,6 +225,8 @@ func (h *Host) Status() Snapshot {
 			Health:          lp.healthValue,
 			HealthMessage:   lp.healthMessage,
 			HealthCheckedAt: lp.healthCheckedAt,
+
+			CommandSignatures: h.commandSignaturesLocked(lp.capabilities.provideCommands),
 
 			EventsDelivered:           lp.eventsDelivered.Load(),
 			EventsDropped:             lp.eventsDropped.Load(),

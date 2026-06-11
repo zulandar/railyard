@@ -93,6 +93,11 @@ func (a *pluginServiceAdapter) Init(ctx context.Context, req *protov1.InitReques
 	if hc != nil {
 		resp.AllowedEvents = hc.advertisedTopics()
 		resp.AllowedCommands = hc.advertisedCommandNames()
+		// Typed arg signatures for commands registered via
+		// RegisterCommandSpec (railyard-77h.16). The host stores these and
+		// validates dispatched args before forwarding to HandleCommand.
+		// Bare RegisterCommand commands carry no spec and are absent here.
+		resp.CommandSpecs = hc.advertisedCommandSpecs()
 	}
 	// Defensive fallback: if the host sent its own declared wish-list in
 	// the request and the plugin didn't subscribe to anything in Init,

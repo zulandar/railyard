@@ -118,9 +118,37 @@ func runPluginsStatus(cmd *cobra.Command, configPath, urlFlag string, jsonOut, v
 		return err
 	}
 	if verbose {
-		return renderStatusCounters(cmd.OutOrStdout(), snap)
+		if err := renderStatusCounters(cmd.OutOrStdout(), snap); err != nil {
+			return err
+		}
+		renderStatusCommandSignatures(cmd.OutOrStdout(), snap)
 	}
 	return nil
+}
+
+// renderStatusCommandSignatures prints each plugin's command signatures
+// (railyard-77h.16) in the -v detail block, one "name(arg:type, ...)" per
+// command. Kept out of the default table to keep it readable. Plugins
+// with no commands are skipped; nothing is printed if no plugin owns any
+// command.
+func renderStatusCommandSignatures(out io.Writer, snap *pluginhost.Snapshot) {
+	any := false
+	for _, p := range snap.Plugins {
+		if len(p.CommandSignatures) > 0 {
+			any = true
+			break
+		}
+	}
+	if !any {
+		return
+	}
+	fmt.Fprintln(out, "\nCOMMAND SIGNATURES:")
+	for _, p := range snap.Plugins {
+		if len(p.CommandSignatures) == 0 {
+			continue
+		}
+		fmt.Fprintf(out, "  %s: %s\n", p.Name, strings.Join(p.CommandSignatures, ", "))
+	}
 }
 
 // renderStatusCounters prints the per-plugin lifetime runtime counters

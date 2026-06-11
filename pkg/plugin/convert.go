@@ -163,6 +163,45 @@ func decodeEvent(ev *protov1.Event) (decodedEvent, error) {
 	}
 }
 
+// argTypeToProto maps the SDK [ArgType] onto the wire enum. An
+// unrecognized value maps to ARG_TYPE_UNSPECIFIED so a future SDK type
+// added without a wire arm degrades to "no type check" rather than
+// encoding garbage (railyard-77h.16).
+func argTypeToProto(t ArgType) protov1.ArgType {
+	switch t {
+	case ArgString:
+		return protov1.ArgType_ARG_TYPE_STRING
+	case ArgInt:
+		return protov1.ArgType_ARG_TYPE_INT
+	case ArgBool:
+		return protov1.ArgType_ARG_TYPE_BOOL
+	case ArgFloat:
+		return protov1.ArgType_ARG_TYPE_FLOAT
+	default:
+		return protov1.ArgType_ARG_TYPE_UNSPECIFIED
+	}
+}
+
+// commandSpecToProto converts an SDK [CommandSpec] to the wire
+// CommandSchema, populating the typed `args` list. The legacy
+// required_args map is left empty — new plugins express their schema
+// exclusively through args (railyard-77h.16).
+func commandSpecToProto(spec CommandSpec) *protov1.CommandSchema {
+	out := &protov1.CommandSchema{Name: spec.Name}
+	if len(spec.Args) > 0 {
+		out.Args = make([]*protov1.ArgSpec, 0, len(spec.Args))
+		for _, a := range spec.Args {
+			out.Args = append(out.Args, &protov1.ArgSpec{
+				Name:        a.Name,
+				Type:        argTypeToProto(a.Type),
+				Required:    a.Required,
+				Description: a.Description,
+			})
+		}
+	}
+	return out
+}
+
 // yardInfoFromProto converts a wire YardInfoResponse to the Go struct.
 func yardInfoFromProto(resp *protov1.YardInfoResponse) YardInfo {
 	yi := YardInfo{

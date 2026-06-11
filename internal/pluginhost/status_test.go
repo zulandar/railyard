@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/zulandar/railyard/pkg/plugin"
+	protov1 "github.com/zulandar/railyard/pkg/plugin/proto/v1"
 )
 
 func newStatusFixtureHost(t *testing.T) *Host {
@@ -372,6 +373,47 @@ func TestStatusSurfacesHealth(t *testing.T) {
 	}
 	if !got.HealthCheckedAt.Equal(time.Unix(1_700_000_090, 0)) {
 		t.Errorf("HealthCheckedAt = %v, want 1_700_000_090", got.HealthCheckedAt)
+	}
+}
+
+// TestStatusSurfacesCommandSignatures asserts a running plugin's owned
+// commands are rendered as "name(arg:type, ...)" signatures: a command
+// with a stored typed spec shows its declared args, while a bare command
+// (no stored spec) renders as "name()". Output is sorted by command name
+// (railyard-77h.16).
+func TestStatusSurfacesCommandSignatures(t *testing.T) {
+	h := newStatusFixtureHost(t)
+	// The fixture's running-plugin owns "do_a" and "do_b". Give do_a a
+	// typed spec; leave do_b bare.
+	h.pluginCmdSpecs = map[string]*protov1.CommandSchema{
+		"do_a": {
+			Name: "do_a",
+			Args: []*protov1.ArgSpec{
+				{Name: "Track", Type: protov1.ArgType_ARG_TYPE_STRING, Required: true},
+				{Name: "Count", Type: protov1.ArgType_ARG_TYPE_INT, Required: true},
+			},
+		},
+	}
+
+	snap := h.Status()
+	var got *PluginStatus
+	for i := range snap.Plugins {
+		if snap.Plugins[i].Name == "running-plugin" {
+			got = &snap.Plugins[i]
+			break
+		}
+	}
+	if got == nil {
+		t.Fatal("running-plugin missing from snapshot")
+	}
+	want := []string{"do_a(Track:string, Count:int)", "do_b()"}
+	if len(got.CommandSignatures) != len(want) {
+		t.Fatalf("CommandSignatures = %v, want %v", got.CommandSignatures, want)
+	}
+	for i, w := range want {
+		if got.CommandSignatures[i] != w {
+			t.Errorf("CommandSignatures[%d] = %q, want %q", i, got.CommandSignatures[i], w)
+		}
 	}
 }
 

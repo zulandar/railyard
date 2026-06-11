@@ -49,8 +49,16 @@ type hostClient struct {
 	// adapter's HandleCommand handler. The host learns about commands
 	// from the Init handshake's advertised capabilities; this map only
 	// routes incoming HandleCommand RPCs back to the user impl.
+	//
+	// commandSpecs holds the typed argument signature for commands
+	// registered via [Host.RegisterCommandSpec] (railyard-77h.16), keyed
+	// by command name. Commands registered via the bare RegisterCommand
+	// carry no entry here. The Init adapter reads it via
+	// advertisedCommandSpecs to fill InitResponse.command_specs so the
+	// host can validate dispatched args before HandleCommand.
 	cmdMu           sync.RWMutex
 	commandHandlers map[string]CommandHandler
+	commandSpecs    map[string]CommandSpec
 
 	// subscribedTopics records every topic the plugin's user code has
 	// subscribed to via [hostClient.Subscribe]. The SDK adapter reads
@@ -84,6 +92,7 @@ func newHostClient(pluginName string, hsc protov1.HostServiceClient, rootCtx con
 		hsc:                hsc,
 		rootCtx:            rootCtx,
 		commandHandlers:    make(map[string]CommandHandler),
+		commandSpecs:       make(map[string]CommandSpec),
 		subscribedTopicSet: make(map[string]struct{}),
 	}
 	hc.logger = slog.New(&hostLogHandler{
@@ -284,6 +293,20 @@ func (h *hostClient) advertisedCommandNames() []string {
 	return out
 }
 
+// advertisedCommandSpecs returns the wire CommandSchema for every command
+// registered with a typed spec via [Host.RegisterCommandSpec]
+// (railyard-77h.16). Bare commands (RegisterCommand) are absent. Consumed
+// by the PluginService Init adapter to fill InitResponse.command_specs.
+func (h *hostClient) advertisedCommandSpecs() []*protov1.CommandSchema {
+	h.cmdMu.RLock()
+	defer h.cmdMu.RUnlock()
+	out := make([]*protov1.CommandSchema, 0, len(h.commandSpecs))
+	for _, spec := range h.commandSpecs {
+		out = append(out, commandSpecToProto(spec))
+	}
+	return out
+}
+
 func (h *hostClient) runSubscribeLoop(ctx context.Context, topic EventType, stream protov1.HostService_SubscribeClient, handler MetaEventHandler) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -372,6 +395,29 @@ func (h *hostClient) RegisterCommand(name string, handler CommandHandler) error 
 		return fmt.Errorf("plugin: RegisterCommand: %q already registered", name)
 	}
 	h.commandHandlers[name] = handler
+	return nil
+}
+
+// RegisterCommandSpec implements Host.RegisterCommandSpec. Like
+// RegisterCommand it is an in-process registration; additionally it
+// records the typed argument signature so the PluginService Init adapter
+// can advertise it to the host in InitResponse.command_specs, where the
+// host stores it and validates dispatched args before forwarding to
+// HandleCommand (railyard-77h.16).
+func (h *hostClient) RegisterCommandSpec(spec CommandSpec, handler CommandHandler) error {
+	if spec.Name == "" {
+		return errors.New("plugin: RegisterCommandSpec: name must not be empty")
+	}
+	if handler == nil {
+		return errors.New("plugin: RegisterCommandSpec: handler must not be nil")
+	}
+	h.cmdMu.Lock()
+	defer h.cmdMu.Unlock()
+	if _, exists := h.commandHandlers[spec.Name]; exists {
+		return fmt.Errorf("plugin: RegisterCommandSpec: %q already registered", spec.Name)
+	}
+	h.commandHandlers[spec.Name] = handler
+	h.commandSpecs[spec.Name] = spec
 	return nil
 }
 

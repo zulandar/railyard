@@ -53,6 +53,179 @@ func registerPluginCommand(t *testing.T, h *Host, pluginName, cmd string, rpc pr
 	return lp
 }
 
+// registerPluginCommandSpec is like registerPluginCommand but also stores
+// a typed arg schema for the command, so DispatchCommand validates
+// dispatched args against it before issuing the HandleCommand RPC
+// (railyard-77h.16).
+func registerPluginCommandSpec(t *testing.T, h *Host, pluginName, cmd string, spec *protov1.CommandSchema, rpc protov1.PluginServiceClient) *launchedPlugin {
+	t.Helper()
+	lp := registerPluginCommand(t, h, pluginName, cmd, rpc)
+	h.mu.Lock()
+	h.pluginCmdSpecs[cmd] = spec
+	h.mu.Unlock()
+	return lp
+}
+
+// newSpecDispatchHost builds a host whose `caller` plugin may dispatch any
+// command (Commands: ["*"]), the common fixture for the spec-validation
+// tests below.
+func newSpecDispatchHost(t *testing.T) *Host {
+	t.Helper()
+	return NewHost(Dependencies{
+		Cfg: &config.Config{
+			Plugins: config.PluginsConfig{
+				Enabled: []string{"caller", "owner"},
+				Settings: map[string]config.PluginSettings{
+					"caller": {Allow: config.AllowConfig{Commands: []string{"*"}}},
+				},
+			},
+		},
+	})
+}
+
+// scaleSpec is a typed schema with one required string arg and one
+// required int arg, reused across the validation tests.
+func scaleSpec() *protov1.CommandSchema {
+	return &protov1.CommandSchema{
+		Name: "scale",
+		Args: []*protov1.ArgSpec{
+			{Name: "Track", Type: protov1.ArgType_ARG_TYPE_STRING, Required: true},
+			{Name: "Count", Type: protov1.ArgType_ARG_TYPE_INT, Required: true},
+		},
+	}
+}
+
+// TestDispatchCommandValidArgsForwarded confirms args that satisfy the
+// declared spec pass validation and reach the plugin's HandleCommand
+// (railyard-77h.16).
+func TestDispatchCommandValidArgsForwarded(t *testing.T) {
+	host := newSpecDispatchHost(t)
+	rpc := &fakePluginRPC{resp: &protov1.HandleCommandResponse{Success: true}}
+	registerPluginCommandSpec(t, host, "owner", "scale", scaleSpec(), rpc)
+
+	hs := newHostService(host, "caller")
+	resp, err := hs.DispatchCommand(context.Background(), &protov1.DispatchCommandRequest{
+		Name: "scale",
+		Args: mustStruct(t, map[string]any{"Track": "backend", "Count": 5}),
+	})
+	if err != nil {
+		t.Fatalf("DispatchCommand: %v", err)
+	}
+	if !resp.Success {
+		t.Errorf("Success = false, want true; Error=%q", resp.Error)
+	}
+	if rpc.calls != 1 {
+		t.Errorf("HandleCommand calls = %d, want 1 (valid args must reach the plugin)", rpc.calls)
+	}
+}
+
+// TestDispatchCommandMissingRequiredArg confirms a missing required arg
+// fails with Success=false AND the plugin's HandleCommand is never invoked
+// (railyard-77h.16).
+func TestDispatchCommandMissingRequiredArg(t *testing.T) {
+	host := newSpecDispatchHost(t)
+	rpc := &fakePluginRPC{resp: &protov1.HandleCommandResponse{Success: true}}
+	registerPluginCommandSpec(t, host, "owner", "scale", scaleSpec(), rpc)
+
+	hs := newHostService(host, "caller")
+	resp, err := hs.DispatchCommand(context.Background(), &protov1.DispatchCommandRequest{
+		Name: "scale",
+		Args: mustStruct(t, map[string]any{"Track": "backend"}), // Count missing
+	})
+	if err != nil {
+		t.Fatalf("unexpected gRPC error: %v", err)
+	}
+	if resp.Success {
+		t.Error("Success = true, want false on missing required arg")
+	}
+	if resp.Error == "" {
+		t.Error("expected a descriptive validation error")
+	}
+	if rpc.calls != 0 {
+		t.Errorf("HandleCommand calls = %d, want 0 (validation must short-circuit the RPC)", rpc.calls)
+	}
+}
+
+// TestDispatchCommandWrongTypedArg confirms a present arg of the wrong type
+// fails with Success=false AND no HandleCommand RPC is issued
+// (railyard-77h.16).
+func TestDispatchCommandWrongTypedArg(t *testing.T) {
+	host := newSpecDispatchHost(t)
+	rpc := &fakePluginRPC{resp: &protov1.HandleCommandResponse{Success: true}}
+	registerPluginCommandSpec(t, host, "owner", "scale", scaleSpec(), rpc)
+
+	hs := newHostService(host, "caller")
+	resp, err := hs.DispatchCommand(context.Background(), &protov1.DispatchCommandRequest{
+		Name: "scale",
+		// Count declared INT; a non-integral float must be rejected.
+		Args: mustStruct(t, map[string]any{"Track": "backend", "Count": 1.5}),
+	})
+	if err != nil {
+		t.Fatalf("unexpected gRPC error: %v", err)
+	}
+	if resp.Success {
+		t.Error("Success = true, want false on wrong-typed arg")
+	}
+	if resp.Error == "" {
+		t.Error("expected a descriptive validation error")
+	}
+	if rpc.calls != 0 {
+		t.Errorf("HandleCommand calls = %d, want 0 (validation must short-circuit the RPC)", rpc.calls)
+	}
+}
+
+// TestDispatchCommandIntegralFloatAcceptedAsInt confirms the convert.go
+// coercion rule: an INT arg accepts a float64 that is integral (the wire
+// always carries JSON numbers as float64) (railyard-77h.16).
+func TestDispatchCommandIntegralFloatAcceptedAsInt(t *testing.T) {
+	host := newSpecDispatchHost(t)
+	rpc := &fakePluginRPC{resp: &protov1.HandleCommandResponse{Success: true}}
+	registerPluginCommandSpec(t, host, "owner", "scale", scaleSpec(), rpc)
+
+	hs := newHostService(host, "caller")
+	resp, err := hs.DispatchCommand(context.Background(), &protov1.DispatchCommandRequest{
+		Name: "scale",
+		Args: mustStruct(t, map[string]any{"Track": "backend", "Count": 5.0}),
+	})
+	if err != nil {
+		t.Fatalf("DispatchCommand: %v", err)
+	}
+	if !resp.Success {
+		t.Errorf("Success = false, want true; integral float64 must satisfy INT; Error=%q", resp.Error)
+	}
+	if rpc.calls != 1 {
+		t.Errorf("HandleCommand calls = %d, want 1", rpc.calls)
+	}
+}
+
+// TestDispatchCommandBareCommandSkipsValidation is the regression test: a
+// command registered with NO stored spec (bare RegisterCommand, or an old
+// plugin) is dispatched with no arg validation and the HandleCommand RPC
+// is still issued, even with args that would fail a typed spec
+// (railyard-77h.16).
+func TestDispatchCommandBareCommandSkipsValidation(t *testing.T) {
+	host := newSpecDispatchHost(t)
+	rpc := &fakePluginRPC{resp: &protov1.HandleCommandResponse{Success: true}}
+	// No spec stored — registerPluginCommand, not registerPluginCommandSpec.
+	registerPluginCommand(t, host, "owner", "bare", rpc)
+
+	hs := newHostService(host, "caller")
+	resp, err := hs.DispatchCommand(context.Background(), &protov1.DispatchCommandRequest{
+		Name: "bare",
+		// Arbitrary args that no typed spec would accept; must pass through.
+		Args: mustStruct(t, map[string]any{"anything": 1.5, "more": true}),
+	})
+	if err != nil {
+		t.Fatalf("DispatchCommand: %v", err)
+	}
+	if !resp.Success {
+		t.Errorf("Success = false, want true; bare command must not be validated; Error=%q", resp.Error)
+	}
+	if rpc.calls != 1 {
+		t.Errorf("HandleCommand calls = %d, want 1 (bare command must still reach the plugin)", rpc.calls)
+	}
+}
+
 // TestDispatchCommandCountsHandledAndLatency drives the plugin-routed
 // branch of DispatchCommand and asserts a successful HandleCommand bumps
 // commandsHandled and accumulates non-zero latency on the owning plugin
