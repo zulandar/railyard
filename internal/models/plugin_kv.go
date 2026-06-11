@@ -21,8 +21,11 @@ type PluginKV struct {
 	Key string `gorm:"primaryKey;size:256"`
 
 	// Value is the opaque payload. Plugins choose their own encoding; the
-	// host imposes only a size cap (KVMaxValueBytes), not a format.
-	Value []byte `gorm:"type:blob"`
+	// host imposes only a size cap (KVMaxValueBytes), not a format. The
+	// column is mediumblob (MySQL max 16 MiB) so a max-size value
+	// (KVMaxValueBytes = 64 KiB) fits comfortably — a plain blob caps at
+	// 65535 bytes and would reject a 64 KiB value the size check accepted.
+	Value []byte `gorm:"type:mediumblob"`
 
 	// UpdatedAt is the wall-clock time of the last write. GORM maintains
 	// it automatically on Create/Save.

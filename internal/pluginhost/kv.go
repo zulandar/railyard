@@ -99,7 +99,7 @@ func (s *hostService) KVGet(ctx context.Context, req *protov1.KVGetRequest) (*pr
 	}
 	var row models.PluginKV
 	res := gdb.WithContext(ctx).
-		Where("plugin = ? AND key = ?", s.pluginName, req.Key).
+		Where("plugin = ? AND `key` = ?", s.pluginName, req.Key).
 		Take(&row)
 	if res.Error != nil {
 		if errors.Is(res.Error, gorm.ErrRecordNotFound) {
@@ -139,7 +139,7 @@ func (s *hostService) KVPut(ctx context.Context, req *protov1.KVPutRequest) (*pr
 	txErr := gdb.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var existing int64
 		if err := tx.Model(&models.PluginKV{}).
-			Where("plugin = ? AND key = ?", s.pluginName, req.Key).
+			Where("plugin = ? AND `key` = ?", s.pluginName, req.Key).
 			Count(&existing).Error; err != nil {
 			return status.Errorf(codes.Internal, "pluginhost: KVPut: count existing: %v", err)
 		}
@@ -183,7 +183,7 @@ func (s *hostService) KVDelete(ctx context.Context, req *protov1.KVDeleteRequest
 		return nil, err
 	}
 	res := gdb.WithContext(ctx).
-		Where("plugin = ? AND key = ?", s.pluginName, req.Key).
+		Where("plugin = ? AND `key` = ?", s.pluginName, req.Key).
 		Delete(&models.PluginKV{})
 	if res.Error != nil {
 		return nil, status.Errorf(codes.Internal, "pluginhost: KVDelete: %v", res.Error)
@@ -207,10 +207,10 @@ func (s *hostService) KVList(ctx context.Context, req *protov1.KVListRequest) (*
 	if req.Prefix != "" {
 		// Escape LIKE wildcards in the user-supplied prefix so a key
 		// containing % or _ does not widen the match.
-		q = q.Where("key LIKE ? ESCAPE '\\'", escapeLikePrefix(req.Prefix)+"%")
+		q = q.Where("`key` LIKE ? ESCAPE '\\'", escapeLikePrefix(req.Prefix)+"%")
 	}
 	var keys []string
-	if err := q.Order("key ASC").Pluck("key", &keys).Error; err != nil {
+	if err := q.Order("`key` ASC").Pluck("`key`", &keys).Error; err != nil {
 		return nil, status.Errorf(codes.Internal, "pluginhost: KVList: %v", err)
 	}
 	return &protov1.KVListResponse{Keys: keys}, nil

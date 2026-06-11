@@ -3,16 +3,19 @@ module github.com/zulandar/railyard
 go 1.26.4
 
 require (
+	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/bradleyfalzon/ghinstallation/v2 v2.18.0
 	github.com/bwmarrin/discordgo v0.29.0
 	github.com/gin-gonic/gin v1.11.0
 	github.com/go-sql-driver/mysql v1.8.1
 	github.com/google/go-github/v68 v68.0.0
+	github.com/hashicorp/go-hclog v1.6.3
 	github.com/hashicorp/go-plugin v1.8.0
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/slack-go/slack v0.23.1
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/oauth2 v0.36.0
+	golang.org/x/sys v0.43.0
 	golang.org/x/term v0.42.0
 	google.golang.org/grpc v1.81.1
 	google.golang.org/protobuf v1.36.11
@@ -40,7 +43,6 @@ require (
 	github.com/google/go-github/v84 v84.0.0 // indirect
 	github.com/google/go-querystring v1.2.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
-	github.com/hashicorp/go-hclog v1.6.3 // indirect
 	github.com/hashicorp/yamux v0.1.2 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
@@ -64,7 +66,6 @@ require (
 	golang.org/x/arch v0.20.0 // indirect
 	golang.org/x/crypto v0.50.0 // indirect
 	golang.org/x/net v0.53.0 // indirect
-	golang.org/x/sys v0.43.0 // indirect
 	golang.org/x/text v0.36.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260226221140-a57be14db171 // indirect
 )
