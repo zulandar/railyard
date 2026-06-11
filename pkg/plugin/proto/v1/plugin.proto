@@ -56,6 +56,18 @@ service PluginService {
   // The args/result preserve the weakly-typed shape of the Go SDK via
   // google.protobuf.Struct.
   rpc HandleCommand(HandleCommandRequest) returns (HandleCommandResponse);
+
+  // Health is an OPTIONAL liveness/functional probe the host polls on a
+  // configurable interval (default 30s) so operators can see whether a
+  // running plugin is actually functional — not merely "process alive"
+  // (railyard-77h.12). A plugin opts in by implementing the SDK's
+  // pkg/plugin.HealthReporter interface; the plugin-side adapter returns
+  // codes.Unimplemented when the user impl does NOT implement it, which
+  // the host surfaces as "n/a" rather than an error. This keeps plugins
+  // built before this RPC fully backward compatible. The host uses a 2s
+  // deadline per probe; a timeout or transport error is mapped to
+  // HEALTH_DEGRADED with the error text.
+  rpc Health(HealthRequest) returns (HealthResponse);
 }
 
 // HostService is implemented by the railyard host. The plugin dials
@@ -222,6 +234,42 @@ message StopRequest {
   int64 drain_timeout_ms = 1;
 }
 message StopResponse {}
+
+// -----------------------------------------------------------------------------
+// Health (railyard-77h.12)
+// -----------------------------------------------------------------------------
+
+// HealthState is the plugin's self-reported functional state. The
+// numeric ordering carries no semantic meaning; the host maps the value
+// onto the pkg/plugin.HealthStatus SDK type. New states append at the
+// tail.
+enum HealthState {
+  // HEALTH_STATE_UNSPECIFIED is the proto3 zero value. A plugin that
+  // implements HealthReporter should never return it; the host treats an
+  // unspecified state as HEALTH_DEGRADED defensively.
+  HEALTH_STATE_UNSPECIFIED = 0;
+
+  // HEALTH_STATE_OK means the plugin is fully functional.
+  HEALTH_STATE_OK = 1;
+
+  // HEALTH_STATE_DEGRADED means the plugin is running but impaired (e.g.
+  // a remote dependency is slow or partially unavailable).
+  HEALTH_STATE_DEGRADED = 2;
+
+  // HEALTH_STATE_FAILING means the plugin is running but non-functional
+  // (e.g. dead remote credentials), even though the process is alive.
+  HEALTH_STATE_FAILING = 3;
+}
+
+message HealthRequest {}
+
+// HealthResponse carries the plugin's self-reported state plus a short
+// human-readable message for operators (surfaced in `ry plugins status`
+// --json and logs). Mirrors pkg/plugin.HealthReporter.Health's return.
+message HealthResponse {
+  HealthState state = 1;
+  string message = 2;
+}
 
 // -----------------------------------------------------------------------------
 // Commands (host <-> plugin)

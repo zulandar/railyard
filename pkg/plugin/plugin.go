@@ -68,3 +68,67 @@ type Plugin interface {
 	// Stop must not block core shutdown indefinitely.
 	Stop(ctx context.Context) error
 }
+
+// HealthStatus is a plugin's self-reported functional state, surfaced by
+// the host in `ry plugins status`. It maps one-for-one onto the proto
+// HealthState enum on the wire. The zero value is [HealthUnknown]; a
+// HealthReporter should always return one of the three real states.
+type HealthStatus int
+
+const (
+	// HealthUnknown is the zero value. A HealthReporter should never
+	// return it; the host treats it as [HealthDegraded] defensively.
+	HealthUnknown HealthStatus = iota
+
+	// HealthOK means the plugin is fully functional.
+	HealthOK
+
+	// HealthDegraded means the plugin is running but impaired (e.g. a
+	// remote dependency is slow or partially unavailable).
+	HealthDegraded
+
+	// HealthFailing means the plugin is running but non-functional (e.g.
+	// dead remote credentials), even though the process is alive.
+	HealthFailing
+)
+
+// String returns the lowercase wire/display name of the status.
+func (s HealthStatus) String() string {
+	switch s {
+	case HealthOK:
+		return "ok"
+	case HealthDegraded:
+		return "degraded"
+	case HealthFailing:
+		return "failing"
+	default:
+		return "unknown"
+	}
+}
+
+// HealthReporter is an OPTIONAL interface a [Plugin] may also implement
+// to expose a functional-health probe. The host polls it on a
+// configurable interval (default 30s) so operators can distinguish a
+// plugin whose process is alive but is non-functional — e.g. a connector
+// with dead remote credentials — from a genuinely healthy one. The
+// result is surfaced in `ry plugins status` under the HEALTH column.
+//
+// Implementing HealthReporter is opt-in: a plugin that does not implement
+// it stays fully backward compatible — the host shows "n/a" for the
+// HEALTH column rather than treating the absence as an error.
+//
+// Health is called from the host on its poll interval with a short (2s)
+// deadline. Implementations MUST return promptly and MUST NOT block on
+// long remote calls; do any expensive checking in the background and
+// return a cached verdict here. The returned message is a short
+// human-readable explanation surfaced to operators (e.g. "github API
+// 401").
+//
+// HealthReporter is part of the frozen SDK surface: it is additive to the
+// required [Plugin] interface and never changes its signature.
+type HealthReporter interface {
+	// Health reports the plugin's current functional state and a short
+	// human-readable message. It must return quickly (the host enforces a
+	// 2s deadline).
+	Health(ctx context.Context) (HealthStatus, string)
+}

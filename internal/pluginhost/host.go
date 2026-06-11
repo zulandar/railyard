@@ -133,10 +133,15 @@ type Host struct {
 	shutdownCh   chan struct{}
 	shutdownOnce sync.Once
 
-	// supervisorWG joins every supervisor goroutine. [Host.Stop] blocks
-	// on it after closing shutdownCh so a relaunch attempt cannot race
-	// the socket cleanup.
+	// supervisorWG joins every supervisor goroutine AND the single
+	// health-poll goroutine (railyard-77h.12). [Host.Stop] blocks on it
+	// after closing shutdownCh so a relaunch attempt — or an in-flight
+	// health probe — cannot race the socket cleanup.
 	supervisorWG sync.WaitGroup
+
+	// healthPollOnce guards the single health-poll goroutine so a
+	// repeated [Host.Start] cannot spawn a second poller (railyard-77h.12).
+	healthPollOnce sync.Once
 
 	// started is set true after [Host.Start] runs. The supervisor uses
 	// it to decide whether a relaunched plugin should additionally be

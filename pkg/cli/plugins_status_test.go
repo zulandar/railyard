@@ -99,6 +99,65 @@ func TestPluginsStatusSDKColumn(t *testing.T) {
 	}
 }
 
+// TestPluginsStatusHealthColumn asserts the rendered default table
+// carries a HEALTH column populated from PluginStatus.Health, rendered as
+// "<value> <age>" for a polled running plugin, "n/a" for a plugin that
+// does not implement HealthReporter, and a dash for a row never polled
+// (railyard-77h.12).
+func TestPluginsStatusHealthColumn(t *testing.T) {
+	withStubConfigLoad(t, func(string) (*config.Config, error) {
+		return &config.Config{Yardmaster: config.YardmasterConfig{HealthPort: 8081}}, nil
+	})
+	withStubStatusFetch(t, func(ctx context.Context, url string, timeout time.Duration) (*pluginhost.Snapshot, error) {
+		return &pluginhost.Snapshot{
+			Plugins: []pluginhost.PluginStatus{
+				{Name: "healthy", Status: pluginhost.StatusRunning, PID: 1, Health: "ok", HealthCheckedAt: time.Now().Add(-12 * time.Second)},
+				{Name: "legacy", Status: pluginhost.StatusRunning, PID: 2, Health: "n/a"},
+				{Name: "unpolled", Status: pluginhost.StatusRunning, PID: 3},
+			},
+		}, nil
+	})
+
+	root := newRootCmd()
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	root.SetArgs([]string{"plugins", "status"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	got := buf.String()
+
+	if !strings.Contains(got, "HEALTH") {
+		t.Errorf("expected HEALTH column header in output:\n%s", got)
+	}
+
+	lines := strings.Split(got, "\n")
+	var healthyLine, legacyLine, unpolledLine string
+	for _, l := range lines {
+		switch {
+		case strings.HasPrefix(strings.TrimSpace(l), "healthy "):
+			healthyLine = l
+		case strings.HasPrefix(strings.TrimSpace(l), "legacy "):
+			legacyLine = l
+		case strings.HasPrefix(strings.TrimSpace(l), "unpolled "):
+			unpolledLine = l
+		}
+	}
+	if !strings.Contains(healthyLine, "ok") {
+		t.Errorf("healthy row missing 'ok' health:\n%s", healthyLine)
+	}
+	if !strings.Contains(healthyLine, "12s") {
+		t.Errorf("healthy row missing age '12s':\n%s", healthyLine)
+	}
+	if !strings.Contains(legacyLine, "n/a") {
+		t.Errorf("legacy row missing 'n/a' health:\n%s", legacyLine)
+	}
+	if !strings.Contains(unpolledLine, "-") {
+		t.Errorf("unpolled row should render a dash for health:\n%s", unpolledLine)
+	}
+}
+
 // TestPluginsStatusErrorColumn asserts the rendered table surfaces
 // PluginStatus.Error for non-running plugins so operators can diagnose
 // failed/disabled rows without falling back to --json. See railyard-kag.

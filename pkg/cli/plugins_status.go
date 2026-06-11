@@ -159,11 +159,12 @@ func formatAvgLatency(avgMicros, handled uint64) string {
 // ("3m ago", "just now", "-" for zero).
 func renderStatusTable(out io.Writer, snap *pluginhost.Snapshot) error {
 	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "NAME\tSTATUS\tSDK\tRESTARTS\tSUBS\tCMDS\tLAST-ACTIVITY\tPID\tPATH\tERROR")
+	fmt.Fprintln(w, "NAME\tSTATUS\tHEALTH\tSDK\tRESTARTS\tSUBS\tCMDS\tLAST-ACTIVITY\tPID\tPATH\tERROR")
 	for _, p := range snap.Plugins {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			p.Name,
 			p.Status,
+			renderHealth(p.Health, p.HealthCheckedAt),
 			dashIfEmpty(p.SDKVersion),
 			dashIfZero(p.RestartCount),
 			dashIfZero(p.SubscriptionCount),
@@ -175,6 +176,46 @@ func renderStatusTable(out io.Writer, snap *pluginhost.Snapshot) error {
 		)
 	}
 	return w.Flush()
+}
+
+// renderHealth formats the optional plugin health verdict for the HEALTH
+// column (railyard-77h.12). A polled plugin shows "<value> <age>" (e.g.
+// "ok 12s"); "n/a" (the plugin does not implement HealthReporter) is shown
+// bare without an age; an empty value (never polled, or a non-running
+// row) renders as a dash.
+func renderHealth(value string, checkedAt time.Time) string {
+	if value == "" {
+		return "-"
+	}
+	if value == "n/a" {
+		return value
+	}
+	if checkedAt.IsZero() {
+		return value
+	}
+	return value + " " + healthAge(checkedAt)
+}
+
+// healthAge renders how long ago the last health poll completed as a
+// compact suffix ("12s", "3m", "2h"); very old timestamps fall back to a
+// date. Mirrors renderRelative's buckets but omits the " ago" suffix to
+// keep the HEALTH cell narrow.
+func healthAge(t time.Time) string {
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		secs := int(d.Seconds())
+		if secs < 0 {
+			secs = 0
+		}
+		return fmt.Sprintf("%ds", secs)
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	default:
+		return t.Format("2006-01-02")
+	}
 }
 
 // errorColumnMax bounds the ERROR column to keep the table readable in

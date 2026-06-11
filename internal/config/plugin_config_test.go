@@ -3,6 +3,7 @@ package config
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -151,6 +152,62 @@ tracks:
 	}
 	if !strings.Contains(err.Error(), "renamed to 'database'") {
 		t.Errorf("error = %q, want deprecation message about rename", err.Error())
+	}
+}
+
+// TestPluginsConfig_HealthIntervalDefault verifies the plugin health
+// poll interval defaults to 30s when unset, and the HealthInterval()
+// helper reflects that (railyard-77h.12).
+func TestPluginsConfig_HealthIntervalDefault(t *testing.T) {
+	yamlSrc := `
+owner: alice
+repo: git@github.com:org/app.git
+tracks:
+  - name: backend
+    language: go
+plugins:
+  enabled: [trainmaster]
+`
+	cfg, err := Parse([]byte(yamlSrc))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Plugins.HealthIntervalSec != 30 {
+		t.Errorf("HealthIntervalSec = %d, want 30 (default)", cfg.Plugins.HealthIntervalSec)
+	}
+	if got := cfg.Plugins.HealthInterval(); got != 30*time.Second {
+		t.Errorf("HealthInterval() = %v, want 30s", got)
+	}
+}
+
+// TestPluginsConfig_HealthIntervalExplicit verifies an explicit
+// health_interval_sec is honored and not overwritten by the default
+// (railyard-77h.12).
+func TestPluginsConfig_HealthIntervalExplicit(t *testing.T) {
+	yamlSrc := `
+owner: alice
+repo: git@github.com:org/app.git
+tracks:
+  - name: backend
+    language: go
+plugins:
+  enabled: [trainmaster]
+  health_interval_sec: 5
+`
+	cfg, err := Parse([]byte(yamlSrc))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Plugins.HealthIntervalSec != 5 {
+		t.Errorf("HealthIntervalSec = %d, want 5", cfg.Plugins.HealthIntervalSec)
+	}
+	if got := cfg.Plugins.HealthInterval(); got != 5*time.Second {
+		t.Errorf("HealthInterval() = %v, want 5s", got)
+	}
+	// An explicit `health_interval_sec` key must not be stashed as a
+	// per-plugin Settings entry.
+	if _, present := cfg.Plugins.Settings["health_interval_sec"]; present {
+		t.Error("health_interval_sec must not be parsed as a per-plugin settings block")
 	}
 }
 

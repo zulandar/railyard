@@ -44,6 +44,18 @@ type PluginStatus struct {
 	Path              string    `json:"path"`
 	Error             string    `json:"error,omitempty"`
 
+	// Optional health probe (railyard-77h.12). Health is the last verdict
+	// from the plugin's PluginService.Health RPC — "ok" / "degraded" /
+	// "failing", or "n/a" for a plugin that does not implement
+	// HealthReporter. Empty (omitted) for non-running rows and for a
+	// running plugin not yet polled. HealthMessage carries the plugin's
+	// own message or the probe error text; HealthCheckedAt is the time of
+	// the last completed poll (omitzero so unpolled/non-running rows stay
+	// clean).
+	Health          string    `json:"health,omitempty"`
+	HealthMessage   string    `json:"health_message,omitempty"`
+	HealthCheckedAt time.Time `json:"health_checked_at,omitzero"`
+
 	// Per-plugin lifetime runtime counters (railyard-77h.14). These are
 	// process-lifetime cumulative (reset on yard restart) but survive a
 	// plugin relaunch. Populated only for running plugins; other states
@@ -137,6 +149,10 @@ func (h *Host) Status() Snapshot {
 			LastActivity:      lp.lastActivity,
 			PID:               lp.pid,
 			Path:              lp.path,
+
+			Health:          lp.healthValue,
+			HealthMessage:   lp.healthMessage,
+			HealthCheckedAt: lp.healthCheckedAt,
 
 			EventsDelivered:           lp.eventsDelivered.Load(),
 			EventsDropped:             lp.eventsDropped.Load(),

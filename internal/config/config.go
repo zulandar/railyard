@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -146,6 +147,12 @@ type PluginsConfig struct {
 	// directories on name collision.
 	PluginsDir string `yaml:"plugins_dir"`
 
+	// HealthIntervalSec is how often, in seconds, the host polls each
+	// running plugin's optional PluginService.Health probe (railyard-77h.12).
+	// Defaults to 30 when unset or non-positive (applied by applyDefaults).
+	// Use [PluginsConfig.HealthInterval] for the resolved duration.
+	HealthIntervalSec int `yaml:"health_interval_sec"`
+
 	// Settings carries per-plugin configuration (currently just the
 	// capability allow-list). Keys are plugin names matching entries in
 	// Enabled — a setting block for a plugin not listed in Enabled is
@@ -197,19 +204,36 @@ type AllowConfig struct {
 	Publish []string `yaml:"publish"`
 }
 
+// defaultHealthIntervalSec is the fallback plugin health-poll interval
+// (railyard-77h.12). Applied by applyDefaults when health_interval_sec is
+// unset or non-positive.
+const defaultHealthIntervalSec = 30
+
+// HealthInterval returns the resolved plugin health-poll interval as a
+// time.Duration. A non-positive HealthIntervalSec falls back to the 30s
+// default so callers never have to special-case an unconfigured value
+// (railyard-77h.12).
+func (p PluginsConfig) HealthInterval() time.Duration {
+	if p.HealthIntervalSec <= 0 {
+		return defaultHealthIntervalSec * time.Second
+	}
+	return time.Duration(p.HealthIntervalSec) * time.Second
+}
+
 // pluginsConfigRaw is the on-wire shape of `plugins:`. It captures the
 // reserved keys typed and stashes the rest as a generic map for
 // per-plugin lookup. Used only inside UnmarshalYAML.
 type pluginsConfigRaw struct {
-	Enabled    []string             `yaml:"enabled"`
-	PluginsDir string               `yaml:"plugins_dir"`
-	Rest       map[string]yaml.Node `yaml:",inline"`
+	Enabled           []string             `yaml:"enabled"`
+	PluginsDir        string               `yaml:"plugins_dir"`
+	HealthIntervalSec int                  `yaml:"health_interval_sec"`
+	Rest              map[string]yaml.Node `yaml:",inline"`
 }
 
 // UnmarshalYAML decodes the `plugins:` block. Reserved keys (`enabled`,
-// `plugins_dir`) populate the typed fields; every remaining key is
-// decoded into a PluginSettings struct and stored in Settings under the
-// key's name.
+// `plugins_dir`, `health_interval_sec`) populate the typed fields; every
+// remaining key is decoded into a PluginSettings struct and stored in
+// Settings under the key's name.
 //
 // Validation of allow-list wildcard tokens happens here so a malformed
 // entry fails config load with a clear message rather than surfacing
@@ -221,6 +245,7 @@ func (p *PluginsConfig) UnmarshalYAML(node *yaml.Node) error {
 	}
 	p.Enabled = raw.Enabled
 	p.PluginsDir = raw.PluginsDir
+	p.HealthIntervalSec = raw.HealthIntervalSec
 	if len(raw.Rest) == 0 {
 		return nil
 	}
@@ -920,6 +945,12 @@ func (c *Config) applyDefaults() {
 		c.Telegraph.Slack.BotToken = resolveEnvVars(c.Telegraph.Slack.BotToken)
 		c.Telegraph.Slack.AppToken = resolveEnvVars(c.Telegraph.Slack.AppToken)
 		c.Telegraph.Discord.BotToken = resolveEnvVars(c.Telegraph.Discord.BotToken)
+	}
+	// Plugin health-poll interval default (railyard-77h.12). Applied
+	// unconditionally so the host always sees a positive value; a
+	// non-positive configured value falls back to the 30s default.
+	if c.Plugins.HealthIntervalSec <= 0 {
+		c.Plugins.HealthIntervalSec = defaultHealthIntervalSec
 	}
 }
 

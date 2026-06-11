@@ -195,6 +195,64 @@ func (a *pluginServiceAdapter) HandleCommand(ctx context.Context, req *protov1.H
 	return resp, nil
 }
 
+// Health handles the OPTIONAL Health probe RPC (railyard-77h.12). The
+// user's Plugin impl opts in by also implementing [HealthReporter]. When
+// it does NOT, we return codes.Unimplemented so the host can surface the
+// plugin as "n/a" rather than an error — keeping plugins built before
+// this RPC fully backward compatible.
+//
+// A panic inside the user's Health is recovered like every other user
+// method: onFatal fires (production exits 1) and the host receives a
+// gRPC Internal error rather than a dropped connection.
+func (a *pluginServiceAdapter) Health(ctx context.Context, _ *protov1.HealthRequest) (*protov1.HealthResponse, error) {
+	reporter, ok := a.impl.(HealthReporter)
+	if !ok {
+		return nil, status.Error(codes.Unimplemented, "plugin does not implement HealthReporter")
+	}
+
+	var (
+		st        HealthStatus
+		msg       string
+		recovered any
+		stack     []byte
+	)
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				recovered = r
+				stack = debug.Stack()
+			}
+		}()
+		st, msg = reporter.Health(ctx)
+	}()
+	if recovered != nil {
+		a.fireFatal("Health", recovered, stack)
+		return nil, status.Errorf(codes.Internal, "plugin Health panic: %v", recovered)
+	}
+
+	return &protov1.HealthResponse{
+		State:   healthStatusToProto(st),
+		Message: msg,
+	}, nil
+}
+
+// healthStatusToProto maps the SDK HealthStatus onto the wire enum. An
+// unknown/zero status is reported as DEGRADED — a HealthReporter that
+// returns the zero value is misbehaving, and degraded is the safe
+// operator-visible verdict.
+func healthStatusToProto(s HealthStatus) protov1.HealthState {
+	switch s {
+	case HealthOK:
+		return protov1.HealthState_HEALTH_STATE_OK
+	case HealthDegraded:
+		return protov1.HealthState_HEALTH_STATE_DEGRADED
+	case HealthFailing:
+		return protov1.HealthState_HEALTH_STATE_FAILING
+	default:
+		return protov1.HealthState_HEALTH_STATE_DEGRADED
+	}
+}
+
 // callUser invokes a user-impl method, converting a panic into an
 // error and forwarding the recovery to onFatal so the process can exit
 // non-zero.

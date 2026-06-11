@@ -238,6 +238,60 @@ from this context, not `context.Background()`.
 
 ---
 
+## Optional: reporting health (`HealthReporter`)
+
+The host supervises your **process** — it relaunches you on a crash and
+counts crashes against a budget. But "the process is alive" is not the
+same as "the plugin is functional": a connector with dead remote
+credentials, or a backend whose API is returning 401s, is alive but
+useless. To surface that, implement the **optional** `HealthReporter`
+interface in addition to `Plugin`:
+
+```go
+type HealthReporter interface {
+    Health(ctx context.Context) (HealthStatus, string)
+}
+```
+
+`HealthStatus` is one of `plugin.HealthOK`, `plugin.HealthDegraded`, or
+`plugin.HealthFailing`. The second return value is a short
+human-readable message surfaced to operators (e.g. `"github API 401"`).
+
+```go
+func (p *MyPlugin) Health(ctx context.Context) (plugin.HealthStatus, string) {
+    if p.lastAuthErr != nil {
+        return plugin.HealthFailing, "remote auth failed: " + p.lastAuthErr.Error()
+    }
+    if p.queueDepth > p.warnThreshold {
+        return plugin.HealthDegraded, fmt.Sprintf("queue backed up: %d", p.queueDepth)
+    }
+    return plugin.HealthOK, ""
+}
+```
+
+Rules:
+
+- **It's opt-in.** Implementing `HealthReporter` is additive — the
+  required `Plugin` interface is unchanged. A plugin that does **not**
+  implement it is fully supported: the host shows `n/a` for its HEALTH
+  column instead of treating the absence as an error. Plugins built
+  before this RPC existed keep working unchanged.
+- **Return fast.** The host polls `Health` on an interval (default 30s)
+  with a **2-second deadline**. Do not block on a long remote call —
+  check your dependency in the background and return a *cached* verdict
+  here. If your `Health` times out or returns an error, the host records
+  the plugin as `degraded` with the error text.
+- **Don't panic.** A panic in `Health` is recovered like any other user
+  method: the host gets a gRPC error and your process exits non-zero
+  (counting against the crash budget).
+
+The verdict shows up in `ry plugins status` under the HEALTH column and
+in the `--json` output (`health`, `health_message`, `health_checked_at`).
+See [`operating.md`](operating.md) for the operator view and how to tune
+the poll interval.
+
+---
+
 ## The Host interface
 
 `plugin.Host` is the only path from your plugin into railyard. Every

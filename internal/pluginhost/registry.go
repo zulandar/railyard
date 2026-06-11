@@ -133,6 +133,32 @@ type launchedPlugin struct {
 	// this field (hot path). Read/written under [Host.mu].
 	lastActivity time.Time
 
+	// --- Optional health probe state (railyard-77h.12) ---
+	//
+	// The host polls each running plugin's optional PluginService.Health
+	// RPC on a configurable interval (default 30s). These fields hold the
+	// most recent result. They are NOT on the per-event hot path (a poll
+	// happens at most once per interval), so unlike the railyard-77h.14
+	// counters they are read/written under [Host.mu] rather than via
+	// atomics.
+
+	// healthValue is the last observed health verdict: one of
+	// healthValueOK / healthValueDegraded / healthValueFailing /
+	// healthValueNA. Empty before the first poll. A plugin that does not
+	// implement HealthReporter (Unimplemented) is recorded as
+	// healthValueNA, not an error.
+	healthValue string
+
+	// healthMessage is the human-readable message from the last Health
+	// probe — the plugin's own message on success, or the error text on
+	// a degraded (RPC error/timeout) result. Empty for n/a.
+	healthMessage string
+
+	// healthCheckedAt is the wall-clock time (from h.clock) of the last
+	// completed Health poll. Zero before the first poll; used by Status()
+	// to render the health age.
+	healthCheckedAt time.Time
+
 	// --- Per-plugin lifetime runtime counters (railyard-77h.14) ---
 	//
 	// HOT-PATH RULE: these counters are touched on the per-event delivery
@@ -556,6 +582,19 @@ func (h *Host) Start(ctx context.Context) {
 		// Start success: record that the plugin was just active.
 		h.bumpActivity(name)
 	}
+
+	// Launch the single health-poll goroutine once core is up
+	// (railyard-77h.12). It joins through supervisorWG and stops when
+	// shutdownCh closes, so [Host.Stop] reaps it with no leak. Guarded by
+	// healthPollOnce so a repeated Start cannot spawn a second poller.
+	h.healthPollOnce.Do(func() {
+		d := time.Duration(defaultHealthIntervalSec()) * time.Second
+		if h.deps.Cfg != nil {
+			d = h.deps.Cfg.Plugins.HealthInterval()
+		}
+		h.supervisorWG.Add(1)
+		go h.healthPollLoop(ctx, d)
+	})
 }
 
 // Stop calls PluginService.Stop on each launched plugin in reverse-name

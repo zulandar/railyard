@@ -42,6 +42,7 @@ const (
 	PluginService_Start_FullMethodName         = "/railyard.plugin.v1.PluginService/Start"
 	PluginService_Stop_FullMethodName          = "/railyard.plugin.v1.PluginService/Stop"
 	PluginService_HandleCommand_FullMethodName = "/railyard.plugin.v1.PluginService/HandleCommand"
+	PluginService_Health_FullMethodName        = "/railyard.plugin.v1.PluginService/Health"
 )
 
 // PluginServiceClient is the client API for PluginService service.
@@ -71,6 +72,17 @@ type PluginServiceClient interface {
 	// The args/result preserve the weakly-typed shape of the Go SDK via
 	// google.protobuf.Struct.
 	HandleCommand(ctx context.Context, in *HandleCommandRequest, opts ...grpc.CallOption) (*HandleCommandResponse, error)
+	// Health is an OPTIONAL liveness/functional probe the host polls on a
+	// configurable interval (default 30s) so operators can see whether a
+	// running plugin is actually functional — not merely "process alive"
+	// (railyard-77h.12). A plugin opts in by implementing the SDK's
+	// pkg/plugin.HealthReporter interface; the plugin-side adapter returns
+	// codes.Unimplemented when the user impl does NOT implement it, which
+	// the host surfaces as "n/a" rather than an error. This keeps plugins
+	// built before this RPC fully backward compatible. The host uses a 2s
+	// deadline per probe; a timeout or transport error is mapped to
+	// HEALTH_DEGRADED with the error text.
+	Health(ctx context.Context, in *HealthRequest, opts ...grpc.CallOption) (*HealthResponse, error)
 }
 
 type pluginServiceClient struct {
@@ -121,6 +133,16 @@ func (c *pluginServiceClient) HandleCommand(ctx context.Context, in *HandleComma
 	return out, nil
 }
 
+func (c *pluginServiceClient) Health(ctx context.Context, in *HealthRequest, opts ...grpc.CallOption) (*HealthResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(HealthResponse)
+	err := c.cc.Invoke(ctx, PluginService_Health_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // PluginServiceServer is the server API for PluginService service.
 // All implementations must embed UnimplementedPluginServiceServer
 // for forward compatibility.
@@ -148,6 +170,17 @@ type PluginServiceServer interface {
 	// The args/result preserve the weakly-typed shape of the Go SDK via
 	// google.protobuf.Struct.
 	HandleCommand(context.Context, *HandleCommandRequest) (*HandleCommandResponse, error)
+	// Health is an OPTIONAL liveness/functional probe the host polls on a
+	// configurable interval (default 30s) so operators can see whether a
+	// running plugin is actually functional — not merely "process alive"
+	// (railyard-77h.12). A plugin opts in by implementing the SDK's
+	// pkg/plugin.HealthReporter interface; the plugin-side adapter returns
+	// codes.Unimplemented when the user impl does NOT implement it, which
+	// the host surfaces as "n/a" rather than an error. This keeps plugins
+	// built before this RPC fully backward compatible. The host uses a 2s
+	// deadline per probe; a timeout or transport error is mapped to
+	// HEALTH_DEGRADED with the error text.
+	Health(context.Context, *HealthRequest) (*HealthResponse, error)
 	mustEmbedUnimplementedPluginServiceServer()
 }
 
@@ -169,6 +202,9 @@ func (UnimplementedPluginServiceServer) Stop(context.Context, *StopRequest) (*St
 }
 func (UnimplementedPluginServiceServer) HandleCommand(context.Context, *HandleCommandRequest) (*HandleCommandResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method HandleCommand not implemented")
+}
+func (UnimplementedPluginServiceServer) Health(context.Context, *HealthRequest) (*HealthResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Health not implemented")
 }
 func (UnimplementedPluginServiceServer) mustEmbedUnimplementedPluginServiceServer() {}
 func (UnimplementedPluginServiceServer) testEmbeddedByValue()                       {}
@@ -263,6 +299,24 @@ func _PluginService_HandleCommand_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _PluginService_Health_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(HealthRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PluginServiceServer).Health(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PluginService_Health_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PluginServiceServer).Health(ctx, req.(*HealthRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // PluginService_ServiceDesc is the grpc.ServiceDesc for PluginService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -285,6 +339,10 @@ var PluginService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "HandleCommand",
 			Handler:    _PluginService_HandleCommand_Handler,
+		},
+		{
+			MethodName: "Health",
+			Handler:    _PluginService_Health_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

@@ -342,16 +342,55 @@ build-time view of what is on disk.)
 The default table is kept narrow for readability:
 
 ```
-NAME  STATUS  SDK  RESTARTS  SUBS  CMDS  LAST-ACTIVITY  PID  PATH  ERROR
+NAME  STATUS  HEALTH  SDK  RESTARTS  SUBS  CMDS  LAST-ACTIVITY  PID  PATH  ERROR
 ```
 
 | Column          | Meaning                                                            |
 |-----------------|--------------------------------------------------------------------|
 | `STATUS`        | `running` / `disabled` / `failed` / `skipped`                      |
+| `HEALTH`        | Plugin's self-reported functional health (see below)               |
 | `RESTARTS`      | Successful supervisor relaunches since the yard booted             |
 | `SUBS`          | Active event-stream subscriptions the plugin currently holds       |
 | `CMDS`          | Commands the plugin registered (capability count, not invocations) |
 | `LAST-ACTIVITY` | Relative time since the plugin last did something host-observed    |
+
+#### Plugin health (`HEALTH` column)
+
+`STATUS` tells you whether the **process** is alive; `HEALTH` tells you
+whether the plugin is actually **functional**. A connector with dead
+remote credentials shows `running` under `STATUS` but `failing` under
+`HEALTH`.
+
+The host polls each running plugin's optional health probe on an
+interval and renders the latest verdict as `<value> <age>`, e.g.
+`ok 12s` — the verdict plus how long ago it was checked:
+
+| `HEALTH` value | Meaning                                                                  |
+|----------------|--------------------------------------------------------------------------|
+| `ok`           | The plugin reports it is fully functional                                |
+| `degraded`     | Running but impaired — OR the host's health probe errored / timed out    |
+| `failing`      | Running but non-functional (e.g. dead credentials), though the process is alive |
+| `n/a`          | The plugin does not implement the health probe — not an error            |
+| `-`            | Not applicable (non-running row) or not yet polled                       |
+
+`n/a` is expected and harmless: implementing the probe is opt-in for
+plugin authors (see [`authoring.md`](authoring.md) → *Optional: reporting
+health*). The full verdict — `health`, `health_message` (the plugin's
+own message or the probe error text), and `health_checked_at` — is always
+present in `--json` output.
+
+**Tuning the poll interval.** The host polls every 30 seconds by default.
+Override it under the `plugins:` block in `railyard.yaml`:
+
+```yaml
+plugins:
+  enabled: [trainmaster]
+  health_interval_sec: 60   # poll every 60s instead of the 30s default
+```
+
+A value of `0` or omitting the key uses the 30s default. The host always
+enforces a 2-second deadline on each individual probe regardless of the
+interval, so a wedged plugin can never stall the poller.
 
 #### Verbose runtime counters (`-v` / `--verbose`)
 

@@ -343,6 +343,38 @@ func TestStatusCounterAvgZeroWhenNoCommands(t *testing.T) {
 	t.Fatal("running-plugin missing")
 }
 
+// TestStatusSurfacesHealth asserts the optional health probe result
+// living on launchedPlugin (railyard-77h.12) is surfaced on the running
+// plugin's PluginStatus row, including the checked-at timestamp.
+func TestStatusSurfacesHealth(t *testing.T) {
+	h := newStatusFixtureHost(t)
+	lp := h.launched["running-plugin"]
+	lp.healthValue = healthValueDegraded
+	lp.healthMessage = "github API 401"
+	lp.healthCheckedAt = time.Unix(1_700_000_090, 0)
+
+	snap := h.Status()
+	var got *PluginStatus
+	for i := range snap.Plugins {
+		if snap.Plugins[i].Name == "running-plugin" {
+			got = &snap.Plugins[i]
+			break
+		}
+	}
+	if got == nil {
+		t.Fatal("running-plugin missing from snapshot")
+	}
+	if got.Health != healthValueDegraded {
+		t.Errorf("Health = %q, want %q", got.Health, healthValueDegraded)
+	}
+	if got.HealthMessage != "github API 401" {
+		t.Errorf("HealthMessage = %q, want %q", got.HealthMessage, "github API 401")
+	}
+	if !got.HealthCheckedAt.Equal(time.Unix(1_700_000_090, 0)) {
+		t.Errorf("HealthCheckedAt = %v, want 1_700_000_090", got.HealthCheckedAt)
+	}
+}
+
 func TestStatusYardmasterInfoPopulated(t *testing.T) {
 	h := newStatusFixtureHost(t)
 	h.deps.RailyardVersion = "1.2.3"
