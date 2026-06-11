@@ -5,6 +5,10 @@ out-of-process plugin. The contract is the source of truth — the Go SDK
 in `pkg/plugin` wraps it, but anything that crosses the process boundary
 must serialize to the proto schema here.
 
+> Writing a plugin in a language other than Go? See
+> [`non-go.md`](non-go.md) for the full launch/handshake/broker-dial-back
+> walkthrough plus a runnable Python example.
+
 ## Layout
 
 ```

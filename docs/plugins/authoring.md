@@ -910,6 +910,9 @@ the rest of the plugin compiles unchanged.
 - **Proto contract** — `docs/plugins/proto.md`. The wire-level gRPC
   schema the SDK wraps. Authors should not need it day-to-day; it's
   the source of truth if the SDK ever surprises you.
+- **Non-Go plugins** — `docs/plugins/non-go.md`. Writing a plugin in
+  another language (handshake + broker dial-back walkthrough), with a
+  worked Python example under `examples/plugins/python/`.
 - **Active design** — the `railyard-fll` bd epic. Crash-budget
   (`railyard-fll.6`), operator config (`railyard-fll.4`), deprecation
   sweep (`railyard-fll.8`).

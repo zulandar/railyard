@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Launcher the railyard host execs as the plugin "binary".
+#
+# The host discovers a plugin by the BASENAME of the executable matching
+# an entry in plugins.enabled, so this file is named `py-example` (no
+# extension) and must be chmod +x. Drop it (or a symlink to it) into a
+# plugins.d directory alongside plugin.py + railyard_plugin/.
+#
+# PEER-CRED CAVEAT (Linux): the host verifies the process that connects
+# to the socket is the EXACT child it launched (same PID). We therefore
+# `exec` python — exec REPLACES this shell's process image in place, so
+# the PID is preserved and SO_PEERCRED matches. Do NOT background or
+# `&`/subshell the python invocation: a fork would connect from a
+# different PID and the host would kill the plugin.
+#
+# Override the interpreter with RYPY_PYTHON (e.g. a venv's python).
+set -euo pipefail
+# Resolve through any symlink so dropping a symlink into plugins.d still
+# finds plugin.py next to the REAL launcher (the host execs the symlink).
+SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+HERE="$(cd "$(dirname "$SELF")" && pwd)"
+PY="${RYPY_PYTHON:-python3}"
+exec "$PY" "$HERE/plugin.py"

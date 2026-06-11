@@ -1,0 +1,5 @@
+# Runtime + codegen deps for the Python plugin example.
+# Install into a venv:  python -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt
+grpcio>=1.60
+grpcio-tools>=1.60
+grpcio-health-checking>=1.60
