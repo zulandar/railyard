@@ -17,18 +17,24 @@ import (
 )
 
 // StatusProvider is the contract the HTTP server uses to satisfy
-// GET /plugins/status. It is satisfied by *pluginhost.Host via the
-// Status() method. The indirection keeps the yardmaster package
-// from importing pluginhost beyond the type-level dependency on
-// pluginhost.Snapshot.
+// GET /plugins/status AND POST /plugins/restart. It is satisfied by
+// *pluginhost.Host via the Status() and Restart() methods. The
+// indirection keeps the yardmaster package from importing pluginhost
+// beyond the type-level dependency on pluginhost.Snapshot.
+//
+// Restart relaunches a single named plugin in the live host without
+// restarting the yard (railyard-77h.13). It returns the prior state so
+// the handler can render an "old-state -> new-state" line; an error for an
+// unknown name or a failed relaunch.
 type StatusProvider interface {
 	Status() pluginhost.Snapshot
+	Restart(ctx context.Context, name string) error
 }
 
 // Compile-time assertion that *pluginhost.Host satisfies StatusProvider.
-// Without this, a signature drift on Host.Status() would only break the
-// CLI build at the assignment site (pkg/cli/yardmaster.go). This catches
-// it at the package that defines the interface.
+// Without this, a signature drift on Host.Status() / Host.Restart() would
+// only break the CLI build at the assignment site (pkg/cli/yardmaster.go).
+// This catches it at the package that defines the interface.
 var _ StatusProvider = (*pluginhost.Host)(nil)
 
 // HealthServer provides HTTP health check endpoints for k8s probes.
@@ -113,6 +119,46 @@ func serveHealthOnListener(ctx context.Context, ln net.Listener, hs *HealthServe
 		}
 	})
 
+	// POST /plugins/restart?name=<name> relaunches a single plugin in the
+	// running host without restarting the yard (railyard-77h.13). The
+	// response JSON carries the old and new state strings so the CLI can
+	// render "old -> new". Errors (unknown name, failed relaunch) return a
+	// non-2xx with a JSON {"error": "..."} body.
+	mux.HandleFunc("/plugins/restart", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		name := r.URL.Query().Get("name")
+		if name == "" {
+			writeRestartError(w, http.StatusBadRequest, "missing required query param: name")
+			return
+		}
+		if provider == nil {
+			writeRestartError(w, http.StatusServiceUnavailable, "no plugin host is wired into this process")
+			return
+		}
+
+		// Capture the prior state from the snapshot so the response can
+		// report "old -> new". A name absent from the snapshot reads as
+		// "unknown" — Restart itself returns the authoritative unknown-name
+		// error below, so this is only for display.
+		oldState := pluginStateFromSnapshot(provider.Status(), name)
+
+		if err := provider.Restart(r.Context(), name); err != nil {
+			writeRestartError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		newState := pluginStateFromSnapshot(provider.Status(), name)
+		w.Header().Set("Content-Type", "application/json")
+		enc := json.NewEncoder(w)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(restartResponse{Name: name, OldState: oldState, NewState: newState}); err != nil {
+			slog.Default().Error("plugins/restart: encode", "err", err)
+		}
+	})
+
 	srv := &http.Server{Handler: mux}
 
 	go func() {
@@ -124,6 +170,42 @@ func serveHealthOnListener(ctx context.Context, ln net.Listener, hs *HealthServe
 		return err
 	}
 	return nil
+}
+
+// restartResponse is the JSON body returned by POST /plugins/restart on
+// success (railyard-77h.13). OldState/NewState are the plugin's snapshot
+// status before and after the relaunch, so the CLI can render
+// "old -> new". A revived plugin reads e.g. "disabled -> running".
+type restartResponse struct {
+	Name     string `json:"name"`
+	OldState string `json:"old_state"`
+	NewState string `json:"new_state"`
+}
+
+// restartErrorBody is the JSON shape for a /plugins/restart failure.
+type restartErrorBody struct {
+	Error string `json:"error"`
+}
+
+// writeRestartError writes a JSON {"error": msg} body with the given
+// status code.
+func writeRestartError(w http.ResponseWriter, code int, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	if err := json.NewEncoder(w).Encode(restartErrorBody{Error: msg}); err != nil {
+		slog.Default().Error("plugins/restart: encode error body", "err", err)
+	}
+}
+
+// pluginStateFromSnapshot returns the status string for `name` in snap, or
+// "unknown" if the snapshot has no row for it.
+func pluginStateFromSnapshot(snap pluginhost.Snapshot, name string) string {
+	for _, p := range snap.Plugins {
+		if p.Name == name {
+			return p.Status
+		}
+	}
+	return "unknown"
 }
 
 // DefaultStaleThreshold is the default time after which an engine is considered stale.

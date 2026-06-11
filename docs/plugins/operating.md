@@ -413,6 +413,56 @@ NAME  EVENTS-DELIVERED  EVENTS-DROPPED  CMDS-HANDLED  CMDS-FAILED  AVG-LATENCY
 The raw fields (including `command_latency_total_micros` and
 `command_latency_avg_micros`) are always present in `--json` output.
 
+#### Restarting a plugin in place (`ry plugins restart <name>`)
+
+`ry plugins restart <name>` relaunches a single plugin inside a running
+yardmaster **without restarting the whole yard**. It is the operator
+escape hatch for three situations:
+
+- A **wedged** plugin (process alive but not doing useful work — e.g.
+  `HEALTH` shows `failing`).
+- A plugin the crash-budget supervisor **permanently disabled**
+  (`STATUS` = `disabled`); the restart revives it.
+- A plugin whose **binary you replaced on disk** since the yard started
+  — the relaunch re-execs the recorded path, so it picks up the new
+  binary.
+
+```
+$ ry plugins restart trainmaster
+trainmaster: disabled -> running
+```
+
+The command POSTs to the same yardmaster HTTP server `ry plugins status`
+reads (`POST /plugins/restart?name=<name>` on
+`cfg.yardmaster.health_port`). It prints `old-state -> new-state` on
+success, or the error (unknown name, failed relaunch). Use `--url` to
+target a specific host (e.g. through `kubectl port-forward`) and
+`--timeout` to raise the deadline for a slow graceful drain (default
+30s — the relaunch first drives the plugin's `Stop` with the same 5s
+drain budget that graceful shutdown uses).
+
+**What restart does to a running plugin.** It gracefully stops the
+subprocess (cancels its event subscriptions, drives `PluginService.Stop`
+with the drain budget, then `SIGTERM` → wait → `SIGKILL`), then relaunches
+a fresh subprocess through the same launch → `Init` (→ `Start`, if the
+yard is already past startup) path the supervisor's crash-relaunch uses.
+
+**Crash-budget reset (important).** A restart is **operator-initiated**,
+not a crash, so it **resets the plugin's crash-budget window**. An
+intentional restart therefore never counts toward the 4-in-60s disable
+threshold, and reviving a `disabled` plugin starts it with a clean budget.
+(Contrast: the supervisor's automatic crash-relaunch leaves the sliding
+window intact — see [Crash policy](#crash-policy).)
+
+**What restart does NOT do.** It does **not** reload `railyard.yaml`.
+Plugin config (the `plugins:` block, per-plugin `allow` lists, top-level
+config blocks) is fixed for the yardmaster process lifetime; a restart
+re-applies the *same* config the yard booted with. To change a plugin's
+config or enable a brand-new plugin you must restart the yardmaster
+process. Restart also only operates on plugins the yard already knows
+about (running, disabled, or init-failed) — it will not discover and
+launch a newly-added plugin binary.
+
 **Reset semantics.** These counters are **process-lifetime**: they
 accumulate from the moment the yardmaster process boots and are reset
 only when that process restarts. They **survive a plugin relaunch** — a
@@ -445,7 +495,7 @@ above).
 | `PermissionDenied` on `Subscribe`                    | Event not in `allow.events`                         | Add the topic or `"*"` to `allow.events`                                       |
 | `PermissionDenied` on `DispatchCommand`              | Command not in `allow.commands`                     | Add the command or a `"ns.*"` prefix to `allow.commands`                       |
 | WARN "plugin name collision"                         | Same plugin in two scanned dirs                     | Remove one; later directory wins                                               |
-| ERROR "plugin permanently disabled"                  | Crash budget exceeded (4 crashes in 60 s)           | Check plugin logs, fix the crash, restart railyard                             |
+| ERROR "plugin permanently disabled"                  | Crash budget exceeded (4 crashes in 60 s)           | Check plugin logs, fix the crash, then `ry plugins restart <name>` to revive it without restarting the yard (or restart railyard) |
 | ERROR `SO_PEERCRED` mismatch                         | Connecting peer's pid/uid did not match launched    | Security check tripped; the plugin will not be retried until railyard restarts |
 | ERROR "incompatible protocol version" at handshake   | Plugin built against a different railyard version   | Rebuild the plugin against this railyard release                               |
 | Plugin runs but does nothing                         | No `allow` block → all caps denied (strict default) | Add an `allow:` block under `plugins.<name>` listing the caps you want         |
