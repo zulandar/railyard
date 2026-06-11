@@ -457,6 +457,38 @@ every plugin-related log line is tagged.
 
 ---
 
+## Persistent key/value store
+
+Plugins can persist small amounts of state across restarts through the
+host's key/value store (`Host.Store()`, railyard-77h.11) — a reconcile
+cursor, a dedupe set, a "last synced" marker. It is backed by railyard's
+own database in a single table.
+
+| Aspect | Detail |
+| --- | --- |
+| Backing table | `plugin_kvs` in the railyard database |
+| Columns | `plugin` (namespace), `key`, `value` (blob), `updated_at` |
+| Primary key | composite `(plugin, key)` — keys are unique per plugin |
+| Namespace | the connection-bound plugin name; set by the host, **never** by the plugin, so cross-plugin reads are impossible |
+| No database | every store call returns `"kv store not configured"` (the plugin must handle the error) |
+
+**Limits (per plugin).** These protect the shared database from a single
+plugin exhausting it. There is no operator knob to raise them.
+
+| Limit | Value |
+| --- | --- |
+| Max value size | 64 KiB |
+| Max key length | 256 bytes |
+| Max keys per plugin | 1024 |
+
+A plugin that exceeds a limit gets an error back from its `Put` call
+(`ResourceExhausted` for an oversized value or the key cap;
+`InvalidArgument` for an oversized key). Overwriting an existing key does
+not count against the key cap. The table is created automatically by the
+standard migration — no operator action is required to enable the store.
+
+---
+
 ## Security notes
 
 - **Plugins run as the railyard uid.** They are not sandboxed beyond
@@ -492,6 +524,7 @@ every plugin-related log line is tagged.
 | Sockets             | `$XDG_RUNTIME_DIR/railyard/plugins/<name>.sock` (or fallback)   |
 | Logs                | Wherever railyard's slog handler writes (operator's choice)     |
 | Config              | The `plugins:` block in `railyard.yaml` plus per-plugin top-level YAML |
+| Plugin KV store     | The `plugin_kvs` table in the railyard database (namespaced per plugin) |
 
 ---
 

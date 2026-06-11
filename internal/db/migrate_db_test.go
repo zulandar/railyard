@@ -4,6 +4,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zulandar/railyard/internal/config"
 	"github.com/zulandar/railyard/internal/models"
@@ -69,6 +70,35 @@ func TestAutoMigrate_CreatesAllTables(t *testing.T) {
 		if !db.Migrator().HasTable(table) {
 			t.Errorf("expected table %q to exist after AutoMigrate", table)
 		}
+	}
+}
+
+// TestAutoMigrate_CreatesPluginKVTable asserts the plugin-scoped KV store
+// table migrates cleanly with its composite (plugin, key) primary key
+// (railyard-77h.11).
+func TestAutoMigrate_CreatesPluginKVTable(t *testing.T) {
+	db := testDB(t)
+
+	if !db.Migrator().HasTable("plugin_kvs") {
+		t.Fatal("expected table \"plugin_kvs\" to exist after AutoMigrate")
+	}
+
+	// Composite primary key: two rows differing only in plugin must both
+	// persist (proves `plugin` is part of the key, not just `key`).
+	now := time.Now()
+	rows := []models.PluginKV{
+		{Plugin: "a", Key: "cursor", Value: []byte("1"), UpdatedAt: now},
+		{Plugin: "b", Key: "cursor", Value: []byte("2"), UpdatedAt: now},
+	}
+	for _, r := range rows {
+		if err := db.Create(&r).Error; err != nil {
+			t.Fatalf("insert %+v: %v", r, err)
+		}
+	}
+	var count int64
+	db.Model(&models.PluginKV{}).Count(&count)
+	if count != 2 {
+		t.Fatalf("plugin_kvs row count = %d, want 2 (composite PK should permit same key across plugins)", count)
 	}
 }
 

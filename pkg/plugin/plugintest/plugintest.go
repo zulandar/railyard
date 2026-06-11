@@ -191,6 +191,14 @@ type FakeHost struct {
 	emits          []RecordedEmit
 	logs           []CapturedLog
 	defaultHandler slog.Handler
+
+	// store is the in-memory key/value fake returned by [FakeHost.Store].
+	// It is lazily created on first access so the zero-value FakeHost
+	// keeps working. Like the real host's per-connection store it is
+	// namespaced to this FakeHost instance — a separate FakeHost has a
+	// separate store, so two plugins under test never see each other's
+	// keys (railyard-77h.11).
+	store *FakeStore
 }
 
 // Compile-time assertion that *FakeHost satisfies plugin.Host. The
@@ -381,6 +389,35 @@ func (h *FakeHost) Emits() []RecordedEmit {
 	return out
 }
 
+// Store returns this FakeHost's in-memory [plugin.Store] fake
+// (railyard-77h.11). The store is created lazily and is namespaced to
+// this FakeHost instance: a different FakeHost has a different store, so
+// tests for two plugins never share keys — mirroring the real host's
+// per-connection namespacing. Tests can inspect or seed the store
+// directly via [FakeHost.StoredValues] / [FakeStore].
+func (h *FakeHost) Store() plugin.Store {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.store == nil {
+		h.store = NewFakeStore()
+	}
+	return h.store
+}
+
+// StoredValues returns a copy of every key/value currently held by this
+// FakeHost's Store, so a test can assert "the plugin persisted X" without
+// reaching back through the Store interface. The returned map and its
+// byte slices are copies; mutating them does not affect host state.
+func (h *FakeHost) StoredValues() map[string][]byte {
+	h.mu.Lock()
+	store := h.store
+	h.mu.Unlock()
+	if store == nil {
+		return map[string][]byte{}
+	}
+	return store.snapshot()
+}
+
 // Logger returns a [*slog.Logger] backed by either LoggerHandler (when
 // set) or a built-in capturing handler that appends every record to
 // the slice accessible via [FakeHost.Logs].
@@ -515,6 +552,7 @@ func (h *FakeHost) Reset() {
 	h.emits = nil
 	h.logs = nil
 	h.defaultHandler = nil
+	h.store = nil
 }
 
 // captureHandler is the default slog handler installed by

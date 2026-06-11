@@ -617,6 +617,69 @@ h.Subscribe(plugin.EventType("trainmaster.synced"), func(topic plugin.EventType,
 (The SDK's static `CarCreatedEvent`-style structs apply only to the core
 topics; plugin-published topics are always `map[string]any`.)
 
+### Store (persistent key/value)
+
+`Store()` gives your plugin a private, persistent key/value namespace
+backed by railyard's database (railyard-77h.11). Use it for anything you
+need to remember across restarts: an event-stream reconcile cursor, a
+dedupe set, a "last synced" marker. Values are opaque `[]byte` — you
+choose the encoding (raw, JSON, protobuf, whatever).
+
+The store is **namespaced to your plugin by construction.** The host
+derives the namespace from the connection-bound identity, never from a
+request field, so you can only ever read and write your own keys — another
+plugin's keys are invisible to you and yours to them.
+
+```go
+type Store interface {
+    Get(ctx context.Context, key string) ([]byte, bool, error)
+    Put(ctx context.Context, key string, value []byte) error
+    Delete(ctx context.Context, key string) error
+    List(ctx context.Context, prefix string) ([]string, error)
+}
+```
+
+A common pattern is a **reconcile cursor**: persist the last sequence
+number you processed so that after a restart you resume from where you
+left off rather than reprocessing or losing events (see `Subscribe`'s
+`EventMeta.Seq` / gap detection above).
+
+```go
+const cursorKey = "reconcile-cursor"
+
+// On startup, read the saved cursor (absent on first run).
+func (p *MyPlugin) loadCursor(ctx context.Context) uint64 {
+    raw, found, err := p.host.Store().Get(ctx, cursorKey)
+    if err != nil || !found {
+        return 0 // first run, or store unavailable — start from zero
+    }
+    return binary.BigEndian.Uint64(raw)
+}
+
+// After processing an event, advance and persist the cursor.
+func (p *MyPlugin) saveCursor(ctx context.Context, seq uint64) error {
+    var buf [8]byte
+    binary.BigEndian.PutUint64(buf[:], seq)
+    return p.host.Store().Put(ctx, cursorKey, buf[:])
+}
+```
+
+`Get` returns `(nil, false, nil)` for a missing key — absence is not an
+error. `Delete` of an absent key is a no-op. `List("")` returns every key
+in your namespace, sorted ascending; pass a prefix to narrow it.
+
+**Limits.** To protect the shared database the host caps each plugin at:
+
+| Limit | Value | On overrun |
+| --- | --- | --- |
+| Value size | 64 KiB | `Put` returns an error (`ResourceExhausted`) |
+| Key length | 256 bytes | `Put` returns an error (`InvalidArgument`) |
+| Keys per plugin | 1024 | `Put` of a *new* key returns an error (`ResourceExhausted`); overwriting an existing key is always allowed |
+
+If railyard is running without a database, every `Store` method returns an
+error (`"kv store not configured"`) rather than panicking — handle the
+error and fall back to in-memory state if your plugin must keep working.
+
 ### RunDaemon (deprecated)
 
 The legacy in-process host wrapped goroutines with panic recovery and

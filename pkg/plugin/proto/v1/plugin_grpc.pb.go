@@ -357,6 +357,10 @@ const (
 	HostService_Config_FullMethodName          = "/railyard.plugin.v1.HostService/Config"
 	HostService_Log_FullMethodName             = "/railyard.plugin.v1.HostService/Log"
 	HostService_EmitEvent_FullMethodName       = "/railyard.plugin.v1.HostService/EmitEvent"
+	HostService_KVGet_FullMethodName           = "/railyard.plugin.v1.HostService/KVGet"
+	HostService_KVPut_FullMethodName           = "/railyard.plugin.v1.HostService/KVPut"
+	HostService_KVDelete_FullMethodName        = "/railyard.plugin.v1.HostService/KVDelete"
+	HostService_KVList_FullMethodName          = "/railyard.plugin.v1.HostService/KVList"
 )
 
 // HostServiceClient is the client API for HostService service.
@@ -402,6 +406,24 @@ type HostServiceClient interface {
 	// field, and returns PermissionDenied for an un-prefixed topic or one
 	// the plugin's allow.publish list does not permit (railyard-77h.9).
 	EmitEvent(ctx context.Context, in *EmitEventRequest, opts ...grpc.CallOption) (*EmitEventResponse, error)
+	// KVGet reads one value from the plugin's private key/value namespace
+	// (railyard-77h.11). The namespace is the caller's connection-bound
+	// identity, NEVER a request field, so a plugin can only ever read its
+	// own keys. found=false means the key is absent. A host with no DB
+	// configured returns codes.Unavailable.
+	KVGet(ctx context.Context, in *KVGetRequest, opts ...grpc.CallOption) (*KVGetResponse, error)
+	// KVPut writes (inserts or overwrites) one value in the plugin's
+	// private namespace. The host enforces per-plugin limits (max value
+	// bytes, max key bytes, max key count) and rejects overruns with
+	// codes.ResourceExhausted / codes.InvalidArgument (railyard-77h.11).
+	KVPut(ctx context.Context, in *KVPutRequest, opts ...grpc.CallOption) (*KVPutResponse, error)
+	// KVDelete removes one key from the plugin's private namespace.
+	// Deleting an absent key is a no-op (no error) (railyard-77h.11).
+	KVDelete(ctx context.Context, in *KVDeleteRequest, opts ...grpc.CallOption) (*KVDeleteResponse, error)
+	// KVList returns the keys in the plugin's private namespace whose name
+	// begins with the given prefix (empty prefix lists all keys), sorted
+	// ascending (railyard-77h.11).
+	KVList(ctx context.Context, in *KVListRequest, opts ...grpc.CallOption) (*KVListResponse, error)
 }
 
 type hostServiceClient struct {
@@ -491,6 +513,46 @@ func (c *hostServiceClient) EmitEvent(ctx context.Context, in *EmitEventRequest,
 	return out, nil
 }
 
+func (c *hostServiceClient) KVGet(ctx context.Context, in *KVGetRequest, opts ...grpc.CallOption) (*KVGetResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(KVGetResponse)
+	err := c.cc.Invoke(ctx, HostService_KVGet_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostServiceClient) KVPut(ctx context.Context, in *KVPutRequest, opts ...grpc.CallOption) (*KVPutResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(KVPutResponse)
+	err := c.cc.Invoke(ctx, HostService_KVPut_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostServiceClient) KVDelete(ctx context.Context, in *KVDeleteRequest, opts ...grpc.CallOption) (*KVDeleteResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(KVDeleteResponse)
+	err := c.cc.Invoke(ctx, HostService_KVDelete_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostServiceClient) KVList(ctx context.Context, in *KVListRequest, opts ...grpc.CallOption) (*KVListResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(KVListResponse)
+	err := c.cc.Invoke(ctx, HostService_KVList_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // HostServiceServer is the server API for HostService service.
 // All implementations must embed UnimplementedHostServiceServer
 // for forward compatibility.
@@ -534,6 +596,24 @@ type HostServiceServer interface {
 	// field, and returns PermissionDenied for an un-prefixed topic or one
 	// the plugin's allow.publish list does not permit (railyard-77h.9).
 	EmitEvent(context.Context, *EmitEventRequest) (*EmitEventResponse, error)
+	// KVGet reads one value from the plugin's private key/value namespace
+	// (railyard-77h.11). The namespace is the caller's connection-bound
+	// identity, NEVER a request field, so a plugin can only ever read its
+	// own keys. found=false means the key is absent. A host with no DB
+	// configured returns codes.Unavailable.
+	KVGet(context.Context, *KVGetRequest) (*KVGetResponse, error)
+	// KVPut writes (inserts or overwrites) one value in the plugin's
+	// private namespace. The host enforces per-plugin limits (max value
+	// bytes, max key bytes, max key count) and rejects overruns with
+	// codes.ResourceExhausted / codes.InvalidArgument (railyard-77h.11).
+	KVPut(context.Context, *KVPutRequest) (*KVPutResponse, error)
+	// KVDelete removes one key from the plugin's private namespace.
+	// Deleting an absent key is a no-op (no error) (railyard-77h.11).
+	KVDelete(context.Context, *KVDeleteRequest) (*KVDeleteResponse, error)
+	// KVList returns the keys in the plugin's private namespace whose name
+	// begins with the given prefix (empty prefix lists all keys), sorted
+	// ascending (railyard-77h.11).
+	KVList(context.Context, *KVListRequest) (*KVListResponse, error)
 	mustEmbedUnimplementedHostServiceServer()
 }
 
@@ -564,6 +644,18 @@ func (UnimplementedHostServiceServer) Log(context.Context, *LogRequest) (*LogRes
 }
 func (UnimplementedHostServiceServer) EmitEvent(context.Context, *EmitEventRequest) (*EmitEventResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method EmitEvent not implemented")
+}
+func (UnimplementedHostServiceServer) KVGet(context.Context, *KVGetRequest) (*KVGetResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method KVGet not implemented")
+}
+func (UnimplementedHostServiceServer) KVPut(context.Context, *KVPutRequest) (*KVPutResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method KVPut not implemented")
+}
+func (UnimplementedHostServiceServer) KVDelete(context.Context, *KVDeleteRequest) (*KVDeleteResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method KVDelete not implemented")
+}
+func (UnimplementedHostServiceServer) KVList(context.Context, *KVListRequest) (*KVListResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method KVList not implemented")
 }
 func (UnimplementedHostServiceServer) mustEmbedUnimplementedHostServiceServer() {}
 func (UnimplementedHostServiceServer) testEmbeddedByValue()                     {}
@@ -705,6 +797,78 @@ func _HostService_EmitEvent_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
+func _HostService_KVGet_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(KVGetRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServiceServer).KVGet(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: HostService_KVGet_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServiceServer).KVGet(ctx, req.(*KVGetRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _HostService_KVPut_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(KVPutRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServiceServer).KVPut(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: HostService_KVPut_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServiceServer).KVPut(ctx, req.(*KVPutRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _HostService_KVDelete_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(KVDeleteRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServiceServer).KVDelete(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: HostService_KVDelete_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServiceServer).KVDelete(ctx, req.(*KVDeleteRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _HostService_KVList_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(KVListRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServiceServer).KVList(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: HostService_KVList_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServiceServer).KVList(ctx, req.(*KVListRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // HostService_ServiceDesc is the grpc.ServiceDesc for HostService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -735,6 +899,22 @@ var HostService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "EmitEvent",
 			Handler:    _HostService_EmitEvent_Handler,
+		},
+		{
+			MethodName: "KVGet",
+			Handler:    _HostService_KVGet_Handler,
+		},
+		{
+			MethodName: "KVPut",
+			Handler:    _HostService_KVPut_Handler,
+		},
+		{
+			MethodName: "KVDelete",
+			Handler:    _HostService_KVDelete_Handler,
+		},
+		{
+			MethodName: "KVList",
+			Handler:    _HostService_KVList_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

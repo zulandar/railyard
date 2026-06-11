@@ -2276,6 +2276,368 @@ func (*EmitEventResponse) Descriptor() ([]byte, []int) {
 	return file_plugin_proto_rawDescGZIP(), []int{32}
 }
 
+type KVGetRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// key is the lookup key within the caller's private namespace.
+	Key           string `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *KVGetRequest) Reset() {
+	*x = KVGetRequest{}
+	mi := &file_plugin_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *KVGetRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*KVGetRequest) ProtoMessage() {}
+
+func (x *KVGetRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_plugin_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use KVGetRequest.ProtoReflect.Descriptor instead.
+func (*KVGetRequest) Descriptor() ([]byte, []int) {
+	return file_plugin_proto_rawDescGZIP(), []int{33}
+}
+
+func (x *KVGetRequest) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
+}
+
+type KVGetResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// value is the stored payload; empty when found=false.
+	Value []byte `protobuf:"bytes,1,opt,name=value,proto3" json:"value,omitempty"`
+	// found reports whether the key existed.
+	Found         bool `protobuf:"varint,2,opt,name=found,proto3" json:"found,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *KVGetResponse) Reset() {
+	*x = KVGetResponse{}
+	mi := &file_plugin_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *KVGetResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*KVGetResponse) ProtoMessage() {}
+
+func (x *KVGetResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_plugin_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use KVGetResponse.ProtoReflect.Descriptor instead.
+func (*KVGetResponse) Descriptor() ([]byte, []int) {
+	return file_plugin_proto_rawDescGZIP(), []int{34}
+}
+
+func (x *KVGetResponse) GetValue() []byte {
+	if x != nil {
+		return x.Value
+	}
+	return nil
+}
+
+func (x *KVGetResponse) GetFound() bool {
+	if x != nil {
+		return x.Found
+	}
+	return false
+}
+
+type KVPutRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// key is the key to insert or overwrite within the caller's namespace.
+	Key string `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	// value is the opaque payload to store.
+	Value         []byte `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *KVPutRequest) Reset() {
+	*x = KVPutRequest{}
+	mi := &file_plugin_proto_msgTypes[35]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *KVPutRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*KVPutRequest) ProtoMessage() {}
+
+func (x *KVPutRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_plugin_proto_msgTypes[35]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use KVPutRequest.ProtoReflect.Descriptor instead.
+func (*KVPutRequest) Descriptor() ([]byte, []int) {
+	return file_plugin_proto_rawDescGZIP(), []int{35}
+}
+
+func (x *KVPutRequest) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
+}
+
+func (x *KVPutRequest) GetValue() []byte {
+	if x != nil {
+		return x.Value
+	}
+	return nil
+}
+
+type KVPutResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *KVPutResponse) Reset() {
+	*x = KVPutResponse{}
+	mi := &file_plugin_proto_msgTypes[36]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *KVPutResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*KVPutResponse) ProtoMessage() {}
+
+func (x *KVPutResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_plugin_proto_msgTypes[36]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use KVPutResponse.ProtoReflect.Descriptor instead.
+func (*KVPutResponse) Descriptor() ([]byte, []int) {
+	return file_plugin_proto_rawDescGZIP(), []int{36}
+}
+
+type KVDeleteRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// key is the key to delete from the caller's namespace. Deleting an
+	// absent key is a no-op.
+	Key           string `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *KVDeleteRequest) Reset() {
+	*x = KVDeleteRequest{}
+	mi := &file_plugin_proto_msgTypes[37]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *KVDeleteRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*KVDeleteRequest) ProtoMessage() {}
+
+func (x *KVDeleteRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_plugin_proto_msgTypes[37]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use KVDeleteRequest.ProtoReflect.Descriptor instead.
+func (*KVDeleteRequest) Descriptor() ([]byte, []int) {
+	return file_plugin_proto_rawDescGZIP(), []int{37}
+}
+
+func (x *KVDeleteRequest) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
+}
+
+type KVDeleteResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *KVDeleteResponse) Reset() {
+	*x = KVDeleteResponse{}
+	mi := &file_plugin_proto_msgTypes[38]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *KVDeleteResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*KVDeleteResponse) ProtoMessage() {}
+
+func (x *KVDeleteResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_plugin_proto_msgTypes[38]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use KVDeleteResponse.ProtoReflect.Descriptor instead.
+func (*KVDeleteResponse) Descriptor() ([]byte, []int) {
+	return file_plugin_proto_rawDescGZIP(), []int{38}
+}
+
+type KVListRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// prefix filters the returned keys to those that begin with it. An
+	// empty prefix returns every key in the caller's namespace.
+	Prefix        string `protobuf:"bytes,1,opt,name=prefix,proto3" json:"prefix,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *KVListRequest) Reset() {
+	*x = KVListRequest{}
+	mi := &file_plugin_proto_msgTypes[39]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *KVListRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*KVListRequest) ProtoMessage() {}
+
+func (x *KVListRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_plugin_proto_msgTypes[39]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use KVListRequest.ProtoReflect.Descriptor instead.
+func (*KVListRequest) Descriptor() ([]byte, []int) {
+	return file_plugin_proto_rawDescGZIP(), []int{39}
+}
+
+func (x *KVListRequest) GetPrefix() string {
+	if x != nil {
+		return x.Prefix
+	}
+	return ""
+}
+
+type KVListResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// keys is the matching key set, sorted ascending.
+	Keys          []string `protobuf:"bytes,1,rep,name=keys,proto3" json:"keys,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *KVListResponse) Reset() {
+	*x = KVListResponse{}
+	mi := &file_plugin_proto_msgTypes[40]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *KVListResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*KVListResponse) ProtoMessage() {}
+
+func (x *KVListResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_plugin_proto_msgTypes[40]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use KVListResponse.ProtoReflect.Descriptor instead.
+func (*KVListResponse) Descriptor() ([]byte, []int) {
+	return file_plugin_proto_rawDescGZIP(), []int{40}
+}
+
+func (x *KVListResponse) GetKeys() []string {
+	if x != nil {
+		return x.Keys
+	}
+	return nil
+}
+
 type SubscribeRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// topics is the list of EventType names (string form from
@@ -2288,7 +2650,7 @@ type SubscribeRequest struct {
 
 func (x *SubscribeRequest) Reset() {
 	*x = SubscribeRequest{}
-	mi := &file_plugin_proto_msgTypes[33]
+	mi := &file_plugin_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2300,7 +2662,7 @@ func (x *SubscribeRequest) String() string {
 func (*SubscribeRequest) ProtoMessage() {}
 
 func (x *SubscribeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_proto_msgTypes[33]
+	mi := &file_plugin_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2313,7 +2675,7 @@ func (x *SubscribeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubscribeRequest.ProtoReflect.Descriptor instead.
 func (*SubscribeRequest) Descriptor() ([]byte, []int) {
-	return file_plugin_proto_rawDescGZIP(), []int{33}
+	return file_plugin_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *SubscribeRequest) GetTopics() []string {
@@ -2368,7 +2730,7 @@ type Event struct {
 
 func (x *Event) Reset() {
 	*x = Event{}
-	mi := &file_plugin_proto_msgTypes[34]
+	mi := &file_plugin_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2380,7 +2742,7 @@ func (x *Event) String() string {
 func (*Event) ProtoMessage() {}
 
 func (x *Event) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_proto_msgTypes[34]
+	mi := &file_plugin_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2393,7 +2755,7 @@ func (x *Event) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Event.ProtoReflect.Descriptor instead.
 func (*Event) Descriptor() ([]byte, []int) {
-	return file_plugin_proto_rawDescGZIP(), []int{34}
+	return file_plugin_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *Event) GetType() EventType {
@@ -2638,7 +3000,7 @@ type CarCreatedEvent struct {
 
 func (x *CarCreatedEvent) Reset() {
 	*x = CarCreatedEvent{}
-	mi := &file_plugin_proto_msgTypes[35]
+	mi := &file_plugin_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2650,7 +3012,7 @@ func (x *CarCreatedEvent) String() string {
 func (*CarCreatedEvent) ProtoMessage() {}
 
 func (x *CarCreatedEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_proto_msgTypes[35]
+	mi := &file_plugin_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2663,7 +3025,7 @@ func (x *CarCreatedEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CarCreatedEvent.ProtoReflect.Descriptor instead.
 func (*CarCreatedEvent) Descriptor() ([]byte, []int) {
-	return file_plugin_proto_rawDescGZIP(), []int{35}
+	return file_plugin_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *CarCreatedEvent) GetCarId() string {
@@ -2712,7 +3074,7 @@ type CarClaimedEvent struct {
 
 func (x *CarClaimedEvent) Reset() {
 	*x = CarClaimedEvent{}
-	mi := &file_plugin_proto_msgTypes[36]
+	mi := &file_plugin_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2724,7 +3086,7 @@ func (x *CarClaimedEvent) String() string {
 func (*CarClaimedEvent) ProtoMessage() {}
 
 func (x *CarClaimedEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_proto_msgTypes[36]
+	mi := &file_plugin_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2737,7 +3099,7 @@ func (x *CarClaimedEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CarClaimedEvent.ProtoReflect.Descriptor instead.
 func (*CarClaimedEvent) Descriptor() ([]byte, []int) {
-	return file_plugin_proto_rawDescGZIP(), []int{36}
+	return file_plugin_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *CarClaimedEvent) GetCarId() string {
@@ -2766,7 +3128,7 @@ type CarStatusChangedEvent struct {
 
 func (x *CarStatusChangedEvent) Reset() {
 	*x = CarStatusChangedEvent{}
-	mi := &file_plugin_proto_msgTypes[37]
+	mi := &file_plugin_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2778,7 +3140,7 @@ func (x *CarStatusChangedEvent) String() string {
 func (*CarStatusChangedEvent) ProtoMessage() {}
 
 func (x *CarStatusChangedEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_proto_msgTypes[37]
+	mi := &file_plugin_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2791,7 +3153,7 @@ func (x *CarStatusChangedEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CarStatusChangedEvent.ProtoReflect.Descriptor instead.
 func (*CarStatusChangedEvent) Descriptor() ([]byte, []int) {
-	return file_plugin_proto_rawDescGZIP(), []int{37}
+	return file_plugin_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *CarStatusChangedEvent) GetCarId() string {
@@ -2826,7 +3188,7 @@ type CarMergedEvent struct {
 
 func (x *CarMergedEvent) Reset() {
 	*x = CarMergedEvent{}
-	mi := &file_plugin_proto_msgTypes[38]
+	mi := &file_plugin_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2838,7 +3200,7 @@ func (x *CarMergedEvent) String() string {
 func (*CarMergedEvent) ProtoMessage() {}
 
 func (x *CarMergedEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_proto_msgTypes[38]
+	mi := &file_plugin_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2851,7 +3213,7 @@ func (x *CarMergedEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CarMergedEvent.ProtoReflect.Descriptor instead.
 func (*CarMergedEvent) Descriptor() ([]byte, []int) {
-	return file_plugin_proto_rawDescGZIP(), []int{38}
+	return file_plugin_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *CarMergedEvent) GetCarId() string {
@@ -2879,7 +3241,7 @@ type MergeFailedEvent struct {
 
 func (x *MergeFailedEvent) Reset() {
 	*x = MergeFailedEvent{}
-	mi := &file_plugin_proto_msgTypes[39]
+	mi := &file_plugin_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2891,7 +3253,7 @@ func (x *MergeFailedEvent) String() string {
 func (*MergeFailedEvent) ProtoMessage() {}
 
 func (x *MergeFailedEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_proto_msgTypes[39]
+	mi := &file_plugin_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2904,7 +3266,7 @@ func (x *MergeFailedEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeFailedEvent.ProtoReflect.Descriptor instead.
 func (*MergeFailedEvent) Descriptor() ([]byte, []int) {
-	return file_plugin_proto_rawDescGZIP(), []int{39}
+	return file_plugin_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *MergeFailedEvent) GetCarId() string {
@@ -2932,7 +3294,7 @@ type EngineStartedEvent struct {
 
 func (x *EngineStartedEvent) Reset() {
 	*x = EngineStartedEvent{}
-	mi := &file_plugin_proto_msgTypes[40]
+	mi := &file_plugin_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2944,7 +3306,7 @@ func (x *EngineStartedEvent) String() string {
 func (*EngineStartedEvent) ProtoMessage() {}
 
 func (x *EngineStartedEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_proto_msgTypes[40]
+	mi := &file_plugin_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2957,7 +3319,7 @@ func (x *EngineStartedEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EngineStartedEvent.ProtoReflect.Descriptor instead.
 func (*EngineStartedEvent) Descriptor() ([]byte, []int) {
-	return file_plugin_proto_rawDescGZIP(), []int{40}
+	return file_plugin_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *EngineStartedEvent) GetEngineId() string {
@@ -2984,7 +3346,7 @@ type EngineStoppedEvent struct {
 
 func (x *EngineStoppedEvent) Reset() {
 	*x = EngineStoppedEvent{}
-	mi := &file_plugin_proto_msgTypes[41]
+	mi := &file_plugin_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2996,7 +3358,7 @@ func (x *EngineStoppedEvent) String() string {
 func (*EngineStoppedEvent) ProtoMessage() {}
 
 func (x *EngineStoppedEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_proto_msgTypes[41]
+	mi := &file_plugin_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3009,7 +3371,7 @@ func (x *EngineStoppedEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EngineStoppedEvent.ProtoReflect.Descriptor instead.
 func (*EngineStoppedEvent) Descriptor() ([]byte, []int) {
-	return file_plugin_proto_rawDescGZIP(), []int{41}
+	return file_plugin_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *EngineStoppedEvent) GetEngineId() string {
@@ -3033,7 +3395,7 @@ type EngineStalledEvent struct {
 
 func (x *EngineStalledEvent) Reset() {
 	*x = EngineStalledEvent{}
-	mi := &file_plugin_proto_msgTypes[42]
+	mi := &file_plugin_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3045,7 +3407,7 @@ func (x *EngineStalledEvent) String() string {
 func (*EngineStalledEvent) ProtoMessage() {}
 
 func (x *EngineStalledEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_proto_msgTypes[42]
+	mi := &file_plugin_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3058,7 +3420,7 @@ func (x *EngineStalledEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EngineStalledEvent.ProtoReflect.Descriptor instead.
 func (*EngineStalledEvent) Descriptor() ([]byte, []int) {
-	return file_plugin_proto_rawDescGZIP(), []int{42}
+	return file_plugin_proto_rawDescGZIP(), []int{50}
 }
 
 func (x *EngineStalledEvent) GetEngineId() string {
@@ -3086,7 +3448,7 @@ type YardmasterActionEvent struct {
 
 func (x *YardmasterActionEvent) Reset() {
 	*x = YardmasterActionEvent{}
-	mi := &file_plugin_proto_msgTypes[43]
+	mi := &file_plugin_proto_msgTypes[51]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3098,7 +3460,7 @@ func (x *YardmasterActionEvent) String() string {
 func (*YardmasterActionEvent) ProtoMessage() {}
 
 func (x *YardmasterActionEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_proto_msgTypes[43]
+	mi := &file_plugin_proto_msgTypes[51]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3111,7 +3473,7 @@ func (x *YardmasterActionEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use YardmasterActionEvent.ProtoReflect.Descriptor instead.
 func (*YardmasterActionEvent) Descriptor() ([]byte, []int) {
-	return file_plugin_proto_rawDescGZIP(), []int{43}
+	return file_plugin_proto_rawDescGZIP(), []int{51}
 }
 
 func (x *YardmasterActionEvent) GetTargetId() string {
@@ -3138,7 +3500,7 @@ type YardPausedEvent struct {
 
 func (x *YardPausedEvent) Reset() {
 	*x = YardPausedEvent{}
-	mi := &file_plugin_proto_msgTypes[44]
+	mi := &file_plugin_proto_msgTypes[52]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3150,7 +3512,7 @@ func (x *YardPausedEvent) String() string {
 func (*YardPausedEvent) ProtoMessage() {}
 
 func (x *YardPausedEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_proto_msgTypes[44]
+	mi := &file_plugin_proto_msgTypes[52]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3163,7 +3525,7 @@ func (x *YardPausedEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use YardPausedEvent.ProtoReflect.Descriptor instead.
 func (*YardPausedEvent) Descriptor() ([]byte, []int) {
-	return file_plugin_proto_rawDescGZIP(), []int{44}
+	return file_plugin_proto_rawDescGZIP(), []int{52}
 }
 
 func (x *YardPausedEvent) GetReason() string {
@@ -3183,7 +3545,7 @@ type YardResumedEvent struct {
 
 func (x *YardResumedEvent) Reset() {
 	*x = YardResumedEvent{}
-	mi := &file_plugin_proto_msgTypes[45]
+	mi := &file_plugin_proto_msgTypes[53]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3195,7 +3557,7 @@ func (x *YardResumedEvent) String() string {
 func (*YardResumedEvent) ProtoMessage() {}
 
 func (x *YardResumedEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_proto_msgTypes[45]
+	mi := &file_plugin_proto_msgTypes[53]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3208,7 +3570,7 @@ func (x *YardResumedEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use YardResumedEvent.ProtoReflect.Descriptor instead.
 func (*YardResumedEvent) Descriptor() ([]byte, []int) {
-	return file_plugin_proto_rawDescGZIP(), []int{45}
+	return file_plugin_proto_rawDescGZIP(), []int{53}
 }
 
 func (x *YardResumedEvent) GetReason() string {
@@ -3374,7 +3736,23 @@ const file_plugin_proto_rawDesc = "" +
 	"\x10EmitEventRequest\x12\x14\n" +
 	"\x05topic\x18\x01 \x01(\tR\x05topic\x121\n" +
 	"\apayload\x18\x02 \x01(\v2\x17.google.protobuf.StructR\apayload\"\x13\n" +
-	"\x11EmitEventResponse\"*\n" +
+	"\x11EmitEventResponse\" \n" +
+	"\fKVGetRequest\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\";\n" +
+	"\rKVGetResponse\x12\x14\n" +
+	"\x05value\x18\x01 \x01(\fR\x05value\x12\x14\n" +
+	"\x05found\x18\x02 \x01(\bR\x05found\"6\n" +
+	"\fKVPutRequest\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\fR\x05value\"\x0f\n" +
+	"\rKVPutResponse\"#\n" +
+	"\x0fKVDeleteRequest\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\"\x12\n" +
+	"\x10KVDeleteResponse\"'\n" +
+	"\rKVListRequest\x12\x16\n" +
+	"\x06prefix\x18\x01 \x01(\tR\x06prefix\"$\n" +
+	"\x0eKVListResponse\x12\x12\n" +
+	"\x04keys\x18\x01 \x03(\tR\x04keys\"*\n" +
 	"\x10SubscribeRequest\x12\x16\n" +
 	"\x06topics\x18\x01 \x03(\tR\x06topics\"\xd9\b\n" +
 	"\x05Event\x121\n" +
@@ -3470,7 +3848,7 @@ const file_plugin_proto_rawDesc = "" +
 	"\x05Start\x12 .railyard.plugin.v1.StartRequest\x1a!.railyard.plugin.v1.StartResponse\x12I\n" +
 	"\x04Stop\x12\x1f.railyard.plugin.v1.StopRequest\x1a .railyard.plugin.v1.StopResponse\x12d\n" +
 	"\rHandleCommand\x12(.railyard.plugin.v1.HandleCommandRequest\x1a).railyard.plugin.v1.HandleCommandResponse\x12O\n" +
-	"\x06Health\x12!.railyard.plugin.v1.HealthRequest\x1a\".railyard.plugin.v1.HealthResponse2\xea\x04\n" +
+	"\x06Health\x12!.railyard.plugin.v1.HealthRequest\x1a\".railyard.plugin.v1.HealthResponse2\xae\a\n" +
 	"\vHostService\x12U\n" +
 	"\bYardInfo\x12#.railyard.plugin.v1.YardInfoRequest\x1a$.railyard.plugin.v1.YardInfoResponse\x12U\n" +
 	"\bSnapshot\x12#.railyard.plugin.v1.SnapshotRequest\x1a$.railyard.plugin.v1.SnapshotResponse\x12N\n" +
@@ -3478,7 +3856,11 @@ const file_plugin_proto_rawDesc = "" +
 	"\x0fDispatchCommand\x12*.railyard.plugin.v1.DispatchCommandRequest\x1a+.railyard.plugin.v1.DispatchCommandResponse\x12O\n" +
 	"\x06Config\x12!.railyard.plugin.v1.ConfigRequest\x1a\".railyard.plugin.v1.ConfigResponse\x12F\n" +
 	"\x03Log\x12\x1e.railyard.plugin.v1.LogRequest\x1a\x1f.railyard.plugin.v1.LogResponse\x12X\n" +
-	"\tEmitEvent\x12$.railyard.plugin.v1.EmitEventRequest\x1a%.railyard.plugin.v1.EmitEventResponseB\xc9\x01\n" +
+	"\tEmitEvent\x12$.railyard.plugin.v1.EmitEventRequest\x1a%.railyard.plugin.v1.EmitEventResponse\x12L\n" +
+	"\x05KVGet\x12 .railyard.plugin.v1.KVGetRequest\x1a!.railyard.plugin.v1.KVGetResponse\x12L\n" +
+	"\x05KVPut\x12 .railyard.plugin.v1.KVPutRequest\x1a!.railyard.plugin.v1.KVPutResponse\x12U\n" +
+	"\bKVDelete\x12#.railyard.plugin.v1.KVDeleteRequest\x1a$.railyard.plugin.v1.KVDeleteResponse\x12O\n" +
+	"\x06KVList\x12!.railyard.plugin.v1.KVListRequest\x1a\".railyard.plugin.v1.KVListResponseB\xc9\x01\n" +
 	"\x16com.railyard.plugin.v1B\vPluginProtoP\x01Z8github.com/zulandar/railyard/pkg/plugin/proto/v1;protov1\xa2\x02\x03RPX\xaa\x02\x12Railyard.Plugin.V1\xca\x02\x12Railyard\\Plugin\\V1\xe2\x02\x1eRailyard\\Plugin\\V1\\GPBMetadata\xea\x02\x14Railyard::Plugin::V1b\x06proto3"
 
 var (
@@ -3494,7 +3876,7 @@ func file_plugin_proto_rawDescGZIP() []byte {
 }
 
 var file_plugin_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
-var file_plugin_proto_msgTypes = make([]protoimpl.MessageInfo, 50)
+var file_plugin_proto_msgTypes = make([]protoimpl.MessageInfo, 58)
 var file_plugin_proto_goTypes = []any{
 	(ArgType)(0),                    // 0: railyard.plugin.v1.ArgType
 	(HealthState)(0),                // 1: railyard.plugin.v1.HealthState
@@ -3533,29 +3915,37 @@ var file_plugin_proto_goTypes = []any{
 	(*LogResponse)(nil),             // 34: railyard.plugin.v1.LogResponse
 	(*EmitEventRequest)(nil),        // 35: railyard.plugin.v1.EmitEventRequest
 	(*EmitEventResponse)(nil),       // 36: railyard.plugin.v1.EmitEventResponse
-	(*SubscribeRequest)(nil),        // 37: railyard.plugin.v1.SubscribeRequest
-	(*Event)(nil),                   // 38: railyard.plugin.v1.Event
-	(*CarCreatedEvent)(nil),         // 39: railyard.plugin.v1.CarCreatedEvent
-	(*CarClaimedEvent)(nil),         // 40: railyard.plugin.v1.CarClaimedEvent
-	(*CarStatusChangedEvent)(nil),   // 41: railyard.plugin.v1.CarStatusChangedEvent
-	(*CarMergedEvent)(nil),          // 42: railyard.plugin.v1.CarMergedEvent
-	(*MergeFailedEvent)(nil),        // 43: railyard.plugin.v1.MergeFailedEvent
-	(*EngineStartedEvent)(nil),      // 44: railyard.plugin.v1.EngineStartedEvent
-	(*EngineStoppedEvent)(nil),      // 45: railyard.plugin.v1.EngineStoppedEvent
-	(*EngineStalledEvent)(nil),      // 46: railyard.plugin.v1.EngineStalledEvent
-	(*YardmasterActionEvent)(nil),   // 47: railyard.plugin.v1.YardmasterActionEvent
-	(*YardPausedEvent)(nil),         // 48: railyard.plugin.v1.YardPausedEvent
-	(*YardResumedEvent)(nil),        // 49: railyard.plugin.v1.YardResumedEvent
-	nil,                             // 50: railyard.plugin.v1.CommandSchema.RequiredArgsEntry
-	nil,                             // 51: railyard.plugin.v1.CarsSnap.CountsEntry
-	nil,                             // 52: railyard.plugin.v1.SnapStats.EngineCountsByStatusEntry
-	nil,                             // 53: railyard.plugin.v1.LogRequest.AttrsEntry
-	(*structpb.Struct)(nil),         // 54: google.protobuf.Struct
-	(*timestamppb.Timestamp)(nil),   // 55: google.protobuf.Timestamp
+	(*KVGetRequest)(nil),            // 37: railyard.plugin.v1.KVGetRequest
+	(*KVGetResponse)(nil),           // 38: railyard.plugin.v1.KVGetResponse
+	(*KVPutRequest)(nil),            // 39: railyard.plugin.v1.KVPutRequest
+	(*KVPutResponse)(nil),           // 40: railyard.plugin.v1.KVPutResponse
+	(*KVDeleteRequest)(nil),         // 41: railyard.plugin.v1.KVDeleteRequest
+	(*KVDeleteResponse)(nil),        // 42: railyard.plugin.v1.KVDeleteResponse
+	(*KVListRequest)(nil),           // 43: railyard.plugin.v1.KVListRequest
+	(*KVListResponse)(nil),          // 44: railyard.plugin.v1.KVListResponse
+	(*SubscribeRequest)(nil),        // 45: railyard.plugin.v1.SubscribeRequest
+	(*Event)(nil),                   // 46: railyard.plugin.v1.Event
+	(*CarCreatedEvent)(nil),         // 47: railyard.plugin.v1.CarCreatedEvent
+	(*CarClaimedEvent)(nil),         // 48: railyard.plugin.v1.CarClaimedEvent
+	(*CarStatusChangedEvent)(nil),   // 49: railyard.plugin.v1.CarStatusChangedEvent
+	(*CarMergedEvent)(nil),          // 50: railyard.plugin.v1.CarMergedEvent
+	(*MergeFailedEvent)(nil),        // 51: railyard.plugin.v1.MergeFailedEvent
+	(*EngineStartedEvent)(nil),      // 52: railyard.plugin.v1.EngineStartedEvent
+	(*EngineStoppedEvent)(nil),      // 53: railyard.plugin.v1.EngineStoppedEvent
+	(*EngineStalledEvent)(nil),      // 54: railyard.plugin.v1.EngineStalledEvent
+	(*YardmasterActionEvent)(nil),   // 55: railyard.plugin.v1.YardmasterActionEvent
+	(*YardPausedEvent)(nil),         // 56: railyard.plugin.v1.YardPausedEvent
+	(*YardResumedEvent)(nil),        // 57: railyard.plugin.v1.YardResumedEvent
+	nil,                             // 58: railyard.plugin.v1.CommandSchema.RequiredArgsEntry
+	nil,                             // 59: railyard.plugin.v1.CarsSnap.CountsEntry
+	nil,                             // 60: railyard.plugin.v1.SnapStats.EngineCountsByStatusEntry
+	nil,                             // 61: railyard.plugin.v1.LogRequest.AttrsEntry
+	(*structpb.Struct)(nil),         // 62: google.protobuf.Struct
+	(*timestamppb.Timestamp)(nil),   // 63: google.protobuf.Timestamp
 }
 var file_plugin_proto_depIdxs = []int32{
 	0,  // 0: railyard.plugin.v1.ArgSpec.type:type_name -> railyard.plugin.v1.ArgType
-	50, // 1: railyard.plugin.v1.CommandSchema.required_args:type_name -> railyard.plugin.v1.CommandSchema.RequiredArgsEntry
+	58, // 1: railyard.plugin.v1.CommandSchema.required_args:type_name -> railyard.plugin.v1.CommandSchema.RequiredArgsEntry
 	4,  // 2: railyard.plugin.v1.CommandSchema.args:type_name -> railyard.plugin.v1.ArgSpec
 	5,  // 3: railyard.plugin.v1.Capabilities.provide_commands:type_name -> railyard.plugin.v1.CommandSchema
 	3,  // 4: railyard.plugin.v1.CapabilityDenial.kind:type_name -> railyard.plugin.v1.CapabilityDenial.Kind
@@ -3563,42 +3953,42 @@ var file_plugin_proto_depIdxs = []int32{
 	7,  // 6: railyard.plugin.v1.InitResponse.denials:type_name -> railyard.plugin.v1.CapabilityDenial
 	5,  // 7: railyard.plugin.v1.InitResponse.command_specs:type_name -> railyard.plugin.v1.CommandSchema
 	1,  // 8: railyard.plugin.v1.HealthResponse.state:type_name -> railyard.plugin.v1.HealthState
-	54, // 9: railyard.plugin.v1.HandleCommandRequest.args:type_name -> google.protobuf.Struct
-	54, // 10: railyard.plugin.v1.HandleCommandResponse.data:type_name -> google.protobuf.Struct
-	54, // 11: railyard.plugin.v1.DispatchCommandRequest.args:type_name -> google.protobuf.Struct
-	54, // 12: railyard.plugin.v1.DispatchCommandResponse.data:type_name -> google.protobuf.Struct
-	55, // 13: railyard.plugin.v1.YardInfoResponse.build_time:type_name -> google.protobuf.Timestamp
+	62, // 9: railyard.plugin.v1.HandleCommandRequest.args:type_name -> google.protobuf.Struct
+	62, // 10: railyard.plugin.v1.HandleCommandResponse.data:type_name -> google.protobuf.Struct
+	62, // 11: railyard.plugin.v1.DispatchCommandRequest.args:type_name -> google.protobuf.Struct
+	62, // 12: railyard.plugin.v1.DispatchCommandResponse.data:type_name -> google.protobuf.Struct
+	63, // 13: railyard.plugin.v1.YardInfoResponse.build_time:type_name -> google.protobuf.Timestamp
 	24, // 14: railyard.plugin.v1.SnapshotResponse.snapshot:type_name -> railyard.plugin.v1.Snapshot
-	55, // 15: railyard.plugin.v1.Snapshot.timestamp:type_name -> google.protobuf.Timestamp
+	63, // 15: railyard.plugin.v1.Snapshot.timestamp:type_name -> google.protobuf.Timestamp
 	25, // 16: railyard.plugin.v1.Snapshot.tracks:type_name -> railyard.plugin.v1.TrackSnap
 	26, // 17: railyard.plugin.v1.Snapshot.engines:type_name -> railyard.plugin.v1.EngineSnap
 	27, // 18: railyard.plugin.v1.Snapshot.cars:type_name -> railyard.plugin.v1.CarsSnap
 	29, // 19: railyard.plugin.v1.Snapshot.yardmaster:type_name -> railyard.plugin.v1.YardmasterSnap
 	30, // 20: railyard.plugin.v1.Snapshot.stats:type_name -> railyard.plugin.v1.SnapStats
-	55, // 21: railyard.plugin.v1.EngineSnap.last_activity:type_name -> google.protobuf.Timestamp
+	63, // 21: railyard.plugin.v1.EngineSnap.last_activity:type_name -> google.protobuf.Timestamp
 	28, // 22: railyard.plugin.v1.CarsSnap.active:type_name -> railyard.plugin.v1.CarSummary
-	51, // 23: railyard.plugin.v1.CarsSnap.counts:type_name -> railyard.plugin.v1.CarsSnap.CountsEntry
-	55, // 24: railyard.plugin.v1.CarSummary.created_at:type_name -> google.protobuf.Timestamp
-	55, // 25: railyard.plugin.v1.CarSummary.claimed_at:type_name -> google.protobuf.Timestamp
-	55, // 26: railyard.plugin.v1.YardmasterSnap.last_action_at:type_name -> google.protobuf.Timestamp
-	52, // 27: railyard.plugin.v1.SnapStats.engine_counts_by_status:type_name -> railyard.plugin.v1.SnapStats.EngineCountsByStatusEntry
-	55, // 28: railyard.plugin.v1.LogRequest.emitted_at:type_name -> google.protobuf.Timestamp
-	53, // 29: railyard.plugin.v1.LogRequest.attrs:type_name -> railyard.plugin.v1.LogRequest.AttrsEntry
-	54, // 30: railyard.plugin.v1.EmitEventRequest.payload:type_name -> google.protobuf.Struct
+	59, // 23: railyard.plugin.v1.CarsSnap.counts:type_name -> railyard.plugin.v1.CarsSnap.CountsEntry
+	63, // 24: railyard.plugin.v1.CarSummary.created_at:type_name -> google.protobuf.Timestamp
+	63, // 25: railyard.plugin.v1.CarSummary.claimed_at:type_name -> google.protobuf.Timestamp
+	63, // 26: railyard.plugin.v1.YardmasterSnap.last_action_at:type_name -> google.protobuf.Timestamp
+	60, // 27: railyard.plugin.v1.SnapStats.engine_counts_by_status:type_name -> railyard.plugin.v1.SnapStats.EngineCountsByStatusEntry
+	63, // 28: railyard.plugin.v1.LogRequest.emitted_at:type_name -> google.protobuf.Timestamp
+	61, // 29: railyard.plugin.v1.LogRequest.attrs:type_name -> railyard.plugin.v1.LogRequest.AttrsEntry
+	62, // 30: railyard.plugin.v1.EmitEventRequest.payload:type_name -> google.protobuf.Struct
 	2,  // 31: railyard.plugin.v1.Event.type:type_name -> railyard.plugin.v1.EventType
-	55, // 32: railyard.plugin.v1.Event.emitted_at:type_name -> google.protobuf.Timestamp
-	39, // 33: railyard.plugin.v1.Event.car_created:type_name -> railyard.plugin.v1.CarCreatedEvent
-	40, // 34: railyard.plugin.v1.Event.car_claimed:type_name -> railyard.plugin.v1.CarClaimedEvent
-	41, // 35: railyard.plugin.v1.Event.car_status_changed:type_name -> railyard.plugin.v1.CarStatusChangedEvent
-	42, // 36: railyard.plugin.v1.Event.car_merged:type_name -> railyard.plugin.v1.CarMergedEvent
-	43, // 37: railyard.plugin.v1.Event.merge_failed:type_name -> railyard.plugin.v1.MergeFailedEvent
-	44, // 38: railyard.plugin.v1.Event.engine_started:type_name -> railyard.plugin.v1.EngineStartedEvent
-	45, // 39: railyard.plugin.v1.Event.engine_stopped:type_name -> railyard.plugin.v1.EngineStoppedEvent
-	46, // 40: railyard.plugin.v1.Event.engine_stalled:type_name -> railyard.plugin.v1.EngineStalledEvent
-	47, // 41: railyard.plugin.v1.Event.yardmaster_action:type_name -> railyard.plugin.v1.YardmasterActionEvent
-	48, // 42: railyard.plugin.v1.Event.yard_paused:type_name -> railyard.plugin.v1.YardPausedEvent
-	49, // 43: railyard.plugin.v1.Event.yard_resumed:type_name -> railyard.plugin.v1.YardResumedEvent
-	54, // 44: railyard.plugin.v1.Event.custom:type_name -> google.protobuf.Struct
+	63, // 32: railyard.plugin.v1.Event.emitted_at:type_name -> google.protobuf.Timestamp
+	47, // 33: railyard.plugin.v1.Event.car_created:type_name -> railyard.plugin.v1.CarCreatedEvent
+	48, // 34: railyard.plugin.v1.Event.car_claimed:type_name -> railyard.plugin.v1.CarClaimedEvent
+	49, // 35: railyard.plugin.v1.Event.car_status_changed:type_name -> railyard.plugin.v1.CarStatusChangedEvent
+	50, // 36: railyard.plugin.v1.Event.car_merged:type_name -> railyard.plugin.v1.CarMergedEvent
+	51, // 37: railyard.plugin.v1.Event.merge_failed:type_name -> railyard.plugin.v1.MergeFailedEvent
+	52, // 38: railyard.plugin.v1.Event.engine_started:type_name -> railyard.plugin.v1.EngineStartedEvent
+	53, // 39: railyard.plugin.v1.Event.engine_stopped:type_name -> railyard.plugin.v1.EngineStoppedEvent
+	54, // 40: railyard.plugin.v1.Event.engine_stalled:type_name -> railyard.plugin.v1.EngineStalledEvent
+	55, // 41: railyard.plugin.v1.Event.yardmaster_action:type_name -> railyard.plugin.v1.YardmasterActionEvent
+	56, // 42: railyard.plugin.v1.Event.yard_paused:type_name -> railyard.plugin.v1.YardPausedEvent
+	57, // 43: railyard.plugin.v1.Event.yard_resumed:type_name -> railyard.plugin.v1.YardResumedEvent
+	62, // 44: railyard.plugin.v1.Event.custom:type_name -> google.protobuf.Struct
 	8,  // 45: railyard.plugin.v1.PluginService.Init:input_type -> railyard.plugin.v1.InitRequest
 	10, // 46: railyard.plugin.v1.PluginService.Start:input_type -> railyard.plugin.v1.StartRequest
 	12, // 47: railyard.plugin.v1.PluginService.Stop:input_type -> railyard.plugin.v1.StopRequest
@@ -3606,25 +3996,33 @@ var file_plugin_proto_depIdxs = []int32{
 	14, // 49: railyard.plugin.v1.PluginService.Health:input_type -> railyard.plugin.v1.HealthRequest
 	20, // 50: railyard.plugin.v1.HostService.YardInfo:input_type -> railyard.plugin.v1.YardInfoRequest
 	22, // 51: railyard.plugin.v1.HostService.Snapshot:input_type -> railyard.plugin.v1.SnapshotRequest
-	37, // 52: railyard.plugin.v1.HostService.Subscribe:input_type -> railyard.plugin.v1.SubscribeRequest
+	45, // 52: railyard.plugin.v1.HostService.Subscribe:input_type -> railyard.plugin.v1.SubscribeRequest
 	18, // 53: railyard.plugin.v1.HostService.DispatchCommand:input_type -> railyard.plugin.v1.DispatchCommandRequest
 	31, // 54: railyard.plugin.v1.HostService.Config:input_type -> railyard.plugin.v1.ConfigRequest
 	33, // 55: railyard.plugin.v1.HostService.Log:input_type -> railyard.plugin.v1.LogRequest
 	35, // 56: railyard.plugin.v1.HostService.EmitEvent:input_type -> railyard.plugin.v1.EmitEventRequest
-	9,  // 57: railyard.plugin.v1.PluginService.Init:output_type -> railyard.plugin.v1.InitResponse
-	11, // 58: railyard.plugin.v1.PluginService.Start:output_type -> railyard.plugin.v1.StartResponse
-	13, // 59: railyard.plugin.v1.PluginService.Stop:output_type -> railyard.plugin.v1.StopResponse
-	17, // 60: railyard.plugin.v1.PluginService.HandleCommand:output_type -> railyard.plugin.v1.HandleCommandResponse
-	15, // 61: railyard.plugin.v1.PluginService.Health:output_type -> railyard.plugin.v1.HealthResponse
-	21, // 62: railyard.plugin.v1.HostService.YardInfo:output_type -> railyard.plugin.v1.YardInfoResponse
-	23, // 63: railyard.plugin.v1.HostService.Snapshot:output_type -> railyard.plugin.v1.SnapshotResponse
-	38, // 64: railyard.plugin.v1.HostService.Subscribe:output_type -> railyard.plugin.v1.Event
-	19, // 65: railyard.plugin.v1.HostService.DispatchCommand:output_type -> railyard.plugin.v1.DispatchCommandResponse
-	32, // 66: railyard.plugin.v1.HostService.Config:output_type -> railyard.plugin.v1.ConfigResponse
-	34, // 67: railyard.plugin.v1.HostService.Log:output_type -> railyard.plugin.v1.LogResponse
-	36, // 68: railyard.plugin.v1.HostService.EmitEvent:output_type -> railyard.plugin.v1.EmitEventResponse
-	57, // [57:69] is the sub-list for method output_type
-	45, // [45:57] is the sub-list for method input_type
+	37, // 57: railyard.plugin.v1.HostService.KVGet:input_type -> railyard.plugin.v1.KVGetRequest
+	39, // 58: railyard.plugin.v1.HostService.KVPut:input_type -> railyard.plugin.v1.KVPutRequest
+	41, // 59: railyard.plugin.v1.HostService.KVDelete:input_type -> railyard.plugin.v1.KVDeleteRequest
+	43, // 60: railyard.plugin.v1.HostService.KVList:input_type -> railyard.plugin.v1.KVListRequest
+	9,  // 61: railyard.plugin.v1.PluginService.Init:output_type -> railyard.plugin.v1.InitResponse
+	11, // 62: railyard.plugin.v1.PluginService.Start:output_type -> railyard.plugin.v1.StartResponse
+	13, // 63: railyard.plugin.v1.PluginService.Stop:output_type -> railyard.plugin.v1.StopResponse
+	17, // 64: railyard.plugin.v1.PluginService.HandleCommand:output_type -> railyard.plugin.v1.HandleCommandResponse
+	15, // 65: railyard.plugin.v1.PluginService.Health:output_type -> railyard.plugin.v1.HealthResponse
+	21, // 66: railyard.plugin.v1.HostService.YardInfo:output_type -> railyard.plugin.v1.YardInfoResponse
+	23, // 67: railyard.plugin.v1.HostService.Snapshot:output_type -> railyard.plugin.v1.SnapshotResponse
+	46, // 68: railyard.plugin.v1.HostService.Subscribe:output_type -> railyard.plugin.v1.Event
+	19, // 69: railyard.plugin.v1.HostService.DispatchCommand:output_type -> railyard.plugin.v1.DispatchCommandResponse
+	32, // 70: railyard.plugin.v1.HostService.Config:output_type -> railyard.plugin.v1.ConfigResponse
+	34, // 71: railyard.plugin.v1.HostService.Log:output_type -> railyard.plugin.v1.LogResponse
+	36, // 72: railyard.plugin.v1.HostService.EmitEvent:output_type -> railyard.plugin.v1.EmitEventResponse
+	38, // 73: railyard.plugin.v1.HostService.KVGet:output_type -> railyard.plugin.v1.KVGetResponse
+	40, // 74: railyard.plugin.v1.HostService.KVPut:output_type -> railyard.plugin.v1.KVPutResponse
+	42, // 75: railyard.plugin.v1.HostService.KVDelete:output_type -> railyard.plugin.v1.KVDeleteResponse
+	44, // 76: railyard.plugin.v1.HostService.KVList:output_type -> railyard.plugin.v1.KVListResponse
+	61, // [61:77] is the sub-list for method output_type
+	45, // [45:61] is the sub-list for method input_type
 	45, // [45:45] is the sub-list for extension type_name
 	45, // [45:45] is the sub-list for extension extendee
 	0,  // [0:45] is the sub-list for field type_name
@@ -3636,7 +4034,7 @@ func file_plugin_proto_init() {
 		return
 	}
 	file_plugin_proto_msgTypes[24].OneofWrappers = []any{}
-	file_plugin_proto_msgTypes[34].OneofWrappers = []any{
+	file_plugin_proto_msgTypes[42].OneofWrappers = []any{
 		(*Event_CarCreated)(nil),
 		(*Event_CarClaimed)(nil),
 		(*Event_CarStatusChanged)(nil),
@@ -3656,7 +4054,7 @@ func file_plugin_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_plugin_proto_rawDesc), len(file_plugin_proto_rawDesc)),
 			NumEnums:      4,
-			NumMessages:   50,
+			NumMessages:   58,
 			NumExtensions: 0,
 			NumServices:   2,
 		},

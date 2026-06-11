@@ -82,6 +82,14 @@ type testPlugin struct {
 	cmdMu      sync.Mutex
 	cmdEnabled bool
 	cmdOut     *os.File
+
+	// KV-mode state (railyard-77h.11). Drives Host.Store() through a full
+	// Put/Get/List/Delete round-trip from Start and logs the observed
+	// results so the host-side e2e can prove the SDK Store accessor works
+	// end-to-end across the process boundary against a real host DB.
+	kvEnabled bool
+	kvHost    plugin.Host
+	kvOut     *os.File
 }
 
 const emitTopic = "testplugin.ping"
@@ -92,6 +100,23 @@ func (p *testPlugin) Name() string { return "testplugin" }
 const cmdTopic = "testplugin.scale"
 
 func (p *testPlugin) Init(_ context.Context, h plugin.Host) error {
+	// KV mode (railyard-77h.11). Capture the host so Start can drive a full
+	// Store round-trip and log the observed results.
+	if os.Getenv("RAILYARD_TESTPLUGIN_KV") == "1" {
+		p.kvEnabled = true
+		p.kvHost = h
+		path := os.Getenv("RAILYARD_TESTPLUGIN_KV_LOG")
+		if path == "" {
+			return fmt.Errorf("testplugin: kv mode requires RAILYARD_TESTPLUGIN_KV_LOG")
+		}
+		f, err := os.Create(path)
+		if err != nil {
+			return fmt.Errorf("testplugin: create kv log: %w", err)
+		}
+		p.kvOut = f
+		return nil
+	}
+
 	// Command-spec mode (railyard-77h.16). Register a command with a typed
 	// argument schema via RegisterCommandSpec and record every invocation's
 	// args to a log file. The host validates dispatched args against the
@@ -300,10 +325,16 @@ func (p *testPlugin) slowHandle(topic plugin.EventType, payload any) {
 	}
 }
 
-func (p *testPlugin) Start(_ context.Context) error {
+func (p *testPlugin) Start(ctx context.Context) error {
 	if p.out != nil {
 		fmt.Fprintln(p.out, "start ok")
 		_ = p.out.Sync()
+	}
+	// KV mode: exercise the full Store round-trip and log each observed
+	// result so the host-side e2e can assert the SDK Store works against a
+	// real host DB (railyard-77h.11).
+	if p.kvEnabled && p.kvHost != nil {
+		p.kvRoundTrip(ctx)
 	}
 	// Emit mode: repeatedly publish onto our own topic until Stop. The
 	// repetition tolerates the brief window before the Subscribe stream
@@ -353,6 +384,13 @@ func (p *testPlugin) Stop(_ context.Context) error {
 		p.emitMu.Unlock()
 	}
 
+	// KV-mode shutdown: close the kv log (railyard-77h.11).
+	if p.kvEnabled && p.kvOut != nil {
+		_ = p.kvOut.Sync()
+		_ = p.kvOut.Close()
+		p.kvOut = nil
+	}
+
 	// Command-spec mode shutdown: close the command log under the same
 	// mutex the handler uses for its writes (railyard-77h.16).
 	if p.cmdEnabled {
@@ -399,6 +437,59 @@ func (p *testPlugin) Stop(_ context.Context) error {
 		p.slowMu.Unlock()
 	}
 	return nil
+}
+
+// kvRoundTrip drives Host.Store() through Put/Get/List/Delete and writes
+// one "step=result" line per operation to the kv log so the host-side e2e
+// can assert each step succeeded across the process boundary
+// (railyard-77h.11).
+func (p *testPlugin) kvRoundTrip(ctx context.Context) {
+	st := p.kvHost.Store()
+	logln := func(format string, args ...any) {
+		fmt.Fprintf(p.kvOut, format+"\n", args...)
+		_ = p.kvOut.Sync()
+	}
+
+	// Missing key first.
+	if _, found, err := st.Get(ctx, "cursor"); err != nil {
+		logln("get-missing err=%v", err)
+	} else {
+		logln("get-missing found=%v", found)
+	}
+
+	// Put then Get.
+	if err := st.Put(ctx, "cursor", []byte("rev-42")); err != nil {
+		logln("put err=%v", err)
+	} else {
+		logln("put ok")
+	}
+	if v, found, err := st.Get(ctx, "cursor"); err != nil {
+		logln("get err=%v", err)
+	} else {
+		logln("get found=%v value=%s", found, string(v))
+	}
+
+	// List.
+	_ = st.Put(ctx, "seen:a", []byte("1"))
+	_ = st.Put(ctx, "seen:b", []byte("1"))
+	if keys, err := st.List(ctx, "seen:"); err != nil {
+		logln("list err=%v", err)
+	} else {
+		logln("list keys=%v", keys)
+	}
+
+	// Delete then Get.
+	if err := st.Delete(ctx, "cursor"); err != nil {
+		logln("delete err=%v", err)
+	} else {
+		logln("delete ok")
+	}
+	if _, found, err := st.Get(ctx, "cursor"); err != nil {
+		logln("get-after-delete err=%v", err)
+	} else {
+		logln("get-after-delete found=%v", found)
+	}
+	logln("done")
 }
 
 func main() {

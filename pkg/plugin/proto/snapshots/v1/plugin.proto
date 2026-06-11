@@ -115,6 +115,28 @@ service HostService {
   // field, and returns PermissionDenied for an un-prefixed topic or one
   // the plugin's allow.publish list does not permit (railyard-77h.9).
   rpc EmitEvent(EmitEventRequest) returns (EmitEventResponse);
+
+  // KVGet reads one value from the plugin's private key/value namespace
+  // (railyard-77h.11). The namespace is the caller's connection-bound
+  // identity, NEVER a request field, so a plugin can only ever read its
+  // own keys. found=false means the key is absent. A host with no DB
+  // configured returns codes.Unavailable.
+  rpc KVGet(KVGetRequest) returns (KVGetResponse);
+
+  // KVPut writes (inserts or overwrites) one value in the plugin's
+  // private namespace. The host enforces per-plugin limits (max value
+  // bytes, max key bytes, max key count) and rejects overruns with
+  // codes.ResourceExhausted / codes.InvalidArgument (railyard-77h.11).
+  rpc KVPut(KVPutRequest) returns (KVPutResponse);
+
+  // KVDelete removes one key from the plugin's private namespace.
+  // Deleting an absent key is a no-op (no error) (railyard-77h.11).
+  rpc KVDelete(KVDeleteRequest) returns (KVDeleteResponse);
+
+  // KVList returns the keys in the plugin's private namespace whose name
+  // begins with the given prefix (empty prefix lists all keys), sorted
+  // ascending (railyard-77h.11).
+  rpc KVList(KVListRequest) returns (KVListResponse);
 }
 
 // -----------------------------------------------------------------------------
@@ -497,6 +519,56 @@ message EmitEventRequest {
 }
 
 message EmitEventResponse {}
+
+// -----------------------------------------------------------------------------
+// Plugin-scoped key/value store (railyard-77h.11)
+//
+// Every request omits the plugin namespace: the host derives it from the
+// connection-bound identity, so a plugin can only ever touch its own
+// keys. Values are opaque bytes — the plugin chooses its own encoding.
+// -----------------------------------------------------------------------------
+
+message KVGetRequest {
+  // key is the lookup key within the caller's private namespace.
+  string key = 1;
+}
+
+message KVGetResponse {
+  // value is the stored payload; empty when found=false.
+  bytes value = 1;
+
+  // found reports whether the key existed.
+  bool found = 2;
+}
+
+message KVPutRequest {
+  // key is the key to insert or overwrite within the caller's namespace.
+  string key = 1;
+
+  // value is the opaque payload to store.
+  bytes value = 2;
+}
+
+message KVPutResponse {}
+
+message KVDeleteRequest {
+  // key is the key to delete from the caller's namespace. Deleting an
+  // absent key is a no-op.
+  string key = 1;
+}
+
+message KVDeleteResponse {}
+
+message KVListRequest {
+  // prefix filters the returned keys to those that begin with it. An
+  // empty prefix returns every key in the caller's namespace.
+  string prefix = 1;
+}
+
+message KVListResponse {
+  // keys is the matching key set, sorted ascending.
+  repeated string keys = 1;
+}
 
 // -----------------------------------------------------------------------------
 // Events

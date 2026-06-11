@@ -392,6 +392,30 @@ func (h *Host) Emit(_ context.Context, topic string, payload map[string]any) err
 	return nil
 }
 
+// inProcessKVNamespace is the fixed plugin namespace the bare in-process
+// *Host uses for its [plugin.Store]. The bare *Host has no
+// connection-bound plugin identity (subprocess plugins reach the KV store
+// through a per-connection hostService whose pluginName scopes every
+// query), so the in-process view shares one namespace. This path exists
+// only for in-process Host-interface satisfaction and test views — real
+// plugins always go through the gRPC HostService KV RPCs, where the
+// namespace is the connection-bound identity (railyard-77h.11).
+const inProcessKVNamespace = "<in-process>"
+
+// Store satisfies the [plugin.Host] contract for in-process callers. It
+// returns a [plugin.Store] backed by deps.DB under the fixed
+// inProcessKVNamespace. When deps.DB is nil every method on the returned
+// store yields the same codes.Unavailable "kv store not configured" error
+// the gRPC path returns, so the in-process view never panics on a DB-less
+// host (railyard-77h.11).
+func (h *Host) Store() plugin.Store {
+	// Reuse the exact KV logic the gRPC HostService exposes by binding a
+	// hostService to the fixed in-process namespace. The hostService KV
+	// handlers honour a nil DB by returning Unavailable, so no extra
+	// guarding is needed here.
+	return &hostServiceStore{svc: &hostService{host: h, pluginName: inProcessKVNamespace}}
+}
+
 // incrSubscription bumps the per-plugin live subscription gauge.
 func (h *Host) incrSubscription(pluginName string) {
 	h.mu.Lock()

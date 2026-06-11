@@ -136,4 +136,45 @@ type Host interface {
 	// map[string]any. Returns an error on a namespace violation, an
 	// allow-list denial, or a transport failure (railyard-77h.9).
 	Emit(ctx context.Context, topic string, payload map[string]any) error
+
+	// Store returns this plugin's private, persistent key/value store
+	// (railyard-77h.11). The store is namespaced to the calling plugin's
+	// connection-bound identity — a plugin can only ever read and write
+	// its own keys; cross-plugin access is impossible by construction.
+	// Values are opaque bytes (the plugin chooses its own encoding).
+	//
+	// The host enforces per-plugin limits to protect the shared backing
+	// DB: a value may be at most 64 KiB, a key at most 256 bytes, and a
+	// single plugin may hold at most 1024 keys at once. Overruns surface
+	// as an error from Put. A host without a configured DB surfaces an
+	// error from every Store method rather than panicking.
+	Store() Store
+}
+
+// Store is a plugin's private, persistent key/value namespace
+// (railyard-77h.11). It is obtained via [Host.Store]. Every method scopes
+// to the calling plugin's connection-bound identity on the host side, so
+// keys written by one plugin are invisible to every other plugin.
+//
+// Values are opaque []byte: the plugin owns the encoding. The host caps
+// value size (64 KiB), key length (256 bytes), and key count (1024 per
+// plugin); a violation is returned as an error from [Store.Put].
+type Store interface {
+	// Get returns the value stored under key and whether it was present.
+	// A missing key returns (nil, false, nil) — absence is not an error.
+	Get(ctx context.Context, key string) ([]byte, bool, error)
+
+	// Put inserts or overwrites the value under key. It returns an error
+	// when a host limit is exceeded (value too large, key too long, or
+	// the per-plugin key cap is reached for a new key) or on transport
+	// failure.
+	Put(ctx context.Context, key string, value []byte) error
+
+	// Delete removes key from the store. Deleting an absent key is a
+	// no-op and returns a nil error.
+	Delete(ctx context.Context, key string) error
+
+	// List returns the keys whose name begins with prefix, sorted
+	// ascending. An empty prefix returns every key in the namespace.
+	List(ctx context.Context, prefix string) ([]string, error)
 }
