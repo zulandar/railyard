@@ -276,6 +276,54 @@ plugins:
 	}
 }
 
+// TestPluginsConfig_PublishAllowList parses an allow.publish list with
+// command-style wildcard tokens (railyard-77h.9).
+func TestPluginsConfig_PublishAllowList(t *testing.T) {
+	yamlSrc := `
+owner: alice
+repo: git@github.com:org/app.git
+tracks:
+  - name: backend
+    language: go
+plugins:
+  enabled: [trainmaster]
+  trainmaster:
+    allow:
+      events:  [CarMerged]
+      publish: ["trainmaster.*", "trainmaster.synced"]
+`
+	cfg, err := Parse([]byte(yamlSrc))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	s := cfg.Plugins.Settings["trainmaster"]
+	if len(s.Allow.Publish) != 2 {
+		t.Errorf("Publish = %v, want 2 entries", s.Allow.Publish)
+	}
+}
+
+// TestPluginsConfig_RejectsInvalidPublishToken rejects a malformed
+// publish wildcard (railyard-77h.9).
+func TestPluginsConfig_RejectsInvalidPublishToken(t *testing.T) {
+	yamlSrc := `
+owner: alice
+repo: r
+tracks: [{name: t, language: go}]
+plugins:
+  enabled: [p]
+  p:
+    allow:
+      publish: ["bad*topic"]
+`
+	_, err := Parse([]byte(yamlSrc))
+	if err == nil {
+		t.Fatal("expected error for malformed publish token")
+	}
+	if !strings.Contains(err.Error(), "publish") {
+		t.Errorf("error %q should mention the publish field", err.Error())
+	}
+}
+
 // TestPluginsConfig_RejectsInvalidWildcard catches the malformed shapes
 // the brief calls out.
 func TestPluginsConfig_RejectsInvalidWildcard(t *testing.T) {

@@ -15,6 +15,7 @@ package pluginhost
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"runtime/debug"
 	"sync"
@@ -354,6 +355,24 @@ func (h *Host) subscribeFor(pluginName string, topic plugin.EventType, handler p
 		busUnsub()
 		decrement()
 	}
+}
+
+// Emit satisfies the [plugin.Host] contract for in-process callers by
+// publishing directly to the bus. Unlike the subprocess path
+// (HostService.EmitEvent), the bare *Host applies no "<plugin>." prefix
+// enforcement or allow.publish gate — those are connection-bound checks
+// that only exist on the gRPC server. Subprocess plugins reach the
+// enforced path; this method exists for in-process Host-interface
+// satisfaction (railyard-77h.9).
+func (h *Host) Emit(_ context.Context, topic string, payload map[string]any) error {
+	if topic == "" {
+		return errors.New("pluginhost: Emit: topic must not be empty")
+	}
+	if h.deps.Bus == nil {
+		return errors.New("pluginhost: Emit: no bus configured")
+	}
+	h.deps.Bus.Publish(topic, payload)
+	return nil
 }
 
 // incrSubscription bumps the per-plugin live subscription gauge.

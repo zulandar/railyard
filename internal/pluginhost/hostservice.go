@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -190,6 +191,58 @@ func (s *hostService) Log(_ context.Context, req *protov1.LogRequest) (*protov1.
 	rec.AddAttrs(attrs...)
 	_ = slog.Default().Handler().Handle(context.Background(), rec)
 	return &protov1.LogResponse{}, nil
+}
+
+// EmitEvent publishes a plugin-originated event onto the internal bus
+// under a namespaced topic (railyard-77h.9).
+//
+// Security: the topic MUST be prefixed with the caller's own
+// "<pluginName>." derived from the connection-bound identity
+// (s.pluginName) — NOT from any request field — so a plugin cannot
+// publish into another plugin's namespace. The topic is then gated
+// against the plugin's allow.publish list (deny-by-default). Only after
+// both checks pass is the payload (a map[string]any) published to the
+// bus, where it reaches subscribers via the existing Subscribe stream.
+func (s *hostService) EmitEvent(_ context.Context, req *protov1.EmitEventRequest) (*protov1.EmitEventResponse, error) {
+	if req == nil || req.Topic == "" {
+		return nil, status.Error(codes.InvalidArgument, "pluginhost: EmitEvent requires a topic")
+	}
+	prefix := s.pluginName + "."
+	if !strings.HasPrefix(req.Topic, prefix) {
+		s.logger.Warn("pluginhost: EmitEvent rejected: topic outside plugin namespace",
+			slog.String("plugin", s.pluginName),
+			slog.String("topic", req.Topic),
+		)
+		return nil, status.Errorf(codes.PermissionDenied,
+			"pluginhost: plugin %q may only emit topics prefixed %q (got %q)",
+			s.pluginName, prefix, req.Topic,
+		)
+	}
+	if !s.allow.AllowPublish(req.Topic) {
+		s.logger.Warn("pluginhost: EmitEvent denied by allow.publish",
+			slog.String("plugin", s.pluginName),
+			slog.String("topic", req.Topic),
+		)
+		return nil, status.Errorf(codes.PermissionDenied,
+			"pluginhost: plugin %q is not allowed to publish topic %q",
+			s.pluginName, req.Topic,
+		)
+	}
+	if s.host == nil || s.host.deps.Bus == nil {
+		return nil, status.Error(codes.Unavailable, "pluginhost: EmitEvent: event bus not configured")
+	}
+
+	// Payload travels the bus as map[string]any so subscribers receive a
+	// dynamic map (no static Go struct exists for plugin topics). A nil
+	// payload becomes an empty map so subscribe.go's dynamic encoding
+	// path engages rather than dropping the event.
+	payload := map[string]any{}
+	if req.Payload != nil {
+		payload = req.Payload.AsMap()
+	}
+	s.host.deps.Bus.Publish(req.Topic, payload)
+	s.host.bumpActivity(s.pluginName)
+	return &protov1.EmitEventResponse{}, nil
 }
 
 // commandResultToDispatch converts a [plugin.CommandResult] to the

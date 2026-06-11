@@ -298,6 +298,7 @@ const (
 	HostService_DispatchCommand_FullMethodName = "/railyard.plugin.v1.HostService/DispatchCommand"
 	HostService_Config_FullMethodName          = "/railyard.plugin.v1.HostService/Config"
 	HostService_Log_FullMethodName             = "/railyard.plugin.v1.HostService/Log"
+	HostService_EmitEvent_FullMethodName       = "/railyard.plugin.v1.HostService/EmitEvent"
 )
 
 // HostServiceClient is the client API for HostService service.
@@ -336,6 +337,13 @@ type HostServiceClient interface {
 	// re-emits the record through its own slog handler with a
 	// "plugin=<name>" attribute already set by the host wrapper.
 	Log(ctx context.Context, in *LogRequest, opts ...grpc.CallOption) (*LogResponse, error)
+	// EmitEvent lets a plugin publish a namespaced event onto the internal
+	// bus so other plugins (and core) can observe it. The topic MUST be
+	// prefixed with the caller's own "<plugin>." name; the host derives
+	// the name from the connection-bound identity, NEVER from a request
+	// field, and returns PermissionDenied for an un-prefixed topic or one
+	// the plugin's allow.publish list does not permit (railyard-77h.9).
+	EmitEvent(ctx context.Context, in *EmitEventRequest, opts ...grpc.CallOption) (*EmitEventResponse, error)
 }
 
 type hostServiceClient struct {
@@ -415,6 +423,16 @@ func (c *hostServiceClient) Log(ctx context.Context, in *LogRequest, opts ...grp
 	return out, nil
 }
 
+func (c *hostServiceClient) EmitEvent(ctx context.Context, in *EmitEventRequest, opts ...grpc.CallOption) (*EmitEventResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(EmitEventResponse)
+	err := c.cc.Invoke(ctx, HostService_EmitEvent_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // HostServiceServer is the server API for HostService service.
 // All implementations must embed UnimplementedHostServiceServer
 // for forward compatibility.
@@ -451,6 +469,13 @@ type HostServiceServer interface {
 	// re-emits the record through its own slog handler with a
 	// "plugin=<name>" attribute already set by the host wrapper.
 	Log(context.Context, *LogRequest) (*LogResponse, error)
+	// EmitEvent lets a plugin publish a namespaced event onto the internal
+	// bus so other plugins (and core) can observe it. The topic MUST be
+	// prefixed with the caller's own "<plugin>." name; the host derives
+	// the name from the connection-bound identity, NEVER from a request
+	// field, and returns PermissionDenied for an un-prefixed topic or one
+	// the plugin's allow.publish list does not permit (railyard-77h.9).
+	EmitEvent(context.Context, *EmitEventRequest) (*EmitEventResponse, error)
 	mustEmbedUnimplementedHostServiceServer()
 }
 
@@ -478,6 +503,9 @@ func (UnimplementedHostServiceServer) Config(context.Context, *ConfigRequest) (*
 }
 func (UnimplementedHostServiceServer) Log(context.Context, *LogRequest) (*LogResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Log not implemented")
+}
+func (UnimplementedHostServiceServer) EmitEvent(context.Context, *EmitEventRequest) (*EmitEventResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method EmitEvent not implemented")
 }
 func (UnimplementedHostServiceServer) mustEmbedUnimplementedHostServiceServer() {}
 func (UnimplementedHostServiceServer) testEmbeddedByValue()                     {}
@@ -601,6 +629,24 @@ func _HostService_Log_Handler(srv interface{}, ctx context.Context, dec func(int
 	return interceptor(ctx, in, info, handler)
 }
 
+func _HostService_EmitEvent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(EmitEventRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServiceServer).EmitEvent(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: HostService_EmitEvent_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServiceServer).EmitEvent(ctx, req.(*EmitEventRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // HostService_ServiceDesc is the grpc.ServiceDesc for HostService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -627,6 +673,10 @@ var HostService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Log",
 			Handler:    _HostService_Log_Handler,
+		},
+		{
+			MethodName: "EmitEvent",
+			Handler:    _HostService_EmitEvent_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

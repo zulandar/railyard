@@ -11,6 +11,7 @@ import (
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/zulandar/railyard/internal/events"
@@ -336,7 +337,22 @@ func payloadToProto(topic string, payload any) (*protov1.Event, bool) {
 		ev.Type = protov1.EventType_EVENT_TYPE_YARD_RESUMED
 		ev.Payload = &protov1.Event_YardResumed{YardResumed: &protov1.YardResumedEvent{Reason: p.Reason}}
 	default:
-		return nil, false
+		// Plugin-published dynamic event (railyard-77h.9). The topic is
+		// not one of the core EventType constants; its payload is a
+		// map[string]any emitted via HostService.EmitEvent. Carry the
+		// namespaced topic in topic_name and the map in the custom Struct
+		// arm. Any other payload shape on an unknown topic is dropped.
+		m, ok := payload.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		st, err := structpb.NewStruct(m)
+		if err != nil {
+			return nil, false
+		}
+		ev.Type = protov1.EventType_EVENT_TYPE_UNSPECIFIED
+		ev.TopicName = topic
+		ev.Payload = &protov1.Event_Custom{Custom: st}
 	}
 	return ev, true
 }

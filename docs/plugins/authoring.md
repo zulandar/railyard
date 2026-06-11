@@ -253,6 +253,7 @@ type Host interface {
     Snapshot(ctx context.Context) (*Snapshot, error)
     RegisterCommand(name string, h CommandHandler) error
     DispatchCommand(ctx context.Context, name string, args CommandArgs) (CommandResult, error)
+    Emit(ctx context.Context, topic string, payload map[string]any) error
     RunDaemon(name string, fn DaemonFunc) // deprecated
     Logger() *slog.Logger
 }
@@ -459,6 +460,51 @@ plugin tag.
 p.host.Logger().Info("processed batch", "rows", n)
 // level=INFO plugin=my-plugin msg="processed batch" rows=42
 ```
+
+### Emit (publishing events)
+
+`Emit` lets your plugin publish its own events onto the bus so other
+plugins (and core) can react — turning a one-way consumer into a
+composable producer (railyard-77h.9):
+
+```go
+err := p.host.Emit(ctx, "my-plugin.remote_changed", map[string]any{
+    "ref":  "refs/heads/main",
+    "sha":  sha,
+})
+```
+
+Rules:
+
+- **Namespace.** The topic MUST be prefixed with your plugin's own
+  `Name()`, i.e. `"my-plugin.<something>"`. The host derives the prefix
+  from the connection-bound identity and rejects anything else with
+  `PermissionDenied` — you cannot publish into another plugin's
+  namespace.
+- **Allow-list.** The operator must grant the topic in your
+  `allow.publish` block (deny-by-default; same `"*"` / `"ns.*"` / literal
+  grammar as commands). See `docs/plugins/operating.md`.
+- **Payload.** A `map[string]any` of JSON-compatible values. Encoding
+  errors and policy denials surface as a non-nil error.
+
+**Receiving a plugin-published event.** Subscribers list the namespaced
+topic (or `"*"`) in their `allow.events` and `Subscribe` to it. Because
+dynamic topics have no static Go payload struct, the payload arrives as
+`map[string]any` — type-assert it:
+
+```go
+h.Subscribe(plugin.EventType("trainmaster.synced"), func(topic plugin.EventType, payload any) {
+    m, ok := payload.(map[string]any)
+    if !ok {
+        return
+    }
+    ref, _ := m["ref"].(string)
+    // ...
+})
+```
+
+(The SDK's static `CarCreatedEvent`-style structs apply only to the core
+topics; plugin-published topics are always `map[string]any`.)
 
 ### RunDaemon (deprecated)
 

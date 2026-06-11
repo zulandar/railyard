@@ -140,6 +140,24 @@ func decodeEvent(ev *protov1.Event) (decodedEvent, error) {
 			topic:   YardResumed,
 			payload: YardResumedEvent{Reason: p.YardResumed.Reason},
 		}, nil
+	case *protov1.Event_Custom:
+		// Plugin-published dynamic event (railyard-77h.9). The topic is
+		// the namespaced string in topic_name; the payload is a
+		// map[string]any decoded from the custom Struct. A nil Struct
+		// decodes to an empty map.
+		if ev.TopicName == "" {
+			return decodedEvent{}, fmt.Errorf("custom event missing topic_name")
+		}
+		var payload map[string]any
+		if p.Custom != nil {
+			payload = p.Custom.AsMap()
+		} else {
+			payload = map[string]any{}
+		}
+		return decodedEvent{
+			topic:   EventType(ev.TopicName),
+			payload: payload,
+		}, nil
 	default:
 		return decodedEvent{}, fmt.Errorf("unknown event payload type")
 	}

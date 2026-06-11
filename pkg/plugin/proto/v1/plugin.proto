@@ -95,6 +95,14 @@ service HostService {
   // re-emits the record through its own slog handler with a
   // "plugin=<name>" attribute already set by the host wrapper.
   rpc Log(LogRequest) returns (LogResponse);
+
+  // EmitEvent lets a plugin publish a namespaced event onto the internal
+  // bus so other plugins (and core) can observe it. The topic MUST be
+  // prefixed with the caller's own "<plugin>." name; the host derives
+  // the name from the connection-bound identity, NEVER from a request
+  // field, and returns PermissionDenied for an un-prefixed topic or one
+  // the plugin's allow.publish list does not permit (railyard-77h.9).
+  rpc EmitEvent(EmitEventRequest) returns (EmitEventResponse);
 }
 
 // -----------------------------------------------------------------------------
@@ -372,6 +380,22 @@ message LogRequest {
 
 message LogResponse {}
 
+// EmitEventRequest carries a plugin-published event (railyard-77h.9).
+message EmitEventRequest {
+  // topic is the namespaced topic "<plugin>.<name>". The host enforces
+  // the caller's own name prefix from the connection-bound identity and
+  // ignores any plugin-supplied identity, so a plugin cannot spoof
+  // another plugin's namespace.
+  string topic = 1;
+
+  // payload is the event body as a structured map. Subscribers receive
+  // it as map[string]any in the Go SDK (no static struct exists for
+  // dynamic topics).
+  google.protobuf.Struct payload = 2;
+}
+
+message EmitEventResponse {}
+
 // -----------------------------------------------------------------------------
 // Events
 // -----------------------------------------------------------------------------
@@ -425,6 +449,13 @@ message Event {
   // should then re-Snapshot to reconcile (railyard-77h.10).
   uint64 dropped = 4;
 
+  // topic_name carries the namespaced topic string for plugin-published
+  // dynamic events (railyard-77h.9), e.g. "trainmaster.synced". It is
+  // empty for core events, whose topic is identified by the `type` enum.
+  // When set, `type` is EVENT_TYPE_UNSPECIFIED and the payload arm is
+  // `custom`.
+  string topic_name = 5;
+
   oneof payload {
     CarCreatedEvent car_created = 10;
     CarClaimedEvent car_claimed = 11;
@@ -437,6 +468,10 @@ message Event {
     YardmasterActionEvent yardmaster_action = 18;
     YardPausedEvent yard_paused = 19;
     YardResumedEvent yard_resumed = 20;
+
+    // custom is the payload for a plugin-published dynamic event
+    // (railyard-77h.9). The topic is carried in topic_name above.
+    google.protobuf.Struct custom = 21;
   }
 }
 

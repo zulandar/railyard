@@ -187,6 +187,14 @@ type PluginSettings struct {
 type AllowConfig struct {
 	Events   []string `yaml:"events"`
 	Commands []string `yaml:"commands"`
+
+	// Publish is the set of event topics the plugin may publish onto the
+	// bus via HostService.EmitEvent (railyard-77h.9). Topics are
+	// namespaced "<plugin>.<name>"; the host independently enforces the
+	// caller's own name prefix. Wildcard semantics match Commands: "*"
+	// matches all, "ns.*" is a prefix wildcard, otherwise literal.
+	// Empty (the zero value) denies all publishing.
+	Publish []string `yaml:"publish"`
 }
 
 // pluginsConfigRaw is the on-wire shape of `plugins:`. It captures the
@@ -245,6 +253,14 @@ func validateAllowConfig(plugin string, a AllowConfig) error {
 	for _, c := range a.Commands {
 		if err := validateCommandToken(c); err != nil {
 			return fmt.Errorf("plugins.%s.allow.commands: %w", plugin, err)
+		}
+	}
+	// Publish topics share the command wildcard grammar ("*", "ns.*", or
+	// a literal) since plugin-published topics are namespaced like
+	// commands (railyard-77h.9).
+	for _, p := range a.Publish {
+		if err := validateCommandToken(p); err != nil {
+			return fmt.Errorf("plugins.%s.allow.publish: %w", plugin, err)
 		}
 	}
 	return nil

@@ -63,11 +63,54 @@ type testPlugin struct {
 	metaOut     *os.File
 	metaSleep   time.Duration
 	metaUnsub   plugin.Unsubscribe
+
+	// Emit-mode state (railyard-77h.9). Subscribes to its own namespaced
+	// topic and emits onto it from Start, logging each received dynamic
+	// payload so the host-side e2e can prove the EmitEvent -> bus ->
+	// Subscribe -> SDK-decode round-trip across the process boundary.
+	emitMu       sync.Mutex
+	emitEnabled  bool
+	emitHost     plugin.Host
+	emitOut      *os.File
+	emitUnsub    plugin.Unsubscribe
+	emitStopCh   chan struct{}
+	emitStopOnce sync.Once
 }
+
+const emitTopic = "testplugin.ping"
 
 func (p *testPlugin) Name() string { return "testplugin" }
 
 func (p *testPlugin) Init(_ context.Context, h plugin.Host) error {
+	// Emit mode (railyard-77h.9). Subscribe to our own namespaced topic
+	// and record each received dynamic payload; Start drives the emit.
+	if os.Getenv("RAILYARD_TESTPLUGIN_EMIT") == "1" {
+		p.emitEnabled = true
+		p.emitHost = h
+		p.emitStopCh = make(chan struct{})
+		path := os.Getenv("RAILYARD_TESTPLUGIN_EMIT_LOG")
+		if path == "" {
+			return fmt.Errorf("testplugin: emit mode requires RAILYARD_TESTPLUGIN_EMIT_LOG")
+		}
+		f, err := os.Create(path)
+		if err != nil {
+			return fmt.Errorf("testplugin: create emit log: %w", err)
+		}
+		p.emitOut = f
+		p.emitUnsub = h.Subscribe(plugin.EventType(emitTopic), func(topic plugin.EventType, payload any) {
+			m, ok := payload.(map[string]any)
+			if !ok {
+				return
+			}
+			msg, _ := m["msg"].(string)
+			p.emitMu.Lock()
+			fmt.Fprintf(p.emitOut, "%s %v\n", topic, msg)
+			_ = p.emitOut.Sync()
+			p.emitMu.Unlock()
+		})
+		return nil
+	}
+
 	// Meta mode (railyard-77h.10). Subscribe to CarCreated with stream
 	// metadata and record "<seq> <dropped>" per delivery, sleeping to
 	// induce backpressure so the host-side e2e can observe a gap.
@@ -221,6 +264,25 @@ func (p *testPlugin) Start(_ context.Context) error {
 		fmt.Fprintln(p.out, "start ok")
 		_ = p.out.Sync()
 	}
+	// Emit mode: repeatedly publish onto our own topic until Stop. The
+	// repetition tolerates the brief window before the Subscribe stream
+	// is wired host-side (railyard-77h.9).
+	if p.emitEnabled && p.emitHost != nil {
+		go func() {
+			ticker := time.NewTicker(100 * time.Millisecond)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-p.emitStopCh:
+					return
+				case <-ticker.C:
+					ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+					_ = p.emitHost.Emit(ctx, emitTopic, map[string]any{"msg": "pong"})
+					cancel()
+				}
+			}
+		}()
+	}
 	return nil
 }
 
@@ -235,6 +297,21 @@ func (p *testPlugin) Stop(_ context.Context) error {
 		_ = p.out.Sync()
 		_ = p.out.Close()
 	}
+	// Emit-mode shutdown: stop the emit loop, unsubscribe, close the log.
+	if p.emitEnabled {
+		p.emitStopOnce.Do(func() { close(p.emitStopCh) })
+		if p.emitUnsub != nil {
+			p.emitUnsub()
+		}
+		p.emitMu.Lock()
+		if p.emitOut != nil {
+			_ = p.emitOut.Sync()
+			_ = p.emitOut.Close()
+			p.emitOut = nil
+		}
+		p.emitMu.Unlock()
+	}
+
 	// Meta-mode shutdown: unsubscribe then close the meta log under the
 	// same mutex the handler uses for its writes.
 	if p.metaEnabled {

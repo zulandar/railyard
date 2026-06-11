@@ -1,6 +1,8 @@
 package plugintest_test
 
 import (
+	"context"
+	"errors"
 	"testing"
 
 	"github.com/zulandar/railyard/pkg/plugin"
@@ -51,5 +53,33 @@ func TestFakeHostSubscribeWithMeta(t *testing.T) {
 	unsub()
 	if got := fh.DriveEventWithMeta(plugin.CarCreated, plugin.CarCreatedEvent{CarID: "c-3"}, plugin.EventMeta{Seq: 9}); got != 0 {
 		t.Errorf("after unsubscribe DriveEventWithMeta invoked %d, want 0", got)
+	}
+}
+
+// TestFakeHostEmit records Emit calls and honors EmitErr (railyard-77h.9).
+func TestFakeHostEmit(t *testing.T) {
+	fh := &plugintest.FakeHost{}
+
+	if err := fh.Emit(context.Background(), "trainmaster.synced", map[string]any{"n": 1}); err != nil {
+		t.Fatalf("Emit: %v", err)
+	}
+	emits := fh.Emits()
+	if len(emits) != 1 {
+		t.Fatalf("Emits len = %d, want 1", len(emits))
+	}
+	if emits[0].Topic != "trainmaster.synced" {
+		t.Errorf("emit topic = %q, want trainmaster.synced", emits[0].Topic)
+	}
+	if emits[0].Payload["n"] != 1 {
+		t.Errorf("emit payload = %v, want n=1", emits[0].Payload)
+	}
+
+	// EmitErr is injected and still records the attempt.
+	fh.EmitErr = errors.New("boom")
+	if err := fh.Emit(context.Background(), "trainmaster.failed", nil); err == nil {
+		t.Error("expected injected EmitErr")
+	}
+	if len(fh.Emits()) != 2 {
+		t.Errorf("Emits should record even on error; got %d", len(fh.Emits()))
 	}
 }

@@ -97,6 +97,39 @@ func TestAllowList_CommandPrefixWildcard(t *testing.T) {
 	}
 }
 
+// TestAllowList_PublishWildcard mirrors the command wildcard semantics
+// for the plugin-publish allow-list (railyard-77h.9): empty denies all,
+// "*" allows all, "ns.*" is a prefix wildcard, otherwise literal.
+func TestAllowList_PublishWildcard(t *testing.T) {
+	empty := newAllowList(config.AllowConfig{})
+	if empty.AllowPublish("trainmaster.synced") {
+		t.Error("empty publish list must deny all")
+	}
+
+	star := newAllowList(config.AllowConfig{Publish: []string{"*"}})
+	if !star.AllowPublish("anything.at.all") {
+		t.Error(`"*" publish entry must allow all topics`)
+	}
+
+	a := newAllowList(config.AllowConfig{Publish: []string{"trainmaster.*", "ci.build_failed"}})
+	cases := []struct {
+		topic string
+		want  bool
+	}{
+		{"trainmaster.synced", true},
+		{"trainmaster.remote_changed", true},
+		{"ci.build_failed", true},
+		{"trainmastersynced", false}, // must include the dot
+		{"ci.build_passed", false},
+		{"other.event", false},
+	}
+	for _, tc := range cases {
+		if got := a.AllowPublish(tc.topic); got != tc.want {
+			t.Errorf("AllowPublish(%q) = %v, want %v", tc.topic, got, tc.want)
+		}
+	}
+}
+
 func TestAllowList_CommandMultipleEntries(t *testing.T) {
 	a := newAllowList(config.AllowConfig{Commands: []string{"ping", "dispatch.*"}})
 	for _, want := range []string{"ping", "dispatch.start", "dispatch.stop"} {

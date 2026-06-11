@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -232,6 +233,12 @@ func (h *hostClient) setSupportedTopics(topics []string) {
 // (the host advertised nothing), so a new plugin keeps working against
 // an old host (railyard-77h.8).
 func (h *hostClient) unknownTopic(topic string) bool {
+	// Plugin-published topics are namespaced "<plugin>.<name>"
+	// (railyard-77h.9) and are legitimately absent from the host's core
+	// topic advertisement, so never flag a dotted/namespaced topic.
+	if strings.Contains(topic, ".") {
+		return false
+	}
 	h.subMu.Lock()
 	defer h.subMu.Unlock()
 	if !h.topicNegotiated {
@@ -239,6 +246,21 @@ func (h *hostClient) unknownTopic(topic string) bool {
 	}
 	_, ok := h.supportedTopics[topic]
 	return !ok
+}
+
+// Emit implements Host.Emit. It encodes the payload as a Struct and
+// forwards it to the host's EmitEvent RPC. The host enforces the
+// "<plugin>." namespace prefix and the allow.publish gate; a violation
+// surfaces here as a gRPC error (railyard-77h.9).
+func (h *hostClient) Emit(ctx context.Context, topic string, payload map[string]any) error {
+	st, err := structpb.NewStruct(payload)
+	if err != nil {
+		return fmt.Errorf("plugin: Emit %q: encoding payload: %w", topic, err)
+	}
+	if _, err := h.hsc.EmitEvent(ctx, &protov1.EmitEventRequest{Topic: topic, Payload: st}); err != nil {
+		return fmt.Errorf("plugin: Emit %q: %w", topic, err)
+	}
+	return nil
 }
 
 // advertisedTopics returns a snapshot of every topic the plugin has

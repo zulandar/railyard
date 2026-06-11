@@ -103,6 +103,17 @@ type RecordedRegistration struct {
 	Handler plugin.CommandHandler
 }
 
+// RecordedEmit captures one call to [FakeHost.Emit] so tests can assert
+// "the plugin published topic X with this payload" (railyard-77h.9).
+type RecordedEmit struct {
+	// Topic is the namespaced topic the plugin emitted.
+	Topic string
+
+	// Payload is the map the plugin supplied. Stored by reference; the
+	// FakeHost does not copy the map.
+	Payload map[string]any
+}
+
 // RecordedDispatch captures one call to [FakeHost.DispatchCommand].
 // Useful for asserting "the plugin asked the host to invoke X with
 // these args" without wiring up a full command pipeline.
@@ -155,6 +166,11 @@ type FakeHost struct {
 	// tests can assert on the attempted name.
 	RegisterCommandErr error
 
+	// EmitErr, if non-nil, is returned from every call to [FakeHost.Emit].
+	// The emit is still recorded so tests can assert on the attempted
+	// topic and payload.
+	EmitErr error
+
 	// LoggerHandler overrides the default capturing handler. Leave nil
 	// to use the built-in [CapturedLog] recorder accessible via
 	// [FakeHost.Logs].
@@ -164,6 +180,7 @@ type FakeHost struct {
 	subscriptions  []*RecordedSubscription
 	registrations  []RecordedRegistration
 	dispatches     []RecordedDispatch
+	emits          []RecordedEmit
 	logs           []CapturedLog
 	defaultHandler slog.Handler
 }
@@ -299,6 +316,28 @@ func (h *FakeHost) DispatchCommand(ctx context.Context, name string, args plugin
 	return handler(ctx, args)
 }
 
+// Emit records the call and returns EmitErr (nil unless set). The real
+// host enforces a "<plugin>." namespace prefix and an allow.publish gate
+// on the connection-bound identity; the fake performs no enforcement so
+// unit tests can assert what the plugin tried to publish. Inject EmitErr
+// to exercise the plugin's error handling (railyard-77h.9).
+func (h *FakeHost) Emit(_ context.Context, topic string, payload map[string]any) error {
+	h.mu.Lock()
+	h.emits = append(h.emits, RecordedEmit{Topic: topic, Payload: payload})
+	err := h.EmitErr
+	h.mu.Unlock()
+	return err
+}
+
+// Emits returns a snapshot of the [FakeHost.Emit] calls made so far.
+func (h *FakeHost) Emits() []RecordedEmit {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	out := make([]RecordedEmit, len(h.emits))
+	copy(out, h.emits)
+	return out
+}
+
 // Logger returns a [*slog.Logger] backed by either LoggerHandler (when
 // set) or a built-in capturing handler that appends every record to
 // the slice accessible via [FakeHost.Logs].
@@ -430,6 +469,7 @@ func (h *FakeHost) Reset() {
 	h.subscriptions = nil
 	h.registrations = nil
 	h.dispatches = nil
+	h.emits = nil
 	h.logs = nil
 	h.defaultHandler = nil
 }

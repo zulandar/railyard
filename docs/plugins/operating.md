@@ -142,23 +142,40 @@ plugins:
 
   trainmaster:
     allow:
-      events:   ["*"]                # any event
+      events:   ["*"]                # any event (core + plugin-published)
       commands: ["dispatch.*"]       # any command in the dispatch.* namespace
+      publish:  ["trainmaster.*"]    # may publish its own namespaced events
 
   slack-notifier:
     allow:
-      events:   [CarMerged, MergeFailed]
+      events:   [CarMerged, MergeFailed, "trainmaster.synced"]
       commands: []                   # no commands
+      # no publish entry -> may not emit any events (deny-by-default)
 ```
+
+### Publishing events (`allow.publish`)
+
+A plugin can publish its own events onto the bus via `Host.Emit`
+(railyard-77h.9) so other plugins can react. Published topics MUST be
+namespaced with the plugin's own name (`"<plugin>.<name>"`); the host
+rejects any other prefix with `PermissionDenied` using the
+connection-bound identity, so a plugin cannot spoof another's namespace.
+
+`allow.publish` gates which topics a plugin may emit, **deny-by-default**
+(an empty or absent list forbids all publishing). It uses the same
+wildcard grammar as `commands`: `"*"`, a `"ns.*"` prefix wildcard, or a
+literal. To let a *subscriber* receive a plugin-published event, list the
+namespaced topic (or `"*"`) in that subscriber's `allow.events`, exactly
+as for core topics. Subscribers receive the payload as `map[string]any`.
 
 ### Wildcards
 
-| Pattern        | Where used     | Matches                                |
-|----------------|----------------|----------------------------------------|
-| `"*"`          | events, commands | All entries                          |
-| `"ns.*"`       | commands         | Anything starting with `ns.`         |
-| `"CarMerged"`  | events           | That exact topic                     |
-| `"slack.post"` | commands         | That exact command                   |
+| Pattern        | Where used        | Matches                              |
+|----------------|-------------------|--------------------------------------|
+| `"*"`          | events, commands, publish | All entries                  |
+| `"ns.*"`       | commands, publish | Anything starting with `ns.`         |
+| `"CarMerged"`  | events            | That exact topic                     |
+| `"slack.post"` | commands, publish | That exact command/topic             |
 
 `"**"`, `"*x"`, and other patterns are **rejected at config load** with
 an error. Keep it simple: full wildcard, prefix wildcard, or literal.

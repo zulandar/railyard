@@ -109,4 +109,13 @@ type Host interface {
 	// All records emitted through the returned logger include a
 	// "plugin=<name>" attribute set by the host.
 	Logger() *slog.Logger
+
+	// Emit publishes a namespaced event onto the bus so other plugins
+	// (and core) can observe it. The topic MUST be prefixed with this
+	// plugin's own name, i.e. "<Name()>.<something>"; the host rejects
+	// any other prefix and gates the topic against the operator's
+	// allow.publish list. Subscribers receive the payload as a
+	// map[string]any. Returns an error on a namespace violation, an
+	// allow-list denial, or a transport failure (railyard-77h.9).
+	Emit(ctx context.Context, topic string, payload map[string]any) error
 }
