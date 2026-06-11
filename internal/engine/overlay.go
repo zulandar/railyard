@@ -118,8 +118,9 @@ func CleanupOverlay(engineID string, cfg *config.Config) error {
 // server's name. It is the .mcp.json server key the claude CLI reads AND the
 // basis for the tool_use prefix below, so the .mcp.json writers (dispatch +
 // engine) and the stream-json observability detector cannot drift apart.
-// (railyard-cpn)
-const CocoIndexMCPServerName = "railyard_cocoindex"
+// (railyard-cpn) It aliases config.ReservedMCPServerName so config validation
+// rejects user mcp_servers entries that would collide with it.
+const CocoIndexMCPServerName = config.ReservedMCPServerName
 
 // CocoIndexMCPToolPrefix is the prefix claude assigns MCP tool_use blocks from
 // the cocoindex server (e.g. mcp__railyard_cocoindex__search_code). Matching it
@@ -139,25 +140,48 @@ type MCPServer struct {
 	Env     map[string]string `json:"env"`
 }
 
-// WriteMCPConfig writes a .mcp.json file into the engine's worktree so that
-// Claude Code discovers the CocoIndex MCP server with the correct env vars.
+// WriteMCPConfig writes or merges Railyard's MCP server entries into the
+// .mcp.json at the engine's worktree so that Claude Code discovers them. A
+// committed .mcp.json is preserved: the railyard_cocoindex entry is upserted
+// (when cocoindex is configured) and railyard.yaml mcp_servers entries are
+// folded in alongside any pre-existing entries.
 func WriteMCPConfig(workDir, engineID, track string, cfg *config.Config) error {
 	if cfg == nil {
 		return fmt.Errorf("overlay: config is nil")
 	}
-	if cfg.CocoIndex.DatabaseURL == "" {
-		return nil // no pgvector configured, skip MCP config
+	if cfg.CocoIndex.DatabaseURL == "" && len(cfg.MCPServers) == 0 {
+		return nil // nothing to write; leave any committed .mcp.json untouched
 	}
 
-	pythonPath, scriptPath := CocoIndexPaths(cfg)
-	mcpCfg := MCPServerConfig{
-		MCPServers: map[string]MCPServer{
-			CocoIndexMCPServerName: {
-				Command: pythonPath,
-				Args:    []string{scriptPath},
-				Env:     engineCocoIndexEnv(workDir, engineID, track, cfg),
-			},
-		},
+	mcpPath := filepath.Join(workDir, ".mcp.json")
+
+	// Load existing .mcp.json (committed to the repo or left by a prior
+	// write) so its entries are preserved.
+	var mcpCfg MCPServerConfig
+	if data, err := os.ReadFile(mcpPath); err == nil {
+		if err := json.Unmarshal(data, &mcpCfg); err != nil {
+			mcpCfg = MCPServerConfig{} // malformed JSON — start fresh
+		}
+	}
+	if mcpCfg.MCPServers == nil {
+		mcpCfg.MCPServers = make(map[string]MCPServer)
+	}
+
+	for name, srv := range cfg.MCPServers {
+		mcpCfg.MCPServers[name] = MCPServer{
+			Command: srv.Command,
+			Args:    srv.Args,
+			Env:     srv.Env,
+		}
+	}
+
+	if cfg.CocoIndex.DatabaseURL != "" {
+		pythonPath, scriptPath := CocoIndexPaths(cfg)
+		mcpCfg.MCPServers[CocoIndexMCPServerName] = MCPServer{
+			Command: pythonPath,
+			Args:    []string{scriptPath},
+			Env:     engineCocoIndexEnv(workDir, engineID, track, cfg),
+		}
 	}
 
 	data, err := json.MarshalIndent(mcpCfg, "", "  ")
@@ -165,7 +189,6 @@ func WriteMCPConfig(workDir, engineID, track string, cfg *config.Config) error {
 		return fmt.Errorf("overlay: marshal .mcp.json: %w", err)
 	}
 
-	mcpPath := filepath.Join(workDir, ".mcp.json")
 	if err := os.WriteFile(mcpPath, data, 0600); err != nil {
 		return fmt.Errorf("overlay: write %s: %w", mcpPath, err)
 	}

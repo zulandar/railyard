@@ -392,3 +392,27 @@ tracks:
 #     in_progress: "inspect: in-progress"
 #     reviewed: "inspect: reviewed"
 #     re_review: "inspect: re-review"
+
+# ---------------------------------------------------------------------------
+# Custom MCP servers (optional)
+# ---------------------------------------------------------------------------
+#
+# Additional MCP servers to expose to agents, merged into the .mcp.json
+# written to every dispatch/engine worktree alongside Railyard's built-in
+# codesearch server. Useful for giving engines access to internal tooling
+# (e.g. an internal software-repo MCP server) while they work.
+#
+# Notes:
+#   - Only agent providers that discover project .mcp.json files consume
+#     these (the claude CLI). The codex/gemini/copilot providers and the
+#     native OpenRouter loop ignore them.
+#   - The name "railyard_cocoindex" is reserved for the built-in server.
+#   - A .mcp.json committed to your repo is preserved: Railyard merges its
+#     entries instead of overwriting the file.
+#
+# mcp_servers:
+#   internal_repo:
+#     command: /usr/local/bin/internal-mcp   # executable to launch (required)
+#     args: ["--repo", "platform"]           # optional argv
+#     env:                                   # optional env for the server process
+#       INTERNAL_TOKEN: ${INTERNAL_MCP_TOKEN}

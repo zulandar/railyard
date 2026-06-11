@@ -22,18 +22,19 @@ type mcpServer struct {
 	Env     map[string]string `json:"env,omitempty"`
 }
 
-// WriteDispatchMCPConfig writes or merges a cocoindex MCP server entry into
-// .mcp.json at workDir. The dispatcher searches all track main tables with
-// no overlay (it operates on the main branch).
+// WriteDispatchMCPConfig writes or merges Railyard's MCP server entries into
+// .mcp.json at workDir: the cocoindex entry (the dispatcher searches all
+// track main tables with no overlay — it operates on the main branch) plus
+// any railyard.yaml mcp_servers entries.
 //
-// If .mcp.json already exists, the railyard_cocoindex entry is added/updated
-// while preserving other MCP server entries.
+// If .mcp.json already exists, entries are added/updated while preserving
+// other MCP server entries.
 func WriteDispatchMCPConfig(workDir string, cfg *config.Config) error {
 	if cfg == nil {
 		return fmt.Errorf("dispatch: config is nil")
 	}
-	if cfg.CocoIndex.DatabaseURL == "" {
-		return nil // no pgvector configured, skip MCP config
+	if cfg.CocoIndex.DatabaseURL == "" && len(cfg.MCPServers) == 0 {
+		return nil // nothing to write; leave any committed .mcp.json untouched
 	}
 
 	mcpPath := filepath.Join(workDir, ".mcp.json")
@@ -50,11 +51,21 @@ func WriteDispatchMCPConfig(workDir string, cfg *config.Config) error {
 		mcpCfg.MCPServers = make(map[string]mcpServer)
 	}
 
-	pythonPath, scriptPath := engine.CocoIndexPaths(cfg)
-	mcpCfg.MCPServers[engine.CocoIndexMCPServerName] = mcpServer{
-		Command: pythonPath,
-		Args:    []string{scriptPath},
-		Env:     engine.MainIndexCocoIndexEnv(cfg),
+	for name, srv := range cfg.MCPServers {
+		mcpCfg.MCPServers[name] = mcpServer{
+			Command: srv.Command,
+			Args:    srv.Args,
+			Env:     srv.Env,
+		}
+	}
+
+	if cfg.CocoIndex.DatabaseURL != "" {
+		pythonPath, scriptPath := engine.CocoIndexPaths(cfg)
+		mcpCfg.MCPServers[engine.CocoIndexMCPServerName] = mcpServer{
+			Command: pythonPath,
+			Args:    []string{scriptPath},
+			Env:     engine.MainIndexCocoIndexEnv(cfg),
+		}
 	}
 
 	data, err := json.MarshalIndent(mcpCfg, "", "  ")

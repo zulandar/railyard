@@ -348,7 +348,7 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 			}
 		}
 
-		// Build overlay index and write MCP config (non-fatal).
+		// Build overlay index (non-fatal).
 		if cfg.CocoIndex.Overlay.Enabled {
 			if overlayTable, err := engine.BuildOverlay(workDir, eng.ID, track, cfg); err != nil {
 				logger.Warn("Overlay build warning", "error", err)
@@ -356,9 +356,13 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 				gormDB.Model(&models.Engine{}).Where("id = ?", eng.ID).Update("overlay_table", overlayTable)
 				eng.OverlayTable = overlayTable
 			}
-			if err := engine.WriteMCPConfig(workDir, eng.ID, track, cfg); err != nil {
-				logger.Warn("MCP config warning", "error", err)
-			}
+		}
+		// Write MCP config (non-fatal). Runs regardless of overlay: it also
+		// carries railyard.yaml mcp_servers entries, and the cocoindex entry
+		// gates itself on database_url — the same gate the native loop's
+		// EngineCodeSearchParams uses below.
+		if err := engine.WriteMCPConfig(workDir, eng.ID, track, cfg); err != nil {
+			logger.Warn("MCP config warning", "error", err)
 		}
 
 		// Spawn-and-monitor with pause-and-retry on upstream rate limits.
