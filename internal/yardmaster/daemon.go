@@ -349,6 +349,7 @@ func processInboxWithBus(ctx context.Context, db *gorm.DB, cfg *config.Config, c
 					DB:           db,
 					ProviderName: cfg.AgentProvider,
 					Model:        cfg.AgentModel,
+					Config:       cfg,
 				})
 				if escErr != nil {
 					logger.Error("Escalation error", "error", escErr)

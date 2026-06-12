@@ -1,12 +1,134 @@
 package yardmaster
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/zulandar/railyard/internal/agentloop"
+	"github.com/zulandar/railyard/internal/config"
 )
+
+// fakeCompleter is a canned-response agentloop.Completer that records the
+// request it received.
+type fakeCompleter struct {
+	resp agentloop.Response
+	err  error
+	got  agentloop.Request
+}
+
+func (f *fakeCompleter) Complete(_ context.Context, req agentloop.Request) (agentloop.Response, error) {
+	f.got = req
+	return f.resp, f.err
+}
+
+func TestEscalateToAgent_NativeLoop(t *testing.T) {
+	fake := &fakeCompleter{resp: agentloop.Response{Content: "GUIDANCE:check the logs"}}
+	orig := resolveBackend
+	resolveBackend = func(cfg *config.Config) (agentloop.Completer, bool, error) {
+		return fake, true, nil
+	}
+	t.Cleanup(func() { resolveBackend = orig })
+
+	result, err := EscalateToAgent(context.Background(), EscalateOpts{
+		Config:   &config.Config{AuthMethod: "openrouter"},
+		Reason:   "stuck",
+		Details:  "tests keep failing",
+		Model:    "test-model",
+		CarID:    "car-1",
+		EngineID: "eng-1",
+	})
+	if err != nil {
+		t.Fatalf("EscalateToAgent: %v", err)
+	}
+	if result.Action != EscalateGuidance {
+		t.Errorf("action = %q, want %q", result.Action, EscalateGuidance)
+	}
+	if result.Message != "check the logs" {
+		t.Errorf("message = %q, want %q", result.Message, "check the logs")
+	}
+	if fake.got.Model != "test-model" {
+		t.Errorf("model = %q, want %q", fake.got.Model, "test-model")
+	}
+	if len(fake.got.Messages) != 1 || !strings.Contains(fake.got.Messages[0].Content, "tests keep failing") {
+		t.Errorf("prompt should contain the escalation details, got %+v", fake.got.Messages)
+	}
+}
+
+func TestEscalateToAgent_NativeResolveError(t *testing.T) {
+	orig := resolveBackend
+	resolveBackend = func(cfg *config.Config) (agentloop.Completer, bool, error) {
+		return nil, true, errors.New("OPENROUTER_API_KEY not set")
+	}
+	t.Cleanup(func() { resolveBackend = orig })
+
+	_, err := EscalateToAgent(context.Background(), EscalateOpts{
+		Config: &config.Config{AuthMethod: "openrouter"},
+		Reason: "stuck",
+	})
+	if err == nil || !strings.Contains(err.Error(), "OPENROUTER_API_KEY") {
+		t.Errorf("expected resolve error to surface, got %v", err)
+	}
+}
+
+func TestEscalateToAgent_NativeCompleteError(t *testing.T) {
+	fake := &fakeCompleter{err: errors.New("upstream 503")}
+	orig := resolveBackend
+	resolveBackend = func(cfg *config.Config) (agentloop.Completer, bool, error) {
+		return fake, true, nil
+	}
+	t.Cleanup(func() { resolveBackend = orig })
+
+	_, err := EscalateToAgent(context.Background(), EscalateOpts{
+		Config: &config.Config{AuthMethod: "openrouter"},
+		Reason: "stuck",
+	})
+	if err == nil || !strings.Contains(err.Error(), "upstream 503") {
+		t.Errorf("expected completion error to surface, got %v", err)
+	}
+}
+
+func TestEscalateToAgent_NonNativeUsesCLIProvider(t *testing.T) {
+	orig := resolveBackend
+	resolveBackend = func(cfg *config.Config) (agentloop.Completer, bool, error) {
+		return nil, false, nil // non-native method: fall back to CLI provider
+	}
+	t.Cleanup(func() { resolveBackend = orig })
+
+	// An unknown provider name proves the CLI path was taken: it fails at
+	// provider resolution, before spawning anything.
+	_, err := EscalateToAgent(context.Background(), EscalateOpts{
+		Config:       &config.Config{AuthMethod: "api_key"},
+		ProviderName: "no-such-provider",
+		Reason:       "stuck",
+	})
+	if err == nil || !strings.Contains(err.Error(), "resolve provider") {
+		t.Errorf("expected CLI provider resolution error, got %v", err)
+	}
+}
+
+func TestEscalateToAgent_NilConfigUsesCLIProvider(t *testing.T) {
+	// Callers that predate the Config field (nil Config) must keep the
+	// CLI-provider behavior; resolveBackend must not be consulted.
+	orig := resolveBackend
+	resolveBackend = func(cfg *config.Config) (agentloop.Completer, bool, error) {
+		t.Fatal("resolveBackend must not be called with nil Config")
+		return nil, false, nil
+	}
+	t.Cleanup(func() { resolveBackend = orig })
+
+	_, err := EscalateToAgent(context.Background(), EscalateOpts{
+		ProviderName: "no-such-provider",
+		Reason:       "stuck",
+	})
+	if err == nil || !strings.Contains(err.Error(), "resolve provider") {
+		t.Errorf("expected CLI provider resolution error, got %v", err)
+	}
+}
 
 func TestBuildEscalationPrompt_ContainsCarDetails(t *testing.T) {
 	// Without a DB, car details are skipped but base prompt still works.
