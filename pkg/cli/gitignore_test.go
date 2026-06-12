@@ -274,6 +274,138 @@ func TestDetectLanguages_NoFiles(t *testing.T) {
 	}
 }
 
+// TestDetectLanguages_NodeFlavor verifies that package.json is classified as
+// typescript vs javascript using the jsTrackLanguage signals: a root
+// tsconfig.json or a "typescript" mention in package.json means TS; otherwise
+// a plain-JS repo gets a javascript track (not a dead TS track) (railyard-a37.3).
+// The monorepo case documents the chosen behavior: a root tsconfig is required,
+// a tsconfig only in a subdir does not count.
+func TestDetectLanguages_NodeFlavor(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(t *testing.T, dir string)
+		want  string
+	}{
+		{
+			name: "js-only",
+			setup: func(t *testing.T, dir string) {
+				writeFile(t, dir, "package.json", "{}")
+				writeFile(t, dir, "index.js", "console.log('hi')")
+			},
+			want: "javascript",
+		},
+		{
+			name: "ts-tsconfig",
+			setup: func(t *testing.T, dir string) {
+				writeFile(t, dir, "package.json", "{}")
+				writeFile(t, dir, "tsconfig.json", "{}")
+			},
+			want: "typescript",
+		},
+		{
+			name: "mixed-ts-and-js",
+			setup: func(t *testing.T, dir string) {
+				writeFile(t, dir, "package.json", "{}")
+				writeFile(t, dir, "tsconfig.json", "{}")
+				writeFile(t, dir, "build.js", "// config")
+			},
+			want: "typescript",
+		},
+		{
+			name: "monorepo-tsconfig-in-subdir-only",
+			setup: func(t *testing.T, dir string) {
+				writeFile(t, dir, "package.json", "{}")
+				sub := filepath.Join(dir, "packages", "web")
+				if err := os.MkdirAll(sub, 0755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(sub, "tsconfig.json"), []byte("{}"), 0644); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: "javascript",
+		},
+		{
+			name: "typescript-in-deps",
+			setup: func(t *testing.T, dir string) {
+				writeFile(t, dir, "package.json", `{"devDependencies":{"typescript":"^5"}}`)
+			},
+			want: "typescript",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			tt.setup(t, dir)
+
+			languages := detectLanguages(dir)
+			if len(languages) != 1 {
+				t.Fatalf("expected exactly 1 language, got %v", languages)
+			}
+			if languages[0] != tt.want {
+				t.Errorf("detected %q, want %q", languages[0], tt.want)
+			}
+		})
+	}
+}
+
+// TestJSTrackLanguage exercises jsTrackLanguage directly so the signal priority
+// (root tsconfig.json, then a "typescript" mention in package.json) is pinned
+// independent of detectLanguages (railyard-a37.3).
+func TestJSTrackLanguage(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(t *testing.T, dir string)
+		want  string
+	}{
+		{
+			name:  "no-files",
+			setup: func(t *testing.T, dir string) {},
+			want:  "javascript",
+		},
+		{
+			name: "package-json-only",
+			setup: func(t *testing.T, dir string) {
+				writeFile(t, dir, "package.json", "{}")
+			},
+			want: "javascript",
+		},
+		{
+			name: "root-tsconfig",
+			setup: func(t *testing.T, dir string) {
+				writeFile(t, dir, "tsconfig.json", "{}")
+			},
+			want: "typescript",
+		},
+		{
+			name: "typescript-dependency",
+			setup: func(t *testing.T, dir string) {
+				writeFile(t, dir, "package.json", `{"dependencies":{"typescript":"^5.4.0"}}`)
+			},
+			want: "typescript",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			tt.setup(t, dir)
+			if got := jsTrackLanguage(dir); got != tt.want {
+				t.Errorf("jsTrackLanguage = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// writeFile is a test helper that writes a file directly under dir.
+func writeFile(t *testing.T, dir, name, content string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRunGitIgnore_DryRun(t *testing.T) {
 	tmpDir := t.TempDir()
 	origDir, _ := os.Getwd()

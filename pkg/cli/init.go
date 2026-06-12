@@ -360,16 +360,19 @@ func languagePreset(lang, root string) config.TrackConfig {
 			Conventions:  map[string]interface{}{"style": "stdlib-first"},
 		}
 	case "typescript":
+		// Real TS repos carry JS config/scripts, so the track matches .js/.jsx
+		// too. ts and js share canonical "Node / TypeScript", so detectLanguages
+		// only ever emits one of them (railyard-a37.3).
 		return config.TrackConfig{
 			Name: "frontend", Language: "typescript",
-			FilePatterns: []string{"**/*.ts", "**/*.tsx"},
+			FilePatterns: []string{"**/*.ts", "**/*.tsx", "**/*.js", "**/*.jsx"},
 			EngineSlots:  2,
 			TestCommand:  "npm test",
 		}
 	case "javascript":
 		return config.TrackConfig{
 			Name: "frontend", Language: "javascript",
-			FilePatterns: []string{"**/*.js", "**/*.jsx"},
+			FilePatterns: []string{"**/*.js", "**/*.jsx", "**/*.mjs", "**/*.cjs"},
 			EngineSlots:  2,
 			TestCommand:  "npm test",
 		}
@@ -430,6 +433,33 @@ func languagePreset(lang, root string) config.TrackConfig {
 			EngineSlots:  2,
 			TestCommand:  testCmd,
 		}
+	case "elixir":
+		return config.TrackConfig{
+			Name: "backend", Language: "elixir",
+			FilePatterns: []string{"**/*.ex", "**/*.exs"},
+			EngineSlots:  2,
+			TestCommand:  "mix test",
+		}
+	case "csharp":
+		return config.TrackConfig{
+			Name: "backend", Language: "csharp",
+			FilePatterns: []string{"**/*.cs", "**/*.csproj"},
+			EngineSlots:  2,
+			TestCommand:  "dotnet test",
+		}
+	case "c":
+		// Test runner is a guess from the build system: a root CMakeLists.txt
+		// implies CTest; otherwise fall back to the autotools/make convention.
+		testCmd := "make test"
+		if _, err := os.Stat(filepath.Join(root, "CMakeLists.txt")); err == nil {
+			testCmd = "ctest"
+		}
+		return config.TrackConfig{
+			Name: "backend", Language: "c",
+			FilePatterns: []string{"**/*.c", "**/*.h", "**/*.cpp", "**/*.hpp"},
+			EngineSlots:  2,
+			TestCommand:  testCmd,
+		}
 	default:
 		return config.TrackConfig{
 			Name: lang, Language: lang,
@@ -439,8 +469,14 @@ func languagePreset(lang, root string) config.TrackConfig {
 }
 
 // generateTracks builds TrackConfig entries from detected languages,
-// resolving name conflicts by suffixing with the language name. root is passed
-// through to languagePreset so toolchain-specific defaults can inspect the repo.
+// resolving name conflicts by suffixing with the language name (e.g. a second
+// "frontend" track becomes "frontend-<lang>"). root is passed through to
+// languagePreset so toolchain-specific defaults can inspect the repo.
+//
+// Note: typescript and javascript both yield a "frontend" track, but they share
+// the canonical "Node / TypeScript" and detectLanguages dedups on canonical, so
+// a repo resolves to exactly one of them — they're never emitted together. That
+// is intended (railyard-a37.3).
 func generateTracks(languages []string, root string) []config.TrackConfig {
 	var tracks []config.TrackConfig
 	usedNames := map[string]bool{}

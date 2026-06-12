@@ -169,6 +169,11 @@ func TestDetectLanguages_MultiLanguage(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte("{}\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
+	// A root tsconfig.json makes the Node flavor resolve to typescript rather
+	// than javascript (railyard-a37.3).
+	if err := os.WriteFile(filepath.Join(dir, "tsconfig.json"), []byte("{}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	languages := detectLanguages(dir)
 	if len(languages) != 2 {
@@ -668,6 +673,106 @@ func TestLanguagePreset_DartUsesPubspec(t *testing.T) {
 	}
 	if tr := languagePreset("dart", pureRoot); tr.TestCommand != "dart test" {
 		t.Errorf("pure-dart: TestCommand = %q, want 'dart test'", tr.TestCommand)
+	}
+}
+
+// TestLanguagePreset_NodeFlavors verifies the typescript and javascript presets
+// after the railyard-a37.3 widening: the typescript track now also matches
+// .js/.jsx (real TS repos carry JS config/scripts), and the javascript track
+// covers .js/.jsx/.mjs/.cjs. Both stay named "frontend" with `npm test`.
+func TestLanguagePreset_NodeFlavors(t *testing.T) {
+	tests := []struct {
+		lang         string
+		wantPatterns []string
+	}{
+		{"typescript", []string{"**/*.ts", "**/*.tsx", "**/*.js", "**/*.jsx"}},
+		{"javascript", []string{"**/*.js", "**/*.jsx", "**/*.mjs", "**/*.cjs"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.lang, func(t *testing.T) {
+			track := languagePreset(tt.lang, t.TempDir())
+			if track.Name != "frontend" {
+				t.Errorf("Name = %q, want %q", track.Name, "frontend")
+			}
+			if track.TestCommand != "npm test" {
+				t.Errorf("TestCommand = %q, want %q", track.TestCommand, "npm test")
+			}
+			has := map[string]bool{}
+			for _, p := range track.FilePatterns {
+				has[p] = true
+			}
+			for _, want := range tt.wantPatterns {
+				if !has[want] {
+					t.Errorf("FilePatterns %v missing %q", track.FilePatterns, want)
+				}
+			}
+		})
+	}
+}
+
+// TestLanguagePreset_BackendExtras verifies the elixir/csharp presets and the
+// c preset's two test-command branches added in railyard-a37.4. Before the fix
+// these languages fell through to the default branch and produced empty
+// FilePatterns/TestCommand.
+func TestLanguagePreset_BackendExtras(t *testing.T) {
+	t.Run("elixir", func(t *testing.T) {
+		tr := languagePreset("elixir", t.TempDir())
+		if tr.Name != "backend" || tr.TestCommand != "mix test" {
+			t.Errorf("elixir = name %q test %q, want backend/mix test", tr.Name, tr.TestCommand)
+		}
+		if len(tr.FilePatterns) == 0 || tr.FilePatterns[0] != "**/*.ex" {
+			t.Errorf("elixir FilePatterns = %v, want first **/*.ex", tr.FilePatterns)
+		}
+	})
+
+	t.Run("csharp", func(t *testing.T) {
+		tr := languagePreset("csharp", t.TempDir())
+		if tr.Name != "backend" || tr.TestCommand != "dotnet test" {
+			t.Errorf("csharp = name %q test %q, want backend/dotnet test", tr.Name, tr.TestCommand)
+		}
+		if len(tr.FilePatterns) == 0 || tr.FilePatterns[0] != "**/*.cs" {
+			t.Errorf("csharp FilePatterns = %v, want first **/*.cs", tr.FilePatterns)
+		}
+	})
+
+	t.Run("c-cmake", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "CMakeLists.txt"), []byte("project(x)\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		tr := languagePreset("c", dir)
+		if tr.Name != "backend" || tr.TestCommand != "ctest" {
+			t.Errorf("c+cmake = name %q test %q, want backend/ctest", tr.Name, tr.TestCommand)
+		}
+		if len(tr.FilePatterns) == 0 || tr.FilePatterns[0] != "**/*.c" {
+			t.Errorf("c FilePatterns = %v, want first **/*.c", tr.FilePatterns)
+		}
+	})
+
+	t.Run("c-make", func(t *testing.T) {
+		// No CMakeLists.txt → fall back to make test.
+		tr := languagePreset("c", t.TempDir())
+		if tr.TestCommand != "make test" {
+			t.Errorf("c without cmake: TestCommand = %q, want 'make test'", tr.TestCommand)
+		}
+	})
+}
+
+// TestLanguagePreset_NoFallThrough is an acceptance criterion for railyard-a37.4:
+// EVERY language detectLanguages can emit must have a real (non-default) preset
+// with non-empty FilePatterns AND a non-empty TestCommand. This kills future
+// fall-through where a detector emits a language with no languagePreset case.
+func TestLanguagePreset_NoFallThrough(t *testing.T) {
+	for _, lang := range detectableLanguages() {
+		t.Run(lang, func(t *testing.T) {
+			tr := languagePreset(lang, t.TempDir())
+			if len(tr.FilePatterns) == 0 {
+				t.Errorf("languagePreset(%q) has empty FilePatterns — falls through to default", lang)
+			}
+			if tr.TestCommand == "" {
+				t.Errorf("languagePreset(%q) has empty TestCommand — falls through to default", lang)
+			}
+		})
 	}
 }
 
