@@ -179,10 +179,13 @@ type launchedPlugin struct {
 	// They MUST be mutated with sync/atomic ONLY — NEVER acquire [Host.mu]
 	// in the per-event loop to bump them. They live on launchedPlugin (not
 	// on the subprocess or a per-subscription value) so they are
-	// process-lifetime cumulative AND survive a plugin relaunch (the
-	// supervisor reuses the same *launchedPlugin and only swaps the dead
-	// subprocess's handles in place — see supervise.go relaunch). They
-	// reset only when the yard process itself restarts.
+	// process-lifetime cumulative AND survive a supervisor CRASH-relaunch
+	// (the supervisor reuses the same *launchedPlugin and only swaps the
+	// dead subprocess's handles in place — see supervise.go relaunch).
+	// They are NOT carried across an operator `ry plugins restart`: that
+	// path builds a fresh *launchedPlugin (launchAndSuperviseForRestart),
+	// so the counters reset, exactly as they do when the yard process
+	// itself restarts.
 	//
 	// Status() reads them with a lock-free Load() (cheap); it may do so
 	// while already holding [Host.mu.RLock], which is fine — the rule is

@@ -105,6 +105,11 @@ type Host interface {
 	// registered command (whether plugin-provided or a core
 	// allow-list entry).
 	//
+	// Call this during [Plugin.Init]. The set of registered commands is
+	// advertised to the host in the Init response; a command registered
+	// after Init returns (e.g. in Start) is never advertised and is
+	// therefore undispatchable.
+	//
 	// A command registered this way carries no argument schema: the host
 	// forwards dispatched args verbatim without validation. Use
 	// [Host.RegisterCommandSpec] to declare a typed signature the host
@@ -122,6 +127,11 @@ type Host interface {
 	// Returns an error on an empty name, a nil handler, or a name that
 	// conflicts with a previously registered command (plugin-provided or
 	// a core allow-list entry).
+	//
+	// Like [Host.RegisterCommand], this must be called during [Plugin.Init]:
+	// the command and its arg schema are advertised to the host in the Init
+	// response, so a spec registered after Init returns is never advertised
+	// and the host's arg validation never engages.
 	RegisterCommandSpec(spec CommandSpec, h CommandHandler) error
 
 	// DispatchCommand invokes a command by name. The host first looks

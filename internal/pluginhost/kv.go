@@ -134,8 +134,16 @@ func (s *hostService) KVPut(ctx context.Context, req *protov1.KVPutRequest) (*pr
 
 	// Enforce the key-count cap, but only for a NEW key. Overwriting an
 	// existing key does not grow the namespace, so it is always allowed.
-	// Do the check-and-write inside a single transaction so two concurrent
-	// puts can't both slip past the cap.
+	// The check-and-write runs in one transaction, but the cap is a soft
+	// limit, not a hard barrier: a plain COUNT(*) under the default
+	// REPEATABLE READ isolation does not lock the gap it counted, so two
+	// concurrent puts of distinct new keys can both observe total == cap-1
+	// and both commit, briefly overshooting KVMaxKeys by the number of
+	// racing writers. That is an acceptable tolerance for a per-plugin
+	// resource guard (the plugin would have to race itself, and the
+	// overshoot is bounded by its own concurrency); a hard cap would need
+	// SELECT ... FOR UPDATE or a counter row, which is not worth the
+	// contention here.
 	txErr := gdb.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var existing int64
 		if err := tx.Model(&models.PluginKV{}).

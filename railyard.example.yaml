@@ -431,9 +431,16 @@ tracks:
 # plugins:
 #   enabled: [trainmaster]
 #   # plugins_dir: /opt/railyard/plugins      # extra directory to scan
+#   # health_interval_sec: 30                  # how often to poll each plugin's
+#   #                                          #   optional Health probe (default 30)
 #
 #   trainmaster:
 #     allow:
 #       events:   ["*"]                        # core + plugin-published topics
 #       commands: ["dispatch.*"]               # may dispatch dispatch.* commands
 #       publish:  ["trainmaster.*"]            # may Emit its own namespaced events
+#     # sha256: "<64-hex>"                      # optional: pin the plugin binary's
+#     #                                         #   SHA-256; the host refuses to exec
+#     #                                         #   a binary whose hash differs and
+#     #                                         #   permanently disables it
+#     #                                         #   (integrity-mismatch). Empty = off.

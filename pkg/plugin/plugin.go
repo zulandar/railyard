@@ -32,13 +32,19 @@ import (
 //     lifetime of the process.
 //  2. The host calls Init after config has been loaded but before core
 //     subsystems start. Init should read the plugin's config via
-//     [Host.Config], validate it, and build any clients. An error
-//     returned from Init causes the host to log a warning and skip this
-//     plugin; other plugins and the core continue normally.
+//     [Host.Config], validate it, build any clients, AND register every
+//     event subscription and command the plugin provides
+//     ([Host.Subscribe], [Host.RegisterCommand], [Host.RegisterCommandSpec]).
+//     Registrations made during Init are advertised to the host in the Init
+//     response; a subscription or command registered later (e.g. in Start)
+//     is NOT advertised and is silently never delivered or dispatched. An
+//     error returned from Init causes the host to log a warning and skip
+//     this plugin; other plugins and the core continue normally.
 //  3. The host calls Start after core subsystems are up. Start should
-//     subscribe to events, register commands, and launch any long-lived
-//     workers as plain goroutines (the plugin owns its own process under
-//     the subprocess model). Start should return quickly.
+//     launch any long-lived workers as plain goroutines (the plugin owns
+//     its own process under the subprocess model) and return quickly. Do
+//     NOT register subscriptions or commands here — that must happen in
+//     Init (see above).
 //  4. On shutdown the host calls Stop with a context that is cancelled
 //     after a 5-second drain timeout. Stop must release resources but
 //     must not block core shutdown — work that can be abandoned should
@@ -52,15 +58,19 @@ type Plugin interface {
 	Name() string
 
 	// Init is called once after config load and before core subsystems
-	// boot. The plugin should read its config, validate it, and build
-	// any clients here. Returning an error causes the host to skip this
-	// plugin for the rest of the binary's lifetime.
+	// boot. The plugin should read its config, validate it, build any
+	// clients, AND register every event subscription and command here —
+	// registrations are advertised to the host in the Init response, so a
+	// Subscribe / RegisterCommand / RegisterCommandSpec call made after
+	// Init returns is silently never wired up. Returning an error causes
+	// the host to skip this plugin for the rest of the binary's lifetime.
 	Init(ctx context.Context, h Host) error
 
 	// Start is called once after core subsystems are running. Plugins
-	// should register subscriptions and commands and launch any
-	// long-lived workers here. Start should not block — long-running
-	// work belongs in a goroutine launched from Start.
+	// should launch any long-lived workers here; subscriptions and
+	// commands must already have been registered in Init (registering them
+	// in Start is too late — they are not advertised). Start should not
+	// block — long-running work belongs in a goroutine launched from Start.
 	Start(ctx context.Context) error
 
 	// Stop is called once on shutdown. The provided context is cancelled

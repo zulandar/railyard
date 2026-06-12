@@ -307,6 +307,18 @@ func (h *hostClient) advertisedCommandSpecs() []*protov1.CommandSchema {
 	return out
 }
 
+// runSubscribeLoop drains one Subscribe stream into handler until the
+// stream closes or the context is cancelled.
+//
+// LIMITATION — a stream close is TERMINAL and SILENT to the consumer: on
+// any non-EOF error the loop logs a WARN and returns, with no reconnect and
+// no callback to the handler. A plugin that must keep receiving events
+// across a host-side stream drop (e.g. a host restart) is responsible for
+// re-subscribing itself; it cannot currently observe the drop through this
+// API. The [EventMeta] Seq/Dropped gap-detection story therefore covers
+// drops WITHIN a live stream but not the stream ending — re-subscribe and
+// reconcile via [Host.Snapshot] if you need at-least-once-ish continuity.
+// A stream-closed callback is a candidate future addition.
 func (h *hostClient) runSubscribeLoop(ctx context.Context, topic EventType, stream protov1.HostService_SubscribeClient, handler MetaEventHandler) {
 	defer func() {
 		if r := recover(); r != nil {

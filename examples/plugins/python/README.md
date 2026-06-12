@@ -31,7 +31,7 @@ What it demonstrates:
 ├── gen.sh                    regenerate the Python stubs from the protos
 ├── requirements.txt          grpcio + grpcio-tools + grpcio-health-checking
 ├── proto/
-│   ├── plugin.proto          copy of pkg/plugin/proto/v1/plugin.proto
+│   ├── plugin.proto          snapshot of pkg/plugin/proto/v1/plugin.proto — see note below
 │   └── grpc_broker.proto     vendored go-plugin broker contract (see header)
 └── railyard_plugin/          generated stubs (committed; runnable as-is)
     ├── plugin_pb2.py / plugin_pb2_grpc.py
@@ -47,9 +47,19 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
+## Proto freshness
+
+`proto/plugin.proto` (and the committed stubs) are a point-in-time snapshot
+of the canonical `pkg/plugin/proto/v1/plugin.proto` covering what this
+example needs — the handshake, lifecycle, and `Subscribe`. It deliberately
+lags newer additive RPCs/messages (e.g. `Health`, the KV store, typed
+command `ArgSpec`s); the example does not exercise them, so the snapshot is
+not auto-synced. To use a newer RPC from Python, copy the canonical proto
+over `proto/plugin.proto` and regenerate the stubs (below).
+
 ## Regenerate stubs (optional — they are committed)
 
-Run this only after refreshing `proto/plugin.proto` from
+Run this after refreshing `proto/plugin.proto` from
 `pkg/plugin/proto/v1/plugin.proto`:
 
 ```bash

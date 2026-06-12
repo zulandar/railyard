@@ -27,6 +27,18 @@ pkg/plugin/proto/snapshots/v1/plugin.proto  # last-known-good snapshot for `buf 
 against which `buf breaking` compares. The snapshot lives outside the
 active module so buf does not try to compile two copies of every type.
 
+> **Caveat — the snapshot gate can be defeated in a single commit.**
+> `buf breaking --against pkg/plugin/proto/snapshots/v1` only protects you
+> if the snapshot is updated in a *separate, reviewed* step from the proto
+> change. If a single commit edits `plugin.proto` *and* refreshes the
+> snapshot in lockstep, buf compares the new proto against the new snapshot
+> and validates nothing. Additivity was verified by hand for the Phase 3
+> changes; the robust gate is `buf breaking --against '.git#branch=main'`,
+> which compares the working proto against the last-merged proto and cannot
+> be bypassed this way. Switching CI to it requires checking out full
+> history (`fetch-depth: 0`) and validating buf's git-ref branch
+> resolution; tracked as a follow-up.
+
 ## Services
 
 ### `PluginService` (implemented by the plugin)
