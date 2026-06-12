@@ -39,6 +39,7 @@ func openWatcherTestDB(t *testing.T) *gorm.DB {
 		&models.Car{},
 		&models.Engine{},
 		&models.Message{},
+		&models.BroadcastAck{},
 		&models.Track{},
 		&models.DispatchSession{},
 		&models.TelegraphConversation{},
@@ -458,7 +459,10 @@ func TestDetectEscalations_TelegraphMessage(t *testing.T) {
 	}
 }
 
-func TestDetectEscalations_MarksAcknowledged(t *testing.T) {
+// TestDetectEscalations_RedetectsUntilDelivered: detection must NOT ack —
+// a message stays eligible for redelivery until the daemon confirms the
+// adapter Send succeeded (at-least-once, railyard-05m).
+func TestDetectEscalations_RedetectsUntilDelivered(t *testing.T) {
 	db := openWatcherTestDB(t)
 	db.Create(&models.Message{
 		FromAgent:    "yardmaster",
@@ -479,13 +483,118 @@ func TestDetectEscalations_MarksAcknowledged(t *testing.T) {
 		t.Fatalf("expected 1 event, got %d", len(events))
 	}
 
-	// Second call should find nothing — message is acknowledged.
+	// Not delivered yet (e.g. adapter send failed or shutdown mid-batch):
+	// the next poll must pick it up again.
 	events2, err := w.detectEscalations()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(events2) != 0 {
-		t.Errorf("expected 0 events after acknowledgement, got %d", len(events2))
+	if len(events2) != 1 {
+		t.Fatalf("expected 1 event on redetect before delivery, got %d", len(events2))
+	}
+
+	// After confirmed delivery, it is no longer detected.
+	if err := MarkEscalationDelivered(db, events2[0]); err != nil {
+		t.Fatalf("MarkEscalationDelivered: %v", err)
+	}
+	events3, err := w.detectEscalations()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(events3) != 0 {
+		t.Errorf("expected 0 events after delivery, got %d", len(events3))
+	}
+}
+
+// TestMarkEscalationDelivered_HumanStaysVisibleToDashboard: telegraph
+// delivery must not consume the global acknowledged flag for human-addressed
+// messages — the dashboard SSE feed polls 'to_agent=human AND
+// acknowledged=false' and must still surface the escalation (railyard-wer).
+func TestMarkEscalationDelivered_HumanStaysVisibleToDashboard(t *testing.T) {
+	db := openWatcherTestDB(t)
+	db.Create(&models.Message{
+		FromAgent:    "yardmaster",
+		ToAgent:      "human",
+		Subject:      "Escalation",
+		Body:         "Need a human",
+		Priority:     "urgent",
+		Acknowledged: false,
+	})
+
+	w, _ := NewWatcher(WatcherOpts{DB: db})
+	events, err := w.detectEscalations()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	if err := MarkEscalationDelivered(db, events[0]); err != nil {
+		t.Fatalf("MarkEscalationDelivered: %v", err)
+	}
+
+	// The dashboard SSE query must still see it.
+	var visible int64
+	db.Model(&models.Message{}).
+		Where("to_agent = ? AND acknowledged = ?", "human", false).
+		Count(&visible)
+	if visible != 1 {
+		t.Errorf("dashboard-visible escalations = %d, want 1 (telegraph delivery must not globally ack)", visible)
+	}
+}
+
+// TestMarkEscalationDelivered_TelegraphAddressedIsAcked: telegraph is the
+// terminal consumer for messages addressed TO it, so delivery globally acks.
+func TestMarkEscalationDelivered_TelegraphAddressedIsAcked(t *testing.T) {
+	db := openWatcherTestDB(t)
+	db.Create(&models.Message{
+		FromAgent:    "engine-1",
+		ToAgent:      "telegraph",
+		Subject:      "Need help",
+		Body:         "Stuck",
+		Acknowledged: false,
+	})
+
+	w, _ := NewWatcher(WatcherOpts{DB: db})
+	events, err := w.detectEscalations()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	if err := MarkEscalationDelivered(db, events[0]); err != nil {
+		t.Fatalf("MarkEscalationDelivered: %v", err)
+	}
+
+	var msg models.Message
+	db.First(&msg, "id = ?", events[0].MessageID)
+	if !msg.Acknowledged {
+		t.Error("telegraph-addressed message should be globally acknowledged after delivery")
+	}
+}
+
+// TestMarkEscalationDelivered_Idempotent: redelivery after a partial failure
+// (send ok, ack write lost) must not error on the second mark.
+func TestMarkEscalationDelivered_Idempotent(t *testing.T) {
+	db := openWatcherTestDB(t)
+	db.Create(&models.Message{
+		FromAgent:    "yardmaster",
+		ToAgent:      "human",
+		Subject:      "Dup",
+		Acknowledged: false,
+	})
+
+	w, _ := NewWatcher(WatcherOpts{DB: db})
+	events, _ := w.detectEscalations()
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	if err := MarkEscalationDelivered(db, events[0]); err != nil {
+		t.Fatalf("first mark: %v", err)
+	}
+	if err := MarkEscalationDelivered(db, events[0]); err != nil {
+		t.Fatalf("second mark should be idempotent: %v", err)
 	}
 }
 

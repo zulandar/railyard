@@ -254,6 +254,11 @@ func (d *Daemon) handleDetectedEvent(ctx context.Context, event DetectedEvent, e
 		formatted = FormatStallEvent(event, dashURL)
 	case EventEscalation:
 		if !evtCfg.Escalations {
+			// Suppressed by config — mark consumed so the watcher does not
+			// re-detect it on every poll.
+			if err := MarkEscalationDelivered(d.db, event); err != nil {
+				log.Printf("telegraph: mark suppressed escalation %d: %v", event.MessageID, err)
+			}
 			return
 		}
 		formatted = FormatEscalation(event, dashURL)
@@ -272,7 +277,16 @@ func (d *Daemon) handleDetectedEvent(ctx context.Context, event DetectedEvent, e
 	if err := d.adapter.Send(ctx, OutboundMessage{
 		Events: []FormattedEvent{formatted},
 	}); err != nil {
+		// Escalations are intentionally NOT marked delivered on failure: the
+		// watcher re-detects them next poll (at-least-once, railyard-05m).
 		log.Printf("telegraph: send event %s: %v", event.Type, err)
+		return
+	}
+
+	if event.Type == EventEscalation {
+		if err := MarkEscalationDelivered(d.db, event); err != nil {
+			log.Printf("telegraph: mark escalation %d delivered: %v", event.MessageID, err)
+		}
 	}
 }
 
