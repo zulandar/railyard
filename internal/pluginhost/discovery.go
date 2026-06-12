@@ -367,8 +367,20 @@ func scanDir(dir string, logger *slog.Logger) []candidate {
 			)
 			continue
 		}
+		name := stripExt(ent.Name())
+		// Reject dotted plugin names: the name is the EmitEvent namespace
+		// prefix, and a dotted name (e.g. "foo.bar") would let plugin "foo"
+		// publish into the "foo.bar.*" namespace via the prefix check
+		// (railyard-uv8.9). Skip with a WARN so the operator can rename.
+		if strings.Contains(name, ".") {
+			logger.Warn("pluginhost: skipping plugin with a dotted name — names must not contain '.' (event-namespace prefix collision)",
+				slog.String("path", full),
+				slog.String("name", name),
+			)
+			continue
+		}
 		out = append(out, candidate{
-			name:   stripExt(ent.Name()),
+			name:   name,
 			path:   full,
 			source: dir,
 		})
