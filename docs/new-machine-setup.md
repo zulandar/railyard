@@ -6,7 +6,7 @@ If you've cloned a repo that already has a `railyard.yaml` committed, you don't 
 
 Make sure you have the [prerequisites](../README.md#prerequisites) installed:
 
-- Go 1.25+
+- Go 1.26+
 - MySQL 8.0+
 - tmux
 - At least one AI coding CLI (Claude Code, Codex, Gemini, or Copilot)

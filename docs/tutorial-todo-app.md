@@ -94,7 +94,7 @@ tracks:
     engine_slots: 2
     test_command: "go test ./..."
     conventions:
-      go_version: "1.25"
+      go_version: "1.26"
       style: "stdlib-first, no frameworks"
       test_framework: "stdlib table-driven tests"
       patterns: "net/http for routing, encoding/json for serialization"

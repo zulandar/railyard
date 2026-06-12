@@ -34,3 +34,6 @@ credentials.json
 # Example plugin binaries (built by docs/quickstart and the verification test)
 /examples/plugins/hello/hello
 /examples/plugins/hello/railyard-hello-example
+
+# Scratch prompt docs (local-only, not for commit)
+docs/bull-improvements-prompt.md

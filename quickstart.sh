@@ -4,6 +4,7 @@ set -euo pipefail
 # Railyard Quickstart — Fresh WSL Setup
 #
 # For a FRESH WSL container where you've cloned the repo.
+# Targets Debian/Ubuntu-based WSL (uses apt-get and the deadsnakes PPA).
 # Installs prerequisites, builds ry, starts MySQL, initializes the DB,
 # optionally sets up pgvector for CocoIndex, and gets you ready to run `ry start`.
 #
@@ -107,8 +108,14 @@ info "Checking prerequisites..."
 check_cmd curl || fail "curl is required but not found. Install: sudo apt-get install curl"
 
 if ! check_cmd go; then
-    GO_VERSION="1.25.0"
-    GO_TAR="go${GO_VERSION}.linux-amd64.tar.gz"
+    GO_VERSION="1.26.4"
+    # Detect CPU arch for the Go tarball (OS stays linux — this script is WSL-scoped).
+    case "$(uname -m)" in
+        x86_64)          GO_ARCH="amd64" ;;
+        aarch64 | arm64) GO_ARCH="arm64" ;;
+        *) fail "Unsupported architecture '$(uname -m)' — install Go manually from https://go.dev/dl/" ;;
+    esac
+    GO_TAR="go${GO_VERSION}.linux-${GO_ARCH}.tar.gz"
     GO_URL="https://go.dev/dl/${GO_TAR}"
     warn "Go not found. Installing Go ${GO_VERSION}..."
     if ! curl -fsSL "${GO_URL}" -o "/tmp/${GO_TAR}"; then
@@ -118,6 +125,7 @@ if ! check_cmd go; then
     sudo tar -C /usr/local -xzf "/tmp/${GO_TAR}"
     rm "/tmp/${GO_TAR}"
     export PATH="/usr/local/go/bin:$PATH"
+    # shellcheck disable=SC2016  # literal $PATH is intentional — it expands at shell init, not here
     grep -q '/usr/local/go/bin' ~/.bashrc 2>/dev/null || echo 'export PATH="/usr/local/go/bin:$PATH"' >> ~/.bashrc
 fi
 ok "Go $(go version | grep -oP '\d+\.\d+' | head -1)"
@@ -133,11 +141,18 @@ if ! check_cmd tmux; then
 fi
 ok "tmux $(tmux -V 2>&1)"
 
-if check_cmd claude; then
-    ok "Claude Code CLI found"
+# Engines spawn agents via an AI coding CLI — any one of these works.
+FOUND_AI_CLIS=()
+for ai_cli in claude codex gemini copilot; do
+    if check_cmd "${ai_cli}"; then
+        FOUND_AI_CLIS+=("${ai_cli}")
+    fi
+done
+if [ ${#FOUND_AI_CLIS[@]} -gt 0 ]; then
+    ok "AI coding CLI(s) found: ${FOUND_AI_CLIS[*]}"
 else
-    warn "Claude Code CLI not found — engines need it to spawn agents."
-    warn "Install: npm install -g @anthropic-ai/claude-code"
+    warn "No AI coding CLI found — engines need one to spawn agents (claude, codex, gemini, or copilot)."
+    warn "Install Claude Code: npm install -g @anthropic-ai/claude-code"
     echo ""
 fi
 
@@ -192,6 +207,7 @@ if [[ ":${PATH}:" != *":${HOME}/.local/bin:"* ]]; then
     info "Added ~/.local/bin to current session PATH"
 fi
 if ! grep -q '\.local/bin' "${HOME}/.bashrc" 2>/dev/null; then
+    # shellcheck disable=SC2016  # literal ${HOME}/${PATH} are intentional — they expand at shell init, not here
     echo 'export PATH="${HOME}/.local/bin:${PATH}"' >> "${HOME}/.bashrc"
     info "Added ~/.local/bin to ~/.bashrc"
 fi
@@ -241,6 +257,8 @@ if ! $MYSQL_RUNNING; then
 
     info "Starting MySQL server on port ${DB_PORT}..."
     mkdir -p "${HOME}/.railyard"
+    # LOCAL DEV ONLY: an empty MySQL root password is acceptable for a local WSL
+    # sandbox. Never use MYSQL_ALLOW_EMPTY_PASSWORD in shared/production environments.
     docker run -d \
         --name railyard-mysql \
         -e MYSQL_ALLOW_EMPTY_PASSWORD=yes \
@@ -249,7 +267,7 @@ if ! $MYSQL_RUNNING; then
         mysql:8.0 > /dev/null 2>&1
     MYSQL_STARTED_BY_US=true
     READY=false
-    for i in $(seq 1 30); do
+    for _ in $(seq 1 30); do
         if check_mysql_ready 127.0.0.1 "${DB_PORT}"; then
             READY=true
             break
@@ -279,7 +297,7 @@ tracks:
     file_patterns: ["cmd/**", "internal/**", "pkg/**", "*.go"]
     engine_slots: 2
     conventions:
-      go_version: "1.25"
+      go_version: "1.26"
       style: "stdlib-first, no frameworks"
 EOF
     ok "Created railyard.yaml (owner: ${OWNER})"
@@ -316,9 +334,9 @@ if check_cmd docker && docker compose version &>/dev/null 2>&1; then
 
     if ! $PGVECTOR_RUNNING; then
         # Port conflict detection.
-        if check_port ${PG_PORT}; then
+        if check_port "${PG_PORT}"; then
             PG_PORT=5482
-            if check_port ${PG_PORT}; then
+            if check_port "${PG_PORT}"; then
                 warn "Ports 5481 and 5482 both in use — skipping pgvector setup."
                 warn "Run 'ry cocoindex init --port <free-port>' manually."
                 PGVECTOR_STATUS="port-conflict"
@@ -332,7 +350,7 @@ if check_cmd docker && docker compose version &>/dev/null 2>&1; then
 
             # Wait for container-internal health check.
             PG_READY=false
-            for i in $(seq 1 30); do
+            for _ in $(seq 1 30); do
                 if docker exec railyard-pgvector pg_isready -U cocoindex -d cocoindex &>/dev/null 2>&1; then
                     PG_READY=true
                     break
@@ -343,7 +361,7 @@ if check_cmd docker && docker compose version &>/dev/null 2>&1; then
             # Verify host-side port forwarding (WSL2 can lag behind container readiness).
             if $PG_READY; then
                 HOST_READY=false
-                for i in $(seq 1 15); do
+                for _ in $(seq 1 15); do
                     if bash -c "echo >/dev/tcp/127.0.0.1/${PG_PORT}" 2>/dev/null; then
                         HOST_READY=true
                         break
