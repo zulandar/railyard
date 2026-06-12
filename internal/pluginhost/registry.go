@@ -105,6 +105,18 @@ type launchedPlugin struct {
 	// construction and supervisor spawn; consumers must nil-check.
 	superviseDone chan struct{}
 
+	// stopCh is closed by an operator restart (signalPluginStop) to wake
+	// this plugin's supervisor out of its exit-wait WITHOUT a host-wide
+	// shutdown — the per-plugin analogue of h.shutdownCh. The supervisor
+	// selects on it in waitForExitOrShutdown and treats a close as a
+	// planned stop (no relaunch). It lets Restart unblock the supervisor
+	// even when it is parked on a freshly-relaunched healthy subprocess,
+	// closing the unbounded-hang window (railyard-uv8.3). Created in
+	// startSupervisor alongside superviseDone; nil before the supervisor
+	// spawns, so consumers must nil-check (a nil channel never selects).
+	// Closed under [Host.mu] via signalPluginStop.
+	stopCh chan struct{}
+
 	// consecutiveCrashes is the count of crashes since the last
 	// successful (re)launch. The supervisor uses it to index into
 	// [backoffSchedule]; it is reset on a clean Init.

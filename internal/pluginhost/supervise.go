@@ -57,6 +57,7 @@ func (h *Host) startSupervisor(ctx context.Context, c candidate, lp *launchedPlu
 	h.mu.Lock()
 	lp.budget = newCrashBudget(h.clock)
 	lp.superviseDone = make(chan struct{})
+	lp.stopCh = make(chan struct{})
 	h.launched[lp.name] = lp
 	h.mu.Unlock()
 
@@ -140,8 +141,10 @@ func (h *Host) supervise(ctx context.Context, c candidate, lp *launchedPlugin) {
 		// owns a fresh go-plugin handshake), so if a Stop fired
 		// during the backoff we must abort here and avoid leaking a
 		// freshly-spawned subprocess that the host will never tear
-		// down.
-		if h.isShuttingDown() {
+		// down. isPluginStopping covers an operator restart that set
+		// stopping while we were in backoff (railyard-uv8.3): relaunching
+		// would just spawn a subprocess Restart immediately tears down.
+		if h.isShuttingDown() || h.isPluginStopping(lp) {
 			return
 		}
 
@@ -217,6 +220,13 @@ func (h *Host) waitForExitOrShutdown(lp *launchedPlugin) bool {
 	for {
 		select {
 		case <-h.shutdownCh:
+			return false
+		case <-lp.stopCh:
+			// A per-plugin stop (operator restart) — treat exactly like a
+			// host shutdown: walk away without relaunching, regardless of
+			// whether the current subprocess is healthy. This is what lets
+			// Restart unblock a supervisor parked on a freshly-relaunched
+			// subprocess (railyard-uv8.3). nil stopCh never fires.
 			return false
 		case <-t.C:
 			if lp.client.Exited() {

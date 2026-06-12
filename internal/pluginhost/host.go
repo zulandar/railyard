@@ -136,6 +136,14 @@ type Host struct {
 	// Keyed by plugin name.
 	launched map[string]*launchedPlugin
 
+	// restarting tracks plugin names with an operator restart in flight,
+	// so a second concurrent Restart of the same name is rejected rather
+	// than racing the first to launch and overwriting h.launched —
+	// orphaning a live subprocess Stop could never reach (railyard-uv8.4).
+	// A name is inserted under h.mu by prepareRestart and removed by
+	// clearRestarting when Restart returns. Read/written under h.mu.
+	restarting map[string]struct{}
+
 	// shutdownCh is closed by [Host.Stop] (idempotently, via
 	// shutdownOnce) to signal every per-plugin supervisor goroutine
 	// that it must NOT relaunch on the next observed subprocess exit.
@@ -216,6 +224,7 @@ func NewHost(deps Dependencies) *Host {
 		pluginCmdSpecs: make(map[string]*protov1.CommandSchema),
 		inProcCmds:     make(map[string]plugin.CommandHandler),
 		launched:       make(map[string]*launchedPlugin),
+		restarting:     make(map[string]struct{}),
 		shutdownCh:     make(chan struct{}),
 		clock:          time.Now,
 		initFailures:   make(map[string]initFailure),

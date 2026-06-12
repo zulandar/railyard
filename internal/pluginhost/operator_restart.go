@@ -80,6 +80,10 @@ func (h *Host) Restart(ctx context.Context, name string) error {
 	if err != nil {
 		return err
 	}
+	// prepareRestart marked this name as restarting under the lock;
+	// release the per-name guard when we return so a later restart can
+	// proceed (railyard-uv8.4).
+	defer h.clearRestarting(name)
 
 	if prevState == StatusRunning {
 		// Ordered teardown of the live subprocess + its supervisor. After
@@ -119,23 +123,66 @@ func (h *Host) prepareRestart(name string) (candidate, string, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	if lp, ok := h.launched[name]; ok {
-		return candidate{name: lp.name, path: lp.path}, StatusRunning, nil
-	}
-	if dp, ok := h.disabled[name]; ok {
-		path := dp.path
-		delete(h.disabled, name)
-		return candidate{name: name, path: path}, StatusDisabled, nil
-	}
-	if f, ok := h.initFailures[name]; ok {
-		path := f.path
-		delete(h.initFailures, name)
-		return candidate{name: name, path: path}, StatusFailed, nil
+	// Per-name serialization: refuse a second concurrent restart of the
+	// same plugin (railyard-uv8.4). Without this, two callers both pass the
+	// state resolution below, both launch, and the second overwrites
+	// h.launched[name] — orphaning the first subprocess.
+	if _, busy := h.restarting[name]; busy {
+		return candidate{}, "", fmt.Errorf(
+			"pluginhost: restart of %q already in progress", name)
 	}
 
-	return candidate{}, "", fmt.Errorf(
-		"pluginhost: unknown plugin %q; known plugins: %s",
-		name, h.knownPluginNamesLocked())
+	var c candidate
+	var state string
+	switch {
+	case h.launched[name] != nil:
+		lp := h.launched[name]
+		c, state = candidate{name: lp.name, path: lp.path}, StatusRunning
+	case h.disabled[name] != nil:
+		dp := h.disabled[name]
+		c, state = candidate{name: name, path: dp.path}, StatusDisabled
+		delete(h.disabled, name)
+	default:
+		if f, ok := h.initFailures[name]; ok {
+			c, state = candidate{name: name, path: f.path}, StatusFailed
+			delete(h.initFailures, name)
+			break
+		}
+		return candidate{}, "", fmt.Errorf(
+			"pluginhost: unknown plugin %q; known plugins: %s",
+			name, h.knownPluginNamesLocked())
+	}
+
+	// Claim the per-name restart slot now, under the same lock that
+	// resolved the state, so a concurrent Restart cannot slip in.
+	h.restarting[name] = struct{}{}
+	return c, state, nil
+}
+
+// clearRestarting releases the per-name restart guard set by
+// prepareRestart (railyard-uv8.4). Idempotent.
+func (h *Host) clearRestarting(name string) {
+	h.mu.Lock()
+	delete(h.restarting, name)
+	h.mu.Unlock()
+}
+
+// signalPluginStop closes lp.stopCh (idempotently) to wake the plugin's
+// supervisor out of its exit-wait without a host-wide shutdown
+// (railyard-uv8.3). Nil-safe for the window before a supervisor spawns.
+// Held under h.mu so the close races neither startSupervisor's creation
+// nor a second signal.
+func (h *Host) signalPluginStop(lp *launchedPlugin) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if lp.stopCh == nil {
+		return
+	}
+	select {
+	case <-lp.stopCh: // already closed
+	default:
+		close(lp.stopCh)
+	}
 }
 
 // knownPluginNamesLocked returns every plugin name the host is aware of
@@ -167,46 +214,55 @@ func (h *Host) knownPluginNamesLocked() string {
 }
 
 // stopRunningForRestart performs the ordered graceful teardown of a
-// currently-running plugin ahead of an operator relaunch. It mirrors the
-// per-plugin half of Host.Stop, with one critical addition: it marks
-// lp.stopping=true and waits for the plugin's supervisor goroutine to exit
-// (lp.superviseDone) BEFORE returning, so the relaunch never races the old
-// supervisor.
+// currently-running plugin ahead of an operator relaunch. It joins the
+// plugin's supervisor goroutine BEFORE touching any subprocess handle, so
+// the teardown can never race the supervisor's in-place relaunch swap nor
+// deadlock waiting on a relaunch that outran the kill (railyard-uv8.3).
 //
 // Sequence:
-//  1. Mark lp.stopping=true under mu, then wait on lp.superviseDone. The
-//     supervisor, on its next exit observation, reads stopping=true and
-//     walks away without relaunching. (markStoppingAndAwaitSupervisor.)
+//  1. markStoppingAndAwaitSupervisor: set lp.stopping=true (so a concurrent
+//     crash-exit reads as planned), close lp.stopCh (so the supervisor
+//     wakes out of its exit-wait even if it is parked on a freshly-
+//     relaunched healthy subprocess), and block on lp.superviseDone until
+//     the supervisor has fully exited. After this returns there is no other
+//     goroutine mutating lp's go-plugin handles.
 //  2. Cancel outstanding Subscribe streams.
 //  3. Drive PluginService.Stop with the stopDrainTimeout drain budget.
-//  4. SIGTERM → wait → SIGKILL via terminateSubprocess.
+//  4. SIGTERM → wait → SIGKILL via terminateSubprocess (no-op if already
+//     crash-exited).
 //  5. Reset the crash budget (operator restart, not a crash).
 //  6. Remove the socket and the launched registry entry.
 //
-// Note on ordering vs. Host.Stop: Host.Stop kills the subprocess and THEN
-// joins supervisorWG. Here we must join the supervisor FIRST (so it sees
-// stopping and never relaunches), then kill — otherwise a supervisor that
-// observed the exit before we set stopping could relaunch into a process
-// we are about to discard. markStoppingAndAwaitSupervisor sets stopping
-// before waiting, and the subprocess is still alive at that point, so the
-// supervisor stays parked in waitForExitOrShutdown until WE kill it — at
-// which point stopping is already true.
+// Contrast with Host.Stop, which kills the subprocess and THEN joins the
+// supervisor: that relies on shutdownCh to wake every supervisor at once.
+// A single-plugin restart has no host-wide signal, so it uses the
+// per-plugin stopCh to wake just this supervisor, then tears the
+// (still-alive) subprocess down itself.
 func (h *Host) stopRunningForRestart(parent context.Context, name string) {
 	lp := h.lookupPluginByName(name)
 	if lp == nil {
 		return
 	}
 
-	// (1) Mark stopping + cancel subscriptions, then kill the subprocess so
-	// the supervisor's waitForExitOrShutdown observes the exit and takes
-	// the planned-shutdown branch (stopping=true). We mark stopping FIRST,
-	// then terminate, then await superviseDone — guaranteeing the
-	// supervisor reads stopping before it can act on the exit.
-	h.markStopping(lp)
+	// (1) Quiesce the supervisor FIRST, before touching any subprocess
+	// handle. markStopping makes a concurrent crash-exit read as planned;
+	// signalPluginStop wakes the supervisor even when it is parked on a
+	// freshly-relaunched healthy subprocess; awaitSupervisor blocks until
+	// the supervisor goroutine has fully exited. Only once it is gone are
+	// lp.client / lp.pluginRPC / lp.pid / lp.socketPath free of the
+	// supervisor's in-place relaunch swap, so the teardown below reads them
+	// race-free and can never deadlock on a relaunch that outran us
+	// (railyard-uv8.3). On a clean wake the subprocess is still alive (the
+	// supervisor walked away without killing it); on a concurrent crash it
+	// is already dead — both are handled below.
+	h.markStoppingAndAwaitSupervisor(lp)
+
+	// (2) Cancel any outstanding Subscribe streams.
 	h.cancelPluginSubscriptions(lp)
 
-	// (2) Best-effort graceful Stop RPC with the drain budget, same as
-	// Host.Stop's per-plugin path.
+	// (3) Best-effort graceful Stop RPC with the drain budget, same as
+	// Host.Stop's per-plugin path. A crash-exited subprocess just makes
+	// this error, which is logged and ignored.
 	ctx, cancel := context.WithTimeout(parent, stopDrainTimeout)
 	done := make(chan error, 1)
 	go func() {
@@ -227,15 +283,9 @@ func (h *Host) stopRunningForRestart(parent context.Context, name string) {
 	}
 	cancel()
 
-	// (3) SIGTERM → wait → SIGKILL. This is the exit the supervisor is
-	// parked waiting for.
+	// (4) SIGTERM → wait → SIGKILL. If the subprocess already exited
+	// (crash), this is a no-op.
 	h.terminateSubprocess(lp)
-
-	// (4) Now that the subprocess is dead, block until the supervisor
-	// goroutine has fully exited. Because stopping is already true, the
-	// supervisor takes the planned-shutdown branch and closes
-	// superviseDone without relaunching.
-	h.awaitSupervisor(lp)
 
 	// (5) Reset the crash budget so the operator restart does not count
 	// toward the disable threshold.
@@ -279,6 +329,7 @@ func (h *Host) awaitSupervisor(lp *launchedPlugin) {
 // interleaves the subprocess kill between them).
 func (h *Host) markStoppingAndAwaitSupervisor(lp *launchedPlugin) {
 	h.markStopping(lp)
+	h.signalPluginStop(lp)
 	h.awaitSupervisor(lp)
 }
 

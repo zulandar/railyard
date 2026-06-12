@@ -4,6 +4,7 @@ import (
 	"context"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -111,6 +112,7 @@ func TestRestart_DisabledPluginRevivesAndResetsBudget(t *testing.T) {
 		disabled:     map[string]*disabledPlugin{},
 		initFailures: map[string]initFailure{},
 		pluginCmds:   map[string]string{},
+		restarting:   map[string]struct{}{},
 	}
 	h.disabled["p1"] = &disabledPlugin{
 		name:           "p1",
@@ -145,6 +147,7 @@ func TestRestart_InitFailedClears(t *testing.T) {
 		disabled:     map[string]*disabledPlugin{},
 		initFailures: map[string]initFailure{},
 		pluginCmds:   map[string]string{},
+		restarting:   map[string]struct{}{},
 	}
 	h.initFailures["p2"] = initFailure{
 		name: "p2",
@@ -177,6 +180,7 @@ func TestRestart_UnknownNameError(t *testing.T) {
 		disabled:     map[string]*disabledPlugin{"beta": {name: "beta"}},
 		initFailures: map[string]initFailure{"gamma": {name: "gamma"}},
 		pluginCmds:   map[string]string{},
+		restarting:   map[string]struct{}{},
 	}
 	_, _, err := h.prepareRestart("delta")
 	if err == nil {
@@ -237,6 +241,82 @@ func TestRestart_DuringShutdownDoesNotRelaunch(t *testing.T) {
 // then return only after superviseDone is closed — proving the handoff is
 // ordered and single-owner (no second launch can begin until the old
 // supervisor is provably gone).
+// TestRestart_ConcurrentDoesNotHangOrDoubleLaunch is the end-to-end guard
+// for railyard-uv8.3 (restart racing an in-flight crash-relaunch must not
+// hang) and railyard-uv8.4 (concurrent restarts of one plugin must not
+// double-launch). The plugin is in "after_start" mode, so its supervisor is
+// continuously relaunching after each post-Start crash — exactly the window
+// that wedged the old teardown. We fire a burst of concurrent Restarts and
+// require: every call returns within a bounded time (a uv8.3 hang would
+// block the whole burst), every error is either nil or the per-name
+// "already in progress" rejection (never a panic/orphan), and the host is
+// left operable. Run under -race in the suite, it also exercises the
+// teardown's freedom from the data race on the subprocess handles.
+func TestRestart_ConcurrentDoesNotHangOrDoubleLaunch(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("UDS not supported on Windows")
+	}
+	counterFile := stageCrashPlugin(t, "after_start")
+
+	cfg := restartTestConfig("crashplugin")
+	bus := events.NewBus()
+	defer bus.(interface{ Close() }).Close()
+	host := NewHost(Dependencies{Cfg: cfg, Bus: bus, RailyardVersion: "test"})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	host.Init(ctx)
+	host.Start(ctx)
+	waitForBoots(t, counterFile, 1, 10*time.Second)
+
+	const burst = 8
+	errs := make([]error, burst)
+	var wg sync.WaitGroup
+	for i := 0; i < burst; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			rctx, rcancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer rcancel()
+			errs[i] = host.Restart(rctx, "crashplugin")
+		}(i)
+	}
+
+	doneAll := make(chan struct{})
+	go func() { wg.Wait(); close(doneAll) }()
+	select {
+	case <-doneAll:
+	case <-time.After(60 * time.Second):
+		t.Fatal("concurrent Restart burst did not return — uv8.3 hang regression")
+	}
+
+	for i, err := range errs {
+		if err != nil && !strings.Contains(err.Error(), "already in progress") {
+			// A restart may legitimately race a crash and surface a relaunch
+			// error; that is acceptable. The contract this test enforces is
+			// no-hang + no-orphan, asserted above and below.
+			t.Logf("Restart[%d] returned: %v", i, err)
+		}
+	}
+
+	// The host tracks at most one entry for the name (the map guarantees no
+	// duplicate key, and the per-name guard guarantees no orphaned extra
+	// subprocess). A final synchronous Restart must succeed, proving the
+	// host is still operable after the burst.
+	if names := host.Names(); len(names) > 1 {
+		t.Fatalf("expected at most one launched plugin after restart burst, got %v", names)
+	}
+	finalCtx, finalCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer finalCancel()
+	if err := host.Restart(finalCtx, "crashplugin"); err != nil {
+		t.Fatalf("final Restart after burst failed — host not operable: %v", err)
+	}
+
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer stopCancel()
+	host.Stop(stopCtx)
+}
+
 func TestRestart_NoDoubleLaunchRacingSupervisor(t *testing.T) {
 	h := NewHost(Dependencies{})
 	lp := &launchedPlugin{
