@@ -288,36 +288,49 @@ func StaleEngines(db *gorm.DB) ([]models.Engine, error) {
 // ReassignCar releases a car from a stalled/dead engine so it can be reclaimed.
 // It sets the car status to "open", clears the assignee, marks the old engine
 // as dead, writes a progress note, and sends a broadcast notification.
-func ReassignCar(db *gorm.DB, carID, fromEngineID, reason string) error {
+//
+// The release is conditional: the car must still be assigned to fromEngineID
+// and in an active status (claimed/in_progress). If it moved on — completed,
+// merged, or already reassigned to another engine — the car is left untouched,
+// no note or broadcast is written, and ReassignCar returns (false, nil); the
+// engine is still marked dead either way, since the caller established its
+// staleness (railyard-h2v).
+func ReassignCar(db *gorm.DB, carID, fromEngineID, reason string) (bool, error) {
 	if db == nil {
-		return fmt.Errorf("yardmaster: db is required")
+		return false, fmt.Errorf("yardmaster: db is required")
 	}
 	if carID == "" {
-		return fmt.Errorf("yardmaster: carID is required")
+		return false, fmt.Errorf("yardmaster: carID is required")
 	}
 	if fromEngineID == "" {
-		return fmt.Errorf("yardmaster: fromEngineID is required")
+		return false, fmt.Errorf("yardmaster: fromEngineID is required")
 	}
 
-	return db.Transaction(func(tx *gorm.DB) error {
-		// Release the car: set status=open, clear assignee.
-		result := tx.Model(&models.Car{}).Where("id = ?", carID).Updates(map[string]interface{}{
-			"status":   "open",
-			"assignee": "",
-		})
+	reassigned := false
+	err := db.Transaction(func(tx *gorm.DB) error {
+		// Release the car only if this engine still actively holds it.
+		result := tx.Model(&models.Car{}).
+			Where("id = ? AND assignee = ? AND status IN ?", carID, fromEngineID, []string{"claimed", "in_progress"}).
+			Updates(map[string]interface{}{
+				"status":   "open",
+				"assignee": "",
+			})
 		if result.Error != nil {
 			return fmt.Errorf("yardmaster: release car %s: %w", carID, result.Error)
 		}
-		if result.RowsAffected == 0 {
-			return fmt.Errorf("yardmaster: car %s not found", carID)
-		}
+		reassigned = result.RowsAffected > 0
 
-		// Mark the engine as dead and clear its current car.
+		// Mark the engine as dead and clear its current car. This happens even
+		// when the car moved on: the engine itself is still stale.
 		if err := tx.Model(&models.Engine{}).Where("id = ?", fromEngineID).Updates(map[string]interface{}{
 			"status":      "dead",
 			"current_car": "",
 		}).Error; err != nil {
 			return fmt.Errorf("yardmaster: mark engine %s dead: %w", fromEngineID, err)
+		}
+
+		if !reassigned {
+			return nil
 		}
 
 		// Write progress note.
@@ -342,4 +355,8 @@ func ReassignCar(db *gorm.DB, carID, fromEngineID, reason string) error {
 
 		return nil
 	})
+	if err != nil {
+		return false, err
+	}
+	return reassigned, nil
 }

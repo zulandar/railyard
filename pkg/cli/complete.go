@@ -14,6 +14,14 @@ import (
 	"github.com/zulandar/railyard/internal/models"
 )
 
+// completableStatuses are the car statuses ry complete may transition to done.
+// claimed is included for engines that died before marking the car
+// in_progress (railyard-rsy).
+var completableStatuses = map[string]bool{
+	"claimed":     true,
+	"in_progress": true,
+}
+
 func newCompleteCmd() *cobra.Command {
 	var configPath string
 
@@ -43,6 +51,13 @@ func runComplete(cmd *cobra.Command, configPath, carID, summary string) error {
 	b, err := car.Get(gormDB, carID)
 	if err != nil {
 		return err
+	}
+
+	// Fail fast on non-completable statuses before any git work. This read is
+	// advisory (clear early error); the authoritative guard is the conditional
+	// UPDATE below (railyard-41w).
+	if !completableStatuses[b.Status] {
+		return fmt.Errorf("complete rejected: car %s is %q — only claimed or in_progress cars can be completed (it may have been reassigned or already merged)", carID, b.Status)
 	}
 
 	// Guard: reject completion if branch has zero commits ahead of base.
@@ -87,11 +102,26 @@ func runComplete(cmd *cobra.Command, configPath, carID, summary string) error {
 		slog.Info("ry complete: branch pushed", "car", carID, "branch", b.Branch)
 	}
 
-	// Transition to done.
-	if err := car.Update(gormDB, carID, map[string]interface{}{
-		"status": "done",
-	}); err != nil {
-		return fmt.Errorf("complete car %s: %w", carID, err)
+	// Transition to done. Conditional UPDATE + RowsAffected (not read-then-
+	// write) so a car reassigned or merged after the check above can never be
+	// flipped back to done — the yardmaster must only see done cars that came
+	// from an active status (railyard-41w).
+	result := gormDB.Model(&models.Car{}).
+		Where("id = ? AND status IN ?", carID, []string{"claimed", "in_progress"}).
+		Updates(map[string]interface{}{
+			"status":       "done",
+			"completed_at": time.Now(),
+		})
+	if result.Error != nil {
+		return fmt.Errorf("complete car %s: %w", carID, result.Error)
+	}
+	if result.RowsAffected == 0 {
+		cur, getErr := car.Get(gormDB, carID)
+		status := "unknown"
+		if getErr == nil {
+			status = cur.Status
+		}
+		return fmt.Errorf("complete rejected: car %s moved to %q during completion — only claimed or in_progress cars can be completed", carID, status)
 	}
 
 	slog.Info("ry complete: car marked done", "car", carID, "summary", summary)

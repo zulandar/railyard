@@ -365,6 +365,17 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 			logger.Warn("MCP config warning", "error", err)
 		}
 
+		// Mark the car in_progress now that an agent is about to work it
+		// (railyard-rsy). Conditional on status=claimed — re-claim cycles
+		// (car already in_progress) and concurrent reassignment are no-ops.
+		// Non-fatal: a miss only affects reporting, and ry complete accepts
+		// claimed as well.
+		if transitioned, mipErr := engine.MarkInProgress(gormDB, claimed.ID, eng.ID); mipErr != nil {
+			cycleLog.Warn("Mark in_progress error", "car", claimed.ID, "error", mipErr)
+		} else if transitioned {
+			claimed.Status = "in_progress"
+		}
+
 		// Spawn-and-monitor with pause-and-retry on upstream rate limits.
 		// The inner loop re-spawns the agent subprocess after a rate-limit
 		// signal, up to cfg.Stall.RateLimitMaxRetries attempts. On exhaustion

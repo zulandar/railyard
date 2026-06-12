@@ -141,7 +141,16 @@ func resumeYardAdapter(db *gorm.DB, bus events.Bus) func(ctx context.Context, re
 // "plugin-dispatched" reason so the progress note is still self-describing.
 func reassignCarAdapter(db *gorm.DB) func(ctx context.Context, carID, fromEngine string) error {
 	return func(ctx context.Context, carID, fromEngine string) error {
-		return yardmaster.ReassignCar(db, carID, fromEngine, "plugin-dispatched")
+		reassigned, err := yardmaster.ReassignCar(db, carID, fromEngine, "plugin-dispatched")
+		if err != nil {
+			return err
+		}
+		if !reassigned {
+			// Surface the no-op to the plugin: the car is not actively held
+			// by that engine (completed, merged, or reassigned already).
+			return fmt.Errorf("car %s is not actively held by engine %s — nothing to reassign", carID, fromEngine)
+		}
+		return nil
 	}
 }
 

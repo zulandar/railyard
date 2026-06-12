@@ -449,9 +449,15 @@ func handleStaleEnginesWithBus(db *gorm.DB, cfg *config.Config, configPath strin
 
 		if eng.CurrentCar != "" {
 			logger.Warn("Engine deregistered as stale", "engine", eng.ID, "car", eng.CurrentCar)
-			if err := ReassignCar(db, eng.CurrentCar, eng.ID, "stale heartbeat"); err != nil {
+			reassigned, err := ReassignCar(db, eng.CurrentCar, eng.ID, "stale heartbeat")
+			switch {
+			case err != nil:
 				logger.Error("Reassign car from stale engine", "car", eng.CurrentCar, "engine", eng.ID, "error", err)
-			} else {
+			case !reassigned:
+				// Car completed/merged or moved to another engine between the
+				// staleness check and the reassign — nothing to broadcast.
+				logger.Info("Car moved on before reassign, leaving untouched", "car", eng.CurrentCar, "engine", eng.ID)
+			default:
 				publish(bus, plugin.YardmasterAction, plugin.YardmasterActionEvent{
 					TargetID:   eng.CurrentCar,
 					ActionType: "reassign",
@@ -933,7 +939,11 @@ func handleEscalateResult(db *gorm.DB, engineID, carID string, result *EscalateR
 	switch result.Action {
 	case EscalateReassign:
 		logger.Info("Escalation: reassigning car", "car", carID)
-		ReassignCar(db, carID, engineID, "escalation: "+result.Message)
+		if reassigned, err := ReassignCar(db, carID, engineID, "escalation: "+result.Message); err != nil {
+			logger.Error("Escalation: reassign failed", "car", carID, "error", err)
+		} else if !reassigned {
+			logger.Info("Escalation: car moved on before reassign", "car", carID)
+		}
 	case EscalateGuidance:
 		logger.Info("Escalation: sending guidance", "engine", engineID)
 		messaging.Send(db, YardmasterID, engineID, "guidance", result.Message,

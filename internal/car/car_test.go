@@ -99,12 +99,10 @@ func TestIsValidTransition(t *testing.T) {
 		{"blocked", "ready", true},
 
 		// Invalid transitions
-		{"open", "done", false},
 		{"open", "in_progress", false},
 		{"open", "claimed", false},
 		{"ready", "done", false},
 		{"ready", "open", false},
-		{"claimed", "done", false},
 		{"in_progress", "ready", false},
 		{"done", "open", false},
 		{"cancelled", "open", false},
@@ -122,7 +120,7 @@ func TestIsValidTransition(t *testing.T) {
 }
 
 func TestValidTransitions_AllStatusesPresent(t *testing.T) {
-	expected := []string{"draft", "open", "ready", "claimed", "in_progress", "blocked", "merge-failed", "pr_open"}
+	expected := []string{"draft", "open", "ready", "claimed", "in_progress", "blocked", "merge-failed", "pr_open", "pr_review"}
 	for _, status := range expected {
 		if _, ok := ValidTransitions[status]; !ok {
 			t.Errorf("ValidTransitions missing key %q", status)
@@ -135,13 +133,59 @@ func TestValidTransitions_PrOpen(t *testing.T) {
 	if !ok {
 		t.Fatal("ValidTransitions missing pr_open")
 	}
-	want := map[string]bool{"open": true, "merged": true, "cancelled": true}
+	want := map[string]bool{"open": true, "merged": true, "cancelled": true, "pr_review": true}
 	if len(targets) != len(want) {
 		t.Fatalf("pr_open targets = %v, want %v", targets, want)
 	}
 	for _, s := range targets {
 		if !want[s] {
 			t.Errorf("unexpected pr_open target: %q", s)
+		}
+	}
+}
+
+// TestValidTransitions_ProductionEdges asserts that every status transition
+// performed by a production call site is present in ValidTransitions, so the
+// map stays the single source of truth for the real car state machine and
+// operators can replay any of these transitions through the validated
+// `ry car update --status` path (railyard-knm).
+func TestValidTransitions_ProductionEdges(t *testing.T) {
+	edges := []struct {
+		from, to, site string
+	}{
+		{"draft", "open", "car.Publish"},
+		{"open", "ready", "ry car update"},
+		{"open", "cancelled", "ry car update"},
+		{"open", "done", "yardmaster.TryCloseEpic (epic auto-close)"},
+		{"open", "merged", "yardmaster daemon epic merge / reconcileStaleCars"},
+		{"ready", "claimed", "engine.ClaimCar"},
+		{"ready", "merged", "yardmaster reconcileStaleCars"},
+		{"claimed", "in_progress", "engine daemon agent spawn"},
+		{"claimed", "done", "ry complete (engine died before in_progress)"},
+		{"claimed", "open", "yardmaster.ReassignCar"},
+		{"claimed", "merged", "yardmaster reconcileStaleCars"},
+		{"in_progress", "done", "ry complete"},
+		{"in_progress", "open", "yardmaster.ReassignCar"},
+		{"in_progress", "merged", "yardmaster reconcileStaleCars"},
+		{"done", "merged", "yardmaster.SwitchCar"},
+		{"done", "merge-failed", "yardmaster.SwitchCar (infra failure)"},
+		{"done", "pr_open", "yardmaster.SwitchCar (PR mode)"},
+		{"blocked", "open", "yardmaster.UnblockDeps / unblock-car action"},
+		{"blocked", "ready", "ry car update"},
+		{"blocked", "done", "yardmaster.UnblockDeps (test-failed retry) / retry-merge action"},
+		{"merge-failed", "done", "retry-merge action"},
+		{"merge-failed", "cancelled", "ry car update"},
+		{"pr_open", "open", "yardmaster reopenCarWithFeedback"},
+		{"pr_open", "merged", "yardmaster daemon PR merge watch"},
+		{"pr_open", "cancelled", "ry car update"},
+		{"pr_open", "pr_review", "inspect Store.ClaimReview"},
+		{"pr_review", "pr_open", "inspect Store.ReleaseReview / stale pr_review cleanup"},
+		{"pr_review", "merged", "operator recovery (PR merged externally mid-review)"},
+		{"pr_review", "cancelled", "operator recovery"},
+	}
+	for _, e := range edges {
+		if !IsValidTransition(e.from, e.to) {
+			t.Errorf("production transition %q -> %q (%s) missing from ValidTransitions", e.from, e.to, e.site)
 		}
 	}
 }

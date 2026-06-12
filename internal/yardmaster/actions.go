@@ -44,9 +44,13 @@ func handleRestartEngineWithBus(_ context.Context, db *gorm.DB, cfg *config.Conf
 	logger.Info("Action restart-engine: restarting engine", "engine", eng.ID, "car", msg.CarID, "reason", msg.Body)
 
 	// Reassign the car back to the pool so another engine can claim it.
-	if err := ReassignCar(db, msg.CarID, eng.ID, "dispatch: "+msg.Body); err != nil {
+	reassigned, err := ReassignCar(db, msg.CarID, eng.ID, "dispatch: "+msg.Body)
+	if err != nil {
 		logger.Error("Action restart-engine: reassign car failed", "car", msg.CarID, "error", err)
 		return
+	}
+	if !reassigned {
+		logger.Info("Action restart-engine: car moved on before reassign", "car", msg.CarID)
 	}
 
 	// Launch a replacement engine on the same track.
