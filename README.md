@@ -581,7 +581,12 @@ docker/              Docker Compose files (pgvector)
 
 ## Tutorials
 
-- **[Build a Todo App with Railyard](docs/tutorial-todo-app.md)** — Step-by-step walkthrough building an API with multiple agents working in parallel
+Each tutorial goes fresh project → `ry init` → dispatch a multi-car feature → run parallel engines, for a different stack:
+
+- **[JavaScript browser game with Playwright PR demos](docs/tutorial-js-game.md)** — a vanilla-JS Snake game; the flagship Playwright PR-demo walkthrough
+- **[Go service](docs/tutorial-go.md)** — a stdlib REST API; the best showcase for dependency-ordered cars and parallel engines
+- **[Laravel / PHP application](docs/tutorial-laravel.md)** — Laravel detection with `php artisan test` as the merge gate
+- **[Mobile app (React Native / Expo)](docs/tutorial-mobile.md)** — RN/Expo detection, jest as the merge gate, plus a Flutter/Swift/Kotlin pointer
 
 ## License
 
