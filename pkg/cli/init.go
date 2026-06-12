@@ -529,6 +529,17 @@ tracks:
 {{- if .TestCommand }}
     test_command: "{{ .TestCommand }}"
 {{- end }}
+{{- if .Playwright }}
+    playwright:
+      enabled: {{ .Playwright.Enabled }}
+      spec_path: "{{ .Playwright.SpecPath }}"
+{{- if .Playwright.Filename }}
+      filename: "{{ .Playwright.Filename }}"
+{{- end }}
+{{- if .Playwright.Template }}
+      template: "{{ .Playwright.Template }}"
+{{- end }}
+{{- end }}
 {{- end }}
 {{- if .Telegraph }}
 
@@ -605,6 +616,7 @@ func newInitCmd() *cobra.Command {
 		skipTelegraph     bool
 		withPlugins       bool
 		withPluginsGlobal bool
+		withPlaywright    bool
 		dbHost            string
 		dbPort            int
 		dbUser            string
@@ -622,7 +634,7 @@ and Telegraph chat bridge (Slack/Discord).
 
 Run this once in any git repository to get started with Railyard.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runInit(cmd, configPath, yes, skipDB, skipCoco, skipTelegraph, withPlugins, withPluginsGlobal, dbHost, dbPort, dbUser, dbPassword)
+			return runInit(cmd, configPath, yes, skipDB, skipCoco, skipTelegraph, withPlugins, withPluginsGlobal, withPlaywright, dbHost, dbPort, dbUser, dbPassword)
 		},
 	}
 
@@ -633,6 +645,7 @@ Run this once in any git repository to get started with Railyard.`,
 	cmd.Flags().BoolVar(&skipTelegraph, "skip-telegraph", false, "skip Telegraph chat bridge setup")
 	cmd.Flags().BoolVar(&withPlugins, "with-plugins", false, "create per-user plugin directory (~/.railyard/plugins) at 0755")
 	cmd.Flags().BoolVar(&withPluginsGlobal, "with-plugins-global", false, "create system-wide plugin directory (/etc/railyard/plugins.d) at 0755 (requires root)")
+	cmd.Flags().BoolVar(&withPlaywright, "with-playwright", false, "enable Playwright PR demos on frontend (ts/js) tracks and scaffold a starter spec + example CI workflow")
 	cmd.Flags().IntVarP(&dbPort, "port", "p", 3306, "database server port")
 	cmd.Flags().StringVarP(&dbHost, "host", "H", "127.0.0.1", "database server host address")
 	cmd.Flags().StringVarP(&dbUser, "user", "u", "root", "database server username")
@@ -641,7 +654,7 @@ Run this once in any git repository to get started with Railyard.`,
 }
 
 // runInit is the main orchestrator for the "ry init" command.
-func runInit(cmd *cobra.Command, configPath string, yes, skipDB, skipCoco, skipTelegraph, withPlugins, withPluginsGlobal bool, dbHost string, dbPort int, dbUser, dbPassword string) error {
+func runInit(cmd *cobra.Command, configPath string, yes, skipDB, skipCoco, skipTelegraph, withPlugins, withPluginsGlobal, withPlaywright bool, dbHost string, dbPort int, dbUser, dbPassword string) error {
 	out := cmd.OutOrStdout()
 	in := io.Reader(byteReader{cmd.InOrStdin()})
 
@@ -735,6 +748,12 @@ func runInit(cmd *cobra.Command, configPath string, yes, skipDB, skipCoco, skipT
 		}
 	}
 
+	// Step 4a: Playwright PR demo opt-in for frontend (ts/js) tracks.
+	// This only wires the config + scaffolds files — Railyard never runs
+	// Playwright itself (see docs/playwright-pr-demo.md). Any track enabled
+	// here triggers the file scaffolding after the config is written.
+	anyPlaywright := offerPlaywright(in, out, tracks, yes, withPlaywright)
+
 	// Step 4b: Telegraph chat bridge setup.
 	var tg *telegraphTemplateData
 	if skipTelegraph {
@@ -796,6 +815,13 @@ func runInit(cmd *cobra.Command, configPath string, yes, skipDB, skipCoco, skipT
 		if commitOut, err := gitCommit.CombinedOutput(); err != nil {
 			fmt.Fprintf(out, "Warning: could not commit %s: %s\n", configPath, strings.TrimSpace(string(commitOut)))
 		}
+	}
+
+	// Step 5a: Scaffold Playwright starter files if any track opted in.
+	// Anchored to gitRoot — the same root railyard.yaml is written to.
+	// Scaffolding failures warn but never fail init.
+	if anyPlaywright {
+		scaffoldPlaywright(out, gitRoot)
 	}
 
 	// Step 5b: Optional plugin directory scaffolding. Both flags are

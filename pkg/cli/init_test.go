@@ -1025,6 +1025,9 @@ func TestInitCmd_Help(t *testing.T) {
 	if !strings.Contains(output, "--with-plugins-global") {
 		t.Errorf("help should show --with-plugins-global flag: %s", output)
 	}
+	if !strings.Contains(output, "--with-playwright") {
+		t.Errorf("help should show --with-playwright flag: %s", output)
+	}
 }
 
 func TestInitCmd_WithPlugins_CreatesPerUserDir(t *testing.T) {
