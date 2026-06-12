@@ -710,6 +710,139 @@ func TestLanguagePreset_NodeFlavors(t *testing.T) {
 	}
 }
 
+// TestIsExpoProject covers the Expo managed-workflow detection signals
+// (railyard-3ql): an "expo" dependency in package.json or a top-level "expo"
+// key in app.json. Substring lookalikes (expo-router, an "expo" npm script)
+// must not count — detection parses JSON rather than grepping.
+func TestIsExpoProject(t *testing.T) {
+	write := func(t *testing.T, dir, name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	t.Run("expo dependency", func(t *testing.T) {
+		dir := t.TempDir()
+		write(t, dir, "package.json", `{"dependencies": {"expo": "~52.0.0", "react-native": "0.76.0"}}`)
+		if !isExpoProject(dir) {
+			t.Error("expo in dependencies should be detected")
+		}
+	})
+
+	t.Run("expo devDependency", func(t *testing.T) {
+		dir := t.TempDir()
+		write(t, dir, "package.json", `{"devDependencies": {"expo": "~52.0.0"}}`)
+		if !isExpoProject(dir) {
+			t.Error("expo in devDependencies should be detected")
+		}
+	})
+
+	t.Run("app.json expo key", func(t *testing.T) {
+		dir := t.TempDir()
+		write(t, dir, "package.json", `{"dependencies": {"react": "18.0.0"}}`)
+		write(t, dir, "app.json", `{"expo": {"name": "my-app", "slug": "my-app"}}`)
+		if !isExpoProject(dir) {
+			t.Error("top-level expo key in app.json should be detected")
+		}
+	})
+
+	t.Run("expo-prefixed package is not expo", func(t *testing.T) {
+		dir := t.TempDir()
+		write(t, dir, "package.json", `{"dependencies": {"expo-router": "4.0.0"}}`)
+		if isExpoProject(dir) {
+			t.Error("expo-router without expo itself must not be detected")
+		}
+	})
+
+	t.Run("expo npm script is not expo", func(t *testing.T) {
+		dir := t.TempDir()
+		write(t, dir, "package.json", `{"scripts": {"expo": "echo not really"}, "dependencies": {"react": "18.0.0"}}`)
+		if isExpoProject(dir) {
+			t.Error("an npm script named expo must not be detected")
+		}
+	})
+
+	t.Run("bare CRA/Next repo", func(t *testing.T) {
+		dir := t.TempDir()
+		write(t, dir, "package.json", `{"dependencies": {"next": "15.0.0", "react": "18.0.0"}}`)
+		if isExpoProject(dir) {
+			t.Error("a Next.js repo must not be classified as Expo")
+		}
+	})
+
+	t.Run("no package.json", func(t *testing.T) {
+		if isExpoProject(t.TempDir()) {
+			t.Error("empty dir must not be classified as Expo")
+		}
+	})
+}
+
+// TestLanguagePreset_Expo verifies that an Expo repo's ts/js track is named
+// "mobile" with Expo conventions injected, and that jest-expo selects a direct
+// jest invocation over the bare `npm test` default (railyard-3ql).
+func TestLanguagePreset_Expo(t *testing.T) {
+	t.Run("typescript expo becomes mobile track", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "package.json"),
+			[]byte(`{"dependencies": {"expo": "~52.0.0"}}`), 0644); err != nil {
+			t.Fatal(err)
+		}
+		tr := languagePreset("typescript", dir)
+		if tr.Name != "mobile" {
+			t.Errorf("Name = %q, want %q", tr.Name, "mobile")
+		}
+		if tr.Language != "typescript" {
+			t.Errorf("Language = %q, want %q", tr.Language, "typescript")
+		}
+		if tr.TestCommand != "npm test" {
+			t.Errorf("TestCommand = %q, want %q", tr.TestCommand, "npm test")
+		}
+		if tr.Conventions == nil || tr.Conventions["framework"] != "expo" {
+			t.Errorf("Conventions = %v, want framework=expo", tr.Conventions)
+		}
+	})
+
+	t.Run("javascript expo becomes mobile track", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "package.json"),
+			[]byte(`{"dependencies": {"expo": "~52.0.0"}}`), 0644); err != nil {
+			t.Fatal(err)
+		}
+		tr := languagePreset("javascript", dir)
+		if tr.Name != "mobile" {
+			t.Errorf("Name = %q, want %q", tr.Name, "mobile")
+		}
+	})
+
+	t.Run("jest-expo selects npx jest", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "package.json"),
+			[]byte(`{"dependencies": {"expo": "~52.0.0"}, "devDependencies": {"jest-expo": "~52.0.0"}}`), 0644); err != nil {
+			t.Fatal(err)
+		}
+		tr := languagePreset("typescript", dir)
+		if tr.TestCommand != "npx jest" {
+			t.Errorf("TestCommand = %q, want %q", tr.TestCommand, "npx jest")
+		}
+	})
+
+	t.Run("non-expo stays frontend", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "package.json"),
+			[]byte(`{"dependencies": {"next": "15.0.0"}}`), 0644); err != nil {
+			t.Fatal(err)
+		}
+		tr := languagePreset("typescript", dir)
+		if tr.Name != "frontend" {
+			t.Errorf("Name = %q, want %q", tr.Name, "frontend")
+		}
+		if tr.Conventions != nil && tr.Conventions["framework"] == "expo" {
+			t.Error("non-expo repo must not get expo conventions")
+		}
+	})
+}
+
 // TestLanguagePreset_BackendExtras verifies the elixir/csharp presets and the
 // c preset's two test-command branches added in railyard-a37.4. Before the fix
 // these languages fell through to the default branch and produced empty
@@ -1345,6 +1478,10 @@ func TestInitCmd_FailsOnEmptyRepo(t *testing.T) {
 	if !strings.Contains(err.Error(), "repo URL is required") {
 		t.Errorf("error should mention repo URL: %v", err)
 	}
+	// The failure must tell the operator how to proceed (railyard-35c).
+	if !strings.Contains(err.Error(), "git remote add origin") {
+		t.Errorf("error should include the git remote add command: %v", err)
+	}
 	// Config file should NOT have been written.
 	if _, statErr := os.Stat(filepath.Join(dir, "railyard.yaml")); statErr == nil {
 		t.Error("config file should not be written when repo URL is empty")
@@ -1568,6 +1705,106 @@ func TestRenderConfig_EmptyPassword(t *testing.T) {
 	}
 	if strings.Contains(yamlStr, "password:") {
 		t.Errorf("rendered YAML should not contain password line when empty:\n%s", yamlStr)
+	}
+}
+
+// chdirForInit moves the test into dir so detectGitRoot/detectLanguages see
+// the temp repo rather than the railyard repo the tests run from.
+func chdirForInit(t *testing.T, dir string) {
+	t.Helper()
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chdir(orig) })
+}
+
+// TestInitCmd_GreenfieldYesWarnsUntested: on a repo with no detectable
+// languages, --yes falls back to the mixed track with no test_command —
+// yardmaster then merges completed branches without running tests. Init must
+// say so prominently instead of leaving it to be discovered at first merge
+// (railyard-35c).
+func TestInitCmd_GreenfieldYesWarnsUntested(t *testing.T) {
+	dir := initGitRepo(t) // README-only: no language indicators
+	configPath := filepath.Join(dir, "railyard.yaml")
+	chdirForInit(t, dir)
+
+	cmd := newRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"init", "--yes", "--skip-db", "--config", configPath})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("init --yes on greenfield repo: %v", err)
+	}
+	output := out.String()
+	if !strings.Contains(output, "UNTESTED") {
+		t.Error("output should warn that merges are UNTESTED without a test_command")
+	}
+	if !strings.Contains(output, "test_command") {
+		t.Error("output should name test_command as the fix")
+	}
+}
+
+// TestInitCmd_GreenfieldInteractivePromptsTestCommand: in interactive mode the
+// mixed-track fallback asks for a test command instead of silently writing a
+// track that merges untested (railyard-35c).
+func TestInitCmd_GreenfieldInteractivePromptsTestCommand(t *testing.T) {
+	dir := initGitRepo(t)
+	configPath := filepath.Join(dir, "railyard.yaml")
+	chdirForInit(t, dir)
+
+	cmd := newRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	// Prompts: owner, remote, host, user, password, port, test command,
+	// tracks confirm, telegraph decline.
+	cmd.SetIn(strings.NewReader("\n\n\n\n\n\nmake check\n\nn\n"))
+	cmd.SetArgs([]string{"init", "--skip-db", "--config", configPath})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("interactive init on greenfield repo: %v", err)
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	cfg, err := config.Parse(data)
+	if err != nil {
+		t.Fatalf("parse generated config: %v\n---\n%s", err, string(data))
+	}
+	if len(cfg.Tracks) != 1 || cfg.Tracks[0].TestCommand != "make check" {
+		t.Errorf("Tracks = %+v, want one mixed track with TestCommand 'make check'", cfg.Tracks)
+	}
+	// A configured test command means the untested-merge warning must not fire.
+	if strings.Contains(out.String(), "UNTESTED") {
+		t.Error("warning should not appear when a test command was provided")
+	}
+}
+
+// TestInitCmd_GreenfieldInteractiveEmptyTestCommandWarns: declining the test
+// command prompt (Enter) still gets the prominent warning (railyard-35c).
+func TestInitCmd_GreenfieldInteractiveEmptyTestCommandWarns(t *testing.T) {
+	dir := initGitRepo(t)
+	configPath := filepath.Join(dir, "railyard.yaml")
+	chdirForInit(t, dir)
+
+	cmd := newRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	// Same prompt sequence, but the test command is declined with Enter.
+	cmd.SetIn(strings.NewReader("\n\n\n\n\n\n\n\nn\n"))
+	cmd.SetArgs([]string{"init", "--skip-db", "--config", configPath})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("interactive init on greenfield repo: %v", err)
+	}
+	if !strings.Contains(out.String(), "UNTESTED") {
+		t.Error("declining the test command should produce the UNTESTED warning")
 	}
 }
 
