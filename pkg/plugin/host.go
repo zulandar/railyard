@@ -52,6 +52,16 @@ type MetaEventHandler func(topic EventType, payload any, meta EventMeta)
 //
 // Every method on Host is safe for concurrent use unless documented
 // otherwise on the method itself.
+//
+// Stability — plugins are CLIENTS of Host, not implementers. Do NOT write
+// your own type that implements Host: new methods may be ADDED to this
+// interface in a minor release (the wire protocol stays backward
+// compatible, but a hand-rolled Go implementation would no longer compile).
+// For tests, embed plugintest.FakeHost (in pkg/plugin/plugintest) and
+// override only the methods you need — it tracks every addition, so your
+// fake keeps compiling across upgrades. (The PR that landed Phase 3
+// described pkg/plugin as "additive-only"; that holds for the wire
+// contract, not for the Go Host interface, which gained methods.)
 type Host interface {
 	// Config returns the raw yaml.Node for the named plugin's
 	// top-level config block from railyard.yaml. If no block was set
