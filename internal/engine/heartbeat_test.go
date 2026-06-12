@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -28,10 +29,13 @@ func heartbeatTestDB(t *testing.T) *gorm.DB {
 	return gormDB
 }
 
-func TestHeartbeat_SelfHealFromDead(t *testing.T) {
+// TestHeartbeat_MarkedDead_SignalsDrain: an external dead mark (scale-down,
+// RestartEngine, yardmaster stale-marking) must surface as ErrMarkedDead on
+// the heartbeat channel so the daemon drains, instead of the old self-heal
+// silently flipping dead back to idle (railyard-7em / railyard-8m6).
+func TestHeartbeat_MarkedDead_SignalsDrain(t *testing.T) {
 	gormDB := heartbeatTestDB(t)
 
-	// Create an engine with status "dead" (simulates race during rolling restart).
 	now := time.Now()
 	if err := gormDB.Create(&models.Engine{
 		ID:           "eng-test",
@@ -44,32 +48,66 @@ func TestHeartbeat_SelfHealFromDead(t *testing.T) {
 		t.Fatalf("create engine: %v", err)
 	}
 
-	// Start heartbeat with a short interval.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	errCh := StartHeartbeat(ctx, gormDB, "eng-test", 50*time.Millisecond)
 
-	// Poll for the expected state instead of fixed sleep.
-	deadline := time.After(2 * time.Second)
-	tick := time.NewTicker(25 * time.Millisecond)
-	defer tick.Stop()
-
-	for {
-		select {
-		case err := <-errCh:
-			t.Fatalf("heartbeat error: %v", err)
-		case <-deadline:
-			var eng models.Engine
-			gormDB.Where("id = ?", "eng-test").First(&eng)
-			t.Fatalf("timed out waiting for self-heal: status=%q", eng.Status)
-		case <-tick.C:
-			var eng models.Engine
-			gormDB.Where("id = ?", "eng-test").First(&eng)
-			if eng.Status == StatusIdle && time.Since(eng.LastActivity) < 2*time.Second {
-				return // success
-			}
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, ErrMarkedDead) {
+			t.Fatalf("heartbeat error = %v, want ErrMarkedDead", err)
 		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for ErrMarkedDead signal")
+	}
+
+	// The engine must NOT resurrect itself.
+	var eng models.Engine
+	gormDB.Where("id = ?", "eng-test").First(&eng)
+	if eng.Status != StatusDead {
+		t.Errorf("status = %q, want %q (no self-heal)", eng.Status, StatusDead)
+	}
+}
+
+// TestHeartbeat_MarkedDeadWhileWorking_SignalsDrain: the duplicate-work
+// scenario — yardmaster marked a slow-but-alive engine dead and reassigned
+// its car. The engine must signal drain, never resurrect to idle while
+// current_car is set.
+func TestHeartbeat_MarkedDeadWhileWorking_SignalsDrain(t *testing.T) {
+	gormDB := heartbeatTestDB(t)
+
+	now := time.Now()
+	if err := gormDB.Create(&models.Engine{
+		ID:           "eng-busy",
+		Track:        "backend",
+		Role:         "engine",
+		Status:       StatusDead,
+		CurrentCar:   "car-123",
+		StartedAt:    now,
+		LastActivity: now,
+	}).Error; err != nil {
+		t.Fatalf("create engine: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	errCh := StartHeartbeat(ctx, gormDB, "eng-busy", 50*time.Millisecond)
+
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, ErrMarkedDead) {
+			t.Fatalf("heartbeat error = %v, want ErrMarkedDead", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for ErrMarkedDead signal")
+	}
+
+	var eng models.Engine
+	gormDB.Where("id = ?", "eng-busy").First(&eng)
+	if eng.Status != StatusDead {
+		t.Errorf("status = %q, want %q (no idle-with-current-car state possible)", eng.Status, StatusDead)
 	}
 }
 

@@ -219,23 +219,37 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 	}
 	var cStats cycleStats
 
+	// gracefulShutdown pushes in-flight work and cleans up engine state.
+	// Shared by ctx cancellation (signal), an external dead mark observed by
+	// the heartbeat, and drain instructions (railyard-8m6).
+	gracefulShutdown := func() {
+		logger.Info("Engine deregistering", "engine", eng.ID)
+		pushInflightBranch(gormDB, eng, workDir)
+		if err := engine.CleanupOverlay(eng.ID, cfg); err != nil {
+			logger.Warn("Overlay cleanup warning", "error", err)
+		}
+		if err := engine.DeregisterWithBus(gormDB, eng.ID, bus); err != nil {
+			logger.Error("Deregister error", "error", err)
+		}
+		if err := engine.RemoveWorktree(repoDir, eng.ID); err != nil {
+			logger.Warn("Remove worktree error", "error", err)
+		}
+		logger.Info("Engine stopped", "engine", eng.ID)
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
-			logger.Info("Engine deregistering", "engine", eng.ID)
-			pushInflightBranch(gormDB, eng, workDir)
-			if err := engine.CleanupOverlay(eng.ID, cfg); err != nil {
-				logger.Warn("Overlay cleanup warning", "error", err)
-			}
-			if err := engine.DeregisterWithBus(gormDB, eng.ID, bus); err != nil {
-				logger.Error("Deregister error", "error", err)
-			}
-			if err := engine.RemoveWorktree(repoDir, eng.ID); err != nil {
-				logger.Warn("Remove worktree error", "error", err)
-			}
-			logger.Info("Engine stopped", "engine", eng.ID)
+			gracefulShutdown()
 			return nil
 		case err := <-hbErrCh:
+			if errors.Is(err, engine.ErrMarkedDead) {
+				// Scale-down, RestartEngine, or yardmaster stale-marking wants
+				// this engine gone. Drain instead of resurrecting (railyard-7em).
+				logger.Info("Engine marked dead externally, draining", "engine", eng.ID)
+				gracefulShutdown()
+				return nil
+			}
 			logger.Error("Heartbeat error", "error", err)
 			return fmt.Errorf("heartbeat: %w", err)
 		default:
@@ -247,6 +261,14 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 			logger.Error("Inbox error", "error", inboxErr)
 		}
 
+		// Handle drain instruction — finish up and exit gracefully. Sent by
+		// orchestration Stop (broadcast), Scale down, and RestartEngine.
+		if engine.ShouldDrain(instructions) {
+			logger.Info("Drain instruction received, shutting down", "engine", eng.ID)
+			gracefulShutdown()
+			return nil
+		}
+
 		// Handle pause instruction.
 		if engine.ShouldPause(instructions) {
 			logger.Info("Paused by yardmaster, waiting for resume")
@@ -256,6 +278,11 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 					break
 				}
 				resumeInst, _ := engine.ProcessInbox(gormDB, eng.ID)
+				if engine.ShouldDrain(resumeInst) {
+					logger.Info("Drain instruction received while paused, shutting down", "engine", eng.ID)
+					gracefulShutdown()
+					return nil
+				}
 				if engine.HasResume(resumeInst) {
 					logger.Info("Resumed by yardmaster")
 					break
@@ -1013,8 +1040,8 @@ func runEngineScale(cmd *cobra.Command, configPath, track string, count int) err
 	if len(result.SessionsCreated) > 0 {
 		fmt.Fprintf(out, "  Created %d new engine sessions\n", len(result.SessionsCreated))
 	}
-	if len(result.SessionsKilled) > 0 {
-		fmt.Fprintf(out, "  Removed %d engines\n", len(result.SessionsKilled))
+	if len(result.EnginesDrained) > 0 {
+		fmt.Fprintf(out, "  Draining %d engines (they exit after finishing current work)\n", len(result.EnginesDrained))
 	}
 	return nil
 }

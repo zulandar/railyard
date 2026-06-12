@@ -21,6 +21,7 @@ func TestClassifyMessage_AllTypes(t *testing.T) {
 		{"resume", InstructionResume},
 		{"switch-track", InstructionSwitchTrack},
 		{"guidance", InstructionGuidance},
+		{"drain", InstructionDrain},
 		{"something-else", InstructionUnknown},
 		{"", InstructionUnknown},
 	}
@@ -85,6 +86,20 @@ func TestHasResume(t *testing.T) {
 	instructions := []Instruction{{Type: InstructionResume}}
 	if !HasResume(instructions) {
 		t.Error("expected resume")
+	}
+}
+
+func TestShouldDrain(t *testing.T) {
+	if ShouldDrain(nil) {
+		t.Error("expected no drain for nil")
+	}
+	instructions := []Instruction{{Type: InstructionGuidance}}
+	if ShouldDrain(instructions) {
+		t.Error("expected no drain for unrelated instructions")
+	}
+	instructions = append(instructions, Instruction{Type: InstructionDrain})
+	if !ShouldDrain(instructions) {
+		t.Error("expected drain")
 	}
 }
 
