@@ -149,6 +149,9 @@ const playwrightTemplateSpec = `import { test, expect } from '@playwright/test';
  *     your repo over ad-hoc selectors so demos stay readable and stable.
  *   - One demo per PR: each car adds exactly one spec at the deterministic
  *     path, which keeps diff-scoped CI execution trivial.
+ *   - Video: Playwright has no --video CLI flag — recording is enabled in
+ *     playwright.config via ` + "`use: { video: 'on' }`" + ` (gate on process.env.CI
+ *     if you only want recordings in CI).
  *
  * Railyard does NOT run this spec — your project's CI does (with video on).
  * See docs/playwright-pr-demo.md.
@@ -171,9 +174,14 @@ const playwrightExampleWorkflow = `# Railyard Playwright PR Demo — REFERENCE w
 #
 #     mv .github/workflows/pr-demo.yml.example .github/workflows/pr-demo.yml
 #
-# It runs Playwright scoped to the spec files changed in the PR diff, records
-# video for every test, and uploads the recordings as a workflow artifact so
-# reviewers can watch the demo without checking out the branch.
+# It runs Playwright scoped to the spec files changed in the PR diff and
+# uploads the video recordings as a workflow artifact so reviewers can watch
+# the demo without checking out the branch.
+#
+# NOTE: Playwright has no --video CLI flag. Enable recording in your
+# playwright.config instead, e.g.:
+#
+#     use: { video: 'on' }   // or gate on process.env.CI
 #
 # Adjust the Node version, install command, and base URL to match your project.
 name: PR Demo (Playwright)
@@ -212,10 +220,11 @@ jobs:
             echo "No PR demo specs changed — nothing to run."
           fi
 
-      - name: Run changed demo specs (video on)
+      - name: Run changed demo specs
         if: steps.changed.outputs.specs != ''
-        # --video on records every test; diff-scoped to just the PR's specs.
-        run: npx playwright test --video on ${{ steps.changed.outputs.specs }}
+        # Diff-scoped to just the PR's specs. Video recording comes from
+        # playwright.config (use: { video: 'on' }) — there is no CLI flag.
+        run: npx playwright test ${{ steps.changed.outputs.specs }}
 
       - name: Upload recordings
         if: always() && steps.changed.outputs.specs != ''

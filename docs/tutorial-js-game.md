@@ -126,7 +126,7 @@ To activate CI, rename the workflow (it ships as `.example` so it never auto-run
 mv .github/workflows/pr-demo.yml.example .github/workflows/pr-demo.yml
 ```
 
-The reference workflow runs Playwright **scoped to the spec files changed in each PR**, with `--video on`, and uploads the recordings as an artifact. See [Playwright PR Demo Setup Guide](playwright-pr-demo.md) for the full schema and CI responsibilities.
+The reference workflow runs Playwright **scoped to the spec files changed in each PR** and uploads the video recordings as an artifact. Playwright has no `--video` CLI flag, so recording comes from your config — see Step 3. See [Playwright PR Demo Setup Guide](playwright-pr-demo.md) for the full schema and CI responsibilities.
 
 ---
 
@@ -137,7 +137,20 @@ npm install --save-dev @playwright/test
 npx playwright install --with-deps
 ```
 
-Add a minimal `playwright.config.ts` pointing `baseURL` at your dev server (e.g. `http://localhost:3000`). The scaffolded `_template.spec.ts` is a valid starter — `npx playwright test --list` will list its example test.
+Add a minimal `playwright.config.ts` pointing `baseURL` at your dev server (e.g. `http://localhost:3000`) and enabling video recording — Playwright has no `--video` CLI flag, so the CI workflow relies on this config:
+
+```ts
+import { defineConfig } from '@playwright/test';
+
+export default defineConfig({
+  use: {
+    baseURL: 'http://localhost:3000',
+    video: process.env.CI ? 'on' : 'off',
+  },
+});
+```
+
+The scaffolded `_template.spec.ts` is a valid starter — `npx playwright test --list` will list its example test.
 
 ---
 

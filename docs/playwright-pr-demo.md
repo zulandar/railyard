@@ -19,7 +19,7 @@ When you opt in, `ry init`:
 
 1. Writes a `playwright:` block to each frontend track in `railyard.yaml` with the documented defaults (`spec_path: tests/pr-demos`, `filename: {car_id}.spec.ts`, `template: tests/pr-demos/_template.spec.ts`).
 2. Scaffolds a starter spec at **`tests/pr-demos/_template.spec.ts`** — a minimal, valid Playwright spec with one example test plus notes on page objects and `baseURL`. Engines copy from it when writing per-car demos. (Existing files are never overwritten.)
-3. Ships a reference CI workflow at **[`.github/workflows/pr-demo.yml.example`](../.github/workflows/pr-demo.yml.example)**. It runs Playwright scoped to the PR's changed spec files (diff-scoped), records video (`--video on`), and uploads the recordings as a workflow artifact.
+3. Scaffolds a reference CI workflow at **`.github/workflows/pr-demo.yml.example`** (written into *your* project, like the starter spec — it isn't a file in the railyard repo). It runs Playwright scoped to the PR's changed spec files (diff-scoped) and uploads the video recordings as a workflow artifact. Playwright has no `--video` CLI flag — enable recording in your `playwright.config`, e.g. `use: { video: 'on' }` (gate on `process.env.CI` to record only in CI).
 
 The workflow ships with a **`.example`** suffix so GitHub Actions never auto-runs it. **To activate CI, rename it:**
 
