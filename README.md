@@ -87,78 +87,97 @@ Each developer runs their own Railyard instance against the same repo. Agents wo
 
 ## Prerequisites
 
-- **Go 1.26+**
-- **MySQL 8.0+** — SQL database
-- **tmux** — terminal multiplexer
-- **AI coding CLI** (at least one):
+**Required:**
+
+- **Docker** — Railyard provisions MySQL (and optional pgvector) in containers for you, so you never install or manage a database yourself
+- **tmux** — terminal multiplexer that hosts the agent panes
+- **An AI coding CLI** (at least one):
   - Claude Code (default) — `npm install -g @anthropic-ai/claude-code`
   - Codex — `npm install -g @openai/codex`
   - Gemini — `npm install -g @google/gemini-cli`
   - Copilot — `gh extension install github/gh-copilot`
-- **Docker** (optional) — for pgvector/CocoIndex semantic search
-- **GitHub CLI** (optional, required when `require_pr: true`) — [install](https://cli.github.com/)
-- **Python 3.13+** (optional) — for CocoIndex semantic search
+
+**Optional:**
+
+- **GitHub CLI** — required when `require_pr: true` ([install](https://cli.github.com/))
+- **Python 3.13+** — only for CocoIndex semantic code search
+
+**Only for building from source:**
+
+- **Go 1.26+** — not needed if you install the prebuilt `ry` binary (see the Quickstart below)
 
 ## Quickstart
 
-The quickstart script handles everything: installing prerequisites, building the `ry` binary, starting MySQL, initializing the database, and optionally setting up pgvector for semantic code search.
+Go from zero to running agents on your own project in four steps — no Go toolchain, no manual database setup.
+
+**1. Install `ry`**
 
 ```bash
-git clone https://github.com/zulandar/railyard.git
-cd railyard
-chmod +x quickstart.sh
-./quickstart.sh
+curl -fsSL https://raw.githubusercontent.com/zulandar/railyard/main/install.sh | sh
 ```
 
-> **Already have a `railyard.yaml` in your repo?** If you're cloning an existing Railyard project to a new machine, see [New Machine Setup](docs/new-machine-setup.md) — you don't need `ry init`.
+This installs a prebuilt `ry` binary to `~/.local/bin`. Prefer Go? `go install github.com/zulandar/railyard/cmd/ry@latest` works too. Or grab a tarball from the [releases page](https://github.com/zulandar/railyard/releases/latest).
+
+**2. Initialize Railyard in your project**
+
+```bash
+cd your-project
+ry init
+```
+
+`ry init` detects your languages, generates `railyard.yaml`, starts MySQL in Docker, and initializes the database. It's interactive by default — or run `ry init --yes` to accept sensible defaults non-interactively.
+
+**3. Create work and start engines**
+
+```bash
+ry dispatch                                          # describe a feature in plain English; Dispatch decomposes it into cars
+# ...or create a car directly:
+ry car create --title "Add auth middleware" --track backend --type task
+ry car publish <car-id>                              # publish so engines can claim it
+
+ry start --engines 2                                 # launch the Yardmaster + 2 engines
+```
+
+**4. Watch the agents work**
+
+```bash
+tmux attach -t railyard
+```
+
+> **Cloning an existing Railyard project** that already has a committed `railyard.yaml`? You don't need `ry init` — see [New Machine Setup](docs/new-machine-setup.md).
+>
+> **Want to hack on Railyard itself?** The contributor dev setup lives in [CONTRIBUTING.md](CONTRIBUTING.md) (and `quickstart.sh` for a fresh WSL environment).
 
 ### Manual Setup
 
-If you prefer to set things up step by step:
+`ry init` is the recommended path. If you'd rather wire things up step by step (or you're building from source):
 
-**1. Build the CLI**
+**1. Install or build the CLI**
+
+Use the binary install from the Quickstart, or build from source (needs Go 1.26+):
 
 ```bash
 go build -o ry ./cmd/ry/
 ```
 
-**2. Start MySQL**
+**2. Create your config**
 
-```bash
-# Start MySQL server (install via your package manager if not already installed)
-# Ensure it is listening on 127.0.0.1:3306
-```
-
-**3. Configure**
-
-Copy the example config and edit it for your project:
+Generate it with `ry init`, or copy the documented example and edit it for your project:
 
 ```bash
 cp railyard.example.yaml railyard.yaml
-# Edit owner, repo, tracks to match your project
-```
-
-Or create a `railyard.yaml` manually in your repo root:
-
-```yaml
-owner: yourname
-repo: git@github.com:org/repo.git
-
-database:
-  host: 127.0.0.1
-  port: 3306
-
-tracks:
-  - name: backend
-    language: go
-    file_patterns: ["cmd/**", "internal/**", "pkg/**", "*.go"]
-    engine_slots: 3
-    conventions:
-      go_version: "1.26"
-      style: "stdlib-first, no frameworks"
+# Edit owner, repo, and tracks to match your project
 ```
 
 See [`railyard.example.yaml`](railyard.example.yaml) for a fully documented template with all available options.
+
+**3. Start MySQL**
+
+```bash
+ry db start -c railyard.yaml
+```
+
+`ry db start` launches a MySQL 8.0 container via Docker (creating the data directory on first run). If MySQL is already running, this is a no-op.
 
 **4. Initialize the database**
 
@@ -166,7 +185,7 @@ See [`railyard.example.yaml`](railyard.example.yaml) for a fully documented temp
 ry db init -c railyard.yaml
 ```
 
-> **After a reboot:** MySQL doesn't survive WSL/system restarts. Run `ry db start -c railyard.yaml` to restart it.
+> **After a reboot:** the MySQL container doesn't auto-start. Run `ry db start -c railyard.yaml` to bring it back.
 
 **5. (Optional) Set up semantic code search**
 
@@ -398,7 +417,7 @@ Railyard integrates with [CocoIndex](https://github.com/cocoindex/cocoindex) and
 # Initialize pgvector (Docker), Python venv, and schema
 ry cocoindex init -c railyard.yaml
 
-# The quickstart.sh script does this automatically if Docker is available
+# `ry init` also offers this interactively when it detects Docker
 ```
 
 This starts a PostgreSQL 16 container with pgvector on port 5481 (auto-detects conflicts), creates a Python 3.13+ venv at `cocoindex/.venv`, installs dependencies, and runs migrations.

@@ -1,15 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Railyard Quickstart — Fresh WSL Setup
+# Railyard Contributor Setup — Fresh WSL
 #
-# For a FRESH WSL container where you've cloned the repo.
+# Sets up a fresh WSL environment for HACKING ON railyard itself: installs
+# prerequisites, builds ry from source, runs railyard's test suite, starts
+# MySQL, and optionally sets up pgvector for CocoIndex.
 # Targets Debian/Ubuntu-based WSL (uses apt-get and the deadsnakes PPA).
-# Installs prerequisites, builds ry, starts MySQL, initializes the DB,
-# optionally sets up pgvector for CocoIndex, and gets you ready to run `ry start`.
+#
+# NOT for end users: to use Railyard on your own project, install the prebuilt
+# binary and run `ry init` instead (see the README Quickstart). This script must
+# be run from the railyard repo root.
 #
 # Usage:
-#   git clone <repo> && cd railyard
+#   git clone https://github.com/zulandar/railyard.git && cd railyard
 #   chmod +x quickstart.sh && ./quickstart.sh
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -96,7 +100,7 @@ trap cleanup EXIT
 
 echo ""
 echo "╔══════════════════════════════════════════════════════╗"
-echo "║         Railyard Quickstart — Fresh WSL Setup        ║"
+echo "║        Railyard Contributor Setup — Fresh WSL        ║"
 echo "╚══════════════════════════════════════════════════════╝"
 echo ""
 

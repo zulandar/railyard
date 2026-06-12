@@ -19,19 +19,13 @@ This tutorial walks you through building a Todo List API using Railyard to orche
 
 Before starting, make sure you have:
 
-- **Railyard** installed (`ry` binary on your PATH) — see the [quickstart](../quickstart.sh) or [README](../README.md)
-- **MySQL** running on port 3306 (or whichever port you configured)
+- **`ry` installed** — `curl -fsSL https://raw.githubusercontent.com/zulandar/railyard/main/install.sh | sh` (see the [README Quickstart](../README.md#quickstart))
+- **Docker** running — Railyard starts MySQL in a container for you
 - **Claude Code CLI** installed (`npm install -g @anthropic-ai/claude-code`)
 - **tmux** installed
 - Your language toolchain installed (Go, PHP, Node.js, etc.)
-- An initialized Railyard database (`ry db init`)
 
-If you haven't done any of this yet, the fastest path is:
-
-```bash
-cd /path/to/railyard
-./quickstart.sh
-```
+The fastest way to set up the config, MySQL, and database together is to run `ry init` in your project (see the [README Quickstart](../README.md#quickstart)). This tutorial writes the configuration out explicitly so you can see what each piece does.
 
 ---
 
