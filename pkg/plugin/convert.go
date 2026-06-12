@@ -169,6 +169,8 @@ func decodeEvent(ev *protov1.Event) (decodedEvent, error) {
 // encoding garbage (railyard-77h.16).
 func argTypeToProto(t ArgType) protov1.ArgType {
 	switch t {
+	case ArgUnspecified:
+		return protov1.ArgType_ARG_TYPE_UNSPECIFIED
 	case ArgString:
 		return protov1.ArgType_ARG_TYPE_STRING
 	case ArgInt:

@@ -54,11 +54,20 @@ type CommandHandler func(ctx context.Context, args CommandArgs) (CommandResult, 
 // [ArgInt] therefore accepts a float64 only when it is integral; an
 // [ArgFloat] accepts any float64; [ArgString] accepts a string;
 // [ArgBool] accepts a bool.
+//
+// The zero value is [ArgUnspecified] (matching the proto's reserved 0), so
+// an [ArgSpec] that omits Type means "presence-only, any type" rather than
+// silently demanding a string. Set an explicit type to enforce one.
 type ArgType int
 
 const (
+	// ArgUnspecified is the zero value: no declared type. The host
+	// presence-checks the argument (when Required) but applies no type
+	// check — any value is accepted. This is what an ArgSpec with Type
+	// omitted means.
+	ArgUnspecified ArgType = iota
 	// ArgString validates the value is a string.
-	ArgString ArgType = iota
+	ArgString
 	// ArgInt validates the value is an integer (an integral float64 on
 	// the wire is accepted; a non-integral float64 is rejected).
 	ArgInt
