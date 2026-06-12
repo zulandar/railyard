@@ -756,6 +756,26 @@ func TestLanguagePreset_BackendExtras(t *testing.T) {
 			t.Errorf("c without cmake: TestCommand = %q, want 'make test'", tr.TestCommand)
 		}
 	})
+
+	t.Run("php-plain", func(t *testing.T) {
+		// No artisan file → plain PHP uses PHPUnit directly.
+		tr := languagePreset("php", t.TempDir())
+		if tr.Name != "backend" || tr.TestCommand != "vendor/bin/phpunit" {
+			t.Errorf("plain php = name %q test %q, want backend/vendor/bin/phpunit", tr.Name, tr.TestCommand)
+		}
+	})
+
+	t.Run("php-laravel", func(t *testing.T) {
+		// An artisan console script at the root → Laravel uses `php artisan test`.
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "artisan"), []byte("#!/usr/bin/env php\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		tr := languagePreset("php", dir)
+		if tr.TestCommand != "php artisan test" {
+			t.Errorf("laravel php: TestCommand = %q, want 'php artisan test'", tr.TestCommand)
+		}
+	})
 }
 
 // TestLanguagePreset_NoFallThrough is an acceptance criterion for railyard-a37.4:

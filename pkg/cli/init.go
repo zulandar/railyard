@@ -398,11 +398,19 @@ func languagePreset(lang, root string) config.TrackConfig {
 			TestCommand:  "mvn test",
 		}
 	case "php":
+		// Laravel projects ship an `artisan` console script and conventionally
+		// run their suite via `php artisan test`; a plain PHP project runs
+		// PHPUnit directly. Detect the Laravel convention from the artisan file
+		// at the repo root (railyard-a37.7).
+		testCmd := "vendor/bin/phpunit"
+		if _, err := os.Stat(filepath.Join(root, "artisan")); err == nil {
+			testCmd = "php artisan test"
+		}
 		return config.TrackConfig{
 			Name: "backend", Language: "php",
 			FilePatterns: []string{"**/*.php"},
 			EngineSlots:  2,
-			TestCommand:  "vendor/bin/phpunit",
+			TestCommand:  testCmd,
 		}
 	case "ruby":
 		return config.TrackConfig{
