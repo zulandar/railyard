@@ -97,6 +97,13 @@ jobs:
       - name: buf lint
         run: buf lint
 
+      # NOTE: comparing against the committed snapshot only catches a
+      # breaking change if the snapshot is updated in a SEPARATE reviewed
+      # step. A single commit that edits plugin.proto and refreshes the
+      # snapshot in lockstep compares new-vs-new and validates nothing. The
+      # robust gate is `buf breaking --against '.git#branch=main'` (needs
+      # checkout fetch-depth: 0); see docs/plugins/proto.md. Tracked as a
+      # follow-up.
       - name: buf breaking (against committed snapshot)
         run: buf breaking --against pkg/plugin/proto/snapshots/v1
 

@@ -42,6 +42,7 @@ const (
 	PluginService_Start_FullMethodName         = "/railyard.plugin.v1.PluginService/Start"
 	PluginService_Stop_FullMethodName          = "/railyard.plugin.v1.PluginService/Stop"
 	PluginService_HandleCommand_FullMethodName = "/railyard.plugin.v1.PluginService/HandleCommand"
+	PluginService_Health_FullMethodName        = "/railyard.plugin.v1.PluginService/Health"
 )
 
 // PluginServiceClient is the client API for PluginService service.
@@ -71,6 +72,17 @@ type PluginServiceClient interface {
 	// The args/result preserve the weakly-typed shape of the Go SDK via
 	// google.protobuf.Struct.
 	HandleCommand(ctx context.Context, in *HandleCommandRequest, opts ...grpc.CallOption) (*HandleCommandResponse, error)
+	// Health is an OPTIONAL liveness/functional probe the host polls on a
+	// configurable interval (default 30s) so operators can see whether a
+	// running plugin is actually functional — not merely "process alive"
+	// (railyard-77h.12). A plugin opts in by implementing the SDK's
+	// pkg/plugin.HealthReporter interface; the plugin-side adapter returns
+	// codes.Unimplemented when the user impl does NOT implement it, which
+	// the host surfaces as "n/a" rather than an error. This keeps plugins
+	// built before this RPC fully backward compatible. The host uses a 2s
+	// deadline per probe; a timeout or transport error is mapped to
+	// HEALTH_DEGRADED with the error text.
+	Health(ctx context.Context, in *HealthRequest, opts ...grpc.CallOption) (*HealthResponse, error)
 }
 
 type pluginServiceClient struct {
@@ -121,6 +133,16 @@ func (c *pluginServiceClient) HandleCommand(ctx context.Context, in *HandleComma
 	return out, nil
 }
 
+func (c *pluginServiceClient) Health(ctx context.Context, in *HealthRequest, opts ...grpc.CallOption) (*HealthResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(HealthResponse)
+	err := c.cc.Invoke(ctx, PluginService_Health_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // PluginServiceServer is the server API for PluginService service.
 // All implementations must embed UnimplementedPluginServiceServer
 // for forward compatibility.
@@ -148,6 +170,17 @@ type PluginServiceServer interface {
 	// The args/result preserve the weakly-typed shape of the Go SDK via
 	// google.protobuf.Struct.
 	HandleCommand(context.Context, *HandleCommandRequest) (*HandleCommandResponse, error)
+	// Health is an OPTIONAL liveness/functional probe the host polls on a
+	// configurable interval (default 30s) so operators can see whether a
+	// running plugin is actually functional — not merely "process alive"
+	// (railyard-77h.12). A plugin opts in by implementing the SDK's
+	// pkg/plugin.HealthReporter interface; the plugin-side adapter returns
+	// codes.Unimplemented when the user impl does NOT implement it, which
+	// the host surfaces as "n/a" rather than an error. This keeps plugins
+	// built before this RPC fully backward compatible. The host uses a 2s
+	// deadline per probe; a timeout or transport error is mapped to
+	// HEALTH_DEGRADED with the error text.
+	Health(context.Context, *HealthRequest) (*HealthResponse, error)
 	mustEmbedUnimplementedPluginServiceServer()
 }
 
@@ -169,6 +202,9 @@ func (UnimplementedPluginServiceServer) Stop(context.Context, *StopRequest) (*St
 }
 func (UnimplementedPluginServiceServer) HandleCommand(context.Context, *HandleCommandRequest) (*HandleCommandResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method HandleCommand not implemented")
+}
+func (UnimplementedPluginServiceServer) Health(context.Context, *HealthRequest) (*HealthResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Health not implemented")
 }
 func (UnimplementedPluginServiceServer) mustEmbedUnimplementedPluginServiceServer() {}
 func (UnimplementedPluginServiceServer) testEmbeddedByValue()                       {}
@@ -263,6 +299,24 @@ func _PluginService_HandleCommand_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _PluginService_Health_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(HealthRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PluginServiceServer).Health(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PluginService_Health_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PluginServiceServer).Health(ctx, req.(*HealthRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // PluginService_ServiceDesc is the grpc.ServiceDesc for PluginService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -286,6 +340,10 @@ var PluginService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "HandleCommand",
 			Handler:    _PluginService_HandleCommand_Handler,
 		},
+		{
+			MethodName: "Health",
+			Handler:    _PluginService_Health_Handler,
+		},
 	},
 	Streams:  []grpc.StreamDesc{},
 	Metadata: "plugin.proto",
@@ -298,6 +356,11 @@ const (
 	HostService_DispatchCommand_FullMethodName = "/railyard.plugin.v1.HostService/DispatchCommand"
 	HostService_Config_FullMethodName          = "/railyard.plugin.v1.HostService/Config"
 	HostService_Log_FullMethodName             = "/railyard.plugin.v1.HostService/Log"
+	HostService_EmitEvent_FullMethodName       = "/railyard.plugin.v1.HostService/EmitEvent"
+	HostService_KVGet_FullMethodName           = "/railyard.plugin.v1.HostService/KVGet"
+	HostService_KVPut_FullMethodName           = "/railyard.plugin.v1.HostService/KVPut"
+	HostService_KVDelete_FullMethodName        = "/railyard.plugin.v1.HostService/KVDelete"
+	HostService_KVList_FullMethodName          = "/railyard.plugin.v1.HostService/KVList"
 )
 
 // HostServiceClient is the client API for HostService service.
@@ -336,6 +399,31 @@ type HostServiceClient interface {
 	// re-emits the record through its own slog handler with a
 	// "plugin=<name>" attribute already set by the host wrapper.
 	Log(ctx context.Context, in *LogRequest, opts ...grpc.CallOption) (*LogResponse, error)
+	// EmitEvent lets a plugin publish a namespaced event onto the internal
+	// bus so other plugins (and core) can observe it. The topic MUST be
+	// prefixed with the caller's own "<plugin>." name; the host derives
+	// the name from the connection-bound identity, NEVER from a request
+	// field, and returns PermissionDenied for an un-prefixed topic or one
+	// the plugin's allow.publish list does not permit (railyard-77h.9).
+	EmitEvent(ctx context.Context, in *EmitEventRequest, opts ...grpc.CallOption) (*EmitEventResponse, error)
+	// KVGet reads one value from the plugin's private key/value namespace
+	// (railyard-77h.11). The namespace is the caller's connection-bound
+	// identity, NEVER a request field, so a plugin can only ever read its
+	// own keys. found=false means the key is absent. A host with no DB
+	// configured returns codes.Unavailable.
+	KVGet(ctx context.Context, in *KVGetRequest, opts ...grpc.CallOption) (*KVGetResponse, error)
+	// KVPut writes (inserts or overwrites) one value in the plugin's
+	// private namespace. The host enforces per-plugin limits (max value
+	// bytes, max key bytes, max key count) and rejects overruns with
+	// codes.ResourceExhausted / codes.InvalidArgument (railyard-77h.11).
+	KVPut(ctx context.Context, in *KVPutRequest, opts ...grpc.CallOption) (*KVPutResponse, error)
+	// KVDelete removes one key from the plugin's private namespace.
+	// Deleting an absent key is a no-op (no error) (railyard-77h.11).
+	KVDelete(ctx context.Context, in *KVDeleteRequest, opts ...grpc.CallOption) (*KVDeleteResponse, error)
+	// KVList returns the keys in the plugin's private namespace whose name
+	// begins with the given prefix (empty prefix lists all keys), sorted
+	// ascending (railyard-77h.11).
+	KVList(ctx context.Context, in *KVListRequest, opts ...grpc.CallOption) (*KVListResponse, error)
 }
 
 type hostServiceClient struct {
@@ -415,6 +503,56 @@ func (c *hostServiceClient) Log(ctx context.Context, in *LogRequest, opts ...grp
 	return out, nil
 }
 
+func (c *hostServiceClient) EmitEvent(ctx context.Context, in *EmitEventRequest, opts ...grpc.CallOption) (*EmitEventResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(EmitEventResponse)
+	err := c.cc.Invoke(ctx, HostService_EmitEvent_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostServiceClient) KVGet(ctx context.Context, in *KVGetRequest, opts ...grpc.CallOption) (*KVGetResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(KVGetResponse)
+	err := c.cc.Invoke(ctx, HostService_KVGet_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostServiceClient) KVPut(ctx context.Context, in *KVPutRequest, opts ...grpc.CallOption) (*KVPutResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(KVPutResponse)
+	err := c.cc.Invoke(ctx, HostService_KVPut_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostServiceClient) KVDelete(ctx context.Context, in *KVDeleteRequest, opts ...grpc.CallOption) (*KVDeleteResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(KVDeleteResponse)
+	err := c.cc.Invoke(ctx, HostService_KVDelete_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostServiceClient) KVList(ctx context.Context, in *KVListRequest, opts ...grpc.CallOption) (*KVListResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(KVListResponse)
+	err := c.cc.Invoke(ctx, HostService_KVList_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // HostServiceServer is the server API for HostService service.
 // All implementations must embed UnimplementedHostServiceServer
 // for forward compatibility.
@@ -451,6 +589,31 @@ type HostServiceServer interface {
 	// re-emits the record through its own slog handler with a
 	// "plugin=<name>" attribute already set by the host wrapper.
 	Log(context.Context, *LogRequest) (*LogResponse, error)
+	// EmitEvent lets a plugin publish a namespaced event onto the internal
+	// bus so other plugins (and core) can observe it. The topic MUST be
+	// prefixed with the caller's own "<plugin>." name; the host derives
+	// the name from the connection-bound identity, NEVER from a request
+	// field, and returns PermissionDenied for an un-prefixed topic or one
+	// the plugin's allow.publish list does not permit (railyard-77h.9).
+	EmitEvent(context.Context, *EmitEventRequest) (*EmitEventResponse, error)
+	// KVGet reads one value from the plugin's private key/value namespace
+	// (railyard-77h.11). The namespace is the caller's connection-bound
+	// identity, NEVER a request field, so a plugin can only ever read its
+	// own keys. found=false means the key is absent. A host with no DB
+	// configured returns codes.Unavailable.
+	KVGet(context.Context, *KVGetRequest) (*KVGetResponse, error)
+	// KVPut writes (inserts or overwrites) one value in the plugin's
+	// private namespace. The host enforces per-plugin limits (max value
+	// bytes, max key bytes, max key count) and rejects overruns with
+	// codes.ResourceExhausted / codes.InvalidArgument (railyard-77h.11).
+	KVPut(context.Context, *KVPutRequest) (*KVPutResponse, error)
+	// KVDelete removes one key from the plugin's private namespace.
+	// Deleting an absent key is a no-op (no error) (railyard-77h.11).
+	KVDelete(context.Context, *KVDeleteRequest) (*KVDeleteResponse, error)
+	// KVList returns the keys in the plugin's private namespace whose name
+	// begins with the given prefix (empty prefix lists all keys), sorted
+	// ascending (railyard-77h.11).
+	KVList(context.Context, *KVListRequest) (*KVListResponse, error)
 	mustEmbedUnimplementedHostServiceServer()
 }
 
@@ -478,6 +641,21 @@ func (UnimplementedHostServiceServer) Config(context.Context, *ConfigRequest) (*
 }
 func (UnimplementedHostServiceServer) Log(context.Context, *LogRequest) (*LogResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Log not implemented")
+}
+func (UnimplementedHostServiceServer) EmitEvent(context.Context, *EmitEventRequest) (*EmitEventResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method EmitEvent not implemented")
+}
+func (UnimplementedHostServiceServer) KVGet(context.Context, *KVGetRequest) (*KVGetResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method KVGet not implemented")
+}
+func (UnimplementedHostServiceServer) KVPut(context.Context, *KVPutRequest) (*KVPutResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method KVPut not implemented")
+}
+func (UnimplementedHostServiceServer) KVDelete(context.Context, *KVDeleteRequest) (*KVDeleteResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method KVDelete not implemented")
+}
+func (UnimplementedHostServiceServer) KVList(context.Context, *KVListRequest) (*KVListResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method KVList not implemented")
 }
 func (UnimplementedHostServiceServer) mustEmbedUnimplementedHostServiceServer() {}
 func (UnimplementedHostServiceServer) testEmbeddedByValue()                     {}
@@ -601,6 +779,96 @@ func _HostService_Log_Handler(srv interface{}, ctx context.Context, dec func(int
 	return interceptor(ctx, in, info, handler)
 }
 
+func _HostService_EmitEvent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(EmitEventRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServiceServer).EmitEvent(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: HostService_EmitEvent_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServiceServer).EmitEvent(ctx, req.(*EmitEventRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _HostService_KVGet_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(KVGetRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServiceServer).KVGet(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: HostService_KVGet_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServiceServer).KVGet(ctx, req.(*KVGetRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _HostService_KVPut_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(KVPutRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServiceServer).KVPut(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: HostService_KVPut_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServiceServer).KVPut(ctx, req.(*KVPutRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _HostService_KVDelete_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(KVDeleteRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServiceServer).KVDelete(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: HostService_KVDelete_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServiceServer).KVDelete(ctx, req.(*KVDeleteRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _HostService_KVList_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(KVListRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServiceServer).KVList(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: HostService_KVList_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServiceServer).KVList(ctx, req.(*KVListRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // HostService_ServiceDesc is the grpc.ServiceDesc for HostService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -627,6 +895,26 @@ var HostService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Log",
 			Handler:    _HostService_Log_Handler,
+		},
+		{
+			MethodName: "EmitEvent",
+			Handler:    _HostService_EmitEvent_Handler,
+		},
+		{
+			MethodName: "KVGet",
+			Handler:    _HostService_KVGet_Handler,
+		},
+		{
+			MethodName: "KVPut",
+			Handler:    _HostService_KVPut_Handler,
+		},
+		{
+			MethodName: "KVDelete",
+			Handler:    _HostService_KVDelete_Handler,
+		},
+		{
+			MethodName: "KVList",
+			Handler:    _HostService_KVList_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

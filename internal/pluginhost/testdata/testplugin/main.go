@@ -54,11 +54,162 @@ type testPlugin struct {
 	slowSleep   time.Duration
 	slowLogDir  string
 	slowEnabled bool
+
+	// Meta-mode state (railyard-77h.10). Subscribes to CarCreated via
+	// SubscribeWithMeta and logs "<seq> <dropped>" per delivery so the
+	// host-side e2e can observe gap detection end-to-end.
+	metaMu      sync.Mutex
+	metaEnabled bool
+	metaOut     *os.File
+	metaSleep   time.Duration
+	metaUnsub   plugin.Unsubscribe
+
+	// Emit-mode state (railyard-77h.9). Subscribes to its own namespaced
+	// topic and emits onto it from Start, logging each received dynamic
+	// payload so the host-side e2e can prove the EmitEvent -> bus ->
+	// Subscribe -> SDK-decode round-trip across the process boundary.
+	emitMu       sync.Mutex
+	emitEnabled  bool
+	emitHost     plugin.Host
+	emitOut      *os.File
+	emitUnsub    plugin.Unsubscribe
+	emitStopCh   chan struct{}
+	emitStopOnce sync.Once
+
+	// Command-spec mode state (railyard-77h.16). Registers a typed command
+	// via RegisterCommandSpec and logs each handled invocation's args so
+	// the host-side e2e can prove host-validated args reach the handler.
+	cmdMu      sync.Mutex
+	cmdEnabled bool
+	cmdOut     *os.File
+
+	// KV-mode state (railyard-77h.11). Drives Host.Store() through a full
+	// Put/Get/List/Delete round-trip from Start and logs the observed
+	// results so the host-side e2e can prove the SDK Store accessor works
+	// end-to-end across the process boundary against a real host DB.
+	kvEnabled bool
+	kvHost    plugin.Host
+	kvOut     *os.File
 }
+
+const emitTopic = "testplugin.ping"
 
 func (p *testPlugin) Name() string { return "testplugin" }
 
+// cmdTopic is the name the command-mode plugin registers a typed spec for.
+const cmdTopic = "testplugin.scale"
+
 func (p *testPlugin) Init(_ context.Context, h plugin.Host) error {
+	// KV mode (railyard-77h.11). Capture the host so Start can drive a full
+	// Store round-trip and log the observed results.
+	if os.Getenv("RAILYARD_TESTPLUGIN_KV") == "1" {
+		p.kvEnabled = true
+		p.kvHost = h
+		path := os.Getenv("RAILYARD_TESTPLUGIN_KV_LOG")
+		if path == "" {
+			return fmt.Errorf("testplugin: kv mode requires RAILYARD_TESTPLUGIN_KV_LOG")
+		}
+		f, err := os.Create(path)
+		if err != nil {
+			return fmt.Errorf("testplugin: create kv log: %w", err)
+		}
+		p.kvOut = f
+		return nil
+	}
+
+	// Command-spec mode (railyard-77h.16). Register a command with a typed
+	// argument schema via RegisterCommandSpec and record every invocation's
+	// args to a log file. The host validates dispatched args against the
+	// declared spec BEFORE calling this handler, so the host-side e2e can
+	// prove valid args reach the plugin (and, indirectly, that invalid args
+	// would not — they are rejected before the RPC).
+	if os.Getenv("RAILYARD_TESTPLUGIN_CMD") == "1" {
+		p.cmdEnabled = true
+		path := os.Getenv("RAILYARD_TESTPLUGIN_CMD_LOG")
+		if path == "" {
+			return fmt.Errorf("testplugin: cmd mode requires RAILYARD_TESTPLUGIN_CMD_LOG")
+		}
+		f, err := os.Create(path)
+		if err != nil {
+			return fmt.Errorf("testplugin: create cmd log: %w", err)
+		}
+		p.cmdOut = f
+		return h.RegisterCommandSpec(plugin.CommandSpec{
+			Name: cmdTopic,
+			Args: []plugin.ArgSpec{
+				{Name: "Track", Type: plugin.ArgString, Required: true},
+				{Name: "Count", Type: plugin.ArgInt, Required: true},
+			},
+		}, func(_ context.Context, args plugin.CommandArgs) (plugin.CommandResult, error) {
+			p.cmdMu.Lock()
+			fmt.Fprintf(p.cmdOut, "handled Track=%v Count=%v\n", args["Track"], args["Count"])
+			_ = p.cmdOut.Sync()
+			p.cmdMu.Unlock()
+			return plugin.CommandResult{Success: true, Data: map[string]any{"ok": true}}, nil
+		})
+	}
+	// Emit mode (railyard-77h.9). Subscribe to our own namespaced topic
+	// and record each received dynamic payload; Start drives the emit.
+	if os.Getenv("RAILYARD_TESTPLUGIN_EMIT") == "1" {
+		p.emitEnabled = true
+		p.emitHost = h
+		p.emitStopCh = make(chan struct{})
+		path := os.Getenv("RAILYARD_TESTPLUGIN_EMIT_LOG")
+		if path == "" {
+			return fmt.Errorf("testplugin: emit mode requires RAILYARD_TESTPLUGIN_EMIT_LOG")
+		}
+		f, err := os.Create(path)
+		if err != nil {
+			return fmt.Errorf("testplugin: create emit log: %w", err)
+		}
+		p.emitOut = f
+		p.emitUnsub = h.Subscribe(plugin.EventType(emitTopic), func(topic plugin.EventType, payload any) {
+			m, ok := payload.(map[string]any)
+			if !ok {
+				return
+			}
+			msg, _ := m["msg"].(string)
+			p.emitMu.Lock()
+			fmt.Fprintf(p.emitOut, "%s %v\n", topic, msg)
+			_ = p.emitOut.Sync()
+			p.emitMu.Unlock()
+		})
+		return nil
+	}
+
+	// Meta mode (railyard-77h.10). Subscribe to CarCreated with stream
+	// metadata and record "<seq> <dropped>" per delivery, sleeping to
+	// induce backpressure so the host-side e2e can observe a gap.
+	if os.Getenv("RAILYARD_TESTPLUGIN_META") == "1" {
+		p.metaEnabled = true
+		ms := 2
+		if raw := os.Getenv("RAILYARD_TESTPLUGIN_META_SLEEP_MS"); raw != "" {
+			if v, err := strconv.Atoi(raw); err == nil && v >= 0 {
+				ms = v
+			}
+		}
+		p.metaSleep = time.Duration(ms) * time.Millisecond
+		path := os.Getenv("RAILYARD_TESTPLUGIN_META_LOG")
+		if path == "" {
+			return fmt.Errorf("testplugin: meta mode requires RAILYARD_TESTPLUGIN_META_LOG")
+		}
+		f, err := os.Create(path)
+		if err != nil {
+			return fmt.Errorf("testplugin: create meta log: %w", err)
+		}
+		p.metaOut = f
+		p.metaUnsub = h.SubscribeWithMeta(plugin.CarCreated, func(_ plugin.EventType, _ any, meta plugin.EventMeta) {
+			p.metaMu.Lock()
+			fmt.Fprintf(p.metaOut, "%d %d\n", meta.Seq, meta.Dropped)
+			_ = p.metaOut.Sync()
+			p.metaMu.Unlock()
+			if p.metaSleep > 0 {
+				time.Sleep(p.metaSleep)
+			}
+		})
+		return nil
+	}
+
 	// Slow-burst mode (railyard-fll.5.3). Detected up front so default
 	// mode below stays a no-op for slow-only env state.
 	if os.Getenv("RAILYARD_TESTPLUGIN_SLOW") == "1" {
@@ -174,10 +325,35 @@ func (p *testPlugin) slowHandle(topic plugin.EventType, payload any) {
 	}
 }
 
-func (p *testPlugin) Start(_ context.Context) error {
+func (p *testPlugin) Start(ctx context.Context) error {
 	if p.out != nil {
 		fmt.Fprintln(p.out, "start ok")
 		_ = p.out.Sync()
+	}
+	// KV mode: exercise the full Store round-trip and log each observed
+	// result so the host-side e2e can assert the SDK Store works against a
+	// real host DB (railyard-77h.11).
+	if p.kvEnabled && p.kvHost != nil {
+		p.kvRoundTrip(ctx)
+	}
+	// Emit mode: repeatedly publish onto our own topic until Stop. The
+	// repetition tolerates the brief window before the Subscribe stream
+	// is wired host-side (railyard-77h.9).
+	if p.emitEnabled && p.emitHost != nil {
+		go func() {
+			ticker := time.NewTicker(100 * time.Millisecond)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-p.emitStopCh:
+					return
+				case <-ticker.C:
+					ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+					_ = p.emitHost.Emit(ctx, emitTopic, map[string]any{"msg": "pong"})
+					cancel()
+				}
+			}
+		}()
 	}
 	return nil
 }
@@ -193,6 +369,55 @@ func (p *testPlugin) Stop(_ context.Context) error {
 		_ = p.out.Sync()
 		_ = p.out.Close()
 	}
+	// Emit-mode shutdown: stop the emit loop, unsubscribe, close the log.
+	if p.emitEnabled {
+		p.emitStopOnce.Do(func() { close(p.emitStopCh) })
+		if p.emitUnsub != nil {
+			p.emitUnsub()
+		}
+		p.emitMu.Lock()
+		if p.emitOut != nil {
+			_ = p.emitOut.Sync()
+			_ = p.emitOut.Close()
+			p.emitOut = nil
+		}
+		p.emitMu.Unlock()
+	}
+
+	// KV-mode shutdown: close the kv log (railyard-77h.11).
+	if p.kvEnabled && p.kvOut != nil {
+		_ = p.kvOut.Sync()
+		_ = p.kvOut.Close()
+		p.kvOut = nil
+	}
+
+	// Command-spec mode shutdown: close the command log under the same
+	// mutex the handler uses for its writes (railyard-77h.16).
+	if p.cmdEnabled {
+		p.cmdMu.Lock()
+		if p.cmdOut != nil {
+			_ = p.cmdOut.Sync()
+			_ = p.cmdOut.Close()
+			p.cmdOut = nil
+		}
+		p.cmdMu.Unlock()
+	}
+
+	// Meta-mode shutdown: unsubscribe then close the meta log under the
+	// same mutex the handler uses for its writes.
+	if p.metaEnabled {
+		if p.metaUnsub != nil {
+			p.metaUnsub()
+		}
+		p.metaMu.Lock()
+		if p.metaOut != nil {
+			_ = p.metaOut.Sync()
+			_ = p.metaOut.Close()
+			p.metaOut = nil
+		}
+		p.metaMu.Unlock()
+	}
+
 	// Slow-mode shutdown: unsubscribe each topic then close every
 	// per-topic file. Mutex protects the close against an in-flight
 	// drain goroutine (slowHandle takes the same mutex around its
@@ -212,6 +437,59 @@ func (p *testPlugin) Stop(_ context.Context) error {
 		p.slowMu.Unlock()
 	}
 	return nil
+}
+
+// kvRoundTrip drives Host.Store() through Put/Get/List/Delete and writes
+// one "step=result" line per operation to the kv log so the host-side e2e
+// can assert each step succeeded across the process boundary
+// (railyard-77h.11).
+func (p *testPlugin) kvRoundTrip(ctx context.Context) {
+	st := p.kvHost.Store()
+	logln := func(format string, args ...any) {
+		fmt.Fprintf(p.kvOut, format+"\n", args...)
+		_ = p.kvOut.Sync()
+	}
+
+	// Missing key first.
+	if _, found, err := st.Get(ctx, "cursor"); err != nil {
+		logln("get-missing err=%v", err)
+	} else {
+		logln("get-missing found=%v", found)
+	}
+
+	// Put then Get.
+	if err := st.Put(ctx, "cursor", []byte("rev-42")); err != nil {
+		logln("put err=%v", err)
+	} else {
+		logln("put ok")
+	}
+	if v, found, err := st.Get(ctx, "cursor"); err != nil {
+		logln("get err=%v", err)
+	} else {
+		logln("get found=%v value=%s", found, string(v))
+	}
+
+	// List.
+	_ = st.Put(ctx, "seen:a", []byte("1"))
+	_ = st.Put(ctx, "seen:b", []byte("1"))
+	if keys, err := st.List(ctx, "seen:"); err != nil {
+		logln("list err=%v", err)
+	} else {
+		logln("list keys=%v", keys)
+	}
+
+	// Delete then Get.
+	if err := st.Delete(ctx, "cursor"); err != nil {
+		logln("delete err=%v", err)
+	} else {
+		logln("delete ok")
+	}
+	if _, found, err := st.Get(ctx, "cursor"); err != nil {
+		logln("get-after-delete err=%v", err)
+	} else {
+		logln("get-after-delete found=%v", found)
+	}
+	logln("done")
 }
 
 func main() {

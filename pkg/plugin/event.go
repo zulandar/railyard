@@ -25,8 +25,19 @@ package plugin
 //	[YardPaused]        -> [YardPausedEvent]
 //	[YardResumed]       -> [YardResumedEvent]
 //
-// Adding a new event type is a breaking SDK change and requires bumping
-// the major version of the railyard module.
+// # Wire-compat policy
+//
+// Adding a new event topic is an ADDITIVE, minor change: a topic
+// travels as a plain string in the HostService.Subscribe stream, and a
+// plugin built against an older SDK simply never subscribes to a topic
+// it does not know about. New topics MUST be appended to [CoreEventTypes]
+// so the host advertises them during the Init handshake; the host's
+// advertised set lets the SDK warn a plugin author who subscribes to a
+// topic the running host does not support (railyard-77h.8).
+//
+// REMOVING a topic, or changing the payload struct paired with an
+// existing topic, remains a breaking change and requires a major
+// version bump of the railyard module.
 type EventType string
 
 // Phase 1 closed set of event topics. The numeric ordering has no

@@ -28,6 +28,7 @@ func AllModels() []interface{} {
 		&models.TelegraphConversation{},
 		&models.BullIssue{},
 		&models.BullMeta{},
+		&models.PluginKV{},
 		&audit.AuditEvent{},
 	}
 }

@@ -47,6 +47,7 @@ import (
 	"log/slog"
 	"sync"
 
+	"google.golang.org/protobuf/types/known/structpb"
 	"gopkg.in/yaml.v3"
 
 	"github.com/zulandar/railyard/pkg/plugin"
@@ -74,10 +75,17 @@ type RecordedSubscription struct {
 	// Topic is the [plugin.EventType] the plugin subscribed to.
 	Topic plugin.EventType
 
-	// Handler is the handler the plugin registered. Tests rarely call
-	// this directly — prefer [FakeHost.DriveEvent], which fires every
-	// matching subscription and respects unsubscribes.
+	// Handler is the handler the plugin registered via Subscribe. Nil for
+	// subscriptions registered via [FakeHost.SubscribeWithMeta] (see
+	// MetaHandler). Tests rarely call this directly — prefer
+	// [FakeHost.DriveEvent].
 	Handler plugin.EventHandler
+
+	// MetaHandler is the handler registered via [FakeHost.SubscribeWithMeta].
+	// Nil for plain Subscribe registrations. Fired by
+	// [FakeHost.DriveEventWithMeta] (and by [FakeHost.DriveEvent] with a
+	// zero [plugin.EventMeta]).
+	MetaHandler plugin.MetaEventHandler
 
 	// Unsubscribed reports whether the subscription's [plugin.Unsubscribe]
 	// has been called. [FakeHost.DriveEvent] skips records where this
@@ -85,15 +93,34 @@ type RecordedSubscription struct {
 	Unsubscribed bool
 }
 
-// RecordedRegistration captures one call to [FakeHost.RegisterCommand].
-// Tests can assert that a plugin registered the expected command name
-// without invoking the underlying handler.
+// RecordedRegistration captures one call to [FakeHost.RegisterCommand]
+// or [FakeHost.RegisterCommandSpec]. Tests can assert that a plugin
+// registered the expected command name — and, for the typed variant, the
+// expected argument signature — without invoking the underlying handler.
 type RecordedRegistration struct {
 	// Name is the command name the plugin registered.
 	Name string
 
 	// Handler is the [plugin.CommandHandler] the plugin supplied.
 	Handler plugin.CommandHandler
+
+	// Spec is the typed [plugin.CommandSpec] for registrations made via
+	// [FakeHost.RegisterCommandSpec] (railyard-77h.16). For a bare
+	// [FakeHost.RegisterCommand] it is the zero value with Spec.Name set
+	// to Name and Spec.Args nil, so tests can read Spec.Args == nil to
+	// tell the two registration paths apart.
+	Spec plugin.CommandSpec
+}
+
+// RecordedEmit captures one call to [FakeHost.Emit] so tests can assert
+// "the plugin published topic X with this payload" (railyard-77h.9).
+type RecordedEmit struct {
+	// Topic is the namespaced topic the plugin emitted.
+	Topic string
+
+	// Payload is the map the plugin supplied. Stored by reference; the
+	// FakeHost does not copy the map.
+	Payload map[string]any
 }
 
 // RecordedDispatch captures one call to [FakeHost.DispatchCommand].
@@ -148,6 +175,11 @@ type FakeHost struct {
 	// tests can assert on the attempted name.
 	RegisterCommandErr error
 
+	// EmitErr, if non-nil, is returned from every call to [FakeHost.Emit].
+	// The emit is still recorded so tests can assert on the attempted
+	// topic and payload.
+	EmitErr error
+
 	// LoggerHandler overrides the default capturing handler. Leave nil
 	// to use the built-in [CapturedLog] recorder accessible via
 	// [FakeHost.Logs].
@@ -157,8 +189,17 @@ type FakeHost struct {
 	subscriptions  []*RecordedSubscription
 	registrations  []RecordedRegistration
 	dispatches     []RecordedDispatch
+	emits          []RecordedEmit
 	logs           []CapturedLog
 	defaultHandler slog.Handler
+
+	// store is the in-memory key/value fake returned by [FakeHost.Store].
+	// It is lazily created on first access so the zero-value FakeHost
+	// keeps working. Like the real host's per-connection store it is
+	// namespaced to this FakeHost instance — a separate FakeHost has a
+	// separate store, so two plugins under test never see each other's
+	// keys (railyard-77h.11).
+	store *FakeStore
 }
 
 // Compile-time assertion that *FakeHost satisfies plugin.Host. The
@@ -204,6 +245,23 @@ func (h *FakeHost) Subscribe(topic plugin.EventType, handler plugin.EventHandler
 	}
 }
 
+// SubscribeWithMeta records a meta-aware subscription and returns an
+// [plugin.Unsubscribe] that marks it unsubscribed. The recorded handler
+// is fired by [FakeHost.DriveEventWithMeta] (with the supplied
+// [plugin.EventMeta]) and by [FakeHost.DriveEvent] (with a zero meta).
+func (h *FakeHost) SubscribeWithMeta(topic plugin.EventType, handler plugin.MetaEventHandler) plugin.Unsubscribe {
+	h.mu.Lock()
+	rec := &RecordedSubscription{Topic: topic, MetaHandler: handler}
+	h.subscriptions = append(h.subscriptions, rec)
+	h.mu.Unlock()
+
+	return func() {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		rec.Unsubscribed = true
+	}
+}
+
 // Snapshot returns SnapshotValue and SnapshotErr. When SnapshotErr is
 // non-nil the value is dropped and (nil, err) is returned — this
 // mirrors railyard's real *Host, which returns (nil, err) on every
@@ -234,7 +292,11 @@ func (h *FakeHost) Snapshot(_ context.Context) (*plugin.Snapshot, error) {
 func (h *FakeHost) RegisterCommand(name string, handler plugin.CommandHandler) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.registrations = append(h.registrations, RecordedRegistration{Name: name, Handler: handler})
+	h.registrations = append(h.registrations, RecordedRegistration{
+		Name:    name,
+		Handler: handler,
+		Spec:    plugin.CommandSpec{Name: name},
+	})
 	if h.RegisterCommandErr != nil {
 		return h.RegisterCommandErr
 	}
@@ -247,6 +309,37 @@ func (h *FakeHost) RegisterCommand(name string, handler plugin.CommandHandler) e
 	for _, prev := range h.registrations[:len(h.registrations)-1] {
 		if prev.Name == name {
 			return fmt.Errorf("pluginhost: command %q is already registered", name)
+		}
+	}
+	return nil
+}
+
+// RegisterCommandSpec records a typed registration and returns errors in
+// the same situations as [FakeHost.RegisterCommand], keyed off
+// spec.Name. The full [plugin.CommandSpec] (including Args) is recorded
+// on [RecordedRegistration.Spec] so tests can assert on the declared
+// argument signature. A non-nil [FakeHost.RegisterCommandErr] takes
+// precedence over the validation errors (railyard-77h.16).
+func (h *FakeHost) RegisterCommandSpec(spec plugin.CommandSpec, handler plugin.CommandHandler) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.registrations = append(h.registrations, RecordedRegistration{
+		Name:    spec.Name,
+		Handler: handler,
+		Spec:    spec,
+	})
+	if h.RegisterCommandErr != nil {
+		return h.RegisterCommandErr
+	}
+	if spec.Name == "" {
+		return errors.New("pluginhost: command name must not be empty")
+	}
+	if handler == nil {
+		return errors.New("pluginhost: command handler must not be nil")
+	}
+	for _, prev := range h.registrations[:len(h.registrations)-1] {
+		if prev.Name == spec.Name {
+			return fmt.Errorf("pluginhost: command %q is already registered", spec.Name)
 		}
 	}
 	return nil
@@ -273,6 +366,70 @@ func (h *FakeHost) DispatchCommand(ctx context.Context, name string, args plugin
 		}, nil
 	}
 	return handler(ctx, args)
+}
+
+// Emit records the call and returns EmitErr (nil unless set). The real
+// host enforces a "<plugin>." namespace prefix and an allow.publish gate
+// on the connection-bound identity; the fake performs no enforcement so
+// unit tests can assert what the plugin tried to publish. Inject EmitErr
+// to exercise the plugin's error handling (railyard-77h.9).
+func (h *FakeHost) Emit(_ context.Context, topic string, payload map[string]any) error {
+	// Coerce the payload through a structpb round-trip exactly as the real
+	// host does on the wire (hostclient_adapter), so the recorded payload
+	// carries the same types a subscriber actually receives — notably every
+	// number as float64, not the caller's Go int/int64. Without this a test
+	// could assert on int and pass while production delivers float64
+	// (railyard-uv8.11). A payload that cannot be represented as a
+	// structpb.Struct fails here, mirroring the real Emit.
+	st, err := structpb.NewStruct(payload)
+	if err != nil {
+		return fmt.Errorf("plugintest: Emit: payload not representable on the wire: %w", err)
+	}
+	coerced := st.AsMap()
+
+	h.mu.Lock()
+	h.emits = append(h.emits, RecordedEmit{Topic: topic, Payload: coerced})
+	emitErr := h.EmitErr
+	h.mu.Unlock()
+	return emitErr
+}
+
+// Emits returns a snapshot of the [FakeHost.Emit] calls made so far.
+func (h *FakeHost) Emits() []RecordedEmit {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	out := make([]RecordedEmit, len(h.emits))
+	copy(out, h.emits)
+	return out
+}
+
+// Store returns this FakeHost's in-memory [plugin.Store] fake
+// (railyard-77h.11). The store is created lazily and is namespaced to
+// this FakeHost instance: a different FakeHost has a different store, so
+// tests for two plugins never share keys — mirroring the real host's
+// per-connection namespacing. Tests can inspect or seed the store
+// directly via [FakeHost.StoredValues] / [FakeStore].
+func (h *FakeHost) Store() plugin.Store {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.store == nil {
+		h.store = NewFakeStore()
+	}
+	return h.store
+}
+
+// StoredValues returns a copy of every key/value currently held by this
+// FakeHost's Store, so a test can assert "the plugin persisted X" without
+// reaching back through the Store interface. The returned map and its
+// byte slices are copies; mutating them does not affect host state.
+func (h *FakeHost) StoredValues() map[string][]byte {
+	h.mu.Lock()
+	store := h.store
+	h.mu.Unlock()
+	if store == nil {
+		return map[string][]byte{}
+	}
+	return store.snapshot()
 }
 
 // Logger returns a [*slog.Logger] backed by either LoggerHandler (when
@@ -353,6 +510,23 @@ func (h *FakeHost) Logs() []CapturedLog {
 //
 // Returns the number of handlers that were invoked.
 func (h *FakeHost) DriveEvent(topic plugin.EventType, payload any) int {
+	return h.driveEvent(topic, payload, plugin.EventMeta{})
+}
+
+// DriveEventWithMeta is like [FakeHost.DriveEvent] but delivers the
+// supplied [plugin.EventMeta] to meta-aware subscriptions registered via
+// [FakeHost.SubscribeWithMeta]. Plain Subscribe handlers still fire
+// (they receive only topic+payload). Returns the number of handlers
+// invoked (railyard-77h.10).
+func (h *FakeHost) DriveEventWithMeta(topic plugin.EventType, payload any, meta plugin.EventMeta) int {
+	return h.driveEvent(topic, payload, meta)
+}
+
+// driveEvent is the shared dispatch loop behind DriveEvent and
+// DriveEventWithMeta. It fires each active subscription's handler for
+// the topic: plain [plugin.EventHandler]s get topic+payload,
+// [plugin.MetaEventHandler]s additionally get meta.
+func (h *FakeHost) driveEvent(topic plugin.EventType, payload any, meta plugin.EventMeta) int {
 	h.mu.Lock()
 	snap := make([]*RecordedSubscription, len(h.subscriptions))
 	copy(snap, h.subscriptions)
@@ -366,9 +540,16 @@ func (h *FakeHost) DriveEvent(topic plugin.EventType, payload any) int {
 			continue
 		}
 		handler := sub.Handler
+		metaHandler := sub.MetaHandler
 		h.mu.Unlock()
-		handler(topic, payload)
-		invoked++
+		switch {
+		case metaHandler != nil:
+			metaHandler(topic, payload, meta)
+			invoked++
+		case handler != nil:
+			handler(topic, payload)
+			invoked++
+		}
 	}
 	return invoked
 }
@@ -382,8 +563,10 @@ func (h *FakeHost) Reset() {
 	h.subscriptions = nil
 	h.registrations = nil
 	h.dispatches = nil
+	h.emits = nil
 	h.logs = nil
 	h.defaultHandler = nil
+	h.store = nil
 }
 
 // captureHandler is the default slog handler installed by

@@ -238,6 +238,60 @@ from this context, not `context.Background()`.
 
 ---
 
+## Optional: reporting health (`HealthReporter`)
+
+The host supervises your **process** — it relaunches you on a crash and
+counts crashes against a budget. But "the process is alive" is not the
+same as "the plugin is functional": a connector with dead remote
+credentials, or a backend whose API is returning 401s, is alive but
+useless. To surface that, implement the **optional** `HealthReporter`
+interface in addition to `Plugin`:
+
+```go
+type HealthReporter interface {
+    Health(ctx context.Context) (HealthStatus, string)
+}
+```
+
+`HealthStatus` is one of `plugin.HealthOK`, `plugin.HealthDegraded`, or
+`plugin.HealthFailing`. The second return value is a short
+human-readable message surfaced to operators (e.g. `"github API 401"`).
+
+```go
+func (p *MyPlugin) Health(ctx context.Context) (plugin.HealthStatus, string) {
+    if p.lastAuthErr != nil {
+        return plugin.HealthFailing, "remote auth failed: " + p.lastAuthErr.Error()
+    }
+    if p.queueDepth > p.warnThreshold {
+        return plugin.HealthDegraded, fmt.Sprintf("queue backed up: %d", p.queueDepth)
+    }
+    return plugin.HealthOK, ""
+}
+```
+
+Rules:
+
+- **It's opt-in.** Implementing `HealthReporter` is additive — the
+  required `Plugin` interface is unchanged. A plugin that does **not**
+  implement it is fully supported: the host shows `n/a` for its HEALTH
+  column instead of treating the absence as an error. Plugins built
+  before this RPC existed keep working unchanged.
+- **Return fast.** The host polls `Health` on an interval (default 30s)
+  with a **2-second deadline**. Do not block on a long remote call —
+  check your dependency in the background and return a *cached* verdict
+  here. If your `Health` times out or returns an error, the host records
+  the plugin as `degraded` with the error text.
+- **Don't panic.** A panic in `Health` is recovered like any other user
+  method: the host gets a gRPC error and your process exits non-zero
+  (counting against the crash budget).
+
+The verdict shows up in `ry plugins status` under the HEALTH column and
+in the `--json` output (`health`, `health_message`, `health_checked_at`).
+See [`operating.md`](operating.md) for the operator view and how to tune
+the poll interval.
+
+---
+
 ## The Host interface
 
 `plugin.Host` is the only path from your plugin into railyard. Every
@@ -249,9 +303,11 @@ type Host interface {
     Config(name string) yaml.Node
     YardInfo() YardInfo
     Subscribe(topic EventType, h EventHandler) Unsubscribe
+    SubscribeWithMeta(topic EventType, h MetaEventHandler) Unsubscribe
     Snapshot(ctx context.Context) (*Snapshot, error)
     RegisterCommand(name string, h CommandHandler) error
     DispatchCommand(ctx context.Context, name string, args CommandArgs) (CommandResult, error)
+    Emit(ctx context.Context, topic string, payload map[string]any) error
     RunDaemon(name string, fn DaemonFunc) // deprecated
     Logger() *slog.Logger
 }
@@ -310,6 +366,49 @@ safe to call multiple times.
 subscriber. Plugins that need ground truth under sustained load should
 also call `Snapshot` periodically.
 
+**Topic negotiation.** Event topics are an *additive* surface: adding a
+new `EventType` to the SDK is a minor change, not a major-version break.
+At Init the host advertises the set of topics it can deliver (the string
+form of `plugin.CoreEventTypes()`), and the SDK records it. If you
+`Subscribe` to a topic the running host did not advertise — e.g. your
+plugin was built against a newer SDK than the host — the SDK logs a
+distinct WARN (`reason=unknown-topic`) instead of leaving a silently
+dead subscription. This is separate from an allow-list denial, which the
+host reports as `PermissionDenied` and the SDK logs with
+`reason=allowlist-denied`. An older host that predates negotiation
+advertises nothing, in which case the SDK skips the check entirely and
+the subscription behaves exactly as before. The plugin's own
+`plugin.SDKVersion` is reported back to the host at Init and shown in the
+`SDK` column of `ry plugins status`.
+
+**Gap detection with `SubscribeWithMeta`.** Event delivery is
+at-most-once: under sustained backpressure the host drops the oldest
+queued events, and everything in flight during a plugin crash/relaunch
+window is lost. Plain `Subscribe` gives you no way to tell. Use
+`SubscribeWithMeta` to receive an `EventMeta{Seq, Dropped}` alongside
+each payload:
+
+```go
+h.SubscribeWithMeta(plugin.CarStatusChanged, func(topic plugin.EventType, payload any, meta plugin.EventMeta) {
+    if meta.Dropped > lastDropped {
+        // A gap opened — reconcile from ground truth before trusting
+        // subsequent events.
+        reconcileViaSnapshot(ctx, h)
+    }
+    lastDropped = meta.Dropped
+    // ... handle payload ...
+})
+```
+
+The reconcile pattern: on `Start` (a fresh stream) take a `Snapshot`
+first, then consume events; whenever `meta.Dropped` increases between two
+received events, re-`Snapshot` to catch up. `meta.Seq` is a per-stream
+delivery counter starting at 1; it **resets to 1 when the stream is
+reopened** (e.g. after a relaunch), which you should treat as "take a
+fresh Snapshot". Exactly-once delivery is explicitly out of scope — the
+SDK gives you gap *visibility*, not gap *prevention*. Plain `Subscribe`
+is unchanged for consumers that do not need this.
+
 ### Snapshot
 
 Returns the current full operational state in a single read
@@ -367,6 +466,47 @@ succeeds locally, the host only dispatches commands the operator has
 explicitly allowed — see [Capabilities and
 allow-listing](#capabilities-and-allow-listing).
 
+A command registered with `RegisterCommand` carries **no argument
+schema**: the host forwards dispatched args verbatim and your handler is
+responsible for every presence/type check (the `args["name"].(string)`
+assertion above).
+
+#### RegisterCommandSpec (host-validated args)
+
+`RegisterCommandSpec` is the typed variant (railyard-77h.16). You declare
+the command's argument signature; the host validates dispatched args
+against it — required keys must be present and every present value must
+type-check — **before** your handler runs. A violation returns
+`CommandResult{Success: false, Error: <violation>}` to the caller and the
+RPC into your plugin is never issued, so your handler only ever sees args
+that already satisfy the spec.
+
+```go
+func (p *MyPlugin) Init(ctx context.Context, h plugin.Host) error {
+    return h.RegisterCommandSpec(plugin.CommandSpec{
+        Name: "my-plugin.scale",
+        Args: []plugin.ArgSpec{
+            {Name: "Track", Type: plugin.ArgString, Required: true},
+            {Name: "Count", Type: plugin.ArgInt, Required: true},
+            {Name: "Force", Type: plugin.ArgBool, Required: false,
+                Description: "skip safety checks"},
+        },
+    }, p.onScale)
+}
+```
+
+`ArgType` is one of `ArgString`, `ArgInt`, `ArgBool`, `ArgFloat`. Type
+checking follows the wire encoding (args round-trip through a
+`google.protobuf.Struct`, so every JSON number arrives as a `float64`):
+an `ArgInt` accepts a `float64` only when it is integral (`5.0` ok, `5.5`
+rejected); an `ArgFloat` accepts any number; `ArgString` accepts a
+string; `ArgBool` accepts a bool. Optional args (`Required: false`) are
+type-checked only when present. The declared signature is surfaced in
+`ry plugins status -v` as `name(arg:type, ...)`.
+
+`RegisterCommand` stays available unchanged for commands that take no
+declared args or that prefer to validate args themselves.
+
 ### DispatchCommand
 
 Invokes a command by name. The host first checks the core allow-list; if
@@ -396,6 +536,31 @@ Validation failures land as `Success: false` with `Error` set; the Go
 dispatchable core commands is in the operator guide
 (`railyard-fll.9.3`).
 
+Argument validation runs **host-side** for two classes of command and is
+uniform across both (railyard-77h.16):
+
+- **Core allow-list commands** (e.g. `scale_track`) carry a built-in
+  required-key/type schema the host enforces before invoking the binding.
+- **Plugin commands registered with `RegisterCommandSpec`** carry the
+  typed schema their author declared; the host validates dispatched args
+  against it before forwarding to the owning plugin's handler.
+
+In both cases a missing required arg yields `missing required argument
+"X"` and a present-but-wrong-typed arg yields `argument "X" has wrong
+type`, returned as `Success: false` **without** the command's
+implementation ever running. Plugin commands registered with the bare
+`RegisterCommand` (no spec) are forwarded unvalidated — exactly as
+before.
+
+`scale_track` adapts to the deployment mode. In local (tmux) mode it
+creates or kills per-engine tmux sessions via the orchestrator. In
+Kubernetes mode (railyard.yaml carries a `kubernetes.namespace`) it
+scales the track's engine Deployment replicas
+(`<release>-engine-<track>`) instead — a plugin dispatching
+`scale_track` does not need to know which mode it is running in. The
+mysql/pgvector StatefulSets are data stores and are never touched by a
+track-level scale.
+
 ### Logger
 
 Returns a `*slog.Logger` scoped with `plugin=<name>`. Use this for
@@ -406,6 +571,114 @@ plugin tag.
 p.host.Logger().Info("processed batch", "rows", n)
 // level=INFO plugin=my-plugin msg="processed batch" rows=42
 ```
+
+### Emit (publishing events)
+
+`Emit` lets your plugin publish its own events onto the bus so other
+plugins (and core) can react — turning a one-way consumer into a
+composable producer (railyard-77h.9):
+
+```go
+err := p.host.Emit(ctx, "my-plugin.remote_changed", map[string]any{
+    "ref":  "refs/heads/main",
+    "sha":  sha,
+})
+```
+
+Rules:
+
+- **Namespace.** The topic MUST be prefixed with your plugin's own
+  `Name()`, i.e. `"my-plugin.<something>"`. The host derives the prefix
+  from the connection-bound identity and rejects anything else with
+  `PermissionDenied` — you cannot publish into another plugin's
+  namespace.
+- **Allow-list.** The operator must grant the topic in your
+  `allow.publish` block (deny-by-default; same `"*"` / `"ns.*"` / literal
+  grammar as commands). See `docs/plugins/operating.md`.
+- **Payload.** A `map[string]any` of JSON-compatible values. Encoding
+  errors and policy denials surface as a non-nil error.
+
+**Receiving a plugin-published event.** Subscribers list the namespaced
+topic (or `"*"`) in their `allow.events` and `Subscribe` to it. Because
+dynamic topics have no static Go payload struct, the payload arrives as
+`map[string]any` — type-assert it:
+
+```go
+h.Subscribe(plugin.EventType("trainmaster.synced"), func(topic plugin.EventType, payload any) {
+    m, ok := payload.(map[string]any)
+    if !ok {
+        return
+    }
+    ref, _ := m["ref"].(string)
+    // ...
+})
+```
+
+(The SDK's static `CarCreatedEvent`-style structs apply only to the core
+topics; plugin-published topics are always `map[string]any`.)
+
+### Store (persistent key/value)
+
+`Store()` gives your plugin a private, persistent key/value namespace
+backed by railyard's database (railyard-77h.11). Use it for anything you
+need to remember across restarts: an event-stream reconcile cursor, a
+dedupe set, a "last synced" marker. Values are opaque `[]byte` — you
+choose the encoding (raw, JSON, protobuf, whatever).
+
+The store is **namespaced to your plugin by construction.** The host
+derives the namespace from the connection-bound identity, never from a
+request field, so you can only ever read and write your own keys — another
+plugin's keys are invisible to you and yours to them.
+
+```go
+type Store interface {
+    Get(ctx context.Context, key string) ([]byte, bool, error)
+    Put(ctx context.Context, key string, value []byte) error
+    Delete(ctx context.Context, key string) error
+    List(ctx context.Context, prefix string) ([]string, error)
+}
+```
+
+A common pattern is a **reconcile cursor**: persist the last sequence
+number you processed so that after a restart you resume from where you
+left off rather than reprocessing or losing events (see `Subscribe`'s
+`EventMeta.Seq` / gap detection above).
+
+```go
+const cursorKey = "reconcile-cursor"
+
+// On startup, read the saved cursor (absent on first run).
+func (p *MyPlugin) loadCursor(ctx context.Context) uint64 {
+    raw, found, err := p.host.Store().Get(ctx, cursorKey)
+    if err != nil || !found {
+        return 0 // first run, or store unavailable — start from zero
+    }
+    return binary.BigEndian.Uint64(raw)
+}
+
+// After processing an event, advance and persist the cursor.
+func (p *MyPlugin) saveCursor(ctx context.Context, seq uint64) error {
+    var buf [8]byte
+    binary.BigEndian.PutUint64(buf[:], seq)
+    return p.host.Store().Put(ctx, cursorKey, buf[:])
+}
+```
+
+`Get` returns `(nil, false, nil)` for a missing key — absence is not an
+error. `Delete` of an absent key is a no-op. `List("")` returns every key
+in your namespace, sorted ascending; pass a prefix to narrow it.
+
+**Limits.** To protect the shared database the host caps each plugin at:
+
+| Limit | Value | On overrun |
+| --- | --- | --- |
+| Value size | 64 KiB | `Put` returns an error (`ResourceExhausted`) |
+| Key length | 256 bytes | `Put` returns an error (`InvalidArgument`) |
+| Keys per plugin | 1024 | `Put` of a *new* key returns an error (`ResourceExhausted`); overwriting an existing key is always allowed |
+
+If railyard is running without a database, every `Store` method returns an
+error (`"kv store not configured"`) rather than panicking — handle the
+error and fall back to in-memory state if your plugin must keep working.
 
 ### RunDaemon (deprecated)
 
@@ -649,6 +922,7 @@ Per-plugin fields:
 | `restart_count` | Cumulative supervisor relaunches since the host booted. |
 | `subscription_count` | Live event subscriptions the plugin owns. |
 | `command_count` | Plugin-registered commands the host routes to it. |
+| `command_signatures` | Each owned command rendered `name(arg:type, ...)` from its declared `RegisterCommandSpec` schema (bare commands render `name()`). Shown in `ry plugins status -v`. |
 | `last_activity` | Last lifecycle or dispatch event timestamp. NOT bumped by event delivery — see below. |
 | `pid` | Subprocess PID (0 when not running). |
 | `path` | Discovered binary path. |
@@ -757,6 +1031,9 @@ the rest of the plugin compiles unchanged.
 - **Proto contract** — `docs/plugins/proto.md`. The wire-level gRPC
   schema the SDK wraps. Authors should not need it day-to-day; it's
   the source of truth if the SDK ever surprises you.
+- **Non-Go plugins** — `docs/plugins/non-go.md`. Writing a plugin in
+  another language (handshake + broker dial-back walkthrough), with a
+  worked Python example under `examples/plugins/python/`.
 - **Active design** — the `railyard-fll` bd epic. Crash-budget
   (`railyard-fll.6`), operator config (`railyard-fll.4`), deprecation
   sweep (`railyard-fll.8`).

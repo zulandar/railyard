@@ -145,14 +145,58 @@ func reassignCarAdapter(db *gorm.DB) func(ctx context.Context, carID, fromEngine
 	}
 }
 
-// scaleTrackAdapter binds "scale_track" to orchestration.Scale. Note: this
-// touches tmux sessions on the host running the daemon, which is sensible
-// in local-dev mode where ry start owns tmux. In k8s pod mode, Scale will
-// fail because there's no tmux session — that's a pre-existing limitation
-// of the scale path, not something this adapter introduces.
+// scaleFunc is the orchestration.Scale signature, factored out so tests can
+// stub the tmux-based scale path without owning a real tmux session.
+type scaleFunc func(opts orchestration.ScaleOpts) (*orchestration.ScaleResult, error)
+
+// scaleTrackAdapter binds "scale_track" to the right scaling path for the
+// deployment mode.
+//
+//   - Local (tmux) mode — railyard.yaml has no `kubernetes:` section — drives
+//     orchestration.Scale, which creates/kills per-engine tmux sessions. This
+//     is the path `ry start` owns.
+//   - Kubernetes mode — railyard.yaml carries a `kubernetes.namespace` — scales
+//     the track's engine Deployment (`<release>-engine-<track>`) replicas via
+//     orchestration.ScaleK8sReplicas. The tmux path is skipped here because a
+//     pod has no tmux session, so orchestration.Scale would only ever return
+//     "no railyard session running".
+//
+// The OSS build wires no in-cluster kube client, so the scaler passed here is
+// nil; in that case ScaleK8sReplicas degrades to a logged no-op (see
+// orchestration.ScaleK8sReplicas). A future in-cluster build can inject a
+// real client-go-backed K8sScaler at buildPluginHost without touching this
+// adapter.
 func scaleTrackAdapter(db *gorm.DB, cfg *config.Config) func(ctx context.Context, track string, count int) error {
+	return scaleTrackAdapterWithScaler(db, cfg, nil, orchestration.Scale)
+}
+
+// scaleTrackAdapterWithScaler is the injectable core of scaleTrackAdapter.
+// scaler may be nil (OSS default → logged no-op in k8s mode); tmuxScale
+// defaults to orchestration.Scale when nil.
+func scaleTrackAdapterWithScaler(db *gorm.DB, cfg *config.Config, scaler orchestration.K8sScaler, tmuxScale scaleFunc) func(ctx context.Context, track string, count int) error {
+	if tmuxScale == nil {
+		tmuxScale = orchestration.Scale
+	}
 	return func(ctx context.Context, track string, count int) error {
-		_, err := orchestration.Scale(orchestration.ScaleOpts{
+		// Kubernetes mode: manage engine Deployment replicas; the tmux path
+		// does not apply inside a pod.
+		if cfg != nil && cfg.Kubernetes.Namespace != "" {
+			return orchestration.ScaleK8sReplicas(ctx, orchestration.K8sScaleOpts{
+				Config: cfg,
+				Scaler: scaler,
+				Track:  track,
+				Count:  count,
+			})
+		}
+		// Local mode: tmux-session scaling. K8s pod-replica management is a
+		// no-op here (logged inside ScaleK8sReplicas for observability).
+		_ = orchestration.ScaleK8sReplicas(ctx, orchestration.K8sScaleOpts{
+			Config: cfg,
+			Scaler: scaler,
+			Track:  track,
+			Count:  count,
+		})
+		_, err := tmuxScale(orchestration.ScaleOpts{
 			DB:     db,
 			Config: cfg,
 			Track:  track,

@@ -24,6 +24,7 @@ import (
 type AllowList struct {
 	events   []string
 	commands []string
+	publish  []string
 }
 
 // newAllowList constructs an AllowList from a config.AllowConfig. The
@@ -33,6 +34,7 @@ func newAllowList(a config.AllowConfig) AllowList {
 	return AllowList{
 		events:   append([]string(nil), a.Events...),
 		commands: append([]string(nil), a.Commands...),
+		publish:  append([]string(nil), a.Publish...),
 	}
 }
 
@@ -83,8 +85,36 @@ func (a AllowList) AllowCommand(name string) bool {
 	return false
 }
 
+// Publish returns a copy of the raw publish allow-list entries.
+func (a AllowList) Publish() []string {
+	return append([]string(nil), a.publish...)
+}
+
+// AllowPublish reports whether the plugin may publish the given event
+// topic via HostService.EmitEvent (railyard-77h.9). An empty list denies
+// everything. "*" matches all; "ns.*" matches any topic with that
+// prefix; otherwise literal match — the same grammar as AllowCommand.
+func (a AllowList) AllowPublish(topic string) bool {
+	for _, p := range a.publish {
+		if p == "*" {
+			return true
+		}
+		if strings.HasSuffix(p, ".*") {
+			prefix := p[:len(p)-1] // keep the trailing dot so "ns." matches "ns.foo" but not "nsfoo"
+			if strings.HasPrefix(topic, prefix) {
+				return true
+			}
+			continue
+		}
+		if p == topic {
+			return true
+		}
+	}
+	return false
+}
+
 // IsEmpty reports whether the allow-list has no entries (the strict
 // default that denies every capability).
 func (a AllowList) IsEmpty() bool {
-	return len(a.events) == 0 && len(a.commands) == 0
+	return len(a.events) == 0 && len(a.commands) == 0 && len(a.publish) == 0
 }

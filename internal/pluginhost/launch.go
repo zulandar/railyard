@@ -83,6 +83,21 @@ func (h *Host) launchPluginOnce(ctx context.Context, c candidate, logger *slog.L
 		return nil, errors.New("pluginhost: candidate path is empty")
 	}
 
+	// Optional sha256 pin enforcement (railyard-77h.15). This lives in the
+	// shared launch helper deliberately: both the first-boot path (initOne)
+	// and EVERY supervisor relaunch after a crash (supervise.go → relaunch)
+	// route through launchPluginOnce, so the binary is re-hashed and
+	// re-compared on every single launch. Verifying only at first boot would
+	// let a binary swapped between restarts slip through — exactly the drift
+	// this control exists to catch. We hash BEFORE any subprocess work so a
+	// mismatch never spawns the binary. The check is a no-op when no pin is
+	// configured (the default). See integrity.go for the residual-TOCTOU
+	// note: go-plugin re-opens and execs by path, so this is
+	// integrity-against-drift, not a sandbox.
+	if err := h.verifyBinaryPin(c, logger); err != nil {
+		return nil, err
+	}
+
 	// Resolve the per-plugin socket dir. go-plugin auto-creates a
 	// subdirectory of our choosing and binds a `plugin*` file inside;
 	// the resulting path satisfies the spec's 0600/owner-only policy.

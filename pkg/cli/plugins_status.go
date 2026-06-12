@@ -57,6 +57,7 @@ func newPluginsStatusCmd() *cobra.Command {
 		configPath string
 		urlFlag    string
 		jsonOut    bool
+		verbose    bool
 		timeout    time.Duration
 	)
 	cmd := &cobra.Command{
@@ -73,17 +74,18 @@ func newPluginsStatusCmd() *cobra.Command {
 		// a confusing block of flag help.
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runPluginsStatus(cmd, configPath, urlFlag, jsonOut, timeout)
+			return runPluginsStatus(cmd, configPath, urlFlag, jsonOut, verbose, timeout)
 		},
 	}
 	cmd.Flags().StringVarP(&configPath, "config", "c", "railyard.yaml", "path to Railyard config file")
 	cmd.Flags().StringVar(&urlFlag, "url", "", "override the target URL (default: http://127.0.0.1:<HealthPort>/plugins/status)")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "emit the raw JSON response instead of a table")
+	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "after the table, print per-plugin lifetime counters (events delivered/dropped, commands handled/failed, avg latency)")
 	cmd.Flags().DurationVar(&timeout, "timeout", 2*time.Second, "HTTP timeout")
 	return cmd
 }
 
-func runPluginsStatus(cmd *cobra.Command, configPath, urlFlag string, jsonOut bool, timeout time.Duration) error {
+func runPluginsStatus(cmd *cobra.Command, configPath, urlFlag string, jsonOut, verbose bool, timeout time.Duration) error {
 	url := urlFlag
 	if url == "" {
 		cfg, err := pluginsListLoadConfig(configPath)
@@ -112,7 +114,72 @@ func runPluginsStatus(cmd *cobra.Command, configPath, urlFlag string, jsonOut bo
 		return enc.Encode(snap)
 	}
 
-	return renderStatusTable(cmd.OutOrStdout(), snap)
+	if err := renderStatusTable(cmd.OutOrStdout(), snap); err != nil {
+		return err
+	}
+	if verbose {
+		if err := renderStatusCounters(cmd.OutOrStdout(), snap); err != nil {
+			return err
+		}
+		renderStatusCommandSignatures(cmd.OutOrStdout(), snap)
+	}
+	return nil
+}
+
+// renderStatusCommandSignatures prints each plugin's command signatures
+// (railyard-77h.16) in the -v detail block, one "name(arg:type, ...)" per
+// command. Kept out of the default table to keep it readable. Plugins
+// with no commands are skipped; nothing is printed if no plugin owns any
+// command.
+func renderStatusCommandSignatures(out io.Writer, snap *pluginhost.Snapshot) {
+	any := false
+	for _, p := range snap.Plugins {
+		if len(p.CommandSignatures) > 0 {
+			any = true
+			break
+		}
+	}
+	if !any {
+		return
+	}
+	fmt.Fprintln(out, "\nCOMMAND SIGNATURES:")
+	for _, p := range snap.Plugins {
+		if len(p.CommandSignatures) == 0 {
+			continue
+		}
+		fmt.Fprintf(out, "  %s: %s\n", p.Name, strings.Join(p.CommandSignatures, ", "))
+	}
+}
+
+// renderStatusCounters prints the per-plugin lifetime runtime counters
+// (railyard-77h.14) below the default table. Kept out of the main table
+// so the default view stays narrow and readable; -v opts into the detail.
+// Counters are process-lifetime (reset on yard restart) but survive a
+// plugin relaunch.
+func renderStatusCounters(out io.Writer, snap *pluginhost.Snapshot) error {
+	fmt.Fprintln(out, "\nRUNTIME COUNTERS (process-lifetime; reset on yardmaster restart):")
+	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "NAME\tEVENTS-DELIVERED\tEVENTS-DROPPED\tCMDS-HANDLED\tCMDS-FAILED\tAVG-LATENCY")
+	for _, p := range snap.Plugins {
+		fmt.Fprintf(w, "%s\t%d\t%d\t%d\t%d\t%s\n",
+			p.Name,
+			p.EventsDelivered,
+			p.EventsDropped,
+			p.CommandsHandled,
+			p.CommandsFailed,
+			formatAvgLatency(p.CommandLatencyAvgMicros, p.CommandsHandled),
+		)
+	}
+	return w.Flush()
+}
+
+// formatAvgLatency renders the derived average command latency. With zero
+// commands handled there is no meaningful average, so we print a dash.
+func formatAvgLatency(avgMicros, handled uint64) string {
+	if handled == 0 {
+		return "-"
+	}
+	return (time.Duration(avgMicros) * time.Microsecond).String()
 }
 
 // renderStatusTable writes a tab-aligned table mirroring the look of
@@ -120,11 +187,13 @@ func runPluginsStatus(cmd *cobra.Command, configPath, urlFlag string, jsonOut bo
 // ("3m ago", "just now", "-" for zero).
 func renderStatusTable(out io.Writer, snap *pluginhost.Snapshot) error {
 	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "NAME\tSTATUS\tRESTARTS\tSUBS\tCMDS\tLAST-ACTIVITY\tPID\tPATH\tERROR")
+	fmt.Fprintln(w, "NAME\tSTATUS\tHEALTH\tSDK\tRESTARTS\tSUBS\tCMDS\tLAST-ACTIVITY\tPID\tPATH\tERROR")
 	for _, p := range snap.Plugins {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			p.Name,
 			p.Status,
+			renderHealth(p.Health, p.HealthCheckedAt),
+			dashIfEmpty(p.SDKVersion),
 			dashIfZero(p.RestartCount),
 			dashIfZero(p.SubscriptionCount),
 			dashIfZero(p.CommandCount),
@@ -135,6 +204,46 @@ func renderStatusTable(out io.Writer, snap *pluginhost.Snapshot) error {
 		)
 	}
 	return w.Flush()
+}
+
+// renderHealth formats the optional plugin health verdict for the HEALTH
+// column (railyard-77h.12). A polled plugin shows "<value> <age>" (e.g.
+// "ok 12s"); "n/a" (the plugin does not implement HealthReporter) is shown
+// bare without an age; an empty value (never polled, or a non-running
+// row) renders as a dash.
+func renderHealth(value string, checkedAt time.Time) string {
+	if value == "" {
+		return "-"
+	}
+	if value == "n/a" {
+		return value
+	}
+	if checkedAt.IsZero() {
+		return value
+	}
+	return value + " " + healthAge(checkedAt)
+}
+
+// healthAge renders how long ago the last health poll completed as a
+// compact suffix ("12s", "3m", "2h"); very old timestamps fall back to a
+// date. Mirrors renderRelative's buckets but omits the " ago" suffix to
+// keep the HEALTH cell narrow.
+func healthAge(t time.Time) string {
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		secs := int(d.Seconds())
+		if secs < 0 {
+			secs = 0
+		}
+		return fmt.Sprintf("%ds", secs)
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	default:
+		return t.Format("2006-01-02")
+	}
 }
 
 // errorColumnMax bounds the ERROR column to keep the table readable in

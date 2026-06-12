@@ -9,11 +9,128 @@ import (
 	"time"
 
 	"github.com/zulandar/railyard/internal/car"
+	"github.com/zulandar/railyard/internal/config"
 	"github.com/zulandar/railyard/internal/events"
 	"github.com/zulandar/railyard/internal/models"
+	"github.com/zulandar/railyard/internal/orchestration"
 	"github.com/zulandar/railyard/pkg/plugin"
 	"gorm.io/gorm"
 )
+
+// fakeScaler records ScaleDeployment calls for adapter tests. It satisfies
+// orchestration.K8sScaler.
+type fakeScaler struct {
+	calls []fakeScaleCall
+	err   error
+}
+
+type fakeScaleCall struct {
+	namespace string
+	name      string
+	replicas  int32
+}
+
+func (f *fakeScaler) ScaleDeployment(_ context.Context, namespace, name string, replicas int32) error {
+	f.calls = append(f.calls, fakeScaleCall{namespace, name, replicas})
+	return f.err
+}
+
+// TestScaleTrackAdapter_K8sModeScalesDeployment verifies that when the config
+// carries a Kubernetes namespace, the adapter scales the track's engine
+// Deployment via the injected scaler and does NOT invoke the tmux-based
+// orchestration.Scale path (which would fail in a pod with no tmux session).
+func TestScaleTrackAdapter_K8sModeScalesDeployment(t *testing.T) {
+	gormDB := mockTestDB(t)
+	scaler := &fakeScaler{}
+	cfg := &config.Config{
+		Owner:      "test",
+		Tracks:     []config.TrackConfig{{Name: "backend", EngineSlots: 5}},
+		Kubernetes: config.KubernetesConfig{Namespace: "railyard-myapp"},
+	}
+
+	tmuxCalled := false
+	tmuxScale := func(opts orchestration.ScaleOpts) (*orchestration.ScaleResult, error) {
+		tmuxCalled = true
+		return &orchestration.ScaleResult{}, nil
+	}
+
+	adapter := scaleTrackAdapterWithScaler(gormDB, cfg, scaler, tmuxScale)
+	if err := adapter(context.Background(), "backend", 3); err != nil {
+		t.Fatalf("adapter: %v", err)
+	}
+
+	if tmuxCalled {
+		t.Error("tmux orchestration.Scale must NOT be called in k8s mode")
+	}
+	if len(scaler.calls) != 1 {
+		t.Fatalf("scaler calls = %d, want 1", len(scaler.calls))
+	}
+	call := scaler.calls[0]
+	if call.namespace != "railyard-myapp" {
+		t.Errorf("namespace = %q, want railyard-myapp", call.namespace)
+	}
+	if call.name != "railyard-myapp-engine-backend" {
+		t.Errorf("deployment = %q, want railyard-myapp-engine-backend", call.name)
+	}
+	if call.replicas != 3 {
+		t.Errorf("replicas = %d, want 3", call.replicas)
+	}
+}
+
+// TestScaleTrackAdapter_LocalModeUsesTmux verifies that in local mode (no
+// Kubernetes namespace) the adapter drives the existing tmux-based
+// orchestration.Scale path and performs no k8s pod-replica management.
+func TestScaleTrackAdapter_LocalModeUsesTmux(t *testing.T) {
+	gormDB := mockTestDB(t)
+	scaler := &fakeScaler{}
+	cfg := &config.Config{
+		Owner:  "test",
+		Tracks: []config.TrackConfig{{Name: "backend", EngineSlots: 5}},
+		// no Kubernetes section -> local mode
+	}
+
+	var gotOpts orchestration.ScaleOpts
+	tmuxCalled := false
+	tmuxScale := func(opts orchestration.ScaleOpts) (*orchestration.ScaleResult, error) {
+		tmuxCalled = true
+		gotOpts = opts
+		return &orchestration.ScaleResult{Track: opts.Track, Current: opts.Count}, nil
+	}
+
+	adapter := scaleTrackAdapterWithScaler(gormDB, cfg, scaler, tmuxScale)
+	if err := adapter(context.Background(), "backend", 2); err != nil {
+		t.Fatalf("adapter: %v", err)
+	}
+
+	if !tmuxCalled {
+		t.Error("tmux orchestration.Scale must be called in local mode")
+	}
+	if gotOpts.Track != "backend" || gotOpts.Count != 2 {
+		t.Errorf("tmux scale opts = {Track:%q Count:%d}, want {backend 2}", gotOpts.Track, gotOpts.Count)
+	}
+	if len(scaler.calls) != 0 {
+		t.Errorf("scaler calls = %d, want 0 in local mode (k8s replica mgmt is a no-op)", len(scaler.calls))
+	}
+}
+
+// TestScaleTrackAdapter_K8sScalerErrorPropagates ensures a scaler failure in
+// k8s mode surfaces from the adapter rather than being swallowed.
+func TestScaleTrackAdapter_K8sScalerErrorPropagates(t *testing.T) {
+	gormDB := mockTestDB(t)
+	scaler := &fakeScaler{err: errors.New("boom")}
+	cfg := &config.Config{
+		Owner:      "test",
+		Tracks:     []config.TrackConfig{{Name: "backend", EngineSlots: 5}},
+		Kubernetes: config.KubernetesConfig{Namespace: "railyard-myapp"},
+	}
+	tmuxScale := func(opts orchestration.ScaleOpts) (*orchestration.ScaleResult, error) {
+		return &orchestration.ScaleResult{}, nil
+	}
+	adapter := scaleTrackAdapterWithScaler(gormDB, cfg, scaler, tmuxScale)
+	if err := adapter(context.Background(), "backend", 3); err == nil {
+		t.Fatal("expected scaler error to propagate from adapter")
+	}
+}
 
 // TestForceCompleteAdapter_WritesAuditProgressNote verifies that the
 // force_complete plugin-host adapter persists a CarProgress audit row whose

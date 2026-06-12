@@ -6,10 +6,13 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
 	protov1 "github.com/zulandar/railyard/pkg/plugin/proto/v1"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"gopkg.in/yaml.v3"
@@ -46,8 +49,16 @@ type hostClient struct {
 	// adapter's HandleCommand handler. The host learns about commands
 	// from the Init handshake's advertised capabilities; this map only
 	// routes incoming HandleCommand RPCs back to the user impl.
+	//
+	// commandSpecs holds the typed argument signature for commands
+	// registered via [Host.RegisterCommandSpec] (railyard-77h.16), keyed
+	// by command name. Commands registered via the bare RegisterCommand
+	// carry no entry here. The Init adapter reads it via
+	// advertisedCommandSpecs to fill InitResponse.command_specs so the
+	// host can validate dispatched args before HandleCommand.
 	cmdMu           sync.RWMutex
 	commandHandlers map[string]CommandHandler
+	commandSpecs    map[string]CommandSpec
 
 	// subscribedTopics records every topic the plugin's user code has
 	// subscribed to via [hostClient.Subscribe]. The SDK adapter reads
@@ -58,6 +69,16 @@ type hostClient struct {
 	subMu              sync.Mutex
 	subscribedTopics   []string
 	subscribedTopicSet map[string]struct{}
+
+	// supportedTopics is the set of event topics the host advertised it
+	// can deliver, captured from the Init handshake
+	// (InitRequest.supported_event_topics, railyard-77h.8).
+	// topicNegotiated is true only when the host advertised a non-empty
+	// set; an old host that advertises nothing leaves it false and
+	// disables the unknown-topic check so new plugins keep working
+	// against old hosts. Both are guarded by subMu.
+	supportedTopics map[string]struct{}
+	topicNegotiated bool
 
 	// logger is the slog.Logger handed to the plugin via Logger(). It
 	// forwards records to the host through HostService.Log.
@@ -71,6 +92,7 @@ func newHostClient(pluginName string, hsc protov1.HostServiceClient, rootCtx con
 		hsc:                hsc,
 		rootCtx:            rootCtx,
 		commandHandlers:    make(map[string]CommandHandler),
+		commandSpecs:       make(map[string]CommandSpec),
 		subscribedTopicSet: make(map[string]struct{}),
 	}
 	hc.logger = slog.New(&hostLogHandler{
@@ -128,7 +150,40 @@ func (h *hostClient) Subscribe(topic EventType, handler EventHandler) Unsubscrib
 	if handler == nil {
 		return func() {}
 	}
+	// Adapt to the meta-aware path, discarding the metadata. Plain
+	// Subscribe behaviour is unchanged (railyard-77h.10).
+	return h.subscribeInternal(topic, func(t EventType, payload any, _ EventMeta) {
+		handler(t, payload)
+	})
+}
+
+// SubscribeWithMeta implements Host.SubscribeWithMeta. It shares the
+// same stream wiring as Subscribe but surfaces the per-stream sequence
+// number and cumulative drop count to the handler (railyard-77h.10).
+func (h *hostClient) SubscribeWithMeta(topic EventType, handler MetaEventHandler) Unsubscribe {
+	if handler == nil {
+		return func() {}
+	}
+	return h.subscribeInternal(topic, handler)
+}
+
+// subscribeInternal is the shared implementation behind Subscribe and
+// SubscribeWithMeta. The handler always receives [EventMeta]; the plain
+// Subscribe wrapper discards it.
+func (h *hostClient) subscribeInternal(topic EventType, handler MetaEventHandler) Unsubscribe {
 	h.recordSubscribedTopic(string(topic))
+	// Negotiation guard (railyard-77h.8): when the host advertised the
+	// topics it supports, a subscription to a topic outside that set will
+	// never deliver. Surface a clear, distinct WARN ("unknown-topic")
+	// rather than letting it fail silently — distinct from the
+	// allow-list denial surfaced in runSubscribeLoop ("allowlist-denied").
+	if h.unknownTopic(string(topic)) && h.logger != nil {
+		h.logger.Warn(
+			"plugin: subscribing to a topic the host does not advertise; it will never deliver — check host/SDK version compatibility",
+			slog.String("topic", string(topic)),
+			slog.String("reason", "unknown-topic"),
+		)
+	}
 	ctx, cancel := context.WithCancel(h.rootCtx)
 	stream, err := h.hsc.Subscribe(ctx, &protov1.SubscribeRequest{Topics: []string{string(topic)}})
 	if err != nil {
@@ -159,6 +214,64 @@ func (h *hostClient) recordSubscribedTopic(topic string) {
 	h.subscribedTopics = append(h.subscribedTopics, topic)
 }
 
+// setSupportedTopics records the host's Init-time topic advertisement
+// (InitRequest.supported_event_topics). A non-empty list enables the
+// unknown-topic check in [hostClient.Subscribe]; an empty list (an old
+// host that predates negotiation) leaves the check disabled
+// (railyard-77h.8).
+func (h *hostClient) setSupportedTopics(topics []string) {
+	h.subMu.Lock()
+	defer h.subMu.Unlock()
+	if len(topics) == 0 {
+		h.topicNegotiated = false
+		h.supportedTopics = nil
+		return
+	}
+	h.topicNegotiated = true
+	h.supportedTopics = make(map[string]struct{}, len(topics))
+	for _, t := range topics {
+		if t == "" {
+			continue
+		}
+		h.supportedTopics[t] = struct{}{}
+	}
+}
+
+// unknownTopic reports whether topic is one the host did NOT advertise
+// at Init time. It returns false when topic negotiation is inactive
+// (the host advertised nothing), so a new plugin keeps working against
+// an old host (railyard-77h.8).
+func (h *hostClient) unknownTopic(topic string) bool {
+	// Plugin-published topics are namespaced "<plugin>.<name>"
+	// (railyard-77h.9) and are legitimately absent from the host's core
+	// topic advertisement, so never flag a dotted/namespaced topic.
+	if strings.Contains(topic, ".") {
+		return false
+	}
+	h.subMu.Lock()
+	defer h.subMu.Unlock()
+	if !h.topicNegotiated {
+		return false
+	}
+	_, ok := h.supportedTopics[topic]
+	return !ok
+}
+
+// Emit implements Host.Emit. It encodes the payload as a Struct and
+// forwards it to the host's EmitEvent RPC. The host enforces the
+// "<plugin>." namespace prefix and the allow.publish gate; a violation
+// surfaces here as a gRPC error (railyard-77h.9).
+func (h *hostClient) Emit(ctx context.Context, topic string, payload map[string]any) error {
+	st, err := structpb.NewStruct(payload)
+	if err != nil {
+		return fmt.Errorf("plugin: Emit %q: encoding payload: %w", topic, err)
+	}
+	if _, err := h.hsc.EmitEvent(ctx, &protov1.EmitEventRequest{Topic: topic, Payload: st}); err != nil {
+		return fmt.Errorf("plugin: Emit %q: %w", topic, err)
+	}
+	return nil
+}
+
 // advertisedTopics returns a snapshot of every topic the plugin has
 // subscribed to so far. Consumed by the PluginService Init adapter.
 func (h *hostClient) advertisedTopics() []string {
@@ -180,7 +293,33 @@ func (h *hostClient) advertisedCommandNames() []string {
 	return out
 }
 
-func (h *hostClient) runSubscribeLoop(ctx context.Context, topic EventType, stream protov1.HostService_SubscribeClient, handler EventHandler) {
+// advertisedCommandSpecs returns the wire CommandSchema for every command
+// registered with a typed spec via [Host.RegisterCommandSpec]
+// (railyard-77h.16). Bare commands (RegisterCommand) are absent. Consumed
+// by the PluginService Init adapter to fill InitResponse.command_specs.
+func (h *hostClient) advertisedCommandSpecs() []*protov1.CommandSchema {
+	h.cmdMu.RLock()
+	defer h.cmdMu.RUnlock()
+	out := make([]*protov1.CommandSchema, 0, len(h.commandSpecs))
+	for _, spec := range h.commandSpecs {
+		out = append(out, commandSpecToProto(spec))
+	}
+	return out
+}
+
+// runSubscribeLoop drains one Subscribe stream into handler until the
+// stream closes or the context is cancelled.
+//
+// LIMITATION — a stream close is TERMINAL and SILENT to the consumer: on
+// any non-EOF error the loop logs a WARN and returns, with no reconnect and
+// no callback to the handler. A plugin that must keep receiving events
+// across a host-side stream drop (e.g. a host restart) is responsible for
+// re-subscribing itself; it cannot currently observe the drop through this
+// API. The [EventMeta] Seq/Dropped gap-detection story therefore covers
+// drops WITHIN a live stream but not the stream ending — re-subscribe and
+// reconcile via [Host.Snapshot] if you need at-least-once-ish continuity.
+// A stream-closed callback is a candidate future addition.
+func (h *hostClient) runSubscribeLoop(ctx context.Context, topic EventType, stream protov1.HostService_SubscribeClient, handler MetaEventHandler) {
 	defer func() {
 		if r := recover(); r != nil {
 			h.logger.Error("plugin: subscribe handler panic recovered",
@@ -193,6 +332,17 @@ func (h *hostClient) runSubscribeLoop(ctx context.Context, topic EventType, stre
 		ev, err := stream.Recv()
 		if err != nil {
 			if errors.Is(err, io.EOF) || ctx.Err() != nil {
+				return
+			}
+			// Distinguish an allow-list denial (railyard-77h.8) from a
+			// generic stream close so operators can tell "your config
+			// blocks this topic" apart from "the host went away".
+			if st, ok := status.FromError(err); ok && st.Code() == codes.PermissionDenied {
+				h.logger.Warn("plugin: subscription denied by host allow-list",
+					slog.String("topic", string(topic)),
+					slog.String("reason", "allowlist-denied"),
+					slog.String("err", err.Error()),
+				)
 				return
 			}
 			h.logger.Warn("plugin: subscribe stream closed",
@@ -212,6 +362,7 @@ func (h *hostClient) runSubscribeLoop(ctx context.Context, topic EventType, stre
 		// Run inside an inline recover so a panicking handler does not
 		// terminate the goroutine — the SDK is the sole owner of this
 		// goroutine's lifetime.
+		meta := EventMeta{Seq: ev.Seq, Dropped: ev.Dropped}
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
@@ -221,7 +372,7 @@ func (h *hostClient) runSubscribeLoop(ctx context.Context, topic EventType, stre
 					)
 				}
 			}()
-			handler(decoded.topic, decoded.payload)
+			handler(decoded.topic, decoded.payload, meta)
 		}()
 	}
 }
@@ -256,6 +407,29 @@ func (h *hostClient) RegisterCommand(name string, handler CommandHandler) error 
 		return fmt.Errorf("plugin: RegisterCommand: %q already registered", name)
 	}
 	h.commandHandlers[name] = handler
+	return nil
+}
+
+// RegisterCommandSpec implements Host.RegisterCommandSpec. Like
+// RegisterCommand it is an in-process registration; additionally it
+// records the typed argument signature so the PluginService Init adapter
+// can advertise it to the host in InitResponse.command_specs, where the
+// host stores it and validates dispatched args before forwarding to
+// HandleCommand (railyard-77h.16).
+func (h *hostClient) RegisterCommandSpec(spec CommandSpec, handler CommandHandler) error {
+	if spec.Name == "" {
+		return errors.New("plugin: RegisterCommandSpec: name must not be empty")
+	}
+	if handler == nil {
+		return errors.New("plugin: RegisterCommandSpec: handler must not be nil")
+	}
+	h.cmdMu.Lock()
+	defer h.cmdMu.Unlock()
+	if _, exists := h.commandHandlers[spec.Name]; exists {
+		return fmt.Errorf("plugin: RegisterCommandSpec: %q already registered", spec.Name)
+	}
+	h.commandHandlers[spec.Name] = handler
+	h.commandSpecs[spec.Name] = spec
 	return nil
 }
 

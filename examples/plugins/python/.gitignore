@@ -1,0 +1,5 @@
+# Local Python toolchain / runtime artifacts (the generated *_pb2*.py stubs
+# ARE committed; everything below is not).
+.venv/
+__pycache__/
+*.pyc

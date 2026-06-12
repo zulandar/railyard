@@ -46,7 +46,7 @@ func TestPluginsListSubcommandWiring(t *testing.T) {
 	}
 	got := buf.String()
 	// Header columns.
-	for _, want := range []string{"NAME", "ENABLED", "EXECUTABLE", "EVENTS", "COMMANDS", "PATH"} {
+	for _, want := range []string{"NAME", "ENABLED", "EXECUTABLE", "PINNED", "EVENTS", "COMMANDS", "PATH"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("header missing column %q in output:\n%s", want, got)
 		}
@@ -119,6 +119,67 @@ func TestPluginsListVerbose(t *testing.T) {
 	if !strings.Contains(got, "alpha.*") {
 		t.Errorf("verbose mode did not expand commands:\n%s", got)
 	}
+}
+
+// TestPluginsListPinnedColumn asserts the `ry plugins list` PINNED column
+// reflects whether a sha256 pin is configured (railyard-77h.15). Operators
+// use it to audit which enabled plugins are integrity-pinned.
+func TestPluginsListPinnedColumn(t *testing.T) {
+	withStubDiscover(t, func(cfg *config.Config) ([]pluginhost.PluginCandidate, error) {
+		return []pluginhost.PluginCandidate{
+			{Name: "pinned-one", Path: "/p/pinned-one", Executable: true, Enabled: true, Pinned: true},
+			{Name: "unpinned-two", Path: "/p/unpinned-two", Executable: true, Enabled: true, Pinned: false},
+		}, nil
+	})
+	withStubConfigLoad(t, func(string) (*config.Config, error) {
+		return &config.Config{}, nil
+	})
+
+	root := newRootCmd()
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	root.SetArgs([]string{"plugins", "list"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("`ry plugins list` failed: %v", err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "PINNED") {
+		t.Errorf("header missing PINNED column:\n%s", got)
+	}
+	// Locate each row and verify the PINNED column reads yes/no.
+	// Layout: NAME ENABLED EXECUTABLE PINNED EVENTS COMMANDS PATH
+	for _, tc := range []struct {
+		name    string
+		wantCol string
+	}{
+		{"pinned-one", "yes"},
+		{"unpinned-two", "no"},
+	} {
+		var row string
+		for _, line := range strings.Split(got, "\n") {
+			if strings.Contains(line, tc.name) {
+				row = line
+				break
+			}
+		}
+		if row == "" {
+			t.Fatalf("no row for %q in output:\n%s", tc.name, got)
+		}
+		fields := strings.Fields(row)
+		if len(fields) < 4 || fields[3] != tc.wantCol {
+			t.Errorf("PINNED column for %q = %q, want %q in row: %s", tc.name, fieldOr(fields, 3), tc.wantCol, row)
+		}
+	}
+}
+
+// fieldOr returns fields[i] or "" if out of range — keeps the assertion
+// above from panicking on a malformed row.
+func fieldOr(fields []string, i int) string {
+	if i < len(fields) {
+		return fields[i]
+	}
+	return ""
 }
 
 // TestPluginsListWithRealDiscovery sets up a temp plugins dir with one

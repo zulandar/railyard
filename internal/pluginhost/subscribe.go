@@ -11,6 +11,7 @@ import (
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/zulandar/railyard/internal/events"
@@ -90,8 +91,16 @@ func (s *hostService) Subscribe(req *protov1.SubscribeRequest, stream protov1.Ho
 	defer streamCancel()
 
 	// Register cancel with the launched plugin so Host.Stop can tear us
-	// down before draining the plugin's PluginService.Stop.
-	if lp := s.host.lookupPluginByName(s.pluginName); lp != nil {
+	// down before draining the plugin's PluginService.Stop. We also keep
+	// the resolved *launchedPlugin so the per-event loop can bump its
+	// lifetime counters (railyard-77h.14) with lock-free atomics — the
+	// pointer is captured ONCE here and reused below; the loop never takes
+	// h.mu. lp may be nil for the brief window where a plugin's own Init
+	// subscribes before the registry entry is recorded (newHostService is
+	// wired before startSupervisor inserts into h.launched); the counter
+	// bumps below nil-check it.
+	lp := s.host.lookupPluginByName(s.pluginName)
+	if lp != nil {
 		lp.subMu.Lock()
 		lp.subCancels = append(lp.subCancels, streamCancel)
 		lp.subMu.Unlock()
@@ -105,6 +114,14 @@ func (s *hostService) Subscribe(req *protov1.SubscribeRequest, stream protov1.Ho
 	queue := make(chan *protov1.Event, subscribeQueueCap)
 	drops := newDropCounter(s.pluginName, s.logger)
 	warner := newDropWarner(s.logger)
+
+	// droppedTotal is the per-subscription cumulative drop count stamped
+	// onto every outgoing Event so the plugin can detect gaps and
+	// reconcile via Snapshot (railyard-77h.10). It is bumped from the
+	// bus-callback goroutines (one per topic) on the drop-oldest path, so
+	// it MUST be atomic; the drain loop reads it with a plain Load. No
+	// mutex is taken on the event hot path.
+	var droppedTotal atomic.Uint64
 
 	// Wire each allowed topic to the bus. incrSubscription per topic
 	// matches the in-process Host.Subscribe shim's per-topic accounting,
@@ -133,6 +150,12 @@ func (s *hostService) Subscribe(req *protov1.SubscribeRequest, stream protov1.Ho
 				default:
 				}
 				drops.record(t)
+				droppedTotal.Add(1)
+				if lp != nil {
+					// Per-plugin lifetime drop counter (railyard-77h.14).
+					// Atomic only — this runs on a bus-callback goroutine.
+					lp.eventsDropped.Add(1)
+				}
 				warner.recordDrop(s.pluginName, t)
 			}
 		})
@@ -154,6 +177,12 @@ func (s *hostService) Subscribe(req *protov1.SubscribeRequest, stream protov1.Ho
 
 	// Drain loop on the calling goroutine. Returning from this function
 	// causes go-plugin's stream wrapper to close the stream cleanly.
+	//
+	// seq counts events DELIVERED on this stream (starting at 1); it is
+	// touched only here, on a single goroutine, so it needs no
+	// synchronization. dropped is the cumulative drop count at delivery
+	// time (railyard-77h.10).
+	var seq uint64
 	for {
 		select {
 		case <-streamCtx.Done():
@@ -162,8 +191,16 @@ func (s *hostService) Subscribe(req *protov1.SubscribeRequest, stream protov1.Ho
 			if !ok {
 				return nil
 			}
+			seq++
+			ev.Seq = seq
+			ev.Dropped = droppedTotal.Load()
 			if err := stream.Send(ev); err != nil {
 				return err
+			}
+			if lp != nil {
+				// Per-plugin lifetime delivery counter (railyard-77h.14).
+				// Atomic only — NO h.mu on this hot path.
+				lp.eventsDelivered.Add(1)
 			}
 		}
 	}
@@ -318,7 +355,22 @@ func payloadToProto(topic string, payload any) (*protov1.Event, bool) {
 		ev.Type = protov1.EventType_EVENT_TYPE_YARD_RESUMED
 		ev.Payload = &protov1.Event_YardResumed{YardResumed: &protov1.YardResumedEvent{Reason: p.Reason}}
 	default:
-		return nil, false
+		// Plugin-published dynamic event (railyard-77h.9). The topic is
+		// not one of the core EventType constants; its payload is a
+		// map[string]any emitted via HostService.EmitEvent. Carry the
+		// namespaced topic in topic_name and the map in the custom Struct
+		// arm. Any other payload shape on an unknown topic is dropped.
+		m, ok := payload.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		st, err := structpb.NewStruct(m)
+		if err != nil {
+			return nil, false
+		}
+		ev.Type = protov1.EventType_EVENT_TYPE_UNSPECIFIED
+		ev.TopicName = topic
+		ev.Payload = &protov1.Event_Custom{Custom: st}
 	}
 	return ev, true
 }

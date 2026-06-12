@@ -5,10 +5,45 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/zulandar/railyard/internal/config"
 )
+
+// TestScanDirRejectsDottedName proves a binary whose (extension-stripped)
+// name contains a dot is NOT discovered as a launch candidate
+// (railyard-uv8.9). A dotted name like "foo.bar" makes the EmitEvent
+// namespace prefix check confusable — plugin "foo" could publish into the
+// "foo.bar.*" namespace — so such names are rejected at discovery.
+func TestScanDirRejectsDottedName(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX executable bit semantics")
+	}
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "good"), 0o755)
+	mustWriteFile(t, filepath.Join(dir, "foo.bar"), 0o755)
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	cs := scanDir(dir, logger)
+
+	var names []string
+	for _, c := range cs {
+		names = append(names, c.name)
+		if strings.Contains(c.name, ".") {
+			t.Errorf("scanDir returned dotted plugin name %q; must be rejected", c.name)
+		}
+	}
+	found := false
+	for _, n := range names {
+		if n == "good" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("valid plugin 'good' must still be discovered; got %v", names)
+	}
+}
 
 // TestDiscoverFiltersNonExecutable seeds a dir with one executable and
 // one non-executable file. Only the executable should be returned as a

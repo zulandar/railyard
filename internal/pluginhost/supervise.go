@@ -21,6 +21,7 @@ package pluginhost
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -56,6 +57,7 @@ func (h *Host) startSupervisor(ctx context.Context, c candidate, lp *launchedPlu
 	h.mu.Lock()
 	lp.budget = newCrashBudget(h.clock)
 	lp.superviseDone = make(chan struct{})
+	lp.stopCh = make(chan struct{})
 	h.launched[lp.name] = lp
 	h.mu.Unlock()
 
@@ -139,8 +141,10 @@ func (h *Host) supervise(ctx context.Context, c candidate, lp *launchedPlugin) {
 		// owns a fresh go-plugin handshake), so if a Stop fired
 		// during the backoff we must abort here and avoid leaking a
 		// freshly-spawned subprocess that the host will never tear
-		// down.
-		if h.isShuttingDown() {
+		// down. isPluginStopping covers an operator restart that set
+		// stopping while we were in backoff (railyard-uv8.3): relaunching
+		// would just spawn a subprocess Restart immediately tears down.
+		if h.isShuttingDown() || h.isPluginStopping(lp) {
 			return
 		}
 
@@ -149,6 +153,17 @@ func (h *Host) supervise(ctx context.Context, c candidate, lp *launchedPlugin) {
 		// count the failure as a crash (it leaves the plugin
 		// down just as a runtime exit would) and continue the loop.
 		if err := h.relaunch(ctx, c, lp); err != nil {
+			// A failed sha256 pin (railyard-77h.15) on relaunch is the
+			// CRITICAL re-verify case: the on-disk binary changed since
+			// first boot. This is NOT a transient crash — looping would
+			// just keep refusing the same swapped binary. Permanently
+			// disable immediately with the distinct integrity-mismatch
+			// reason (verifyBinaryPin already WARN-logged both hashes).
+			var integ *integrityMismatchError
+			if errors.As(err, &integ) {
+				h.handleIntegrityDisable(lp)
+				return
+			}
 			lp.logger.Warn(
 				fmt.Sprintf("plugin %s: relaunch attempt failed: %v", c.name, err),
 				slog.String("error", err.Error()),
@@ -205,6 +220,13 @@ func (h *Host) waitForExitOrShutdown(lp *launchedPlugin) bool {
 	for {
 		select {
 		case <-h.shutdownCh:
+			return false
+		case <-lp.stopCh:
+			// A per-plugin stop (operator restart) — treat exactly like a
+			// host shutdown: walk away without relaunching, regardless of
+			// whether the current subprocess is healthy. This is what lets
+			// Restart unblock a supervisor parked on a freshly-relaunched
+			// subprocess (railyard-uv8.3). nil stopCh never fires.
 			return false
 		case <-t.C:
 			if lp.client.Exited() {
@@ -268,6 +290,35 @@ func (h *Host) handlePermanentDisable(lp *launchedPlugin, finalCount int) {
 	h.markPermanentlyDisabled(lp)
 }
 
+// handleIntegrityDisable is the relaunch-path teardown when a supervisor
+// relaunch is refused because the on-disk binary's sha256 no longer matches
+// the configured pin (railyard-77h.15). Unlike handlePermanentDisable it is
+// NOT a crash-budget exhaustion — the binary changed under us — so it logs
+// the integrity framing (verifyBinaryPin already WARN-logged both hashes)
+// and records the disabled snapshot with the integrity-mismatch reason. The
+// dead subprocess is already gone (the crash that triggered this relaunch),
+// but we kill + clean its socket defensively, exactly as the crash-budget
+// path does.
+func (h *Host) handleIntegrityDisable(lp *launchedPlugin) {
+	h.mu.Lock()
+	lp.lastExitReason = integrityMismatchReason
+	h.mu.Unlock()
+
+	lp.logger.Error(
+		fmt.Sprintf(
+			"plugin permanently disabled: binary sha256 no longer matches the configured pin on relaunch; restart railyard after restoring the pinned binary. plugin=%s reason=%s",
+			lp.name, integrityMismatchReason,
+		),
+		slog.String("plugin", lp.name),
+		slog.String("reason", integrityMismatchReason),
+	)
+
+	h.cancelPluginSubscriptions(lp)
+	lp.client.Kill()
+	removeSocket(lp.socketPath)
+	h.markPermanentlyDisabled(lp)
+}
+
 // markPermanentlyDisabled snapshots lp into h.disabled, removes it from
 // h.launched, and clears any command ownership the plugin held — all in
 // a single critical section so Status() readers observe exactly one of
@@ -288,9 +339,16 @@ func (h *Host) markPermanentlyDisabled(lp *launchedPlugin) {
 		commandCount:   len(lp.capabilities.provideCommands),
 	}
 	delete(h.launched, lp.name)
+	// Drop command ownership AND the typed arg specs in lockstep — the
+	// pluginCmds/pluginCmdSpecs invariant (host.go) requires both to be
+	// cleaned up together, exactly as removeLaunched does. Leaving a stale
+	// spec behind would make a disable -> ry plugins restart cycle with a
+	// changed binary validate dispatched args against the old schema
+	// (railyard-uv8.2).
 	for cmd, owner := range h.pluginCmds {
 		if owner == lp.name {
 			delete(h.pluginCmds, cmd)
+			delete(h.pluginCmdSpecs, cmd)
 		}
 	}
 }
@@ -310,18 +368,24 @@ func (h *Host) relaunch(ctx context.Context, c candidate, lp *launchedPlugin) er
 		return fmt.Errorf("launch: %w", err)
 	}
 
-	// Re-run Init. Capabilities are re-advertised; we trust the
-	// allow-list intersection already cached on lp.allow.
+	// Re-run Init advertising the host's supported event topics, exactly
+	// like the first boot — a bare request would silently degrade topic
+	// negotiation after the first crash (railyard-uv8.7).
 	initCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	if _, err := fresh.pluginRPC.Init(initCtx, &protov1.InitRequest{
-		PluginName:   c.name,
-		Capabilities: &protov1.Capabilities{},
-	}); err != nil {
+	resp, err := fresh.pluginRPC.Init(initCtx, hostInitRequest(c.name))
+	if err != nil {
 		fresh.client.Kill()
 		removeSocket(fresh.socketPath)
 		return fmt.Errorf("Init RPC after relaunch: %w", err)
 	}
+
+	// Refresh capabilities, SDK version, and the command registry from the
+	// fresh response so a relaunched binary that changed its command set or
+	// arg schemas does not leave the host validating against a stale spec
+	// (railyard-uv8.7). lp.allow is preserved across relaunch, so the
+	// intersection uses the same configured allow-list.
+	h.applyInitResponse(lp, resp)
 
 	// If the host has already been Started, re-Start the plugin.
 	// Otherwise leave it Init-only — host.Start will pick it up in

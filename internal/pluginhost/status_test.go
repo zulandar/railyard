@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/zulandar/railyard/pkg/plugin"
+	protov1 "github.com/zulandar/railyard/pkg/plugin/proto/v1"
 )
 
 func newStatusFixtureHost(t *testing.T) *Host {
@@ -21,6 +22,7 @@ func newStatusFixtureHost(t *testing.T) *Host {
 				pid:          12345,
 				restartCount: 0,
 				lastActivity: time.Unix(1_700_000_050, 0),
+				sdkVersion:   "9.9.9",
 				capabilities: pluginCapabilities{provideCommands: []string{"do_a", "do_b"}},
 			},
 		},
@@ -114,6 +116,29 @@ func TestStatusRunningFieldsPopulated(t *testing.T) {
 	}
 	if got.Error != "" {
 		t.Errorf("running plugin Error = %q, want empty", got.Error)
+	}
+	if got.SDKVersion != "9.9.9" {
+		t.Errorf("SDKVersion = %q, want 9.9.9", got.SDKVersion)
+	}
+}
+
+// TestStatusSDKVersionOnlyForRunning asserts the reported SDK version is
+// surfaced for running plugins and omitted for the other states, which
+// never observe an InitResponse (railyard-77h.8).
+func TestStatusSDKVersionOnlyForRunning(t *testing.T) {
+	h := newStatusFixtureHost(t)
+	snap := h.Status()
+	for _, p := range snap.Plugins {
+		switch p.Name {
+		case "running-plugin":
+			if p.SDKVersion != "9.9.9" {
+				t.Errorf("running SDKVersion = %q, want 9.9.9", p.SDKVersion)
+			}
+		default:
+			if p.SDKVersion != "" {
+				t.Errorf("%s SDKVersion = %q, want empty", p.Name, p.SDKVersion)
+			}
+		}
 	}
 }
 
@@ -255,6 +280,184 @@ func TestMarkPermanentlyDisabledSurfacesViaStatus(t *testing.T) {
 	}
 	if row.CommandCount != 2 {
 		t.Errorf("CommandCount = %d", row.CommandCount)
+	}
+}
+
+// TestMarkPermanentlyDisabledClearsCmdSpecs proves the disable path drops
+// the doomed plugin's typed arg specs in lockstep with its command
+// ownership (railyard-uv8.2). Otherwise a disable -> ry plugins restart
+// cycle with a binary that changed/dropped a spec would validate dispatched
+// args against the stale schema. removeLaunched already does both; the
+// supervisor's disable path must match the documented invariant.
+func TestMarkPermanentlyDisabledClearsCmdSpecs(t *testing.T) {
+	h := &Host{
+		bootedAt:      time.Unix(1_700_000_000, 0),
+		clock:         func() time.Time { return time.Unix(1_700_000_100, 0) },
+		launched:      map[string]*launchedPlugin{},
+		subscriptions: map[string]int{},
+		initFailures:  map[string]initFailure{},
+		disabled:      map[string]*disabledPlugin{},
+		pluginCmds:    map[string]string{"do_a": "doomed-plugin", "keep": "other-plugin"},
+		pluginCmdSpecs: map[string]*protov1.CommandSchema{
+			"do_a": {Name: "do_a", Args: []*protov1.ArgSpec{{Name: "x", Type: protov1.ArgType_ARG_TYPE_STRING, Required: true}}},
+			"keep": {Name: "keep"},
+		},
+	}
+	lp := &launchedPlugin{
+		name:         "doomed-plugin",
+		path:         "/etc/railyard/plugins.d/doomed-plugin",
+		capabilities: pluginCapabilities{provideCommands: []string{"do_a"}},
+	}
+	h.launched["doomed-plugin"] = lp
+
+	h.markPermanentlyDisabled(lp)
+
+	if _, ok := h.pluginCmds["do_a"]; ok {
+		t.Error("pluginCmds entry for disabled plugin's command must be cleared")
+	}
+	if _, ok := h.pluginCmdSpecs["do_a"]; ok {
+		t.Error("pluginCmdSpecs entry for disabled plugin's command must be cleared in lockstep")
+	}
+	// Another plugin's command + spec must survive.
+	if _, ok := h.pluginCmds["keep"]; !ok {
+		t.Error("another plugin's command ownership must not be touched")
+	}
+	if _, ok := h.pluginCmdSpecs["keep"]; !ok {
+		t.Error("another plugin's spec must not be touched")
+	}
+}
+
+// TestStatusSurfacesRuntimeCounters asserts the per-plugin lifetime
+// counters living on launchedPlugin (railyard-77h.14) are read out of
+// the atomics and surfaced on the running plugin's PluginStatus row.
+// CommandLatencyAvgMicros is derived at display time as
+// commandLatencyTotalMicros / commandsHandled.
+func TestStatusSurfacesRuntimeCounters(t *testing.T) {
+	h := newStatusFixtureHost(t)
+	lp := h.launched["running-plugin"]
+	lp.eventsDelivered.Store(100)
+	lp.eventsDropped.Store(7)
+	lp.commandsHandled.Store(4)
+	lp.commandsFailed.Store(1)
+	lp.commandLatencyTotalMicros.Store(8000) // avg = 2000us over 4 handled
+
+	snap := h.Status()
+	var got *PluginStatus
+	for i := range snap.Plugins {
+		if snap.Plugins[i].Name == "running-plugin" {
+			got = &snap.Plugins[i]
+			break
+		}
+	}
+	if got == nil {
+		t.Fatal("running-plugin missing from snapshot")
+	}
+	if got.EventsDelivered != 100 {
+		t.Errorf("EventsDelivered = %d, want 100", got.EventsDelivered)
+	}
+	if got.EventsDropped != 7 {
+		t.Errorf("EventsDropped = %d, want 7", got.EventsDropped)
+	}
+	if got.CommandsHandled != 4 {
+		t.Errorf("CommandsHandled = %d, want 4", got.CommandsHandled)
+	}
+	if got.CommandsFailed != 1 {
+		t.Errorf("CommandsFailed = %d, want 1", got.CommandsFailed)
+	}
+	if got.CommandLatencyTotalMicros != 8000 {
+		t.Errorf("CommandLatencyTotalMicros = %d, want 8000", got.CommandLatencyTotalMicros)
+	}
+	if got.CommandLatencyAvgMicros != 2000 {
+		t.Errorf("CommandLatencyAvgMicros = %d, want 2000", got.CommandLatencyAvgMicros)
+	}
+}
+
+// TestStatusCounterAvgZeroWhenNoCommands asserts the derived average is
+// zero (not a divide-by-zero panic) when no commands have been handled.
+func TestStatusCounterAvgZeroWhenNoCommands(t *testing.T) {
+	h := newStatusFixtureHost(t)
+	snap := h.Status()
+	for _, p := range snap.Plugins {
+		if p.Name == "running-plugin" {
+			if p.CommandLatencyAvgMicros != 0 {
+				t.Errorf("CommandLatencyAvgMicros = %d, want 0 with zero handled", p.CommandLatencyAvgMicros)
+			}
+			return
+		}
+	}
+	t.Fatal("running-plugin missing")
+}
+
+// TestStatusSurfacesHealth asserts the optional health probe result
+// living on launchedPlugin (railyard-77h.12) is surfaced on the running
+// plugin's PluginStatus row, including the checked-at timestamp.
+func TestStatusSurfacesHealth(t *testing.T) {
+	h := newStatusFixtureHost(t)
+	lp := h.launched["running-plugin"]
+	lp.healthValue = healthValueDegraded
+	lp.healthMessage = "github API 401"
+	lp.healthCheckedAt = time.Unix(1_700_000_090, 0)
+
+	snap := h.Status()
+	var got *PluginStatus
+	for i := range snap.Plugins {
+		if snap.Plugins[i].Name == "running-plugin" {
+			got = &snap.Plugins[i]
+			break
+		}
+	}
+	if got == nil {
+		t.Fatal("running-plugin missing from snapshot")
+	}
+	if got.Health != healthValueDegraded {
+		t.Errorf("Health = %q, want %q", got.Health, healthValueDegraded)
+	}
+	if got.HealthMessage != "github API 401" {
+		t.Errorf("HealthMessage = %q, want %q", got.HealthMessage, "github API 401")
+	}
+	if !got.HealthCheckedAt.Equal(time.Unix(1_700_000_090, 0)) {
+		t.Errorf("HealthCheckedAt = %v, want 1_700_000_090", got.HealthCheckedAt)
+	}
+}
+
+// TestStatusSurfacesCommandSignatures asserts a running plugin's owned
+// commands are rendered as "name(arg:type, ...)" signatures: a command
+// with a stored typed spec shows its declared args, while a bare command
+// (no stored spec) renders as "name()". Output is sorted by command name
+// (railyard-77h.16).
+func TestStatusSurfacesCommandSignatures(t *testing.T) {
+	h := newStatusFixtureHost(t)
+	// The fixture's running-plugin owns "do_a" and "do_b". Give do_a a
+	// typed spec; leave do_b bare.
+	h.pluginCmdSpecs = map[string]*protov1.CommandSchema{
+		"do_a": {
+			Name: "do_a",
+			Args: []*protov1.ArgSpec{
+				{Name: "Track", Type: protov1.ArgType_ARG_TYPE_STRING, Required: true},
+				{Name: "Count", Type: protov1.ArgType_ARG_TYPE_INT, Required: true},
+			},
+		},
+	}
+
+	snap := h.Status()
+	var got *PluginStatus
+	for i := range snap.Plugins {
+		if snap.Plugins[i].Name == "running-plugin" {
+			got = &snap.Plugins[i]
+			break
+		}
+	}
+	if got == nil {
+		t.Fatal("running-plugin missing from snapshot")
+	}
+	want := []string{"do_a(Track:string, Count:int)", "do_b()"}
+	if len(got.CommandSignatures) != len(want) {
+		t.Fatalf("CommandSignatures = %v, want %v", got.CommandSignatures, want)
+	}
+	for i, w := range want {
+		if got.CommandSignatures[i] != w {
+			t.Errorf("CommandSignatures[%d] = %q, want %q", i, got.CommandSignatures[i], w)
+		}
 	}
 }
 

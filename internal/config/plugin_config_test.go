@@ -3,6 +3,7 @@ package config
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -154,6 +155,62 @@ tracks:
 	}
 }
 
+// TestPluginsConfig_HealthIntervalDefault verifies the plugin health
+// poll interval defaults to 30s when unset, and the HealthInterval()
+// helper reflects that (railyard-77h.12).
+func TestPluginsConfig_HealthIntervalDefault(t *testing.T) {
+	yamlSrc := `
+owner: alice
+repo: git@github.com:org/app.git
+tracks:
+  - name: backend
+    language: go
+plugins:
+  enabled: [trainmaster]
+`
+	cfg, err := Parse([]byte(yamlSrc))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Plugins.HealthIntervalSec != 30 {
+		t.Errorf("HealthIntervalSec = %d, want 30 (default)", cfg.Plugins.HealthIntervalSec)
+	}
+	if got := cfg.Plugins.HealthInterval(); got != 30*time.Second {
+		t.Errorf("HealthInterval() = %v, want 30s", got)
+	}
+}
+
+// TestPluginsConfig_HealthIntervalExplicit verifies an explicit
+// health_interval_sec is honored and not overwritten by the default
+// (railyard-77h.12).
+func TestPluginsConfig_HealthIntervalExplicit(t *testing.T) {
+	yamlSrc := `
+owner: alice
+repo: git@github.com:org/app.git
+tracks:
+  - name: backend
+    language: go
+plugins:
+  enabled: [trainmaster]
+  health_interval_sec: 5
+`
+	cfg, err := Parse([]byte(yamlSrc))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Plugins.HealthIntervalSec != 5 {
+		t.Errorf("HealthIntervalSec = %d, want 5", cfg.Plugins.HealthIntervalSec)
+	}
+	if got := cfg.Plugins.HealthInterval(); got != 5*time.Second {
+		t.Errorf("HealthInterval() = %v, want 5s", got)
+	}
+	// An explicit `health_interval_sec` key must not be stashed as a
+	// per-plugin Settings entry.
+	if _, present := cfg.Plugins.Settings["health_interval_sec"]; present {
+		t.Error("health_interval_sec must not be parsed as a per-plugin settings block")
+	}
+}
+
 // keysOf is a small helper for stable error messages.
 func keysOf(m map[string]yaml.Node) []string {
 	out := make([]string, 0, len(m))
@@ -276,6 +333,54 @@ plugins:
 	}
 }
 
+// TestPluginsConfig_PublishAllowList parses an allow.publish list with
+// command-style wildcard tokens (railyard-77h.9).
+func TestPluginsConfig_PublishAllowList(t *testing.T) {
+	yamlSrc := `
+owner: alice
+repo: git@github.com:org/app.git
+tracks:
+  - name: backend
+    language: go
+plugins:
+  enabled: [trainmaster]
+  trainmaster:
+    allow:
+      events:  [CarMerged]
+      publish: ["trainmaster.*", "trainmaster.synced"]
+`
+	cfg, err := Parse([]byte(yamlSrc))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	s := cfg.Plugins.Settings["trainmaster"]
+	if len(s.Allow.Publish) != 2 {
+		t.Errorf("Publish = %v, want 2 entries", s.Allow.Publish)
+	}
+}
+
+// TestPluginsConfig_RejectsInvalidPublishToken rejects a malformed
+// publish wildcard (railyard-77h.9).
+func TestPluginsConfig_RejectsInvalidPublishToken(t *testing.T) {
+	yamlSrc := `
+owner: alice
+repo: r
+tracks: [{name: t, language: go}]
+plugins:
+  enabled: [p]
+  p:
+    allow:
+      publish: ["bad*topic"]
+`
+	_, err := Parse([]byte(yamlSrc))
+	if err == nil {
+		t.Fatal("expected error for malformed publish token")
+	}
+	if !strings.Contains(err.Error(), "publish") {
+		t.Errorf("error %q should mention the publish field", err.Error())
+	}
+}
+
 // TestPluginsConfig_RejectsInvalidWildcard catches the malformed shapes
 // the brief calls out.
 func TestPluginsConfig_RejectsInvalidWildcard(t *testing.T) {
@@ -358,6 +463,107 @@ plugins:
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := Parse([]byte(tc.yaml))
+			if err == nil {
+				t.Fatalf("expected parse error for %s", tc.name)
+			}
+			if !strings.Contains(err.Error(), tc.wantText) {
+				t.Errorf("error = %q, want substring %q", err.Error(), tc.wantText)
+			}
+		})
+	}
+}
+
+// TestPluginsConfig_Sha256_ValidNormalizes verifies a valid 64-hex sha256
+// pin parses and is normalized to lowercase (railyard-77h.15).
+func TestPluginsConfig_Sha256_ValidNormalizes(t *testing.T) {
+	// Mixed-case 64-hex string; must normalize to lowercase.
+	const mixed = "ABCdef0123456789ABCDEF0123456789abcdef0123456789ABCDEF0123456789"
+	const lower = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+	yamlSrc := `
+owner: alice
+repo: git@github.com:org/app.git
+tracks:
+  - name: backend
+    language: go
+plugins:
+  enabled: [trainmaster]
+  trainmaster:
+    sha256: "` + mixed + `"
+`
+	cfg, err := Parse([]byte(yamlSrc))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	s, ok := cfg.Plugins.Settings["trainmaster"]
+	if !ok {
+		t.Fatal("Settings missing trainmaster entry")
+	}
+	if s.Sha256 != lower {
+		t.Errorf("Sha256 = %q, want normalized lowercase %q", s.Sha256, lower)
+	}
+}
+
+// TestPluginsConfig_Sha256_AbsentEmpty verifies a plugin with no sha256
+// key parses with an empty Sha256 (default = no check; railyard-77h.15).
+func TestPluginsConfig_Sha256_AbsentEmpty(t *testing.T) {
+	yamlSrc := `
+owner: alice
+repo: git@github.com:org/app.git
+tracks:
+  - name: backend
+    language: go
+plugins:
+  enabled: [trainmaster]
+  trainmaster:
+    allow:
+      events: ["*"]
+`
+	cfg, err := Parse([]byte(yamlSrc))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	s := cfg.Plugins.Settings["trainmaster"]
+	if s.Sha256 != "" {
+		t.Errorf("Sha256 = %q, want empty (no pin configured)", s.Sha256)
+	}
+}
+
+// TestPluginsConfig_RejectsBadSha256 covers the malformed sha256 shapes:
+// wrong length and non-hex characters (railyard-77h.15).
+func TestPluginsConfig_RejectsBadSha256(t *testing.T) {
+	cases := []struct {
+		name     string
+		sha      string
+		wantText string
+	}{
+		{
+			name:     "too_short",
+			sha:      "abcdef", // 6 chars, not 64
+			wantText: "sha256",
+		},
+		{
+			name:     "too_long",
+			sha:      "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789ff", // 66 chars
+			wantText: "sha256",
+		},
+		{
+			name:     "non_hex",
+			sha:      "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz", // 64 chars, all 'z'
+			wantText: "sha256",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			yamlSrc := `
+owner: alice
+repo: r
+tracks: [{name: t, language: go}]
+plugins:
+  enabled: [p]
+  p:
+    sha256: "` + tc.sha + `"
+`
+			_, err := Parse([]byte(yamlSrc))
 			if err == nil {
 				t.Fatalf("expected parse error for %s", tc.name)
 			}

@@ -21,6 +21,30 @@ type EventHandler func(topic EventType, payload any)
 // are no-ops. It is safe to call from within the handler itself.
 type Unsubscribe func()
 
+// EventMeta carries per-event stream metadata delivered alongside the
+// payload to handlers registered via [Host.SubscribeWithMeta]. It lets
+// a consumer detect gaps in an at-most-once event stream and reconcile
+// via [Host.Snapshot] (railyard-77h.10).
+type EventMeta struct {
+	// Seq is the per-subscription delivery counter: 1 for the first
+	// event delivered on the stream, incrementing by one per delivered
+	// event. It RESETS to 1 when the stream is reopened (e.g. after a
+	// plugin relaunch), which the consumer should treat as "take a fresh
+	// Snapshot before trusting subsequent events".
+	Seq uint64
+
+	// Dropped is the cumulative number of events the host dropped on this
+	// subscription since the stream opened (drop-oldest backpressure). An
+	// increase in Dropped between two received events signals a gap;
+	// re-Snapshot to reconcile. Exactly-once delivery is out of scope.
+	Dropped uint64
+}
+
+// MetaEventHandler is the handler signature for [Host.SubscribeWithMeta].
+// It receives the same topic and payload as an [EventHandler] plus the
+// [EventMeta] describing stream position and drops.
+type MetaEventHandler func(topic EventType, payload any, meta EventMeta)
+
 // Host is the single interface plugins use to interact with railyard
 // core. Implementations live in the railyard internal/pluginhost
 // package; the in-plugin gRPC client adapter satisfies this interface
@@ -28,6 +52,16 @@ type Unsubscribe func()
 //
 // Every method on Host is safe for concurrent use unless documented
 // otherwise on the method itself.
+//
+// Stability — plugins are CLIENTS of Host, not implementers. Do NOT write
+// your own type that implements Host: new methods may be ADDED to this
+// interface in a minor release (the wire protocol stays backward
+// compatible, but a hand-rolled Go implementation would no longer compile).
+// For tests, embed plugintest.FakeHost (in pkg/plugin/plugintest) and
+// override only the methods you need — it tracks every addition, so your
+// fake keeps compiling across upgrades. (The PR that landed Phase 3
+// described pkg/plugin as "additive-only"; that holds for the wire
+// contract, not for the Go Host interface, which gained methods.)
 type Host interface {
 	// Config returns the raw yaml.Node for the named plugin's
 	// top-level config block from railyard.yaml. If no block was set
@@ -52,6 +86,13 @@ type Host interface {
 	// not do heavy work inside the handler.
 	Subscribe(topic EventType, h EventHandler) Unsubscribe
 
+	// SubscribeWithMeta is like [Host.Subscribe] but additionally hands
+	// the handler an [EventMeta] describing the per-stream sequence
+	// number and cumulative drop count, so consumers can detect gaps and
+	// reconcile via [Host.Snapshot]. Plain Subscribe remains available
+	// unchanged for consumers that do not need gap detection.
+	SubscribeWithMeta(topic EventType, h MetaEventHandler) Unsubscribe
+
 	// Snapshot returns the current full yard state in a single read
 	// transaction. It is intended for heartbeat-style consumers that
 	// re-send full state on a cadence. The context controls the
@@ -63,7 +104,35 @@ type Host interface {
 	// Returns an error if the name conflicts with a previously
 	// registered command (whether plugin-provided or a core
 	// allow-list entry).
+	//
+	// Call this during [Plugin.Init]. The set of registered commands is
+	// advertised to the host in the Init response; a command registered
+	// after Init returns (e.g. in Start) is never advertised and is
+	// therefore undispatchable.
+	//
+	// A command registered this way carries no argument schema: the host
+	// forwards dispatched args verbatim without validation. Use
+	// [Host.RegisterCommandSpec] to declare a typed signature the host
+	// validates before invoking the handler.
 	RegisterCommand(name string, h CommandHandler) error
+
+	// RegisterCommandSpec is the typed-schema variant of
+	// [Host.RegisterCommand] (railyard-77h.16). The plugin declares the
+	// command's argument signature via [CommandSpec]; the host stores it
+	// and validates dispatched args against it — required keys must be
+	// present and each present value must match its declared [ArgType] —
+	// BEFORE the handler is invoked. A spec with no Args validates only
+	// the command name, identical to RegisterCommand.
+	//
+	// Returns an error on an empty name, a nil handler, or a name that
+	// conflicts with a previously registered command (plugin-provided or
+	// a core allow-list entry).
+	//
+	// Like [Host.RegisterCommand], this must be called during [Plugin.Init]:
+	// the command and its arg schema are advertised to the host in the Init
+	// response, so a spec registered after Init returns is never advertised
+	// and the host's arg validation never engages.
+	RegisterCommandSpec(spec CommandSpec, h CommandHandler) error
 
 	// DispatchCommand invokes a command by name. The host first looks
 	// up the name in the Phase 1 core allow-list (see spec §7.3); if
@@ -78,4 +147,54 @@ type Host interface {
 	// All records emitted through the returned logger include a
 	// "plugin=<name>" attribute set by the host.
 	Logger() *slog.Logger
+
+	// Emit publishes a namespaced event onto the bus so other plugins
+	// (and core) can observe it. The topic MUST be prefixed with this
+	// plugin's own name, i.e. "<Name()>.<something>"; the host rejects
+	// any other prefix and gates the topic against the operator's
+	// allow.publish list. Subscribers receive the payload as a
+	// map[string]any. Returns an error on a namespace violation, an
+	// allow-list denial, or a transport failure (railyard-77h.9).
+	Emit(ctx context.Context, topic string, payload map[string]any) error
+
+	// Store returns this plugin's private, persistent key/value store
+	// (railyard-77h.11). The store is namespaced to the calling plugin's
+	// connection-bound identity — a plugin can only ever read and write
+	// its own keys; cross-plugin access is impossible by construction.
+	// Values are opaque bytes (the plugin chooses its own encoding).
+	//
+	// The host enforces per-plugin limits to protect the shared backing
+	// DB: a value may be at most 64 KiB, a key at most 256 bytes, and a
+	// single plugin may hold at most 1024 keys at once. Overruns surface
+	// as an error from Put. A host without a configured DB surfaces an
+	// error from every Store method rather than panicking.
+	Store() Store
+}
+
+// Store is a plugin's private, persistent key/value namespace
+// (railyard-77h.11). It is obtained via [Host.Store]. Every method scopes
+// to the calling plugin's connection-bound identity on the host side, so
+// keys written by one plugin are invisible to every other plugin.
+//
+// Values are opaque []byte: the plugin owns the encoding. The host caps
+// value size (64 KiB), key length (256 bytes), and key count (1024 per
+// plugin); a violation is returned as an error from [Store.Put].
+type Store interface {
+	// Get returns the value stored under key and whether it was present.
+	// A missing key returns (nil, false, nil) — absence is not an error.
+	Get(ctx context.Context, key string) ([]byte, bool, error)
+
+	// Put inserts or overwrites the value under key. It returns an error
+	// when a host limit is exceeded (value too large, key too long, or
+	// the per-plugin key cap is reached for a new key) or on transport
+	// failure.
+	Put(ctx context.Context, key string, value []byte) error
+
+	// Delete removes key from the store. Deleting an absent key is a
+	// no-op and returns a nil error.
+	Delete(ctx context.Context, key string) error
+
+	// List returns the keys whose name begins with prefix, sorted
+	// ascending. An empty prefix returns every key in the namespace.
+	List(ctx context.Context, prefix string) ([]string, error)
 }

@@ -22,6 +22,15 @@ import (
 // `go test` session this is a one-time cost.
 func buildTestPlugin(t *testing.T) string {
 	t.Helper()
+	return buildPluginBinary(t, "testplugin")
+}
+
+// buildPluginBinary compiles the helper plugin binary under
+// testdata/<name> and returns its absolute path. Generalizes
+// buildTestPlugin so additional fixture plugins (e.g. healthplugin,
+// railyard-77h.12) can be built without duplicating the toolchain dance.
+func buildPluginBinary(t *testing.T, name string) string {
+	t.Helper()
 	if testing.Short() {
 		t.Skip("subprocess plugin build is slow; skip under -short")
 	}
@@ -29,11 +38,11 @@ func buildTestPlugin(t *testing.T) string {
 	if err != nil {
 		t.Skipf("go toolchain not available: %v", err)
 	}
-	src, err := filepath.Abs(filepath.Join("testdata", "testplugin"))
+	src, err := filepath.Abs(filepath.Join("testdata", name))
 	if err != nil {
 		t.Fatalf("abs path: %v", err)
 	}
-	out := filepath.Join(t.TempDir(), "testplugin")
+	out := filepath.Join(t.TempDir(), name)
 	if runtime.GOOS == "windows" {
 		out += ".exe"
 	}
@@ -45,7 +54,7 @@ func buildTestPlugin(t *testing.T) string {
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
 	if err := cmd.Run(); err != nil {
-		t.Fatalf("build testplugin: %v\n%s", err, buf.String())
+		t.Fatalf("build %s: %v\n%s", name, err, buf.String())
 	}
 	if err := os.Chmod(out, 0o700); err != nil {
 		t.Fatalf("chmod: %v", err)

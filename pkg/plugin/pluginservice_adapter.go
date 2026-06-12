@@ -65,6 +65,11 @@ func (a *pluginServiceAdapter) Init(ctx context.Context, req *protov1.InitReques
 		a.mu.Lock()
 		a.hc = hc
 		a.mu.Unlock()
+		// Capture the host's Init-time topic advertisement BEFORE the
+		// user's Init runs, so any Subscribe call made during Init can be
+		// checked against it (railyard-77h.8). req is nil-safe via the
+		// generated getter.
+		hc.setSupportedTopics(req.GetSupportedEventTopics())
 		initErr = a.callUser("Init", func() error {
 			return a.impl.Init(ctx, hc)
 		})
@@ -81,13 +86,18 @@ func (a *pluginServiceAdapter) Init(ctx context.Context, req *protov1.InitReques
 	// applies its allow-list (railyard-fll.4) and stores its filtered
 	// view internally; the response we hand back here describes what the
 	// plugin TRIED to register so the host can compute denials.
-	resp := &protov1.InitResponse{}
+	resp := &protov1.InitResponse{SdkVersion: SDKVersion}
 	a.mu.Lock()
 	hc := a.hc
 	a.mu.Unlock()
 	if hc != nil {
 		resp.AllowedEvents = hc.advertisedTopics()
 		resp.AllowedCommands = hc.advertisedCommandNames()
+		// Typed arg signatures for commands registered via
+		// RegisterCommandSpec (railyard-77h.16). The host stores these and
+		// validates dispatched args before forwarding to HandleCommand.
+		// Bare RegisterCommand commands carry no spec and are absent here.
+		resp.CommandSpecs = hc.advertisedCommandSpecs()
 	}
 	// Defensive fallback: if the host sent its own declared wish-list in
 	// the request and the plugin didn't subscribe to anything in Init,
@@ -188,6 +198,64 @@ func (a *pluginServiceAdapter) HandleCommand(ctx context.Context, req *protov1.H
 		resp.Data = dataStruct
 	}
 	return resp, nil
+}
+
+// Health handles the OPTIONAL Health probe RPC (railyard-77h.12). The
+// user's Plugin impl opts in by also implementing [HealthReporter]. When
+// it does NOT, we return codes.Unimplemented so the host can surface the
+// plugin as "n/a" rather than an error — keeping plugins built before
+// this RPC fully backward compatible.
+//
+// A panic inside the user's Health is recovered like every other user
+// method: onFatal fires (production exits 1) and the host receives a
+// gRPC Internal error rather than a dropped connection.
+func (a *pluginServiceAdapter) Health(ctx context.Context, _ *protov1.HealthRequest) (*protov1.HealthResponse, error) {
+	reporter, ok := a.impl.(HealthReporter)
+	if !ok {
+		return nil, status.Error(codes.Unimplemented, "plugin does not implement HealthReporter")
+	}
+
+	var (
+		st        HealthStatus
+		msg       string
+		recovered any
+		stack     []byte
+	)
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				recovered = r
+				stack = debug.Stack()
+			}
+		}()
+		st, msg = reporter.Health(ctx)
+	}()
+	if recovered != nil {
+		a.fireFatal("Health", recovered, stack)
+		return nil, status.Errorf(codes.Internal, "plugin Health panic: %v", recovered)
+	}
+
+	return &protov1.HealthResponse{
+		State:   healthStatusToProto(st),
+		Message: msg,
+	}, nil
+}
+
+// healthStatusToProto maps the SDK HealthStatus onto the wire enum. An
+// unknown/zero status is reported as DEGRADED — a HealthReporter that
+// returns the zero value is misbehaving, and degraded is the safe
+// operator-visible verdict.
+func healthStatusToProto(s HealthStatus) protov1.HealthState {
+	switch s {
+	case HealthOK:
+		return protov1.HealthState_HEALTH_STATE_OK
+	case HealthDegraded:
+		return protov1.HealthState_HEALTH_STATE_DEGRADED
+	case HealthFailing:
+		return protov1.HealthState_HEALTH_STATE_FAILING
+	default:
+		return protov1.HealthState_HEALTH_STATE_DEGRADED
+	}
 }
 
 // callUser invokes a user-impl method, converting a panic into an

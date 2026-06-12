@@ -1,0 +1,36 @@
+// Vendored copy of hashicorp/go-plugin's internal broker contract.
+//
+// SOURCE: github.com/hashicorp/go-plugin@v1.8.0
+//   internal/plugin/grpc_broker.proto
+// LICENSE: MPL-2.0 (see the upstream module).
+//
+// WHY THIS IS HERE: go-plugin keeps this proto in an `internal/` package,
+// so it is not importable. A non-Go plugin that wants the HostService
+// dial-back MUST serve the `plugin.GRPCBroker` service itself, which means
+// it needs these message/service definitions. The fully-qualified service
+// name (`plugin.GRPCBroker`) and the field numbers below are the wire
+// contract the railyard host (a go-plugin Client) speaks — do NOT rename
+// the package or renumber fields, or gRPC method routing will not match.
+//
+// Keep this file byte-for-byte in sync with the upstream version pinned in
+// railyard's go.mod (run `go list -m github.com/hashicorp/go-plugin`).
+
+syntax = "proto3";
+package plugin;
+option go_package = "github.com/hashicorp/go-plugin/internal/plugin";
+
+message ConnInfo {
+    uint32 service_id = 1;
+    string network = 2;
+    string address = 3;
+    message Knock {
+        bool knock = 1;
+        bool ack = 2;
+        string error = 3;
+    }
+    Knock knock = 4;
+}
+
+service GRPCBroker {
+    rpc StartStream(stream ConnInfo) returns (stream ConnInfo);
+}

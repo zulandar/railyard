@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -146,6 +147,12 @@ type PluginsConfig struct {
 	// directories on name collision.
 	PluginsDir string `yaml:"plugins_dir"`
 
+	// HealthIntervalSec is how often, in seconds, the host polls each
+	// running plugin's optional PluginService.Health probe (railyard-77h.12).
+	// Defaults to 30 when unset or non-positive (applied by applyDefaults).
+	// Use [PluginsConfig.HealthInterval] for the resolved duration.
+	HealthIntervalSec int `yaml:"health_interval_sec"`
+
 	// Settings carries per-plugin configuration (currently just the
 	// capability allow-list). Keys are plugin names matching entries in
 	// Enabled — a setting block for a plugin not listed in Enabled is
@@ -166,6 +173,18 @@ type PluginSettings struct {
 	// Allow is the capability allow-list for the plugin. Empty struct
 	// (the zero value) denies every advertised capability.
 	Allow AllowConfig `yaml:"allow"`
+
+	// Sha256 optionally pins the SHA-256 hash of the plugin binary the host
+	// is allowed to launch (railyard-77h.15). When set it must be exactly
+	// 64 hex characters; config load normalizes it to lowercase. The host
+	// recomputes the binary's hash on EVERY launch (first boot and every
+	// supervisor relaunch) and refuses to exec a binary whose hash does not
+	// match, permanently disabling the plugin with the "integrity-mismatch"
+	// reason. Empty (the zero value) disables the check — the default,
+	// preserving prior behavior. This is an integrity-against-drift control,
+	// not a sandbox: see internal/pluginhost/launch.go for the residual
+	// TOCTOU note.
+	Sha256 string `yaml:"sha256"`
 }
 
 // AllowConfig is the capability allow-list for one plugin.
@@ -187,21 +206,46 @@ type PluginSettings struct {
 type AllowConfig struct {
 	Events   []string `yaml:"events"`
 	Commands []string `yaml:"commands"`
+
+	// Publish is the set of event topics the plugin may publish onto the
+	// bus via HostService.EmitEvent (railyard-77h.9). Topics are
+	// namespaced "<plugin>.<name>"; the host independently enforces the
+	// caller's own name prefix. Wildcard semantics match Commands: "*"
+	// matches all, "ns.*" is a prefix wildcard, otherwise literal.
+	// Empty (the zero value) denies all publishing.
+	Publish []string `yaml:"publish"`
+}
+
+// defaultHealthIntervalSec is the fallback plugin health-poll interval
+// (railyard-77h.12). Applied by applyDefaults when health_interval_sec is
+// unset or non-positive.
+const defaultHealthIntervalSec = 30
+
+// HealthInterval returns the resolved plugin health-poll interval as a
+// time.Duration. A non-positive HealthIntervalSec falls back to the 30s
+// default so callers never have to special-case an unconfigured value
+// (railyard-77h.12).
+func (p PluginsConfig) HealthInterval() time.Duration {
+	if p.HealthIntervalSec <= 0 {
+		return defaultHealthIntervalSec * time.Second
+	}
+	return time.Duration(p.HealthIntervalSec) * time.Second
 }
 
 // pluginsConfigRaw is the on-wire shape of `plugins:`. It captures the
 // reserved keys typed and stashes the rest as a generic map for
 // per-plugin lookup. Used only inside UnmarshalYAML.
 type pluginsConfigRaw struct {
-	Enabled    []string             `yaml:"enabled"`
-	PluginsDir string               `yaml:"plugins_dir"`
-	Rest       map[string]yaml.Node `yaml:",inline"`
+	Enabled           []string             `yaml:"enabled"`
+	PluginsDir        string               `yaml:"plugins_dir"`
+	HealthIntervalSec int                  `yaml:"health_interval_sec"`
+	Rest              map[string]yaml.Node `yaml:",inline"`
 }
 
 // UnmarshalYAML decodes the `plugins:` block. Reserved keys (`enabled`,
-// `plugins_dir`) populate the typed fields; every remaining key is
-// decoded into a PluginSettings struct and stored in Settings under the
-// key's name.
+// `plugins_dir`, `health_interval_sec`) populate the typed fields; every
+// remaining key is decoded into a PluginSettings struct and stored in
+// Settings under the key's name.
 //
 // Validation of allow-list wildcard tokens happens here so a malformed
 // entry fails config load with a clear message rather than surfacing
@@ -213,6 +257,7 @@ func (p *PluginsConfig) UnmarshalYAML(node *yaml.Node) error {
 	}
 	p.Enabled = raw.Enabled
 	p.PluginsDir = raw.PluginsDir
+	p.HealthIntervalSec = raw.HealthIntervalSec
 	if len(raw.Rest) == 0 {
 		return nil
 	}
@@ -228,6 +273,15 @@ func (p *PluginsConfig) UnmarshalYAML(node *yaml.Node) error {
 		if err := validateAllowConfig(name, s.Allow); err != nil {
 			return err
 		}
+		// Validate + normalize the optional sha256 binary pin
+		// (railyard-77h.15). Normalization (lowercasing) is written back
+		// onto the stored settings struct so the host's compare is
+		// case-insensitive without re-folding at launch time.
+		normalized, err := validateSha256(name, s.Sha256)
+		if err != nil {
+			return err
+		}
+		s.Sha256 = normalized
 		p.Settings[name] = s
 	}
 	return nil
@@ -247,7 +301,36 @@ func validateAllowConfig(plugin string, a AllowConfig) error {
 			return fmt.Errorf("plugins.%s.allow.commands: %w", plugin, err)
 		}
 	}
+	// Publish topics share the command wildcard grammar ("*", "ns.*", or
+	// a literal) since plugin-published topics are namespaced like
+	// commands (railyard-77h.9).
+	for _, p := range a.Publish {
+		if err := validateCommandToken(p); err != nil {
+			return fmt.Errorf("plugins.%s.allow.publish: %w", plugin, err)
+		}
+	}
 	return nil
+}
+
+// validateSha256 validates the optional per-plugin binary pin
+// (railyard-77h.15). An empty value is valid (no pin configured → no
+// check). A non-empty value must be exactly 64 hex characters (upper or
+// lower); it is returned normalized to lowercase. Anything else is
+// rejected with a clear, plugin-scoped config error.
+func validateSha256(plugin, sha string) (string, error) {
+	if sha == "" {
+		return "", nil
+	}
+	if len(sha) != 64 {
+		return "", fmt.Errorf("plugins.%s.sha256: must be exactly 64 hex characters, got %d", plugin, len(sha))
+	}
+	for _, r := range sha {
+		isHex := (r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')
+		if !isHex {
+			return "", fmt.Errorf("plugins.%s.sha256: must be hex (0-9a-fA-F); invalid character %q", plugin, r)
+		}
+	}
+	return strings.ToLower(sha), nil
 }
 
 // validateEventToken accepts "*" alone or a literal topic name with no
@@ -904,6 +987,12 @@ func (c *Config) applyDefaults() {
 		c.Telegraph.Slack.BotToken = resolveEnvVars(c.Telegraph.Slack.BotToken)
 		c.Telegraph.Slack.AppToken = resolveEnvVars(c.Telegraph.Slack.AppToken)
 		c.Telegraph.Discord.BotToken = resolveEnvVars(c.Telegraph.Discord.BotToken)
+	}
+	// Plugin health-poll interval default (railyard-77h.12). Applied
+	// unconditionally so the host always sees a positive value; a
+	// non-positive configured value falls back to the 30s default.
+	if c.Plugins.HealthIntervalSec <= 0 {
+		c.Plugins.HealthIntervalSec = defaultHealthIntervalSec
 	}
 }
 

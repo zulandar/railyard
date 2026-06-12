@@ -15,6 +15,7 @@ package pluginhost
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"runtime/debug"
 	"sync"
@@ -26,6 +27,7 @@ import (
 	"github.com/zulandar/railyard/internal/config"
 	"github.com/zulandar/railyard/internal/events"
 	"github.com/zulandar/railyard/pkg/plugin"
+	protov1 "github.com/zulandar/railyard/pkg/plugin/proto/v1"
 )
 
 // Dependencies bundles the inputs required to construct a [*Host]. Wiring
@@ -106,6 +108,16 @@ type Host struct {
 	// the core allow-list misses.
 	pluginCmds map[string]string
 
+	// pluginCmdSpecs maps a plugin-registered command name to the typed
+	// argument schema the owning plugin reported in
+	// InitResponse.command_specs (railyard-77h.16). Populated alongside
+	// pluginCmds in initOne and cleaned up in removeLaunched in lockstep.
+	// HostService.DispatchCommand validates dispatched args against the
+	// stored spec before forwarding to HandleCommand; a command with no
+	// entry here (a bare RegisterCommand, or an old plugin) skips
+	// validation entirely. Read/written under h.mu.
+	pluginCmdSpecs map[string]*protov1.CommandSchema
+
 	// inProcCmds holds in-process command handlers registered via
 	// [Host.RegisterCommand]. Subprocess plugins do NOT use this path —
 	// they advertise commands through their PluginService.Init response
@@ -124,6 +136,14 @@ type Host struct {
 	// Keyed by plugin name.
 	launched map[string]*launchedPlugin
 
+	// restarting tracks plugin names with an operator restart in flight,
+	// so a second concurrent Restart of the same name is rejected rather
+	// than racing the first to launch and overwriting h.launched —
+	// orphaning a live subprocess Stop could never reach (railyard-uv8.4).
+	// A name is inserted under h.mu by prepareRestart and removed by
+	// clearRestarting when Restart returns. Read/written under h.mu.
+	restarting map[string]struct{}
+
 	// shutdownCh is closed by [Host.Stop] (idempotently, via
 	// shutdownOnce) to signal every per-plugin supervisor goroutine
 	// that it must NOT relaunch on the next observed subprocess exit.
@@ -132,10 +152,15 @@ type Host struct {
 	shutdownCh   chan struct{}
 	shutdownOnce sync.Once
 
-	// supervisorWG joins every supervisor goroutine. [Host.Stop] blocks
-	// on it after closing shutdownCh so a relaunch attempt cannot race
-	// the socket cleanup.
+	// supervisorWG joins every supervisor goroutine AND the single
+	// health-poll goroutine (railyard-77h.12). [Host.Stop] blocks on it
+	// after closing shutdownCh so a relaunch attempt — or an in-flight
+	// health probe — cannot race the socket cleanup.
 	supervisorWG sync.WaitGroup
+
+	// healthPollOnce guards the single health-poll goroutine so a
+	// repeated [Host.Start] cannot spawn a second poller (railyard-77h.12).
+	healthPollOnce sync.Once
 
 	// started is set true after [Host.Start] runs. The supervisor uses
 	// it to decide whether a relaunched plugin should additionally be
@@ -194,14 +219,16 @@ var _ plugin.Host = (*Host)(nil)
 // plugins until [Host.Init] is called.
 func NewHost(deps Dependencies) *Host {
 	h := &Host{
-		deps:         deps,
-		pluginCmds:   make(map[string]string),
-		inProcCmds:   make(map[string]plugin.CommandHandler),
-		launched:     make(map[string]*launchedPlugin),
-		shutdownCh:   make(chan struct{}),
-		clock:        time.Now,
-		initFailures: make(map[string]initFailure),
-		disabled:     make(map[string]*disabledPlugin),
+		deps:           deps,
+		pluginCmds:     make(map[string]string),
+		pluginCmdSpecs: make(map[string]*protov1.CommandSchema),
+		inProcCmds:     make(map[string]plugin.CommandHandler),
+		launched:       make(map[string]*launchedPlugin),
+		restarting:     make(map[string]struct{}),
+		shutdownCh:     make(chan struct{}),
+		clock:          time.Now,
+		initFailures:   make(map[string]initFailure),
+		disabled:       make(map[string]*disabledPlugin),
 		// `skipped` starts nil; populated by Init when there are missing plugins.
 	}
 	// bootedAt MUST come from h.clock so tests that stub the clock can
@@ -315,6 +342,21 @@ func (h *Host) Subscribe(topic plugin.EventType, handler plugin.EventHandler) pl
 	return h.subscribeFor("", topic, handler)
 }
 
+// SubscribeWithMeta satisfies the [plugin.Host] contract. The bare
+// in-process *Host is a direct bus passthrough with no per-stream
+// sequence or drop accounting (that lives on the gRPC Subscribe path in
+// subscribe.go), so it delivers a zero [plugin.EventMeta]. Subprocess
+// plugins reach the meta-bearing path through HostService.Subscribe
+// (railyard-77h.10).
+func (h *Host) SubscribeWithMeta(topic plugin.EventType, handler plugin.MetaEventHandler) plugin.Unsubscribe {
+	if handler == nil {
+		return func() {}
+	}
+	return h.subscribeFor("", topic, func(t plugin.EventType, payload any) {
+		handler(t, payload, plugin.EventMeta{})
+	})
+}
+
 // subscribeFor is the per-plugin-tracked Subscribe implementation used
 // by in-process callers via *Host.Subscribe. Subprocess plugins use the
 // gRPC Subscribe path implemented in subscribe.go.
@@ -339,6 +381,48 @@ func (h *Host) subscribeFor(pluginName string, topic plugin.EventType, handler p
 		busUnsub()
 		decrement()
 	}
+}
+
+// Emit satisfies the [plugin.Host] contract for in-process callers by
+// publishing directly to the bus. Unlike the subprocess path
+// (HostService.EmitEvent), the bare *Host applies no "<plugin>." prefix
+// enforcement or allow.publish gate — those are connection-bound checks
+// that only exist on the gRPC server. Subprocess plugins reach the
+// enforced path; this method exists for in-process Host-interface
+// satisfaction (railyard-77h.9).
+func (h *Host) Emit(_ context.Context, topic string, payload map[string]any) error {
+	if topic == "" {
+		return errors.New("pluginhost: Emit: topic must not be empty")
+	}
+	if h.deps.Bus == nil {
+		return errors.New("pluginhost: Emit: no bus configured")
+	}
+	h.deps.Bus.Publish(topic, payload)
+	return nil
+}
+
+// inProcessKVNamespace is the fixed plugin namespace the bare in-process
+// *Host uses for its [plugin.Store]. The bare *Host has no
+// connection-bound plugin identity (subprocess plugins reach the KV store
+// through a per-connection hostService whose pluginName scopes every
+// query), so the in-process view shares one namespace. This path exists
+// only for in-process Host-interface satisfaction and test views — real
+// plugins always go through the gRPC HostService KV RPCs, where the
+// namespace is the connection-bound identity (railyard-77h.11).
+const inProcessKVNamespace = "<in-process>"
+
+// Store satisfies the [plugin.Host] contract for in-process callers. It
+// returns a [plugin.Store] backed by deps.DB under the fixed
+// inProcessKVNamespace. When deps.DB is nil every method on the returned
+// store yields the same codes.Unavailable "kv store not configured" error
+// the gRPC path returns, so the in-process view never panics on a DB-less
+// host (railyard-77h.11).
+func (h *Host) Store() plugin.Store {
+	// Reuse the exact KV logic the gRPC HostService exposes by binding a
+	// hostService to the fixed in-process namespace. The hostService KV
+	// handlers honour a nil DB by returning Unavailable, so no extra
+	// guarding is needed here.
+	return &hostServiceStore{svc: &hostService{host: h, pluginName: inProcessKVNamespace}}
 }
 
 // incrSubscription bumps the per-plugin live subscription gauge.

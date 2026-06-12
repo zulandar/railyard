@@ -52,6 +52,14 @@ type PluginCandidate struct {
 	// plugin. Empty when no allow block is configured.
 	AllowCommands []string
 
+	// Pinned reports whether a sha256 binary pin is configured for this
+	// plugin (cfg.Plugins.Settings[name].Sha256 is non-empty;
+	// railyard-77h.15). It does NOT verify the on-disk binary against the
+	// pin — this is a read-only discovery projection — only whether the
+	// operator has opted into integrity pinning. Surfaced as the PINNED
+	// column in `ry plugins list` so operators can audit pin coverage.
+	Pinned bool
+
 	// SocketPath is the would-be Unix-domain socket path the host
 	// would bind for this plugin if launched right now. Computed
 	// without creating any directories so this stays a read-only
@@ -126,6 +134,7 @@ func DiscoverPlugins(cfg *config.Config) ([]PluginCandidate, error) {
 		if s, ok := settings[name]; ok {
 			pc.AllowEvents = append([]string(nil), s.Allow.Events...)
 			pc.AllowCommands = append([]string(nil), s.Allow.Commands...)
+			pc.Pinned = s.Sha256 != ""
 		}
 		byName[name] = pc
 	}
@@ -158,6 +167,7 @@ func pluginCandidateFromScan(
 	if s, ok := settings[c.name]; ok {
 		pc.AllowEvents = append([]string(nil), s.Allow.Events...)
 		pc.AllowCommands = append([]string(nil), s.Allow.Commands...)
+		pc.Pinned = s.Sha256 != ""
 	}
 	return pc
 }
@@ -357,8 +367,20 @@ func scanDir(dir string, logger *slog.Logger) []candidate {
 			)
 			continue
 		}
+		name := stripExt(ent.Name())
+		// Reject dotted plugin names: the name is the EmitEvent namespace
+		// prefix, and a dotted name (e.g. "foo.bar") would let plugin "foo"
+		// publish into the "foo.bar.*" namespace via the prefix check
+		// (railyard-uv8.9). Skip with a WARN so the operator can rename.
+		if strings.Contains(name, ".") {
+			logger.Warn("pluginhost: skipping plugin with a dotted name — names must not contain '.' (event-namespace prefix collision)",
+				slog.String("path", full),
+				slog.String("name", name),
+			)
+			continue
+		}
 		out = append(out, candidate{
-			name:   stripExt(ent.Name()),
+			name:   name,
 			path:   full,
 			source: dir,
 		})

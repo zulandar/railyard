@@ -135,6 +135,46 @@ func TestAdapterLifecycle(t *testing.T) {
 	}
 }
 
+// TestAdapterInitReportsSDKVersion verifies the plugin reports its SDK
+// version in the InitResponse so the host can surface it in
+// `ry plugins status` (railyard-77h.8).
+func TestAdapterInitReportsSDKVersion(t *testing.T) {
+	t.Parallel()
+
+	impl := &fakePlugin{name: "ver"}
+	adapter, _ := newTestAdapter(impl)
+	resp, err := adapter.Init(context.Background(), &protov1.InitRequest{PluginName: "ver"})
+	if err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if resp.SdkVersion != SDKVersion {
+		t.Errorf("resp.SdkVersion = %q, want %q", resp.SdkVersion, SDKVersion)
+	}
+}
+
+// TestAdapterInitStashesSupportedTopics verifies the host's Init-time
+// topic advertisement is recorded on the hostClient so subsequent
+// Subscribe calls can detect unknown topics (railyard-77h.8).
+func TestAdapterInitStashesSupportedTopics(t *testing.T) {
+	t.Parallel()
+
+	impl := &fakePlugin{name: "neg"}
+	adapter, hc := newTestAdapter(impl)
+	_, err := adapter.Init(context.Background(), &protov1.InitRequest{
+		PluginName:           "neg",
+		SupportedEventTopics: []string{string(CarCreated), string(CarClaimed)},
+	})
+	if err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if hc.unknownTopic(string(CarCreated)) {
+		t.Error("advertised topic CarCreated flagged as unknown")
+	}
+	if !hc.unknownTopic("Frobnicate") {
+		t.Error("un-advertised topic Frobnicate should be flagged unknown")
+	}
+}
+
 // TestAdapterInitError verifies that a user Init returning an error is
 // surfaced as a gRPC FailedPrecondition status, which the host treats
 // as "skip this plugin" per the proto contract.
@@ -195,6 +235,118 @@ func TestAdapterPanicRecovery(t *testing.T) {
 	if got != "Init" {
 		t.Errorf("onFatal rpc = %q, want %q", got, "Init")
 	}
+}
+
+// healthyFakePlugin embeds fakePlugin and additionally implements the
+// optional HealthReporter interface so the adapter's Health RPC routes
+// to a real implementation.
+type healthyFakePlugin struct {
+	fakePlugin
+	state   HealthStatus
+	message string
+	calls   atomic.Int32
+}
+
+func (h *healthyFakePlugin) Health(_ context.Context) (HealthStatus, string) {
+	h.calls.Add(1)
+	return h.state, h.message
+}
+
+// TestAdapterHealthUnimplemented verifies that a plugin which does NOT
+// implement HealthReporter causes the adapter's Health RPC to return
+// codes.Unimplemented — the backward-compatibility path the host maps to
+// "n/a" rather than an error (railyard-77h.12).
+func TestAdapterHealthUnimplemented(t *testing.T) {
+	t.Parallel()
+
+	impl := &fakePlugin{name: "no-health"}
+	adapter, _ := newTestAdapter(impl)
+
+	_, err := adapter.Health(context.Background(), &protov1.HealthRequest{})
+	if err == nil {
+		t.Fatal("expected Unimplemented error for plugin without HealthReporter, got nil")
+	}
+	if s, ok := status.FromError(err); !ok || s.Code() != codes.Unimplemented {
+		t.Fatalf("Health error code = %v, want Unimplemented", err)
+	}
+}
+
+// TestAdapterHealthReporter verifies that a plugin implementing
+// HealthReporter has its self-reported state and message mapped onto the
+// proto HealthResponse (railyard-77h.12).
+func TestAdapterHealthReporter(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name  string
+		state HealthStatus
+		want  protov1.HealthState
+	}{
+		{"ok", HealthOK, protov1.HealthState_HEALTH_STATE_OK},
+		{"degraded", HealthDegraded, protov1.HealthState_HEALTH_STATE_DEGRADED},
+		{"failing", HealthFailing, protov1.HealthState_HEALTH_STATE_FAILING},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			impl := &healthyFakePlugin{
+				fakePlugin: fakePlugin{name: "healthy"},
+				state:      tc.state,
+				message:    "all good",
+			}
+			adapter, _ := newTestAdapter(impl)
+
+			resp, err := adapter.Health(context.Background(), &protov1.HealthRequest{})
+			if err != nil {
+				t.Fatalf("Health returned error: %v", err)
+			}
+			if resp.State != tc.want {
+				t.Errorf("state = %v, want %v", resp.State, tc.want)
+			}
+			if resp.Message != "all good" {
+				t.Errorf("message = %q, want %q", resp.Message, "all good")
+			}
+			if impl.calls.Load() != 1 {
+				t.Errorf("Health impl called %d times, want 1", impl.calls.Load())
+			}
+		})
+	}
+}
+
+// TestAdapterHealthPanicRecovery verifies a panicking Health impl is
+// recovered, onFatal fires, and the host receives a gRPC Internal error
+// rather than a connection drop (railyard-77h.12).
+func TestAdapterHealthPanicRecovery(t *testing.T) {
+	t.Parallel()
+
+	panicker := &panicHealthPlugin{name: "panic-health"}
+	adapter, _ := newTestAdapter(panicker)
+
+	var fatalCalled atomic.Int32
+	adapter.onFatal = func(_ string, _ any, _ []byte) { fatalCalled.Add(1) }
+
+	_, err := adapter.Health(context.Background(), &protov1.HealthRequest{})
+	if err == nil {
+		t.Fatal("expected error from panicking Health, got nil")
+	}
+	if s, ok := status.FromError(err); !ok || s.Code() != codes.Internal {
+		t.Fatalf("Health panic error code = %v, want Internal", err)
+	}
+	if fatalCalled.Load() != 1 {
+		t.Fatalf("onFatal invoked %d times, want 1", fatalCalled.Load())
+	}
+}
+
+// panicHealthPlugin implements Plugin + HealthReporter and panics in
+// Health to exercise the adapter's recovery path.
+type panicHealthPlugin struct{ name string }
+
+func (p *panicHealthPlugin) Name() string                     { return p.name }
+func (p *panicHealthPlugin) Init(context.Context, Host) error { return nil }
+func (p *panicHealthPlugin) Start(context.Context) error      { return nil }
+func (p *panicHealthPlugin) Stop(context.Context) error       { return nil }
+func (p *panicHealthPlugin) Health(context.Context) (HealthStatus, string) {
+	panic("health boom")
 }
 
 // TestCommandArgsStructRoundTrip exercises the bidirectional conversion

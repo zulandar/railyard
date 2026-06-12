@@ -220,6 +220,19 @@ func (h *Host) RegisterCommand(name string, handler plugin.CommandHandler) error
 	return nil
 }
 
+// RegisterCommandSpec is the typed-schema variant of RegisterCommand for
+// in-process callers (railyard-77h.16). The bare *Host is reached only by
+// in-process subsystems / the in-plugin SDK view via DispatchCommand,
+// which forwards to inProcCmds without arg validation; the typed
+// host-side validation lives on the subprocess gRPC path
+// (hostservice.go), keyed off the specs each plugin reports at Init. The
+// bare *Host therefore satisfies the interface by registering the handler
+// under spec.Name; the Args are accepted for API parity but not enforced
+// on this in-process passthrough path.
+func (h *Host) RegisterCommandSpec(spec plugin.CommandSpec, handler plugin.CommandHandler) error {
+	return h.RegisterCommand(spec.Name, handler)
+}
+
 // validateArgs ensures every required key is present and carries a value
 // of the declared kind. Returns nil when args satisfies the spec.
 func validateArgs(specs []argSpec, args plugin.CommandArgs) error {

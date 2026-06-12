@@ -2,15 +2,18 @@ package pluginhost
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
 	goplugin "github.com/hashicorp/go-plugin"
+	"github.com/zulandar/railyard/pkg/plugin"
 	protov1 "github.com/zulandar/railyard/pkg/plugin/proto/v1"
 )
 
@@ -54,6 +57,12 @@ type launchedPlugin struct {
 	// routing.
 	capabilities pluginCapabilities
 
+	// sdkVersion is the pkg/plugin SDK version the plugin reported in its
+	// InitResponse (railyard-77h.8). Empty for a plugin built before
+	// version reporting. Set once at Init; surfaced by Status(). Read
+	// under [Host.mu].
+	sdkVersion string
+
 	// allow is the per-plugin capability allow-list resolved from
 	// railyard.yaml at Init time (railyard-fll.4). It is consulted on
 	// every Subscribe and DispatchCommand to enforce the policy at
@@ -96,6 +105,18 @@ type launchedPlugin struct {
 	// construction and supervisor spawn; consumers must nil-check.
 	superviseDone chan struct{}
 
+	// stopCh is closed by an operator restart (signalPluginStop) to wake
+	// this plugin's supervisor out of its exit-wait WITHOUT a host-wide
+	// shutdown — the per-plugin analogue of h.shutdownCh. The supervisor
+	// selects on it in waitForExitOrShutdown and treats a close as a
+	// planned stop (no relaunch). It lets Restart unblock the supervisor
+	// even when it is parked on a freshly-relaunched healthy subprocess,
+	// closing the unbounded-hang window (railyard-uv8.3). Created in
+	// startSupervisor alongside superviseDone; nil before the supervisor
+	// spawns, so consumers must nil-check (a nil channel never selects).
+	// Closed under [Host.mu] via signalPluginStop.
+	stopCh chan struct{}
+
 	// consecutiveCrashes is the count of crashes since the last
 	// successful (re)launch. The supervisor uses it to index into
 	// [backoffSchedule]; it is reset on a clean Init.
@@ -124,6 +145,73 @@ type launchedPlugin struct {
 	// delivery into the plugin's subscription stream does NOT bump
 	// this field (hot path). Read/written under [Host.mu].
 	lastActivity time.Time
+
+	// --- Optional health probe state (railyard-77h.12) ---
+	//
+	// The host polls each running plugin's optional PluginService.Health
+	// RPC on a configurable interval (default 30s). These fields hold the
+	// most recent result. They are NOT on the per-event hot path (a poll
+	// happens at most once per interval), so unlike the railyard-77h.14
+	// counters they are read/written under [Host.mu] rather than via
+	// atomics.
+
+	// healthValue is the last observed health verdict: one of
+	// healthValueOK / healthValueDegraded / healthValueFailing /
+	// healthValueNA. Empty before the first poll. A plugin that does not
+	// implement HealthReporter (Unimplemented) is recorded as
+	// healthValueNA, not an error.
+	healthValue string
+
+	// healthMessage is the human-readable message from the last Health
+	// probe — the plugin's own message on success, or the error text on
+	// a degraded (RPC error/timeout) result. Empty for n/a.
+	healthMessage string
+
+	// healthCheckedAt is the wall-clock time (from h.clock) of the last
+	// completed Health poll. Zero before the first poll; used by Status()
+	// to render the health age.
+	healthCheckedAt time.Time
+
+	// --- Per-plugin lifetime runtime counters (railyard-77h.14) ---
+	//
+	// HOT-PATH RULE: these counters are touched on the per-event delivery
+	// path (subscribe.go) and the command-dispatch path (hostservice.go).
+	// They MUST be mutated with sync/atomic ONLY — NEVER acquire [Host.mu]
+	// in the per-event loop to bump them. They live on launchedPlugin (not
+	// on the subprocess or a per-subscription value) so they are
+	// process-lifetime cumulative AND survive a supervisor CRASH-relaunch
+	// (the supervisor reuses the same *launchedPlugin and only swaps the
+	// dead subprocess's handles in place — see supervise.go relaunch).
+	// They are NOT carried across an operator `ry plugins restart`: that
+	// path builds a fresh *launchedPlugin (launchAndSuperviseForRestart),
+	// so the counters reset, exactly as they do when the yard process
+	// itself restarts.
+	//
+	// Status() reads them with a lock-free Load() (cheap); it may do so
+	// while already holding [Host.mu.RLock], which is fine — the rule is
+	// only that the EVENT loop adds no locking.
+
+	// eventsDelivered counts events successfully sent on this plugin's
+	// subscription stream(s) over the host's lifetime.
+	eventsDelivered atomic.Uint64
+
+	// eventsDropped counts events dropped on the drop-oldest backpressure
+	// path before reaching this plugin.
+	eventsDropped atomic.Uint64
+
+	// commandsHandled counts commands routed into this plugin's
+	// PluginService.HandleCommand (counted once the RPC is invoked,
+	// regardless of outcome).
+	commandsHandled atomic.Uint64
+
+	// commandsFailed counts HandleCommand invocations that returned a
+	// transport error OR a logical failure (resp.Success == false).
+	commandsFailed atomic.Uint64
+
+	// commandLatencyTotalMicros is the cumulative wall-clock time spent in
+	// PluginService.HandleCommand, in microseconds. The display layer
+	// derives the average as commandLatencyTotalMicros / commandsHandled.
+	commandLatencyTotalMicros atomic.Uint64
 }
 
 // pluginCapabilities is the host's view of the negotiated capability
@@ -196,6 +284,18 @@ func (h *Host) lookupPluginByCommand(cmdName string) *launchedPlugin {
 	return h.launched[owner]
 }
 
+// lookupPluginCmdSpec returns the typed argument schema a subprocess
+// plugin declared for cmdName via RegisterCommandSpec (railyard-77h.16),
+// or nil if the command has no stored spec (a bare RegisterCommand, or a
+// plugin built before spec reporting). A nil return tells
+// DispatchCommand to skip arg validation for that command. Holds the lock
+// for the duration of the read.
+func (h *Host) lookupPluginCmdSpec(cmdName string) *protov1.CommandSchema {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.pluginCmdSpecs[cmdName]
+}
+
 // removeLaunched deletes the launched-plugin entry for name and returns
 // the removed struct (or nil). Idempotent.
 func (h *Host) removeLaunched(name string) *launchedPlugin {
@@ -206,10 +306,12 @@ func (h *Host) removeLaunched(name string) *launchedPlugin {
 		return nil
 	}
 	delete(h.launched, name)
-	// Also drop any command-registry rows owned by this plugin.
+	// Also drop any command-registry rows owned by this plugin, including
+	// the typed arg specs stored alongside them (railyard-77h.16).
 	for cmd, owner := range h.pluginCmds {
 		if owner == name {
 			delete(h.pluginCmds, cmd)
+			delete(h.pluginCmdSpecs, cmd)
 		}
 	}
 	return lp
@@ -274,6 +376,23 @@ func (h *Host) initOne(ctx context.Context, c candidate, parentLogger *slog.Logg
 
 	lp, err := h.launchPluginOnce(ctx, c, pluginLogger)
 	if err != nil {
+		// A failed sha256 pin (railyard-77h.15) is a permanent, distinct
+		// disable — NOT an ordinary init failure. No launchedPlugin exists
+		// yet on this first-boot refusal, so record a disabled entry
+		// directly with the integrity-mismatch reason (the relaunch path
+		// reuses the existing launchedPlugin via handlePermanentDisable
+		// instead). verifyBinaryPin already WARN-logged both hashes.
+		var integ *integrityMismatchError
+		if errors.As(err, &integ) {
+			h.mu.Lock()
+			h.disabled[c.name] = &disabledPlugin{
+				name:           c.name,
+				path:           c.path,
+				lastExitReason: integrityMismatchReason,
+			}
+			h.mu.Unlock()
+			return
+		}
 		pluginLogger.Warn(
 			"plugin "+c.name+": launch failed — skipped ("+err.Error()+")",
 			slog.String("error", err.Error()),
@@ -303,8 +422,9 @@ func (h *Host) initOne(ctx context.Context, c candidate, parentLogger *slog.Logg
 	initCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	resp, err := lp.pluginRPC.Init(initCtx, &protov1.InitRequest{
-		PluginName:   c.name,
-		Capabilities: &protov1.Capabilities{},
+		PluginName:           c.name,
+		Capabilities:         &protov1.Capabilities{},
+		SupportedEventTopics: canonicalEventTopics(),
 	})
 	if err != nil {
 		pluginLogger.Warn(
@@ -356,6 +476,25 @@ func (h *Host) initOne(ctx context.Context, c candidate, parentLogger *slog.Logg
 		provideCommands: allowedCmds,
 	}
 
+	// Record the plugin's reported SDK version (railyard-77h.8). Set
+	// before startSupervisor inserts lp into h.launched, so there is no
+	// concurrent reader yet. Empty for plugins built before version
+	// reporting.
+	lp.sdkVersion = resp.SdkVersion
+
+	// Index the typed arg specs the plugin reported (railyard-77h.16) by
+	// command name so the ownership loop below can stash the matching
+	// spec alongside h.pluginCmds. A command with no entry here (a bare
+	// RegisterCommand, or a plugin built before spec reporting) is dispatched
+	// without arg validation, exactly as before.
+	specByName := make(map[string]*protov1.CommandSchema, len(resp.CommandSpecs))
+	for _, cs := range resp.CommandSpecs {
+		if cs == nil || cs.Name == "" {
+			continue
+		}
+		specByName[cs.Name] = cs
+	}
+
 	// Register command ownership BEFORE spawning the supervisor so a
 	// crash-restart race cannot leave a window where the plugin's
 	// commands look unowned.
@@ -381,6 +520,11 @@ func (h *Host) initOne(ctx context.Context, c candidate, parentLogger *slog.Logg
 			continue
 		}
 		h.pluginCmds[cmd] = lp.name
+		// Stash the typed arg spec (if the plugin declared one via
+		// RegisterCommandSpec) so DispatchCommand validates against it.
+		if spec, ok := specByName[cmd]; ok && len(spec.Args) > 0 {
+			h.pluginCmdSpecs[cmd] = spec
+		}
 	}
 	h.mu.Unlock()
 
@@ -398,6 +542,98 @@ func (h *Host) initOne(ctx context.Context, c candidate, parentLogger *slog.Logg
 	// future code path adds in-place re-init (e.g. config reload), it
 	// will need to clear initFailures itself in the same lock acquisition
 	// that re-inserts into h.launched.
+}
+
+// canonicalEventTopics returns the host's advertised event-topic list
+// for the Init handshake, derived from the SDK's
+// pkg/plugin.CoreEventTypes() so the advertised set cannot drift from
+// the SDK constants (railyard-77h.8). The plugin uses it to warn on a
+// subscription to a topic the host cannot deliver.
+func canonicalEventTopics() []string {
+	core := plugin.CoreEventTypes()
+	out := make([]string, 0, len(core))
+	for _, et := range core {
+		out = append(out, string(et))
+	}
+	return out
+}
+
+// hostInitRequest builds the InitRequest the host sends on every launch
+// path — first boot, crash-relaunch, and operator restart. Centralising it
+// guarantees the host always advertises its supported event topics
+// (railyard-77h.8) so a relaunch re-negotiates exactly like the first boot
+// rather than degrading to a bare request (railyard-uv8.7).
+func hostInitRequest(name string) *protov1.InitRequest {
+	return &protov1.InitRequest{
+		PluginName:           name,
+		Capabilities:         &protov1.Capabilities{},
+		SupportedEventTopics: canonicalEventTopics(),
+	}
+}
+
+// applyInitResponse intersects a freshly-received InitResponse's advertised
+// capabilities with lp.allow, records the filtered surface + reported SDK
+// version on lp, and refreshes the host command registry for lp.name: it
+// first drops every command ownership AND arg spec this plugin currently
+// holds, then re-registers from the response. Clearing first means a
+// relaunched binary that dropped, renamed, or re-typed a command cannot
+// leave stale ownership or a stale arg schema behind (railyard-uv8.7,
+// compounding railyard-uv8.2). It is the shared response-application step
+// for the crash-relaunch and operator-restart paths; initOne keeps its own
+// first-boot variant because it additionally WARN-logs each denied cap.
+//
+// Holds h.mu for the registry mutation.
+func (h *Host) applyInitResponse(lp *launchedPlugin, resp *protov1.InitResponse) {
+	allowedEvents, _ := filterAllowedEvents(append([]string(nil), resp.AllowedEvents...), lp.allow)
+	allowedCmds, _ := filterAllowedCommands(append([]string(nil), resp.AllowedCommands...), lp.allow)
+
+	specByName := make(map[string]*protov1.CommandSchema, len(resp.CommandSpecs))
+	for _, cs := range resp.CommandSpecs {
+		if cs == nil || cs.Name == "" {
+			continue
+		}
+		specByName[cs.Name] = cs
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	lp.capabilities = pluginCapabilities{
+		subscribeEvents: allowedEvents,
+		provideCommands: allowedCmds,
+	}
+	lp.sdkVersion = resp.SdkVersion
+
+	// Drop this plugin's previous ownership + specs so a changed command
+	// set cannot leave stale entries.
+	for cmd, owner := range h.pluginCmds {
+		if owner == lp.name {
+			delete(h.pluginCmds, cmd)
+			delete(h.pluginCmdSpecs, cmd)
+		}
+	}
+
+	for _, cmd := range allowedCmds {
+		if cmd == "" {
+			continue
+		}
+		if _, taken := h.allowed[cmd]; taken {
+			lp.logger.Warn("pluginhost: plugin command conflicts with core allow-list — ignoring",
+				slog.String("command", cmd))
+			continue
+		}
+		if existing, taken := h.pluginCmds[cmd]; taken {
+			lp.logger.Warn("pluginhost: plugin command name collision — keeping first registration",
+				slog.String("command", cmd),
+				slog.String("first_plugin", existing),
+				slog.String("second_plugin", lp.name))
+			continue
+		}
+		h.pluginCmds[cmd] = lp.name
+		if spec, ok := specByName[cmd]; ok && len(spec.Args) > 0 {
+			h.pluginCmdSpecs[cmd] = spec
+		}
+	}
 }
 
 // resolveAllowList builds the per-plugin AllowList from the loaded
@@ -489,6 +725,19 @@ func (h *Host) Start(ctx context.Context) {
 		// Start success: record that the plugin was just active.
 		h.bumpActivity(name)
 	}
+
+	// Launch the single health-poll goroutine once core is up
+	// (railyard-77h.12). It joins through supervisorWG and stops when
+	// shutdownCh closes, so [Host.Stop] reaps it with no leak. Guarded by
+	// healthPollOnce so a repeated Start cannot spawn a second poller.
+	h.healthPollOnce.Do(func() {
+		d := time.Duration(defaultHealthIntervalSec()) * time.Second
+		if h.deps.Cfg != nil {
+			d = h.deps.Cfg.Plugins.HealthInterval()
+		}
+		h.supervisorWG.Add(1)
+		go h.healthPollLoop(ctx, d)
+	})
 }
 
 // Stop calls PluginService.Stop on each launched plugin in reverse-name

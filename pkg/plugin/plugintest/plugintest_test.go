@@ -294,6 +294,64 @@ func TestRegisterCommandRecords(t *testing.T) {
 	}
 }
 
+// TestRegisterCommandSpecRecordsSpec confirms the FakeHost records the
+// full typed [plugin.CommandSpec] on the registration so tests can assert
+// the declared argument signature, and that a bare RegisterCommand
+// records a spec with nil Args (railyard-77h.16).
+func TestRegisterCommandSpecRecordsSpec(t *testing.T) {
+	t.Parallel()
+
+	fh := &plugintest.FakeHost{}
+	handler := func(_ context.Context, _ plugin.CommandArgs) (plugin.CommandResult, error) {
+		return plugin.CommandResult{Success: true}, nil
+	}
+
+	spec := plugin.CommandSpec{
+		Name: "scale",
+		Args: []plugin.ArgSpec{
+			{Name: "Track", Type: plugin.ArgString, Required: true},
+			{Name: "Count", Type: plugin.ArgInt, Required: true},
+		},
+	}
+	if err := fh.RegisterCommandSpec(spec, handler); err != nil {
+		t.Fatalf("RegisterCommandSpec: %v", err)
+	}
+	if err := fh.RegisterCommand("bare", handler); err != nil {
+		t.Fatalf("RegisterCommand: %v", err)
+	}
+
+	regs := fh.Registrations()
+	if len(regs) != 2 {
+		t.Fatalf("expected 2 registrations, got %d", len(regs))
+	}
+	if regs[0].Name != "scale" || regs[0].Spec.Name != "scale" {
+		t.Errorf("typed registration name = %q / spec %q, want scale", regs[0].Name, regs[0].Spec.Name)
+	}
+	if len(regs[0].Spec.Args) != 2 {
+		t.Fatalf("typed spec args = %d, want 2", len(regs[0].Spec.Args))
+	}
+	if regs[0].Spec.Args[0].Name != "Track" || regs[0].Spec.Args[0].Type != plugin.ArgString {
+		t.Errorf("spec arg[0] = %+v, want Track:ArgString", regs[0].Spec.Args[0])
+	}
+	// Bare registration records a spec with nil Args so callers can tell
+	// the two paths apart.
+	if regs[1].Name != "bare" || regs[1].Spec.Args != nil {
+		t.Errorf("bare registration = %+v, want name bare with nil Spec.Args", regs[1])
+	}
+
+	// Validation mirrors RegisterCommand: empty name, nil handler, and a
+	// duplicate of an already-registered name all error.
+	if err := fh.RegisterCommandSpec(plugin.CommandSpec{Name: "scale"}, handler); err == nil {
+		t.Error("duplicate name must error")
+	}
+	if err := fh.RegisterCommandSpec(plugin.CommandSpec{}, handler); err == nil {
+		t.Error("empty name must error")
+	}
+	if err := fh.RegisterCommandSpec(plugin.CommandSpec{Name: "x"}, nil); err == nil {
+		t.Error("nil handler must error")
+	}
+}
+
 func TestRegisterCommandReturnsConfiguredError(t *testing.T) {
 	t.Parallel()
 

@@ -57,6 +57,107 @@ func TestPluginsStatusTableOutput(t *testing.T) {
 	}
 }
 
+// TestPluginsStatusSDKColumn asserts the rendered table carries an SDK
+// column populated from PluginStatus.SDKVersion, with a dash for rows
+// that report no version (railyard-77h.8).
+func TestPluginsStatusSDKColumn(t *testing.T) {
+	withStubConfigLoad(t, func(string) (*config.Config, error) {
+		return &config.Config{Yardmaster: config.YardmasterConfig{HealthPort: 8081}}, nil
+	})
+	withStubStatusFetch(t, func(ctx context.Context, url string, timeout time.Duration) (*pluginhost.Snapshot, error) {
+		return &pluginhost.Snapshot{
+			Plugins: []pluginhost.PluginStatus{
+				{Name: "trainmaster", Status: pluginhost.StatusRunning, SDKVersion: "1.0.0", PID: 7},
+				{Name: "legacy", Status: pluginhost.StatusRunning, PID: 8},
+			},
+		}, nil
+	})
+
+	root := newRootCmd()
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	root.SetArgs([]string{"plugins", "status"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "SDK") {
+		t.Errorf("expected SDK column header, got:\n%s", got)
+	}
+	if !strings.Contains(got, "1.0.0") {
+		t.Errorf("expected trainmaster SDK version 1.0.0 in output:\n%s", got)
+	}
+	lines := strings.Split(got, "\n")
+	for _, l := range lines {
+		if strings.HasPrefix(strings.TrimSpace(l), "legacy ") {
+			// legacy reports no SDK version -> dash placeholder.
+			if !strings.Contains(l, "-") {
+				t.Errorf("expected dash for empty SDK version on legacy row:\n%s", l)
+			}
+		}
+	}
+}
+
+// TestPluginsStatusHealthColumn asserts the rendered default table
+// carries a HEALTH column populated from PluginStatus.Health, rendered as
+// "<value> <age>" for a polled running plugin, "n/a" for a plugin that
+// does not implement HealthReporter, and a dash for a row never polled
+// (railyard-77h.12).
+func TestPluginsStatusHealthColumn(t *testing.T) {
+	withStubConfigLoad(t, func(string) (*config.Config, error) {
+		return &config.Config{Yardmaster: config.YardmasterConfig{HealthPort: 8081}}, nil
+	})
+	withStubStatusFetch(t, func(ctx context.Context, url string, timeout time.Duration) (*pluginhost.Snapshot, error) {
+		return &pluginhost.Snapshot{
+			Plugins: []pluginhost.PluginStatus{
+				{Name: "healthy", Status: pluginhost.StatusRunning, PID: 1, Health: "ok", HealthCheckedAt: time.Now().Add(-12 * time.Second)},
+				{Name: "legacy", Status: pluginhost.StatusRunning, PID: 2, Health: "n/a"},
+				{Name: "unpolled", Status: pluginhost.StatusRunning, PID: 3},
+			},
+		}, nil
+	})
+
+	root := newRootCmd()
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	root.SetArgs([]string{"plugins", "status"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	got := buf.String()
+
+	if !strings.Contains(got, "HEALTH") {
+		t.Errorf("expected HEALTH column header in output:\n%s", got)
+	}
+
+	lines := strings.Split(got, "\n")
+	var healthyLine, legacyLine, unpolledLine string
+	for _, l := range lines {
+		switch {
+		case strings.HasPrefix(strings.TrimSpace(l), "healthy "):
+			healthyLine = l
+		case strings.HasPrefix(strings.TrimSpace(l), "legacy "):
+			legacyLine = l
+		case strings.HasPrefix(strings.TrimSpace(l), "unpolled "):
+			unpolledLine = l
+		}
+	}
+	if !strings.Contains(healthyLine, "ok") {
+		t.Errorf("healthy row missing 'ok' health:\n%s", healthyLine)
+	}
+	if !strings.Contains(healthyLine, "12s") {
+		t.Errorf("healthy row missing age '12s':\n%s", healthyLine)
+	}
+	if !strings.Contains(legacyLine, "n/a") {
+		t.Errorf("legacy row missing 'n/a' health:\n%s", legacyLine)
+	}
+	if !strings.Contains(unpolledLine, "-") {
+		t.Errorf("unpolled row should render a dash for health:\n%s", unpolledLine)
+	}
+}
+
 // TestPluginsStatusErrorColumn asserts the rendered table surfaces
 // PluginStatus.Error for non-running plugins so operators can diagnose
 // failed/disabled rows without falling back to --json. See railyard-kag.
@@ -130,6 +231,118 @@ func TestPluginsStatusErrorColumn(t *testing.T) {
 	fields := strings.Fields(blankyLine)
 	if len(fields) == 0 || fields[len(fields)-1] != "-" {
 		t.Errorf("expected whitespace-only error to render as \"-\", got row:\n%s", blankyLine)
+	}
+}
+
+// TestPluginsStatusVerboseShowsCounters asserts the -v/--verbose flag
+// renders the per-plugin runtime counters (events delivered/dropped,
+// commands handled/failed, avg latency) that the default table omits to
+// stay readable (railyard-77h.14).
+func TestPluginsStatusVerboseShowsCounters(t *testing.T) {
+	withStubConfigLoad(t, func(string) (*config.Config, error) {
+		return &config.Config{Yardmaster: config.YardmasterConfig{HealthPort: 8081}}, nil
+	})
+	snap := &pluginhost.Snapshot{
+		Plugins: []pluginhost.PluginStatus{
+			{
+				Name: "trainmaster", Status: pluginhost.StatusRunning, PID: 42,
+				EventsDelivered: 100, EventsDropped: 7,
+				CommandsHandled: 4, CommandsFailed: 1,
+				CommandLatencyTotalMicros: 8000, CommandLatencyAvgMicros: 2000,
+			},
+		},
+	}
+
+	// Default table: counters NOT shown.
+	withStubStatusFetch(t, func(_ context.Context, _ string, _ time.Duration) (*pluginhost.Snapshot, error) {
+		return snap, nil
+	})
+	root := newRootCmd()
+	var def bytes.Buffer
+	root.SetOut(&def)
+	root.SetErr(&def)
+	root.SetArgs([]string{"plugins", "status"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute default: %v", err)
+	}
+	if strings.Contains(def.String(), "EVENTS-DELIVERED") || strings.Contains(def.String(), "events delivered") {
+		t.Errorf("default table should NOT include counter detail, got:\n%s", def.String())
+	}
+
+	// Verbose: counters shown.
+	for _, flag := range []string{"-v", "--verbose"} {
+		withStubStatusFetch(t, func(_ context.Context, _ string, _ time.Duration) (*pluginhost.Snapshot, error) {
+			return snap, nil
+		})
+		vroot := newRootCmd()
+		var vb bytes.Buffer
+		vroot.SetOut(&vb)
+		vroot.SetErr(&vb)
+		vroot.SetArgs([]string{"plugins", "status", flag})
+		if err := vroot.Execute(); err != nil {
+			t.Fatalf("execute %s: %v", flag, err)
+		}
+		got := vb.String()
+		// Counter values: events delivered/dropped, commands handled/failed,
+		// and the avg latency rendered as a human-readable duration
+		// (2000us -> "2ms").
+		for _, want := range []string{"trainmaster", "100", "7", "4", "1", "2ms"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("verbose (%s) output missing %q:\n%s", flag, want, got)
+			}
+		}
+	}
+}
+
+// TestPluginsStatusVerboseShowsCommandSignatures asserts the -v block
+// renders each plugin's command signatures as "name(arg:type, ...)" and
+// that the default table does NOT (railyard-77h.16).
+func TestPluginsStatusVerboseShowsCommandSignatures(t *testing.T) {
+	withStubConfigLoad(t, func(string) (*config.Config, error) {
+		return &config.Config{Yardmaster: config.YardmasterConfig{HealthPort: 8081}}, nil
+	})
+	snap := &pluginhost.Snapshot{
+		Plugins: []pluginhost.PluginStatus{
+			{
+				Name: "trainmaster", Status: pluginhost.StatusRunning, PID: 42,
+				CommandSignatures: []string{"scale(Track:string, Count:int)", "ping()"},
+			},
+		},
+	}
+
+	// Default table: signatures NOT shown.
+	withStubStatusFetch(t, func(_ context.Context, _ string, _ time.Duration) (*pluginhost.Snapshot, error) {
+		return snap, nil
+	})
+	root := newRootCmd()
+	var def bytes.Buffer
+	root.SetOut(&def)
+	root.SetErr(&def)
+	root.SetArgs([]string{"plugins", "status"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute default: %v", err)
+	}
+	if strings.Contains(def.String(), "COMMAND SIGNATURES") || strings.Contains(def.String(), "scale(Track:string") {
+		t.Errorf("default table should NOT include command signatures, got:\n%s", def.String())
+	}
+
+	// Verbose: signatures shown.
+	withStubStatusFetch(t, func(_ context.Context, _ string, _ time.Duration) (*pluginhost.Snapshot, error) {
+		return snap, nil
+	})
+	vroot := newRootCmd()
+	var vb bytes.Buffer
+	vroot.SetOut(&vb)
+	vroot.SetErr(&vb)
+	vroot.SetArgs([]string{"plugins", "status", "-v"})
+	if err := vroot.Execute(); err != nil {
+		t.Fatalf("execute -v: %v", err)
+	}
+	got := vb.String()
+	for _, want := range []string{"COMMAND SIGNATURES", "trainmaster", "scale(Track:string, Count:int)", "ping()"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("verbose output missing %q:\n%s", want, got)
+		}
 	}
 }
 
