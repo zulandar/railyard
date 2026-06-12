@@ -34,12 +34,28 @@ package pluginhost
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
 	"strings"
 
 	protov1 "github.com/zulandar/railyard/pkg/plugin/proto/v1"
+)
+
+// Restart error categories. Returned wrapped (via %w) so callers — notably
+// the yardmaster HTTP handler — can classify a failure with errors.Is and
+// map it to the right HTTP status: a genuine client error (4xx) vs. a
+// server-side relaunch failure (5xx) (railyard-uv8.8).
+var (
+	// ErrPluginNotFound is wrapped when no plugin is known under the name.
+	ErrPluginNotFound = errors.New("plugin not found")
+	// ErrRestartInProgress is wrapped when a restart of the same plugin is
+	// already running (railyard-uv8.4).
+	ErrRestartInProgress = errors.New("restart already in progress")
+	// ErrHostShuttingDown is wrapped when the host is (or began) shutting
+	// down, so a relaunch must not start.
+	ErrHostShuttingDown = errors.New("host is shutting down")
 )
 
 // Restart relaunches the named plugin in place without restarting the
@@ -69,7 +85,7 @@ func (h *Host) Restart(ctx context.Context, name string) error {
 	// teardown can take up to stopDrainTimeout and Stop may race in during
 	// that window.
 	if h.isShuttingDown() {
-		return fmt.Errorf("pluginhost: cannot restart %q: host is shutting down", name)
+		return fmt.Errorf("pluginhost: cannot restart %q: %w", name, ErrHostShuttingDown)
 	}
 
 	// Snapshot the prior state and, for non-running states, clear the
@@ -96,7 +112,7 @@ func (h *Host) Restart(ctx context.Context, name string) error {
 		// Re-check shutdown: the teardown above can block for the drain
 		// budget, and a Stop may have raced in. If so, do not relaunch.
 		if h.isShuttingDown() {
-			return fmt.Errorf("pluginhost: cannot restart %q: host began shutting down during teardown", name)
+			return fmt.Errorf("pluginhost: cannot restart %q: began shutting down during teardown: %w", name, ErrHostShuttingDown)
 		}
 	}
 
@@ -129,7 +145,7 @@ func (h *Host) prepareRestart(name string) (candidate, string, error) {
 	// h.launched[name] — orphaning the first subprocess.
 	if _, busy := h.restarting[name]; busy {
 		return candidate{}, "", fmt.Errorf(
-			"pluginhost: restart of %q already in progress", name)
+			"pluginhost: restart of %q rejected: %w", name, ErrRestartInProgress)
 	}
 
 	var c candidate
@@ -149,8 +165,8 @@ func (h *Host) prepareRestart(name string) (candidate, string, error) {
 			break
 		}
 		return candidate{}, "", fmt.Errorf(
-			"pluginhost: unknown plugin %q; known plugins: %s",
-			name, h.knownPluginNamesLocked())
+			"pluginhost: unknown plugin %q; known plugins: %s: %w",
+			name, h.knownPluginNamesLocked(), ErrPluginNotFound)
 	}
 
 	// Claim the per-name restart slot now, under the same lock that
@@ -345,7 +361,7 @@ func (h *Host) markStoppingAndAwaitSupervisor(lp *launchedPlugin) {
 // the error is returned.
 func (h *Host) launchAndSuperviseForRestart(ctx context.Context, c candidate) error {
 	if h.isShuttingDown() {
-		return fmt.Errorf("host is shutting down")
+		return ErrHostShuttingDown
 	}
 
 	logger := slog.Default().With(slog.String("plugin", c.name))

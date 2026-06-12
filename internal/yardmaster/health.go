@@ -3,6 +3,7 @@ package yardmaster
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -120,13 +121,44 @@ func serveHealthOnListener(ctx context.Context, ln net.Listener, hs *HealthServe
 	})
 
 	// POST /plugins/restart?name=<name> relaunches a single plugin in the
-	// running host without restarting the yard (railyard-77h.13). The
-	// response JSON carries the old and new state strings so the CLI can
-	// render "old -> new". Errors (unknown name, failed relaunch) return a
-	// non-2xx with a JSON {"error": "..."} body.
-	mux.HandleFunc("/plugins/restart", func(w http.ResponseWriter, r *http.Request) {
+	// running host without restarting the yard (railyard-77h.13).
+	mux.HandleFunc("/plugins/restart", makeRestartHandler(provider))
+
+	srv := &http.Server{Handler: mux}
+
+	go func() {
+		<-ctx.Done()
+		srv.Close()
+	}()
+
+	if err := srv.Serve(ln); err != http.ErrServerClosed {
+		return err
+	}
+	return nil
+}
+
+// makeRestartHandler builds the POST /plugins/restart handler. This is the
+// only MUTATING route on the health server, which binds 0.0.0.0 so k8s
+// probes can reach /healthz and /readyz; restart is therefore gated to
+// loopback callers (railyard-uv8.5) — the ry CLI talks to it over
+// 127.0.0.1. Without the gate, anyone with network reach could restart
+// plugins, revive a deliberately crash-disabled plugin (restart resets the
+// crash budget), or restart-loop one. Extracted as a named function so the
+// loopback gate is unit-testable. The response JSON carries the old and new
+// state strings so the CLI can render "old -> new"; failures return a
+// non-2xx with a JSON {"error": "..."} body.
+func makeRestartHandler(provider StatusProvider) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		// Loopback-only: refuse any caller that is not on the local
+		// loopback interface. The listener binds all interfaces for the
+		// read-only probes, but this mutation must not be network-reachable.
+		if !isLoopbackRemoteAddr(r.RemoteAddr) {
+			writeRestartError(w, http.StatusForbidden,
+				"plugins/restart is restricted to loopback callers")
 			return
 		}
 		name := r.URL.Query().Get("name")
@@ -146,7 +178,7 @@ func serveHealthOnListener(ctx context.Context, ln net.Listener, hs *HealthServe
 		oldState := pluginStateFromSnapshot(provider.Status(), name)
 
 		if err := provider.Restart(r.Context(), name); err != nil {
-			writeRestartError(w, http.StatusBadRequest, err.Error())
+			writeRestartError(w, restartErrorStatus(err), err.Error())
 			return
 		}
 
@@ -157,19 +189,37 @@ func serveHealthOnListener(ctx context.Context, ln net.Listener, hs *HealthServe
 		if err := enc.Encode(restartResponse{Name: name, OldState: oldState, NewState: newState}); err != nil {
 			slog.Default().Error("plugins/restart: encode", "err", err)
 		}
-	})
-
-	srv := &http.Server{Handler: mux}
-
-	go func() {
-		<-ctx.Done()
-		srv.Close()
-	}()
-
-	if err := srv.Serve(ln); err != http.ErrServerClosed {
-		return err
 	}
-	return nil
+}
+
+// restartErrorStatus maps a Host.Restart error to an HTTP status code
+// (railyard-uv8.8): only genuine client errors are 4xx. An unknown plugin
+// name is a bad request (400); a restart already in progress is a conflict
+// (409); the host shutting down is transient (503); everything else — a
+// failed relaunch (launch/Init/Start) — is a server error (500).
+func restartErrorStatus(err error) int {
+	switch {
+	case errors.Is(err, pluginhost.ErrPluginNotFound):
+		return http.StatusBadRequest
+	case errors.Is(err, pluginhost.ErrRestartInProgress):
+		return http.StatusConflict
+	case errors.Is(err, pluginhost.ErrHostShuttingDown):
+		return http.StatusServiceUnavailable
+	default:
+		return http.StatusInternalServerError
+	}
+}
+
+// isLoopbackRemoteAddr reports whether an http.Request RemoteAddr
+// ("host:port") resolves to the loopback interface. A malformed or
+// non-loopback address returns false (deny) (railyard-uv8.5).
+func isLoopbackRemoteAddr(remoteAddr string) bool {
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err != nil {
+		return false
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // restartResponse is the JSON body returned by POST /plugins/restart on
