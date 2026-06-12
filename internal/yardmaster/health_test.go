@@ -9,6 +9,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/zulandar/railyard/internal/models"
+	"gorm.io/gorm"
 )
 
 func TestCheckEngineHealth_NilDB(t *testing.T) {
@@ -51,7 +54,7 @@ func TestDefaultStaleThreshold(t *testing.T) {
 }
 
 func TestReassignCar_NilDB(t *testing.T) {
-	err := ReassignCar(nil, "car-001", "eng-001", "stalled")
+	_, err := ReassignCar(nil, "car-001", "eng-001", "stalled")
 	if err == nil {
 		t.Fatal("expected error for nil db")
 	}
@@ -62,7 +65,7 @@ func TestReassignCar_NilDB(t *testing.T) {
 
 func TestReassignCar_EmptyCarID(t *testing.T) {
 	// nil db check comes first, then carID check.
-	err := ReassignCar(nil, "", "eng-001", "stalled")
+	_, err := ReassignCar(nil, "", "eng-001", "stalled")
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -70,9 +73,134 @@ func TestReassignCar_EmptyCarID(t *testing.T) {
 
 func TestReassignCar_EmptyEngineID(t *testing.T) {
 	// nil db check comes first, then field checks.
-	err := ReassignCar(nil, "car-001", "", "stalled")
+	_, err := ReassignCar(nil, "car-001", "", "stalled")
 	if err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+// --- ReassignCar status/assignee guard (railyard-h2v) ---
+
+func reassignFixture(t *testing.T, db *gorm.DB, carStatus, carAssignee string) {
+	t.Helper()
+	now := time.Now()
+	if err := db.Create(&models.Car{
+		ID: "car-rg", Title: "guard test", Status: carStatus, Track: "backend",
+		Assignee: carAssignee, CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("create car: %v", err)
+	}
+	if err := db.Create(&models.Engine{
+		ID: "eng-rg", Track: "backend", Role: "engine", Status: "working",
+		CurrentCar: "car-rg", LastActivity: now,
+	}).Error; err != nil {
+		t.Fatalf("create engine: %v", err)
+	}
+}
+
+func TestReassignCar_StillClaimed_Reopens(t *testing.T) {
+	db := testDB(t)
+	reassignFixture(t, db, "claimed", "eng-rg")
+
+	reassigned, err := ReassignCar(db, "car-rg", "eng-rg", "stale heartbeat")
+	if err != nil {
+		t.Fatalf("ReassignCar: %v", err)
+	}
+	if !reassigned {
+		t.Error("reassigned = false, want true")
+	}
+
+	var c models.Car
+	if err := db.First(&c, "id = ?", "car-rg").Error; err != nil {
+		t.Fatalf("fetch car: %v", err)
+	}
+	if c.Status != "open" || c.Assignee != "" {
+		t.Errorf("car = (%q, assignee %q), want (open, \"\")", c.Status, c.Assignee)
+	}
+
+	var eng models.Engine
+	if err := db.First(&eng, "id = ?", "eng-rg").Error; err != nil {
+		t.Fatalf("fetch engine: %v", err)
+	}
+	if eng.Status != "dead" || eng.CurrentCar != "" {
+		t.Errorf("engine = (%q, current %q), want (dead, \"\")", eng.Status, eng.CurrentCar)
+	}
+
+	var notes int64
+	db.Model(&models.CarProgress{}).Where("car_id = ?", "car-rg").Count(&notes)
+	if notes != 1 {
+		t.Errorf("progress notes = %d, want 1", notes)
+	}
+	var msgs int64
+	db.Model(&models.Message{}).Where("car_id = ?", "car-rg").Count(&msgs)
+	if msgs != 1 {
+		t.Errorf("broadcast messages = %d, want 1", msgs)
+	}
+}
+
+func TestReassignCar_CarAlreadyDone_NoOp(t *testing.T) {
+	db := testDB(t)
+	// The "stale" engine finished the car between the health check and the
+	// reassign: the completion must not be lost.
+	reassignFixture(t, db, "done", "eng-rg")
+
+	reassigned, err := ReassignCar(db, "car-rg", "eng-rg", "stale heartbeat")
+	if err != nil {
+		t.Fatalf("ReassignCar: %v", err)
+	}
+	if reassigned {
+		t.Error("reassigned = true, want false (car already done)")
+	}
+
+	var c models.Car
+	if err := db.First(&c, "id = ?", "car-rg").Error; err != nil {
+		t.Fatalf("fetch car: %v", err)
+	}
+	if c.Status != "done" || c.Assignee != "eng-rg" {
+		t.Errorf("car = (%q, assignee %q), want (done, eng-rg) untouched", c.Status, c.Assignee)
+	}
+
+	// Genuinely stale engine must still be marked dead.
+	var eng models.Engine
+	if err := db.First(&eng, "id = ?", "eng-rg").Error; err != nil {
+		t.Fatalf("fetch engine: %v", err)
+	}
+	if eng.Status != "dead" {
+		t.Errorf("engine status = %q, want dead", eng.Status)
+	}
+
+	// No reassignment note or broadcast for a no-op.
+	var notes int64
+	db.Model(&models.CarProgress{}).Where("car_id = ?", "car-rg").Count(&notes)
+	if notes != 0 {
+		t.Errorf("progress notes = %d, want 0", notes)
+	}
+	var msgs int64
+	db.Model(&models.Message{}).Where("car_id = ?", "car-rg").Count(&msgs)
+	if msgs != 0 {
+		t.Errorf("broadcast messages = %d, want 0", msgs)
+	}
+}
+
+func TestReassignCar_ClaimedByOtherEngine_NoOp(t *testing.T) {
+	db := testDB(t)
+	// Car was already reassigned to and claimed by a different engine.
+	reassignFixture(t, db, "claimed", "eng-other")
+
+	reassigned, err := ReassignCar(db, "car-rg", "eng-rg", "stale heartbeat")
+	if err != nil {
+		t.Fatalf("ReassignCar: %v", err)
+	}
+	if reassigned {
+		t.Error("reassigned = true, want false (claimed by another engine)")
+	}
+
+	var c models.Car
+	if err := db.First(&c, "id = ?", "car-rg").Error; err != nil {
+		t.Fatalf("fetch car: %v", err)
+	}
+	if c.Status != "claimed" || c.Assignee != "eng-other" {
+		t.Errorf("car = (%q, assignee %q), want (claimed, eng-other) untouched", c.Status, c.Assignee)
 	}
 }
 

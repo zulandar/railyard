@@ -10,6 +10,7 @@ import (
 
 	"github.com/zulandar/railyard/internal/config"
 	"github.com/zulandar/railyard/internal/db"
+	"github.com/zulandar/railyard/internal/engine"
 	"github.com/zulandar/railyard/internal/models"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -280,8 +281,14 @@ func TestRunComplete_Success(t *testing.T) {
 	cleanup := withMockDB(t, gormDB)
 	defer cleanup()
 
+	// Exercise the real engine lifecycle rather than hand-seeding in_progress:
+	// claimed -> in_progress (engine.MarkInProgress at agent spawn) -> done
+	// (railyard-rsy).
 	now := time.Now()
-	gormDB.Create(&models.Car{ID: "car-done", Title: "Completable", Status: "in_progress", Track: "backend", Branch: "ry/backend/car-done", BaseBranch: "main", CreatedAt: now, UpdatedAt: now})
+	gormDB.Create(&models.Car{ID: "car-done", Title: "Completable", Status: "claimed", Track: "backend", Assignee: "eng-test", Branch: "ry/backend/car-done", BaseBranch: "main", CreatedAt: now, UpdatedAt: now})
+	if transitioned, err := engine.MarkInProgress(gormDB, "car-done", "eng-test"); err != nil || !transitioned {
+		t.Fatalf("MarkInProgress = (%v, %v), want (true, nil)", transitioned, err)
+	}
 
 	// Set up a git repo with a bare remote and a commit ahead of main.
 	bareDir := t.TempDir()
@@ -329,6 +336,109 @@ func TestRunComplete_Success(t *testing.T) {
 	}
 	if c.Status != "done" {
 		t.Errorf("status = %q, want %q", c.Status, "done")
+	}
+}
+
+// TestRunComplete_FromClaimed exercises the real engine flow where the engine
+// died before transitioning the car to in_progress: ry complete on a still-
+// claimed car must succeed (railyard-rsy regression / railyard-41w).
+func TestRunComplete_FromClaimed(t *testing.T) {
+	gormDB := mockTestDB(t)
+	cleanup := withMockDB(t, gormDB)
+	defer cleanup()
+
+	now := time.Now()
+	gormDB.Create(&models.Car{ID: "car-clm", Title: "Claimed car", Status: "claimed", Track: "backend", Branch: "ry/backend/car-clm", BaseBranch: "main", Assignee: "eng-1", CreatedAt: now, UpdatedAt: now})
+
+	bareDir := t.TempDir()
+	repoDir := t.TempDir()
+	run := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("%v: %s\n%s", args, err, out)
+		}
+	}
+	run(bareDir, "git", "init", "--bare", "-b", "main")
+	run(repoDir, "git", "init", "-b", "main")
+	run(repoDir, "git", "config", "user.email", "test@test.com")
+	run(repoDir, "git", "config", "user.name", "test")
+	run(repoDir, "git", "commit", "--allow-empty", "-m", "init")
+	run(repoDir, "git", "remote", "add", "origin", bareDir)
+	run(repoDir, "git", "push", "origin", "main")
+	run(repoDir, "git", "checkout", "-b", "ry/backend/car-clm")
+	run(repoDir, "git", "commit", "--allow-empty", "-m", "real work")
+
+	origDir, _ := os.Getwd()
+	if err := os.Chdir(repoDir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	defer os.Chdir(origDir) //nolint:errcheck
+
+	out, err := execCmd(t, []string{"complete", "car-clm", "done from claimed", "--config", "test.yaml"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v\noutput: %s", err, out)
+	}
+
+	var c models.Car
+	if err := gormDB.First(&c, "id = ?", "car-clm").Error; err != nil {
+		t.Fatalf("fetch car: %v", err)
+	}
+	if c.Status != "done" {
+		t.Errorf("status = %q, want %q", c.Status, "done")
+	}
+}
+
+// TestRunComplete_RejectedWhenMerged: a merged car must not be flipped back to
+// done — that would make the yardmaster re-run the merge flow (railyard-41w).
+func TestRunComplete_RejectedWhenMerged(t *testing.T) {
+	gormDB := mockTestDB(t)
+	cleanup := withMockDB(t, gormDB)
+	defer cleanup()
+
+	now := time.Now()
+	gormDB.Create(&models.Car{ID: "car-mrg", Title: "Merged car", Status: "merged", Track: "backend", Branch: "ry/backend/car-mrg", BaseBranch: "main", CreatedAt: now, UpdatedAt: now})
+
+	_, err := execCmd(t, []string{"complete", "car-mrg", "too late", "--config", "test.yaml"})
+	if err == nil {
+		t.Fatal("expected error completing a merged car")
+	}
+	if !strings.Contains(err.Error(), "merged") {
+		t.Errorf("error should name the current status, got: %v", err)
+	}
+
+	var c models.Car
+	if err := gormDB.First(&c, "id = ?", "car-mrg").Error; err != nil {
+		t.Fatalf("fetch car: %v", err)
+	}
+	if c.Status != "merged" {
+		t.Errorf("status = %q, want %q (unchanged)", c.Status, "merged")
+	}
+}
+
+// TestRunComplete_RejectedWhenOpen: a car reassigned away from the caller
+// (status back to open, assignee cleared) must not be completable.
+func TestRunComplete_RejectedWhenOpen(t *testing.T) {
+	gormDB := mockTestDB(t)
+	cleanup := withMockDB(t, gormDB)
+	defer cleanup()
+
+	now := time.Now()
+	gormDB.Create(&models.Car{ID: "car-rsn", Title: "Reassigned car", Status: "open", Track: "backend", Branch: "ry/backend/car-rsn", BaseBranch: "main", CreatedAt: now, UpdatedAt: now})
+
+	_, err := execCmd(t, []string{"complete", "car-rsn", "stale agent", "--config", "test.yaml"})
+	if err == nil {
+		t.Fatal("expected error completing an open (reassigned) car")
+	}
+
+	var c models.Car
+	if err := gormDB.First(&c, "id = ?", "car-rsn").Error; err != nil {
+		t.Fatalf("fetch car: %v", err)
+	}
+	if c.Status != "open" {
+		t.Errorf("status = %q, want %q (unchanged)", c.Status, "open")
 	}
 }
 

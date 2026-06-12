@@ -59,16 +59,32 @@ type StatusCount struct {
 
 // ValidTransitions maps each status to its valid next statuses.
 // The special case "any → blocked" is handled in isValidTransition.
+//
+// This map is the source of truth for the car state machine: it must contain
+// every transition any production call site performs (raw db writes included),
+// so operators can replay each of them through `ry car update --status`.
+// TestValidTransitions_ProductionEdges pins each edge to its call site
+// (railyard-knm).
+//
+// Non-obvious edges:
+//   - claimed → done: ry complete when the engine died before marking the
+//     car in_progress.
+//   - claimed/in_progress → open: yardmaster ReassignCar off a stale engine.
+//   - open/ready/claimed/in_progress → merged: reconcileStaleCars detecting a
+//     branch merged externally; open → merged/done also covers epic auto-close.
+//   - blocked → done: UnblockDeps test-failed retry and the retry-merge action.
+//   - done → pr_open → pr_review: PR mode + inspect review claims.
 var ValidTransitions = map[string][]string{
 	"draft":        {"open"},
-	"open":         {"ready", "cancelled", "blocked"},
-	"ready":        {"claimed", "blocked"},
-	"claimed":      {"in_progress", "blocked"},
-	"in_progress":  {"done", "blocked"},
-	"done":         {"merged", "merge-failed"},
-	"blocked":      {"open", "ready"},
+	"open":         {"ready", "cancelled", "blocked", "done", "merged"},
+	"ready":        {"claimed", "blocked", "merged"},
+	"claimed":      {"in_progress", "done", "open", "blocked", "merged"},
+	"in_progress":  {"done", "open", "blocked", "merged"},
+	"done":         {"merged", "merge-failed", "pr_open"},
+	"blocked":      {"open", "ready", "done"},
 	"merge-failed": {"done", "cancelled"},
-	"pr_open":      {"open", "merged", "cancelled"},
+	"pr_open":      {"open", "merged", "cancelled", "pr_review"},
+	"pr_review":    {"pr_open", "merged", "cancelled"},
 }
 
 // GenerateID creates a unique car ID in car-xxxxx format (5-char hex).

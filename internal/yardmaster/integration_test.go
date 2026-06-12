@@ -248,9 +248,12 @@ func TestIntegration_ReassignCar(t *testing.T) {
 		Status: "in_progress", Assignee: "eng-001",
 	})
 
-	err := ReassignCar(gormDB, "car-001", "eng-001", "heartbeat stale >60s")
+	reassigned, err := ReassignCar(gormDB, "car-001", "eng-001", "heartbeat stale >60s")
 	if err != nil {
 		t.Fatalf("ReassignCar: %v", err)
+	}
+	if !reassigned {
+		t.Fatal("reassigned = false, want true")
 	}
 
 	// Verify car is open and unassigned.
@@ -294,12 +297,14 @@ func TestIntegration_ReassignCar(t *testing.T) {
 func TestIntegration_ReassignCar_NotFound(t *testing.T) {
 	gormDB := setupTestDB(t, "railyard_ym_reassign2")
 
-	err := ReassignCar(gormDB, "car-nonexistent", "eng-001", "stalled")
-	if err == nil {
-		t.Fatal("expected error for non-existent car")
+	// A car that does not exist (or is not actively held by the engine) is a
+	// guarded no-op, not an error (railyard-h2v).
+	reassigned, err := ReassignCar(gormDB, "car-nonexistent", "eng-001", "stalled")
+	if err != nil {
+		t.Fatalf("ReassignCar: %v", err)
 	}
-	if err.Error() != "yardmaster: car car-nonexistent not found" {
-		t.Errorf("error = %q", err)
+	if reassigned {
+		t.Error("reassigned = true, want false for non-existent car")
 	}
 }
 
@@ -308,7 +313,7 @@ func TestIntegration_ReassignCar_DBError(t *testing.T) {
 	sqlDB, _ := gormDB.DB()
 	sqlDB.Close()
 
-	err := ReassignCar(gormDB, "car-001", "eng-001", "stalled")
+	_, err := ReassignCar(gormDB, "car-001", "eng-001", "stalled")
 	if err == nil {
 		t.Fatal("expected error for closed DB")
 	}

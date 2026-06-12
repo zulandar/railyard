@@ -114,6 +114,35 @@ func ClaimCar(db *gorm.DB, engineID, track string) (*models.Car, error) {
 	return nil, fmt.Errorf("engine: claim failed after %d retries: %w", claimMaxRetries, lastErr)
 }
 
+// MarkInProgress transitions a car from claimed to in_progress as the engine
+// spawns the agent subprocess, so reporting surfaces (ry status, dashboard,
+// telegraph digest) show the car as actively worked and ry complete's
+// claimed/in_progress guard passes (railyard-rsy).
+//
+// The update is conditional on the car still being claimed by this engine, so
+// it is safe against concurrent reassignment and idempotent across re-claim
+// cycles (a car already in_progress is a no-op). Returns whether the
+// transition happened; an error only on DB failure.
+func MarkInProgress(db *gorm.DB, carID, engineID string) (bool, error) {
+	if carID == "" {
+		return false, fmt.Errorf("engine: carID is required")
+	}
+	if engineID == "" {
+		return false, fmt.Errorf("engine: engineID is required")
+	}
+
+	result := db.Model(&models.Car{}).
+		Where("id = ? AND status = ? AND assignee = ?", carID, "claimed", engineID).
+		Update("status", "in_progress")
+	if result.Error != nil {
+		return false, fmt.Errorf("engine: mark car %s in_progress: %w", carID, result.Error)
+	}
+	if result.RowsAffected > 0 {
+		slog.Info("engine: car in progress", "engine", engineID, "car", carID)
+	}
+	return result.RowsAffected > 0, nil
+}
+
 // isSerializationError checks if an error is a MySQL serialization failure
 // (Error 1213) or deadlock that should be retried.
 func isSerializationError(err error) bool {

@@ -505,10 +505,10 @@ func TestUpdate_InvalidTransition(t *testing.T) {
 	car := createCar(t, db, CreateOpts{Title: "Invalid", Track: "backend"})
 	db.Model(&models.Car{}).Where("id = ?", car.ID).Update("status", "open")
 
-	// open → done is not valid.
-	err := Update(db, car.ID, map[string]interface{}{"status": "done"})
+	// open → in_progress is not valid (a car must be claimed first).
+	err := Update(db, car.ID, map[string]interface{}{"status": "in_progress"})
 	if err == nil {
-		t.Fatal("expected error for invalid transition open→done")
+		t.Fatal("expected error for invalid transition open→in_progress")
 	}
 	if !strings.Contains(err.Error(), "invalid status transition") {
 		t.Errorf("error = %q, want to contain %q", err.Error(), "invalid status transition")
