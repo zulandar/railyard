@@ -124,7 +124,7 @@ func (r *Router) Handle(ctx context.Context, msg InboundMessage) {
 		}
 
 		// 3c. @mention or !ry in a thread with no prior session → new session in thread.
-		if isMention(text) || isDispatchPrefix(text) {
+		if r.isBotMention(text) || isDispatchPrefix(text) {
 			fmt.Fprintf(r.out, "telegraph: router: → new session in thread [ch=%s thread=%s]\n", msg.ChannelID, msg.ThreadID)
 			r.sendAck(ctx, msg.ChannelID, msg.ThreadID)
 			_, err := r.sessionMgr.NewSession(ctx, "telegraph", msg.UserName, msg.ThreadID, msg.ChannelID)
@@ -175,7 +175,7 @@ func (r *Router) Handle(ctx context.Context, msg InboundMessage) {
 	// 4. Top-level @mention or !ry → always create a new thread and session.
 	//    This ensures every top-level mention gets its own conversation thread,
 	//    regardless of any historic channel-level sessions.
-	if isMention(text) || isDispatchPrefix(text) {
+	if r.isBotMention(text) || isDispatchPrefix(text) {
 		sessionThreadID := msg.ChannelID // fallback if thread creation unavailable
 		if ts, ok := r.adapter.(ThreadStarter); ok {
 			ack := r.nextAck()
@@ -408,10 +408,10 @@ func isDispatchPrefix(text string) bool {
 	return strings.HasPrefix(text, commandPrefix+" ")
 }
 
-// mentionRe matches platform mention formats:
+// mentionRe matches platform mention formats and captures the mentioned ID:
 //   - Discord: <@123456> or <@!123456> (numeric IDs)
 //   - Slack:   <@U123ABC> (alphanumeric IDs starting with a letter)
-var mentionRe = regexp.MustCompile(`<@!?[A-Za-z0-9_]+>`)
+var mentionRe = regexp.MustCompile(`<@!?([A-Za-z0-9_]+)>`)
 
 // knownCommands is the set of top-level commands the CommandHandler supports.
 var knownCommands = map[string]bool{
@@ -421,10 +421,16 @@ var knownCommands = map[string]bool{
 	"help":   true,
 }
 
-// extractMentionCommand checks if the message is a bot @mention followed by
-// a known command. Returns the command text (without the mention) if so,
-// or empty string if not. Handles Discord <@ID>, <@!ID>, and Slack <@UID> formats.
+// extractMentionCommand checks if the message is a mention of THE BOT
+// followed by a known command. Returns the command text (without the
+// mention) if so, or empty string if not. Handles Discord <@ID>, <@!ID>,
+// and Slack <@UID> formats. Mentions of other users never execute commands
+// (railyard-992).
 func (r *Router) extractMentionCommand(text string) string {
+	if !r.isBotMention(text) {
+		return ""
+	}
+
 	// Strip platform mentions: Discord <@ID>/<@!ID> and Slack <@UXXXXX>.
 	stripped := mentionRe.ReplaceAllString(text, "")
 	stripped = strings.TrimSpace(stripped)
@@ -442,9 +448,19 @@ func (r *Router) extractMentionCommand(text string) string {
 	return ""
 }
 
-// isMention returns true if the text contains an @mention pattern.
-// This is a simple heuristic; platform-specific adapters may provide
-// richer mention detection.
-func isMention(text string) bool {
-	return strings.Contains(text, "@")
+// isBotMention returns true only when the text contains a platform mention
+// of THE BOT (mention ID == botUserID). Bare '@' text — emails, @here,
+// @everyone, mentions of other users — never counts (railyard-992). When
+// botUserID is unknown, mentions cannot be verified, so this always returns
+// false and only the explicit !ry prefix routes messages.
+func (r *Router) isBotMention(text string) bool {
+	if r.botUserID == "" {
+		return false
+	}
+	for _, m := range mentionRe.FindAllStringSubmatch(text, -1) {
+		if m[1] == r.botUserID {
+			return true
+		}
+	}
+	return false
 }

@@ -3,6 +3,7 @@ package telegraph
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -63,6 +64,7 @@ type DetectedEvent struct {
 	// Escalation events
 	MessageID uint
 	FromAgent string
+	ToAgent   string
 	Subject   string
 	Body      string
 	Priority  string
@@ -198,6 +200,7 @@ func (w *Watcher) Run(ctx context.Context) <-chan DetectedEvent {
 			case <-pollTicker.C:
 				events, err := w.Poll(ctx)
 				if err != nil {
+					log.Printf("telegraph: watcher: poll: %v", err)
 					continue
 				}
 				emit(events)
@@ -325,12 +328,28 @@ func (w *Watcher) detectStalls() ([]DetectedEvent, error) {
 	return events, nil
 }
 
-// detectEscalations finds unacknowledged messages sent to "human" or
-// "telegraph" and marks them as acknowledged after pickup.
+// telegraphConsumerID is the per-consumer delivery marker telegraph records
+// in broadcast_acks. Using a consumer-scoped marker instead of the global
+// acknowledged flag keeps human-addressed escalations visible to the
+// dashboard SSE feed, which polls 'to_agent=human AND acknowledged=false'
+// (railyard-wer).
+const telegraphConsumerID = "telegraph"
+
+// detectEscalations finds messages sent to "human" or "telegraph" that
+// telegraph has not delivered to chat yet. Detection does NOT mark anything:
+// delivery is confirmed by the daemon calling [MarkEscalationDelivered] only
+// after the adapter Send succeeds, so a crash, shutdown mid-batch, or send
+// failure leaves the message eligible for redelivery on the next poll
+// (at-least-once; duplicates on retry are acceptable, silent loss is not —
+// railyard-05m).
 func (w *Watcher) detectEscalations() ([]DetectedEvent, error) {
+	delivered := w.db.Table("broadcast_acks").
+		Select("message_id").
+		Where("agent_id = ?", telegraphConsumerID)
+
 	var msgs []models.Message
-	if err := w.db.Where("to_agent IN ? AND acknowledged = ?",
-		[]string{"human", "telegraph"}, false).
+	if err := w.db.Where("to_agent IN ? AND acknowledged = ? AND id NOT IN (?)",
+		[]string{"human", "telegraph"}, false, delivered).
 		Order("created_at ASC").
 		Find(&msgs).Error; err != nil {
 		return nil, err
@@ -341,29 +360,51 @@ func (w *Watcher) detectEscalations() ([]DetectedEvent, error) {
 	}
 
 	events := make([]DetectedEvent, 0, len(msgs))
-	ids := make([]uint, 0, len(msgs))
 	for _, m := range msgs {
 		events = append(events, DetectedEvent{
 			Type:      EventEscalation,
 			Timestamp: m.CreatedAt,
 			MessageID: m.ID,
 			FromAgent: m.FromAgent,
+			ToAgent:   m.ToAgent,
 			CarID:     m.CarID,
 			Subject:   m.Subject,
 			Body:      m.Body,
 			Priority:  m.Priority,
 		})
-		ids = append(ids, m.ID)
-	}
-
-	// Mark acknowledged so they aren't picked up again.
-	if err := w.db.Model(&models.Message{}).
-		Where("id IN ?", ids).
-		Update("acknowledged", true).Error; err != nil {
-		return nil, fmt.Errorf("acknowledge escalations: %w", err)
 	}
 
 	return events, nil
+}
+
+// MarkEscalationDelivered records that an escalation event reached the chat
+// platform. It writes telegraph's per-consumer delivery marker (idempotent),
+// and for messages addressed to telegraph itself — where telegraph is the
+// terminal consumer — also sets the global acknowledged flag. Messages to
+// "human" keep acknowledged=false so the dashboard still surfaces them
+// (railyard-wer).
+func MarkEscalationDelivered(db *gorm.DB, event DetectedEvent) error {
+	if event.MessageID == 0 {
+		return fmt.Errorf("telegraph: mark delivered: event has no message ID")
+	}
+
+	ack := models.BroadcastAck{
+		MessageID: event.MessageID,
+		AgentID:   telegraphConsumerID,
+	}
+	if err := db.Where(&ack).FirstOrCreate(&ack).Error; err != nil {
+		return fmt.Errorf("telegraph: mark delivered %d: %w", event.MessageID, err)
+	}
+
+	if event.ToAgent == telegraphConsumerID {
+		if err := db.Model(&models.Message{}).
+			Where("id = ?", event.MessageID).
+			Update("acknowledged", true).Error; err != nil {
+			return fmt.Errorf("telegraph: acknowledge %d: %w", event.MessageID, err)
+		}
+	}
+
+	return nil
 }
 
 // BuildPulse creates a pulse digest event from the current orchestration
