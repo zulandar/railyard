@@ -3,10 +3,11 @@
 // (internal/agentloop) or a CLI agent provider, and — when native — building the
 // OpenAI-compatible client from the environment.
 //
-// Engine, dispatch, telegraph, bull, and inspect all consume Resolve so the
-// native-vs-CLI choice is defined once. A new role wiring its agent through
-// Resolve cannot silently skip the native path the way the open-coded
-// IsNativeLoopMethod/NewClientFromEnv pair could (inspect did, until railyard-37x.1).
+// Engine, dispatch, telegraph, bull, inspect, and yardmaster escalation all
+// consume Resolve so the native-vs-CLI choice is defined once. A new role
+// wiring its agent through Resolve cannot silently skip the native path the
+// way the open-coded IsNativeLoopMethod/NewClientFromEnv pair could (inspect
+// did until railyard-37x.1; yardmaster did until railyard-ocd).
 package agentbackend
 
 import (

@@ -3,6 +3,7 @@ package cli
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -346,6 +347,65 @@ func dartTestCommand(root string) (cmd, reason string) {
 	return "dart test", "no Flutter dependency in pubspec.yaml"
 }
 
+// packageJSON is the subset of package.json that detection inspects.
+type packageJSON struct {
+	Dependencies    map[string]string `json:"dependencies"`
+	DevDependencies map[string]string `json:"devDependencies"`
+}
+
+// readPackageJSON parses root/package.json. ok is false when the file is
+// missing or malformed — detection treats both as "no signal".
+func readPackageJSON(root string) (pkg packageJSON, ok bool) {
+	data, err := os.ReadFile(filepath.Join(root, "package.json"))
+	if err != nil {
+		return packageJSON{}, false
+	}
+	if err := json.Unmarshal(data, &pkg); err != nil {
+		return packageJSON{}, false
+	}
+	return pkg, true
+}
+
+// isExpoProject reports whether the repo is an Expo app (railyard-3ql). The
+// managed workflow has no android/ or ios/ directories, so the native-layout
+// markers in detectLanguages never fire; the signals are an "expo" dependency
+// in package.json or a top-level "expo" key in app.json. Both are parsed as
+// JSON so lookalikes (expo-router, an npm script named "expo") don't count.
+func isExpoProject(root string) bool {
+	if pkg, ok := readPackageJSON(root); ok {
+		if _, dep := pkg.Dependencies["expo"]; dep {
+			return true
+		}
+		if _, dep := pkg.DevDependencies["expo"]; dep {
+			return true
+		}
+	}
+	if data, err := os.ReadFile(filepath.Join(root, "app.json")); err == nil {
+		var app map[string]json.RawMessage
+		if json.Unmarshal(data, &app) == nil && app["expo"] != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// applyExpoPreset rebrands a ts/js frontend track as the Expo mobile track:
+// name "mobile", Expo conventions injected into engine prompts, and a direct
+// jest invocation when the repo tests via jest-expo (npm test isn't guaranteed
+// to be wired in a fresh Expo app).
+func applyExpoPreset(tr *config.TrackConfig, root string) {
+	tr.Name = "mobile"
+	tr.Conventions = map[string]interface{}{
+		"framework": "expo",
+		"tooling":   "use 'npx expo' for Expo CLI commands; this is an Expo (React Native) app, not a web frontend",
+	}
+	if pkg, ok := readPackageJSON(root); ok {
+		if _, dep := pkg.DevDependencies["jest-expo"]; dep {
+			tr.TestCommand = "npx jest"
+		}
+	}
+}
+
 // languagePreset returns a sensible default TrackConfig for a given language.
 // root is the project root, used to tailor toolchain-specific defaults (e.g.
 // the Dart test command) to what the repo actually declares.
@@ -363,19 +423,27 @@ func languagePreset(lang, root string) config.TrackConfig {
 		// Real TS repos carry JS config/scripts, so the track matches .js/.jsx
 		// too. ts and js share canonical "Node / TypeScript", so detectLanguages
 		// only ever emits one of them (railyard-a37.3).
-		return config.TrackConfig{
+		tr := config.TrackConfig{
 			Name: "frontend", Language: "typescript",
 			FilePatterns: []string{"**/*.ts", "**/*.tsx", "**/*.js", "**/*.jsx"},
 			EngineSlots:  2,
 			TestCommand:  "npm test",
 		}
+		if isExpoProject(root) {
+			applyExpoPreset(&tr, root)
+		}
+		return tr
 	case "javascript":
-		return config.TrackConfig{
+		tr := config.TrackConfig{
 			Name: "frontend", Language: "javascript",
 			FilePatterns: []string{"**/*.js", "**/*.jsx", "**/*.mjs", "**/*.cjs"},
 			EngineSlots:  2,
 			TestCommand:  "npm test",
 		}
+		if isExpoProject(root) {
+			applyExpoPreset(&tr, root)
+		}
+		return tr
 	case "python":
 		return config.TrackConfig{
 			Name: "backend", Language: "python",
@@ -724,17 +792,30 @@ func runInit(cmd *cobra.Command, configPath string, yes, skipDB, skipCoco, skipT
 	}
 
 	// Fail fast if repo URL is still empty — config.Load will reject it,
-	// so don't write an unusable file.
+	// so don't write an unusable file. Local-only repos must add a remote
+	// first: the PR/merge flow and engine pushes all assume origin exists
+	// (railyard-35c).
 	if remote == "" {
-		return fmt.Errorf("repo URL is required (no origin remote detected and none provided)")
+		return fmt.Errorf("repo URL is required (no origin remote detected and none provided) — add one and re-run:\n  git remote add origin <url>")
 	}
 
 	// Generate tracks.
 	tracks := generateTracks(langs, gitRoot)
 	if len(tracks) == 0 {
-		tracks = []config.TrackConfig{
-			{Name: "default", Language: "mixed", EngineSlots: 2},
+		// Greenfield fallback: nothing to infer a test command from, but an
+		// empty test_command means yardmaster merges completed branches
+		// without running tests. Ask interactively; under --yes, warn loudly
+		// instead of leaving it to be discovered at first merge (railyard-35c).
+		fallback := config.TrackConfig{Name: "default", Language: "mixed", EngineSlots: 2}
+		if !yes {
+			fmt.Fprintln(out, "\nNo languages detected, so no test command could be inferred.")
+			fallback.TestCommand = promptValue(in, out, "Test command for merge gating (Enter to skip)", "")
 		}
+		if fallback.TestCommand == "" {
+			fmt.Fprintln(out, "\nWARNING: no test_command configured — completed branches will merge to main UNTESTED.")
+			fmt.Fprintln(out, "Next step: set test_command on the default track in railyard.yaml before starting engines.")
+		}
+		tracks = []config.TrackConfig{fallback}
 	}
 
 	// Surface the Dart test-command decision so a pure-Dart package isn't

@@ -349,6 +349,7 @@ func processInboxWithBus(ctx context.Context, db *gorm.DB, cfg *config.Config, c
 					DB:           db,
 					ProviderName: cfg.AgentProvider,
 					Model:        cfg.AgentModel,
+					Config:       cfg,
 				})
 				if escErr != nil {
 					logger.Error("Escalation error", "error", escErr)
@@ -1036,6 +1037,7 @@ func maybeSwitchEscalateWithBus(ctx context.Context, db *gorm.DB, cfg *config.Co
 				DB:           db,
 				ProviderName: cfg.AgentProvider,
 				Model:        cfg.AgentModel,
+				Config:       cfg,
 			})
 			if escErr != nil {
 				logger.Error("Escalation error", "car", carID, "error", escErr)
@@ -1100,6 +1102,7 @@ func maybeSwitchEscalateWithBus(ctx context.Context, db *gorm.DB, cfg *config.Co
 			DB:           db,
 			ProviderName: cfg.AgentProvider,
 			Model:        cfg.AgentModel,
+			Config:       cfg,
 		})
 		if escErr != nil {
 			logger.Error("Escalation error", "car", carID, "error", escErr)

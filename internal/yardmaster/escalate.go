@@ -7,10 +7,17 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zulandar/railyard/internal/agentbackend"
+	"github.com/zulandar/railyard/internal/agentloop"
+	"github.com/zulandar/railyard/internal/config"
 	"github.com/zulandar/railyard/internal/engine"
 	"github.com/zulandar/railyard/internal/models"
 	"gorm.io/gorm"
 )
+
+// resolveBackend selects the native-loop-vs-CLI backend for escalation.
+// Package var so tests can substitute a fake Completer.
+var resolveBackend = agentbackend.Resolve
 
 // EscalationTracker tracks the last escalation time per car to implement cooldowns.
 type EscalationTracker struct {
@@ -71,6 +78,11 @@ type EscalateOpts struct {
 	// Model selects a specific model for the configured agent provider
 	// (e.g. "claude-opus-4-5"). Empty means use the provider's default.
 	Model string
+	// Config, when non-nil, lets escalation follow the same native-vs-CLI
+	// routing as every other agent role (agentbackend.Resolve): auth_method
+	// openrouter/openai_compat runs the prompt through the native agent loop
+	// instead of spawning a CLI provider. Nil preserves the CLI-only behavior.
+	Config *config.Config
 }
 
 // EscalateResult contains the agent's decision after escalation.
@@ -83,6 +95,23 @@ type EscalateResult struct {
 // and parses the structured decision response. Uses the provider configured
 // in opts.ProviderName (defaults to "claude").
 func EscalateToAgent(ctx context.Context, opts EscalateOpts) (*EscalateResult, error) {
+	if opts.Config != nil {
+		client, useNative, err := resolveBackend(opts.Config)
+		if err != nil {
+			return nil, fmt.Errorf("yardmaster: escalate: native loop: %w", err)
+		}
+		if useNative {
+			resp, err := client.Complete(ctx, agentloop.Request{
+				Model:    opts.Model,
+				Messages: []agentloop.Message{{Role: "user", Content: buildEscalationPrompt(opts)}},
+			})
+			if err != nil {
+				return nil, fmt.Errorf("yardmaster: escalate: %w", err)
+			}
+			return parseEscalateResponse(resp.Content), nil
+		}
+	}
+
 	providerName := opts.ProviderName
 	if providerName == "" {
 		providerName = "claude"
