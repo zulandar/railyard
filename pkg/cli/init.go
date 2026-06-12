@@ -360,16 +360,19 @@ func languagePreset(lang, root string) config.TrackConfig {
 			Conventions:  map[string]interface{}{"style": "stdlib-first"},
 		}
 	case "typescript":
+		// Real TS repos carry JS config/scripts, so the track matches .js/.jsx
+		// too. ts and js share canonical "Node / TypeScript", so detectLanguages
+		// only ever emits one of them (railyard-a37.3).
 		return config.TrackConfig{
 			Name: "frontend", Language: "typescript",
-			FilePatterns: []string{"**/*.ts", "**/*.tsx"},
+			FilePatterns: []string{"**/*.ts", "**/*.tsx", "**/*.js", "**/*.jsx"},
 			EngineSlots:  2,
 			TestCommand:  "npm test",
 		}
 	case "javascript":
 		return config.TrackConfig{
 			Name: "frontend", Language: "javascript",
-			FilePatterns: []string{"**/*.js", "**/*.jsx"},
+			FilePatterns: []string{"**/*.js", "**/*.jsx", "**/*.mjs", "**/*.cjs"},
 			EngineSlots:  2,
 			TestCommand:  "npm test",
 		}
@@ -395,11 +398,19 @@ func languagePreset(lang, root string) config.TrackConfig {
 			TestCommand:  "mvn test",
 		}
 	case "php":
+		// Laravel projects ship an `artisan` console script and conventionally
+		// run their suite via `php artisan test`; a plain PHP project runs
+		// PHPUnit directly. Detect the Laravel convention from the artisan file
+		// at the repo root (railyard-a37.7).
+		testCmd := "vendor/bin/phpunit"
+		if _, err := os.Stat(filepath.Join(root, "artisan")); err == nil {
+			testCmd = "php artisan test"
+		}
 		return config.TrackConfig{
 			Name: "backend", Language: "php",
 			FilePatterns: []string{"**/*.php"},
 			EngineSlots:  2,
-			TestCommand:  "vendor/bin/phpunit",
+			TestCommand:  testCmd,
 		}
 	case "ruby":
 		return config.TrackConfig{
@@ -430,6 +441,33 @@ func languagePreset(lang, root string) config.TrackConfig {
 			EngineSlots:  2,
 			TestCommand:  testCmd,
 		}
+	case "elixir":
+		return config.TrackConfig{
+			Name: "backend", Language: "elixir",
+			FilePatterns: []string{"**/*.ex", "**/*.exs"},
+			EngineSlots:  2,
+			TestCommand:  "mix test",
+		}
+	case "csharp":
+		return config.TrackConfig{
+			Name: "backend", Language: "csharp",
+			FilePatterns: []string{"**/*.cs", "**/*.csproj"},
+			EngineSlots:  2,
+			TestCommand:  "dotnet test",
+		}
+	case "c":
+		// Test runner is a guess from the build system: a root CMakeLists.txt
+		// implies CTest; otherwise fall back to the autotools/make convention.
+		testCmd := "make test"
+		if _, err := os.Stat(filepath.Join(root, "CMakeLists.txt")); err == nil {
+			testCmd = "ctest"
+		}
+		return config.TrackConfig{
+			Name: "backend", Language: "c",
+			FilePatterns: []string{"**/*.c", "**/*.h", "**/*.cpp", "**/*.hpp"},
+			EngineSlots:  2,
+			TestCommand:  testCmd,
+		}
 	default:
 		return config.TrackConfig{
 			Name: lang, Language: lang,
@@ -439,8 +477,14 @@ func languagePreset(lang, root string) config.TrackConfig {
 }
 
 // generateTracks builds TrackConfig entries from detected languages,
-// resolving name conflicts by suffixing with the language name. root is passed
-// through to languagePreset so toolchain-specific defaults can inspect the repo.
+// resolving name conflicts by suffixing with the language name (e.g. a second
+// "frontend" track becomes "frontend-<lang>"). root is passed through to
+// languagePreset so toolchain-specific defaults can inspect the repo.
+//
+// Note: typescript and javascript both yield a "frontend" track, but they share
+// the canonical "Node / TypeScript" and detectLanguages dedups on canonical, so
+// a repo resolves to exactly one of them — they're never emitted together. That
+// is intended (railyard-a37.3).
 func generateTracks(languages []string, root string) []config.TrackConfig {
 	var tracks []config.TrackConfig
 	usedNames := map[string]bool{}
@@ -492,6 +536,17 @@ tracks:
     engine_slots: {{ .EngineSlots }}
 {{- if .TestCommand }}
     test_command: "{{ .TestCommand }}"
+{{- end }}
+{{- if .Playwright }}
+    playwright:
+      enabled: {{ .Playwright.Enabled }}
+      spec_path: "{{ .Playwright.SpecPath }}"
+{{- if .Playwright.Filename }}
+      filename: "{{ .Playwright.Filename }}"
+{{- end }}
+{{- if .Playwright.Template }}
+      template: "{{ .Playwright.Template }}"
+{{- end }}
 {{- end }}
 {{- end }}
 {{- if .Telegraph }}
@@ -569,6 +624,7 @@ func newInitCmd() *cobra.Command {
 		skipTelegraph     bool
 		withPlugins       bool
 		withPluginsGlobal bool
+		withPlaywright    bool
 		dbHost            string
 		dbPort            int
 		dbUser            string
@@ -586,7 +642,7 @@ and Telegraph chat bridge (Slack/Discord).
 
 Run this once in any git repository to get started with Railyard.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runInit(cmd, configPath, yes, skipDB, skipCoco, skipTelegraph, withPlugins, withPluginsGlobal, dbHost, dbPort, dbUser, dbPassword)
+			return runInit(cmd, configPath, yes, skipDB, skipCoco, skipTelegraph, withPlugins, withPluginsGlobal, withPlaywright, dbHost, dbPort, dbUser, dbPassword)
 		},
 	}
 
@@ -597,6 +653,7 @@ Run this once in any git repository to get started with Railyard.`,
 	cmd.Flags().BoolVar(&skipTelegraph, "skip-telegraph", false, "skip Telegraph chat bridge setup")
 	cmd.Flags().BoolVar(&withPlugins, "with-plugins", false, "create per-user plugin directory (~/.railyard/plugins) at 0755")
 	cmd.Flags().BoolVar(&withPluginsGlobal, "with-plugins-global", false, "create system-wide plugin directory (/etc/railyard/plugins.d) at 0755 (requires root)")
+	cmd.Flags().BoolVar(&withPlaywright, "with-playwright", false, "enable Playwright PR demos on frontend (ts/js) tracks and scaffold a starter spec + example CI workflow")
 	cmd.Flags().IntVarP(&dbPort, "port", "p", 3306, "database server port")
 	cmd.Flags().StringVarP(&dbHost, "host", "H", "127.0.0.1", "database server host address")
 	cmd.Flags().StringVarP(&dbUser, "user", "u", "root", "database server username")
@@ -605,7 +662,7 @@ Run this once in any git repository to get started with Railyard.`,
 }
 
 // runInit is the main orchestrator for the "ry init" command.
-func runInit(cmd *cobra.Command, configPath string, yes, skipDB, skipCoco, skipTelegraph, withPlugins, withPluginsGlobal bool, dbHost string, dbPort int, dbUser, dbPassword string) error {
+func runInit(cmd *cobra.Command, configPath string, yes, skipDB, skipCoco, skipTelegraph, withPlugins, withPluginsGlobal, withPlaywright bool, dbHost string, dbPort int, dbUser, dbPassword string) error {
 	out := cmd.OutOrStdout()
 	in := io.Reader(byteReader{cmd.InOrStdin()})
 
@@ -699,6 +756,12 @@ func runInit(cmd *cobra.Command, configPath string, yes, skipDB, skipCoco, skipT
 		}
 	}
 
+	// Step 4a: Playwright PR demo opt-in for frontend (ts/js) tracks.
+	// This only wires the config + scaffolds files — Railyard never runs
+	// Playwright itself (see docs/playwright-pr-demo.md). Any track enabled
+	// here triggers the file scaffolding after the config is written.
+	anyPlaywright := offerPlaywright(in, out, tracks, yes, withPlaywright)
+
 	// Step 4b: Telegraph chat bridge setup.
 	var tg *telegraphTemplateData
 	if skipTelegraph {
@@ -760,6 +823,13 @@ func runInit(cmd *cobra.Command, configPath string, yes, skipDB, skipCoco, skipT
 		if commitOut, err := gitCommit.CombinedOutput(); err != nil {
 			fmt.Fprintf(out, "Warning: could not commit %s: %s\n", configPath, strings.TrimSpace(string(commitOut)))
 		}
+	}
+
+	// Step 5a: Scaffold Playwright starter files if any track opted in.
+	// Anchored to gitRoot — the same root railyard.yaml is written to.
+	// Scaffolding failures warn but never fail init.
+	if anyPlaywright {
+		scaffoldPlaywright(out, gitRoot)
 	}
 
 	// Step 5b: Optional plugin directory scaffolding. Both flags are

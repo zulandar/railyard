@@ -337,19 +337,60 @@ func ideOSPatterns() []string {
 	}
 }
 
+// detectableLanguages is the static superset of every language detectLanguages
+// can emit. It exists so a single anti-fall-through test can assert that every
+// detectable language has a real languagePreset (non-empty FilePatterns AND
+// TestCommand) — see TestLanguagePreset_NoFallThrough (railyard-a37.4). Keep
+// this list in sync with the indicators in detectLanguages and the jsTrackLanguage
+// flavors ("javascript"/"typescript").
+func detectableLanguages() []string {
+	return []string{
+		"go", "typescript", "javascript", "rust", "python", "dart",
+		"kotlin", "java", "swift", "ruby", "php", "elixir", "c", "csharp",
+	}
+}
+
+// jsTrackLanguage classifies a Node project rooted at root as either
+// "typescript" or "javascript". Signals, in priority order:
+//
+//  1. PRIMARY: a root-level tsconfig.json exists → typescript. This is the
+//     authoritative declaration that the repo is a TypeScript project.
+//  2. SECONDARY (cheap): package.json mentions "typescript" (e.g. as a dep) →
+//     typescript. A plain substring check is sufficient here.
+//
+// Otherwise the repo is plain JavaScript. Detection only inspects the ROOT
+// tsconfig.json: a monorepo with package.json at the root but tsconfig.json
+// only in a SUBDIR classifies as "javascript" (we don't walk subtrees).
+func jsTrackLanguage(root string) string {
+	if _, err := os.Stat(filepath.Join(root, "tsconfig.json")); err == nil {
+		return "typescript"
+	}
+	if data, err := os.ReadFile(filepath.Join(root, "package.json")); err == nil {
+		if strings.Contains(string(data), `"typescript"`) {
+			return "typescript"
+		}
+	}
+	return "javascript"
+}
+
 // detectLanguages scans the project root for language indicator files.
 func detectLanguages(root string) []string {
 	// Each indicator lists one or more candidate paths (globs are supported);
 	// the language is detected if ANY candidate matches. Mobile markers cover
 	// both the single-module Android Studio layout and the nested ios/android
 	// layouts that Flutter, React Native, and Capacitor generate (railyard-7ea).
+	//
+	// The package.json indicator's lang is resolved per-repo via jsTrackLanguage
+	// (ts vs js) rather than hardcoded "typescript": a plain-JS repo must get a
+	// javascript track whose patterns match its .js files, not a dead TS track
+	// (railyard-a37.3).
 	indicators := []struct {
 		paths   []string // file/dir globs relative to root; any match counts
 		lang    string
 		dirOnly bool // require a matched glob to be a directory (bundle markers)
 	}{
 		{paths: []string{"go.mod"}, lang: "go"},
-		{paths: []string{"package.json"}, lang: "typescript"},
+		{paths: []string{"package.json"}, lang: jsTrackLanguage(root)},
 		{paths: []string{"Cargo.toml"}, lang: "rust"},
 		{paths: []string{"setup.py"}, lang: "python"},
 		{paths: []string{"pyproject.toml"}, lang: "python"},

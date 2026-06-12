@@ -4,6 +4,31 @@ Playwright PR Demo is an opt-in, per-track feature that instructs engines workin
 
 Railyard does **not** run Playwright. Your project's own CI is expected to execute the spec (with video recording on) and surface the recording. Railyard's scope is the engine prompt instruction and the PR-body pointer.
 
+## Quick start (`ry init`)
+
+The fastest way to turn this on is during `ry init`. Railyard detects frontend tracks (TypeScript / JavaScript) and offers the Playwright PR demo on-ramp:
+
+- **Interactive:** for each frontend track, `ry init` asks `Enable Playwright PR demos for track <name>? [y/N]` (default No). Answer `y` to enable it.
+- **Non-interactive:** `--yes` leaves Playwright **off**. Pass `--with-playwright` to enable it without prompting (it also works interactively to skip the prompt):
+
+  ```bash
+  ry init --yes --with-playwright
+  ```
+
+When you opt in, `ry init`:
+
+1. Writes a `playwright:` block to each frontend track in `railyard.yaml` with the documented defaults (`spec_path: tests/pr-demos`, `filename: {car_id}.spec.ts`, `template: tests/pr-demos/_template.spec.ts`).
+2. Scaffolds a starter spec at **`tests/pr-demos/_template.spec.ts`** — a minimal, valid Playwright spec with one example test plus notes on page objects and `baseURL`. Engines copy from it when writing per-car demos. (Existing files are never overwritten.)
+3. Scaffolds a reference CI workflow at **`.github/workflows/pr-demo.yml.example`** (written into *your* project, like the starter spec — it isn't a file in the railyard repo). It runs Playwright scoped to the PR's changed spec files (diff-scoped) and uploads the video recordings as a workflow artifact. Playwright has no `--video` CLI flag — enable recording in your `playwright.config`, e.g. `use: { video: 'on' }` (gate on `process.env.CI` to record only in CI).
+
+The workflow ships with a **`.example`** suffix so GitHub Actions never auto-runs it. **To activate CI, rename it:**
+
+```bash
+mv .github/workflows/pr-demo.yml.example .github/workflows/pr-demo.yml
+```
+
+This on-ramp only lowers the wiring barrier — it does **not** change the execution model. Railyard still does not run Playwright; your CI does (see [CI responsibilities](#ci-responsibilities) and [Limitations](#limitations)). If you'd rather wire it up by hand, the manual schema is documented below.
+
 ## Overview
 
 When enabled on a track, two things change:

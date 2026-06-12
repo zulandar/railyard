@@ -6,12 +6,11 @@ If you've cloned a repo that already has a `railyard.yaml` committed, you don't 
 
 Make sure you have the [prerequisites](../README.md#prerequisites) installed:
 
-- Go 1.25+
-- MySQL 8.0+
-- tmux
+- **Docker** — provisions MySQL for you via `ry db start` (you don't install a database yourself)
+- **tmux**
 - At least one AI coding CLI (Claude Code, Codex, Gemini, or Copilot)
-- Docker (optional, for CocoIndex semantic search)
-- Python 3.13+ (optional, for CocoIndex)
+- **Python 3.13+** (optional, for CocoIndex semantic search)
+- **Go 1.26+** (only if you build `ry` from source instead of installing the prebuilt binary)
 
 ## Steps
 
