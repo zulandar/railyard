@@ -16,6 +16,7 @@ const (
 	InstructionResume      InstructionType = "resume"
 	InstructionSwitchTrack InstructionType = "switch-track"
 	InstructionGuidance    InstructionType = "guidance"
+	InstructionDrain       InstructionType = "drain"
 	InstructionUnknown     InstructionType = "unknown"
 )
 
@@ -44,6 +45,8 @@ func ClassifyMessage(msg *models.Message) InstructionType {
 		return InstructionSwitchTrack
 	case "guidance":
 		return InstructionGuidance
+	case "drain":
+		return InstructionDrain
 	default:
 		return InstructionUnknown
 	}
@@ -97,6 +100,18 @@ func ShouldAbort(instructions []Instruction, carID string) bool {
 func ShouldPause(instructions []Instruction) bool {
 	for _, inst := range instructions {
 		if inst.Type == InstructionPause {
+			return true
+		}
+	}
+	return false
+}
+
+// ShouldDrain checks if any instruction requests a graceful drain — finish
+// the current cycle, then shut down. Sent by orchestration Stop (broadcast),
+// Scale down, and RestartEngine (targeted) (railyard-8m6).
+func ShouldDrain(instructions []Instruction) bool {
+	for _, inst := range instructions {
+		if inst.Type == InstructionDrain {
 			return true
 		}
 	}

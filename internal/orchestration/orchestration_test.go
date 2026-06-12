@@ -1079,15 +1079,71 @@ func TestScale_ScaleDown(t *testing.T) {
 	if result.Current != 1 {
 		t.Errorf("current = %d, want 1", result.Current)
 	}
-	if len(result.SessionsKilled) != 2 {
-		t.Errorf("sessions killed = %d, want 2", len(result.SessionsKilled))
+	if len(result.EnginesDrained) != 2 {
+		t.Errorf("engines drained = %d, want 2", len(result.EnginesDrained))
 	}
-	// Newest engines should be killed first (LIFO).
-	if result.SessionsKilled[0] != "eng-3" {
-		t.Errorf("first killed = %q, want eng-3", result.SessionsKilled[0])
+	// Newest engines should be drained first (LIFO).
+	if result.EnginesDrained[0] != "eng-3" {
+		t.Errorf("first drained = %q, want eng-3", result.EnginesDrained[0])
 	}
-	if result.SessionsKilled[1] != "eng-2" {
-		t.Errorf("second killed = %q, want eng-2", result.SessionsKilled[1])
+	if result.EnginesDrained[1] != "eng-2" {
+		t.Errorf("second drained = %q, want eng-2", result.EnginesDrained[1])
+	}
+
+	// Each removed engine gets a targeted drain instruction the daemon honors,
+	// and is marked dead (railyard-8m6).
+	for _, id := range []string{"eng-2", "eng-3"} {
+		var eng models.Engine
+		db.Where("id = ?", id).First(&eng)
+		if eng.Status != "dead" {
+			t.Errorf("engine %s status = %q, want dead", id, eng.Status)
+		}
+		var drains int64
+		db.Model(&models.Message{}).Where("to_agent = ? AND subject = ?", id, "drain").Count(&drains)
+		if drains != 1 {
+			t.Errorf("drain messages for %s = %d, want 1", id, drains)
+		}
+	}
+
+	// The surviving engine is untouched.
+	var eng1 models.Engine
+	db.Where("id = ?", "eng-1").First(&eng1)
+	if eng1.Status != "idle" {
+		t.Errorf("eng-1 status = %q, want idle", eng1.Status)
+	}
+	var eng1Drains int64
+	db.Model(&models.Message{}).Where("to_agent = ? AND subject = ?", "eng-1", "drain").Count(&eng1Drains)
+	if eng1Drains != 0 {
+		t.Errorf("drain messages for eng-1 = %d, want 0", eng1Drains)
+	}
+}
+
+// TestScale_DBError: DB failures must be returned, not silently ignored
+// (railyard-8m6).
+func TestScale_DBError(t *testing.T) {
+	db := testDB(t)
+	cfg := testConfig("test", config.TrackConfig{Name: "backend", EngineSlots: 5})
+	m := &mockTmux{
+		sessionExistsFunc: func(name string) bool {
+			return name == YardmasterSession("test")
+		},
+	}
+
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("get underlying sql.DB: %v", err)
+	}
+	sqlDB.Close()
+
+	_, err = Scale(ScaleOpts{
+		DB:     db,
+		Config: cfg,
+		Track:  "backend",
+		Count:  1,
+		Tmux:   m,
+	})
+	if err == nil {
+		t.Fatal("expected error for closed DB")
 	}
 }
 
@@ -1289,7 +1345,15 @@ func TestRestartEngine_Success(t *testing.T) {
 	if eng.Status != "dead" {
 		t.Errorf("old engine status = %q, want dead", eng.Status)
 	}
-	// A new session should have been created and keys sent.
+	// The old engine must be drained, not just DB-marked: a targeted drain
+	// instruction makes the daemon exit so engine count does not grow
+	// (railyard-8m6).
+	var drains int64
+	db.Model(&models.Message{}).Where("to_agent = ? AND subject = ?", "eng-1", "drain").Count(&drains)
+	if drains != 1 {
+		t.Errorf("drain messages for eng-1 = %d, want 1", drains)
+	}
+	// Exactly one new session should have been created and keys sent.
 	if len(m.createdSessions) != 1 {
 		t.Errorf("sessions created = %d, want 1", len(m.createdSessions))
 	}

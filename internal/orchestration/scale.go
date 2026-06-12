@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/zulandar/railyard/internal/config"
+	"github.com/zulandar/railyard/internal/messaging"
 	"github.com/zulandar/railyard/internal/models"
 	"gorm.io/gorm"
 )
@@ -126,7 +127,9 @@ type ScaleResult struct {
 	Previous        int
 	Current         int
 	SessionsCreated []string
-	SessionsKilled  []string
+	// EnginesDrained lists the engine IDs (not tmux session names) that were
+	// sent a drain instruction and marked dead on scale-down.
+	EnginesDrained []string
 }
 
 // Scale adjusts the engine count for a track.
@@ -174,7 +177,9 @@ func Scale(opts ScaleOpts) (*ScaleResult, error) {
 
 	// Count current live engines for this track.
 	var currentEngines []models.Engine
-	opts.DB.Where("track = ? AND status != ?", opts.Track, "dead").Find(&currentEngines)
+	if err := opts.DB.Where("track = ? AND status != ?", opts.Track, "dead").Find(&currentEngines).Error; err != nil {
+		return nil, fmt.Errorf("orchestration: list engines for track %q: %w", opts.Track, err)
+	}
 	currentCount := len(currentEngines)
 
 	result := &ScaleResult{
@@ -212,10 +217,21 @@ func Scale(opts ScaleOpts) (*ScaleResult, error) {
 		toRemove := -delta
 		for i := 0; i < toRemove && i < len(currentEngines); i++ {
 			eng := currentEngines[i]
-			// Mark as dead.
-			opts.DB.Model(&models.Engine{}).Where("id = ?", eng.ID).
-				Update("status", "dead")
-			result.SessionsKilled = append(result.SessionsKilled, eng.ID)
+			// Send a targeted drain instruction, then mark dead. The engine
+			// daemon honors either signal (inbox drain message, or
+			// ErrMarkedDead from its heartbeat) by finishing the current
+			// cycle and exiting — a DB-only dead mark alone never stopped
+			// the process (railyard-8m6).
+			if _, err := messaging.Send(opts.DB, "orchestrator", eng.ID, "drain",
+				fmt.Sprintf("Track %s scaled down to %d engines. Complete current work and exit gracefully.", opts.Track, opts.Count),
+				messaging.SendOpts{}); err != nil {
+				return result, fmt.Errorf("orchestration: send drain to engine %s: %w", eng.ID, err)
+			}
+			if err := opts.DB.Model(&models.Engine{}).Where("id = ?", eng.ID).
+				Update("status", "dead").Error; err != nil {
+				return result, fmt.Errorf("orchestration: mark engine %s dead: %w", eng.ID, err)
+			}
+			result.EnginesDrained = append(result.EnginesDrained, eng.ID)
 		}
 	}
 
@@ -288,7 +304,11 @@ func ListEngines(opts EngineListOpts) ([]EngineInfo, error) {
 	return infos, nil
 }
 
-// RestartEngine kills an engine's process and launches a replacement in a new session.
+// RestartEngine drains an engine's process and launches a replacement in a
+// new session. The old engine gets a targeted drain instruction and is marked
+// dead; its daemon honors either signal (inbox message or heartbeat
+// ErrMarkedDead) by finishing the current cycle and exiting, so the engine
+// count does not grow (railyard-8m6).
 func RestartEngine(db *gorm.DB, cfg *config.Config, configPath, engineID string, tmux Tmux) error {
 	if db == nil {
 		return fmt.Errorf("orchestration: database connection is required")
@@ -315,9 +335,16 @@ func RestartEngine(db *gorm.DB, cfg *config.Config, configPath, engineID string,
 		return fmt.Errorf("orchestration: engine %q not found", engineID)
 	}
 
-	// Mark old engine as dead.
-	db.Model(&models.Engine{}).Where("id = ?", engineID).
-		Update("status", "dead")
+	// Drain the old engine: targeted drain instruction, then mark dead.
+	if _, err := messaging.Send(db, "orchestrator", engineID, "drain",
+		"Engine restarting. Complete current work and exit gracefully.",
+		messaging.SendOpts{}); err != nil {
+		return fmt.Errorf("orchestration: send drain to engine %s: %w", engineID, err)
+	}
+	if err := db.Model(&models.Engine{}).Where("id = ?", engineID).
+		Update("status", "dead").Error; err != nil {
+		return fmt.Errorf("orchestration: mark engine %s dead: %w", engineID, err)
+	}
 
 	// Create new session with same track.
 	nextIdx := nextEngineIndex(tmux, owner)
