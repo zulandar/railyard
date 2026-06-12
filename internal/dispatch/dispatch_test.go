@@ -1,6 +1,8 @@
 package dispatch
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -254,7 +256,11 @@ func TestStart_ValidConfig_FailsOnClaude(t *testing.T) {
 		Name:     "backend",
 		Language: "go",
 	})
-	err := Start(StartOpts{Config: cfg})
+	// RepoDir MUST be set to an isolated dir: with it empty, Start falls back
+	// to os.Getwd() (this package dir under 'go test') and registers a real
+	// git worktree at internal/dispatch/.railyard/dispatch in the developer's
+	// repository before failing at the agent-binary step (railyard-tiw).
+	err := Start(StartOpts{Config: cfg, RepoDir: t.TempDir()})
 	// Start renders the prompt successfully but fails when trying to run the agent.
 	if err == nil {
 		t.Fatal("expected error (agent binary not available in test)")
@@ -262,6 +268,7 @@ func TestStart_ValidConfig_FailsOnClaude(t *testing.T) {
 	if !strings.Contains(err.Error(), "agent session") {
 		t.Errorf("error = %q, want to contain %q", err.Error(), "agent session")
 	}
+	assertNoRailyardDir(t)
 }
 
 func TestStart_EmptyAgentProvider_DefaultsToClaude(t *testing.T) {
@@ -270,13 +277,28 @@ func TestStart_EmptyAgentProvider_DefaultsToClaude(t *testing.T) {
 		Language: "go",
 	})
 	cfg.AgentProvider = "" // explicitly empty — should default to "claude"
-	err := Start(StartOpts{Config: cfg})
+	err := Start(StartOpts{Config: cfg, RepoDir: t.TempDir()})
 	// Should fail on binary execution, NOT on "unknown provider"
 	if err == nil {
 		t.Fatal("expected error (agent binary not available in test)")
 	}
 	if strings.Contains(err.Error(), "unknown provider") {
 		t.Errorf("empty AgentProvider should default to claude, got: %v", err)
+	}
+	assertNoRailyardDir(t)
+}
+
+// assertNoRailyardDir fails the test if a .railyard directory appeared under
+// the package directory — i.e. a Start call escaped its isolated RepoDir and
+// registered a worktree inside the source repository (railyard-tiw).
+func assertNoRailyardDir(t *testing.T) {
+	t.Helper()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(wd, ".railyard")); statErr == nil {
+		t.Errorf(".railyard directory created under %s — test polluted the source repo", wd)
 	}
 }
 

@@ -45,22 +45,17 @@ func startDBServer(t *testing.T) *testDBServer {
 		srv.cmd.Wait()
 	})
 
-	waitForServer(t, port)
+	waitForMySQL(t, port)
 	return srv
 }
 
-func freePort(t *testing.T) int {
-	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("find free port: %v", err)
-	}
-	port := l.Addr().(*net.TCPAddr).Port
-	l.Close()
-	return port
-}
+// freePort is shared with the untagged health_test.go — do not redeclare it
+// here: both files compile together under -tags integration, and a duplicate
+// kept this whole tag from building (railyard-8h8).
 
-func waitForServer(t *testing.T, port int) {
+// waitForMySQL polls until mysqld accepts connections. Distinct from
+// health_test.go's waitForServer: a longer deadline for the slow mysqld boot.
+func waitForMySQL(t *testing.T, port int) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
@@ -108,7 +103,7 @@ func TestIntegration_CheckEngineHealth_ZeroThreshold(t *testing.T) {
 
 func TestIntegration_ReassignCar_EmptyCarID(t *testing.T) {
 	gormDB := setupTestDB(t, "railyard_ym_hval2")
-	err := ReassignCar(gormDB, "", "eng-001", "stalled")
+	_, err := ReassignCar(gormDB, "", "eng-001", "stalled")
 	if err == nil {
 		t.Fatal("expected error for empty carID")
 	}
@@ -116,7 +111,7 @@ func TestIntegration_ReassignCar_EmptyCarID(t *testing.T) {
 
 func TestIntegration_ReassignCar_EmptyEngineID(t *testing.T) {
 	gormDB := setupTestDB(t, "railyard_ym_hval3")
-	err := ReassignCar(gormDB, "car-001", "", "stalled")
+	_, err := ReassignCar(gormDB, "car-001", "", "stalled")
 	if err == nil {
 		t.Fatal("expected error for empty engineID")
 	}
@@ -481,12 +476,8 @@ func setupGitRepo(t *testing.T) string {
 	return dir
 }
 
-func writeFile(t *testing.T, dir, name, content string) {
-	t.Helper()
-	if err := os.WriteFile(dir+"/"+name, []byte(content), 0644); err != nil {
-		t.Fatalf("write %s: %v", name, err)
-	}
-}
+// writeFile is shared with the untagged switch_test.go (same signature, plus
+// MkdirAll) — do not redeclare it here (railyard-8h8).
 
 func TestIntegration_Switch_FullFlow(t *testing.T) {
 	gormDB := setupTestDB(t, "railyard_ym_switchfull")
