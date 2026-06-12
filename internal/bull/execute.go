@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"strings"
 	"text/template"
 
 	"github.com/google/go-github/v68/github"
@@ -117,6 +118,24 @@ func ExecuteTriage(ctx context.Context, issue *github.Issue, opts TriageOpts) (*
 
 func handleCreateCar(ctx context.Context, issue *github.Issue, opts TriageOpts, result *TriageResult, rawResponse string) (*TriageOutcome, error) {
 	number := issue.GetNumber()
+
+	// The triage LLM can hallucinate a track; a car on a track absent from
+	// the config is unclaimable by every engine and sits open forever
+	// (railyard-d5f).
+	if len(opts.Tracks) > 0 {
+		found := false
+		names := make([]string, 0, len(opts.Tracks))
+		for _, t := range opts.Tracks {
+			names = append(names, t.Name)
+			if t.Name == result.Track {
+				found = true
+			}
+		}
+		if !found {
+			return nil, fmt.Errorf("bull: triage proposed unknown track %q for issue #%d (configured: %s)",
+				result.Track, number, strings.Join(names, ", "))
+		}
+	}
 
 	carOpts := CarCreateOpts{
 		Title:        result.Title,

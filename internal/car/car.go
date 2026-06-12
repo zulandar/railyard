@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/zulandar/railyard/internal/events"
@@ -87,18 +88,42 @@ var ValidTransitions = map[string][]string{
 	"pr_review":    {"pr_open", "merged", "cancelled"},
 }
 
-// GenerateID creates a unique car ID in car-xxxxx format (5-char hex).
+// GenerateID creates a random car ID in car-xxxxxxxx format (8-char hex).
+// 32 bits of randomness keeps birthday collisions negligible at realistic
+// car counts; the previous 5-char/20-bit space hit ~50% collision odds by
+// ~1,200 cars (railyard-sos). IDs are opaque strings — existing shorter IDs
+// remain valid.
 func GenerateID() (string, error) {
-	b := make([]byte, 3)
+	b := make([]byte, 4)
 	if _, err := rand.Read(b); err != nil {
 		return "", fmt.Errorf("car: generate ID: %w", err)
 	}
-	return "car-" + hex.EncodeToString(b)[:5], nil
+	return "car-" + hex.EncodeToString(b), nil
 }
 
-// ComputeBranch builds the git branch name for a car.
+// generateID is swapped out by tests to force ID collisions.
+var generateID = GenerateID
+
+// ComputeBranch builds the git branch name for a car. An empty or
+// whitespace-only prefix yields "track/id" — never a leading slash, which
+// would be an invalid git ref that only fails much later in the engine
+// (railyard-d5f).
 func ComputeBranch(branchPrefix, track, id string) string {
+	branchPrefix = strings.TrimSpace(branchPrefix)
+	if branchPrefix == "" {
+		return fmt.Sprintf("%s/%s", track, id)
+	}
 	return fmt.Sprintf("%s/%s/%s", branchPrefix, track, id)
+}
+
+// validCarTypes is the set of car types CreateOpts documents; type drives
+// epic-only behaviors (parent validation, switch skip), so a typo'd type
+// silently misbehaves if accepted (railyard-d5f).
+var validCarTypes = map[string]bool{
+	"task":  true,
+	"epic":  true,
+	"bug":   true,
+	"spike": true,
 }
 
 // Create creates a new car with an auto-generated ID.
@@ -142,33 +167,47 @@ func CreateWithBus(db *gorm.DB, bus events.Bus, opts CreateOpts) (*models.Car, e
 	if opts.Type == "" {
 		opts.Type = "task"
 	}
-
-	id, err := generateUniqueID(db)
-	if err != nil {
-		return nil, err
+	if !validCarTypes[opts.Type] {
+		return nil, fmt.Errorf("car: invalid type %q (valid: task, epic, bug, spike)", opts.Type)
 	}
 
-	car := models.Car{
-		ID:          id,
-		Title:       opts.Title,
-		Description: opts.Description,
-		Type:        opts.Type,
-		Status:      "draft",
-		Priority:    opts.Priority,
-		Track:       opts.Track,
-		BaseBranch:  opts.BaseBranch,
-		DesignNotes: opts.DesignNotes,
-		Acceptance:  opts.Acceptance,
-		SkipTests:   opts.SkipTests,
-		RequestedBy: opts.RequestedBy,
-		Branch:      ComputeBranch(opts.BranchPrefix, opts.Track, id),
-	}
+	// Insert with retry on duplicate-key: the old COUNT-then-INSERT check was
+	// racy — two concurrent creators drawing the same ID both passed count==0
+	// and the loser got a raw duplicate-key error (railyard-sos).
+	var car models.Car
+	const maxIDAttempts = 5
+	for attempt := 0; ; attempt++ {
+		id, err := generateID()
+		if err != nil {
+			return nil, err
+		}
 
-	if opts.ParentID != "" {
-		car.ParentID = &opts.ParentID
-	}
+		car = models.Car{
+			ID:          id,
+			Title:       opts.Title,
+			Description: opts.Description,
+			Type:        opts.Type,
+			Status:      "draft",
+			Priority:    opts.Priority,
+			Track:       opts.Track,
+			BaseBranch:  opts.BaseBranch,
+			DesignNotes: opts.DesignNotes,
+			Acceptance:  opts.Acceptance,
+			SkipTests:   opts.SkipTests,
+			RequestedBy: opts.RequestedBy,
+			Branch:      ComputeBranch(opts.BranchPrefix, opts.Track, id),
+		}
+		if opts.ParentID != "" {
+			car.ParentID = &opts.ParentID
+		}
 
-	if err := db.Create(&car).Error; err != nil {
+		err = db.Create(&car).Error
+		if err == nil {
+			break
+		}
+		if isDuplicateKeyError(err) && attempt < maxIDAttempts-1 {
+			continue // ID collision — draw a fresh one
+		}
 		return nil, fmt.Errorf("car: create: %w", err)
 	}
 
@@ -222,6 +261,12 @@ func List(db *gorm.DB, filters ListFilters) ([]models.Car, error) {
 	return cars, nil
 }
 
+// ErrConcurrentModification is returned by Update/UpdateWithBus when a status
+// change validated against a snapshot could not be applied because another
+// writer changed the car's status between the read and the write. Callers may
+// re-read and retry (railyard-5df).
+var ErrConcurrentModification = errors.New("car: concurrent modification")
+
 // Update modifies car fields. Status transitions are validated against ValidTransitions.
 // Equivalent to UpdateWithBus(db, nil, id, updates) — no events are published.
 func Update(db *gorm.DB, id string, updates map[string]interface{}) error {
@@ -266,8 +311,23 @@ func UpdateWithBus(db *gorm.DB, bus events.Bus, id string, updates map[string]in
 		}
 	}
 
-	if err := db.Model(&models.Car{}).Where("id = ?", id).Updates(updates).Error; err != nil {
-		return fmt.Errorf("car: update %s: %w", id, err)
+	// For status changes, the UPDATE is conditional on the status the
+	// transition was validated against — a concurrent writer (yardmaster
+	// reassign, reconcile, unblock, another CLI invocation) landing between
+	// the read and the write would otherwise be clobbered by a stale-validated
+	// transition (railyard-5df). RowsAffected==0 means the car moved on.
+	q := db.Model(&models.Car{}).Where("id = ?", id)
+	statusChanging := false
+	if _, ok := updates["status"].(string); ok {
+		statusChanging = true
+		q = q.Where("status = ?", oldStatus)
+	}
+	result := q.Updates(updates)
+	if result.Error != nil {
+		return fmt.Errorf("car: update %s: %w", id, result.Error)
+	}
+	if statusChanging && result.RowsAffected == 0 {
+		return fmt.Errorf("car: update %s: status changed from %q since read: %w", id, oldStatus, ErrConcurrentModification)
 	}
 
 	if newStatus, ok := updates["status"].(string); ok {
@@ -430,20 +490,18 @@ func PublishWithBus(db *gorm.DB, bus events.Bus, id string, recursive bool) (int
 	return count, nil
 }
 
-// generateUniqueID generates an ID and retries once on collision.
-func generateUniqueID(db *gorm.DB) (string, error) {
-	for range 2 {
-		id, err := GenerateID()
-		if err != nil {
-			return "", err
-		}
-		var count int64
-		if err := db.Model(&models.Car{}).Where("id = ?", id).Count(&count).Error; err != nil {
-			return "", fmt.Errorf("car: check ID uniqueness: %w", err)
-		}
-		if count == 0 {
-			return id, nil
-		}
+// isDuplicateKeyError reports whether err is a primary-key collision from
+// the cars insert: gorm's translated error, MySQL error 1062, or sqlite's
+// UNIQUE constraint message.
+func isDuplicateKeyError(err error) bool {
+	if err == nil {
+		return false
 	}
-	return "", fmt.Errorf("car: failed to generate unique ID after retries")
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "1062") ||
+		strings.Contains(msg, "Duplicate entry") ||
+		strings.Contains(msg, "UNIQUE constraint failed")
 }

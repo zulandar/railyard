@@ -545,3 +545,38 @@ func TestHasMultipleBaseBranches_Single(t *testing.T) {
 		t.Error("expected false for single car")
 	}
 }
+
+// TestRunCarCreate_UnknownTrack: a typo'd track produces a car no engine can
+// ever claim (engines filter strictly by track =) and nothing sweeps it.
+// Create must reject tracks not present in the config (railyard-d5f).
+func TestRunCarCreate_UnknownTrack(t *testing.T) {
+	gormDB := mockTestDB(t)
+	cleanup := withMockDB(t, gormDB)
+	defer cleanup()
+
+	_, err := execCmd(t, []string{"car", "create", "--title", "typo", "--track", "bakend", "--config", "test.yaml"})
+	if err == nil {
+		t.Fatal("expected error for unknown track")
+	}
+	if !strings.Contains(err.Error(), "bakend") || !strings.Contains(err.Error(), "backend") {
+		t.Errorf("error should name the bad track and list valid ones, got: %v", err)
+	}
+
+	var count int64
+	gormDB.Model(&models.Car{}).Count(&count)
+	if count != 0 {
+		t.Errorf("cars created = %d, want 0", count)
+	}
+}
+
+// TestRunCarCreate_KnownTrack: configured tracks still work.
+func TestRunCarCreate_KnownTrack(t *testing.T) {
+	gormDB := mockTestDB(t)
+	cleanup := withMockDB(t, gormDB)
+	defer cleanup()
+
+	out, err := execCmd(t, []string{"car", "create", "--title", "ok", "--track", "backend", "--config", "test.yaml"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v\n%s", err, out)
+	}
+}

@@ -85,6 +85,27 @@ func runCarCreate(cmd *cobra.Command, configPath string, opts car.CreateOpts) er
 	if err != nil {
 		return err
 	}
+
+	// Validate the track against the config: engines claim strictly by
+	// track equality, so a typo'd track produces a car that sits open
+	// forever with nothing sweeping or reporting it (railyard-d5f). An
+	// empty track is allowed through — it either inherits from the parent
+	// epic or is rejected by car.Create.
+	if opts.Track != "" {
+		known := make([]string, 0, len(cfg.Tracks))
+		found := false
+		for _, t := range cfg.Tracks {
+			known = append(known, t.Name)
+			if t.Name == opts.Track {
+				found = true
+			}
+		}
+		if !found {
+			return fmt.Errorf("unknown track %q — no engine would ever claim this car; configured tracks: %s",
+				opts.Track, strings.Join(known, ", "))
+		}
+	}
+
 	opts.BranchPrefix = cfg.BranchPrefix
 	if opts.RequestedBy == "" {
 		opts.RequestedBy = cfg.Owner

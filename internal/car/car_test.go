@@ -13,9 +13,11 @@ func TestGenerateID_Format(t *testing.T) {
 	if !strings.HasPrefix(id, "car-") {
 		t.Errorf("ID %q missing car- prefix", id)
 	}
-	// car- (4 chars) + 5 hex chars = 9 total
-	if len(id) != 9 {
-		t.Errorf("ID length = %d, want 9; id = %q", len(id), id)
+	// car- (4 chars) + 8 hex chars = 12 total. 32 bits of randomness keeps
+	// collisions negligible at realistic car counts; the old 5-char/20-bit
+	// space hit ~50% collision odds around 1,200 cars (railyard-sos).
+	if len(id) != 12 {
+		t.Errorf("ID length = %d, want 12; id = %q", len(id), id)
 	}
 }
 
@@ -59,6 +61,11 @@ func TestComputeBranch(t *testing.T) {
 		{"ry/bob", "frontend", "car-00000", "ry/bob/frontend/car-00000"},
 		{"ry/carol", "infra", "car-fffff", "ry/carol/infra/car-fffff"},
 		{"ry", "backend", "car-abc12", "ry/backend/car-abc12"},
+		// Empty/whitespace prefix must still yield a valid git ref — a
+		// leading slash ("/backend/car-x") fails git check-ref-format and
+		// only surfaces much later in the engine (railyard-d5f).
+		{"", "backend", "car-abc12", "backend/car-abc12"},
+		{"  ", "backend", "car-abc12", "backend/car-abc12"},
 	}
 	for _, tt := range tests {
 		got := ComputeBranch(tt.prefix, tt.track, tt.id)

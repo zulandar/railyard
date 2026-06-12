@@ -1,10 +1,15 @@
 package car
 
 import (
+	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/zulandar/railyard/internal/events"
 	"github.com/zulandar/railyard/internal/models"
+	"github.com/zulandar/railyard/pkg/plugin"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -925,5 +930,146 @@ func TestFullLifecycle(t *testing.T) {
 	}
 	if got.CompletedAt == nil {
 		t.Error("CompletedAt should be set")
+	}
+}
+
+// --- railyard-5df: conditional status updates ---
+
+// TestUpdateWithBus_ConcurrentModification simulates a writer changing the
+// car's status between UpdateWithBus's validating read and its write. The
+// stale-validated write must NOT clobber the interloper's status; it must
+// surface ErrConcurrentModification instead (railyard-5df).
+func TestUpdateWithBus_ConcurrentModification(t *testing.T) {
+	db := testDB(t)
+
+	car := createCar(t, db, CreateOpts{Title: "Race", Track: "backend"})
+	db.Exec("UPDATE cars SET status = ? WHERE id = ?", "done", car.ID)
+
+	// Between UpdateWithBus's read (status=done) and its UPDATE, flip the
+	// status to merge-failed — as the yardmaster switch would on an infra
+	// failure. Registered on the gorm update pipeline; db.Exec inside the
+	// hook does not re-enter model callbacks.
+	interleaved := false
+	if err := db.Callback().Update().Before("gorm:update").Register("test_interleave", func(tx *gorm.DB) {
+		if !interleaved {
+			interleaved = true
+			tx.Session(&gorm.Session{NewDB: true}).Exec(
+				"UPDATE cars SET status = ? WHERE id = ?", "merge-failed", car.ID)
+		}
+	}); err != nil {
+		t.Fatalf("register callback: %v", err)
+	}
+
+	// done -> merged validates against the read snapshot, but by write time
+	// the car is merge-failed; merged would silently un-fail it.
+	err := Update(db, car.ID, map[string]interface{}{"status": "merged"})
+	if err == nil {
+		t.Fatal("expected concurrent-modification error")
+	}
+	if !errors.Is(err, ErrConcurrentModification) {
+		t.Fatalf("error = %v, want ErrConcurrentModification", err)
+	}
+
+	var got models.Car
+	db.First(&got, "id = ?", car.ID)
+	if got.Status != "merge-failed" {
+		t.Errorf("status = %q, want %q (interloper's write preserved)", got.Status, "merge-failed")
+	}
+}
+
+// TestUpdateWithBus_NoEventOnConflict: lifecycle events must describe
+// transitions that actually happened — a conflicted write publishes nothing.
+func TestUpdateWithBus_NoEventOnConflict(t *testing.T) {
+	db := testDB(t)
+
+	car := createCar(t, db, CreateOpts{Title: "Race events", Track: "backend"})
+	db.Exec("UPDATE cars SET status = ? WHERE id = ?", "done", car.ID)
+
+	interleaved := false
+	if err := db.Callback().Update().Before("gorm:update").Register("test_interleave_evt", func(tx *gorm.DB) {
+		if !interleaved {
+			interleaved = true
+			tx.Session(&gorm.Session{NewDB: true}).Exec(
+				"UPDATE cars SET status = ? WHERE id = ?", "merge-failed", car.ID)
+		}
+	}); err != nil {
+		t.Fatalf("register callback: %v", err)
+	}
+
+	bus := events.NewBus()
+	var published atomic.Int32
+	unsub := bus.Subscribe(string(plugin.CarMerged), func(payload any) {
+		published.Add(1)
+	})
+	defer unsub()
+
+	if err := UpdateWithBus(db, bus, car.ID, map[string]interface{}{"status": "merged"}); err == nil {
+		t.Fatal("expected concurrent-modification error")
+	}
+
+	// Delivery is async on the subscriber's drain goroutine — give any
+	// (erroneous) publish time to land before asserting none arrived.
+	time.Sleep(100 * time.Millisecond)
+
+	if n := published.Load(); n != 0 {
+		t.Errorf("events published on conflicted write = %d, want 0", n)
+	}
+}
+
+// --- railyard-d5f: create-time validation ---
+
+func TestCreateWithBus_InvalidType(t *testing.T) {
+	db := testDB(t)
+
+	_, err := Create(db, CreateOpts{Title: "Typo", Track: "backend", Type: "epicc"})
+	if err == nil {
+		t.Fatal("expected error for invalid type")
+	}
+	if !strings.Contains(err.Error(), "invalid type") {
+		t.Errorf("error = %q, want to mention invalid type", err.Error())
+	}
+}
+
+func TestCreateWithBus_ValidTypes(t *testing.T) {
+	db := testDB(t)
+
+	for _, typ := range []string{"task", "epic", "bug", "spike", ""} {
+		if _, err := Create(db, CreateOpts{Title: "ok " + typ, Track: "backend", Type: typ}); err != nil {
+			t.Errorf("Create(type=%q) error: %v", typ, err)
+		}
+	}
+}
+
+// --- railyard-sos: duplicate-ID retry ---
+
+// TestCreateWithBus_RetriesOnDuplicateID: a generated ID colliding with an
+// existing row must be retried transparently with a fresh ID, not surfaced
+// as a duplicate-key error (the old COUNT-then-INSERT check was racy).
+func TestCreateWithBus_RetriesOnDuplicateID(t *testing.T) {
+	db := testDB(t)
+
+	existing := createCar(t, db, CreateOpts{Title: "First", Track: "backend"})
+
+	// Force the generator to collide once, then produce a fresh ID.
+	orig := generateID
+	calls := 0
+	generateID = func() (string, error) {
+		calls++
+		if calls == 1 {
+			return existing.ID, nil
+		}
+		return orig()
+	}
+	defer func() { generateID = orig }()
+
+	c, err := Create(db, CreateOpts{Title: "Second", Track: "backend"})
+	if err != nil {
+		t.Fatalf("Create should retry on duplicate ID: %v", err)
+	}
+	if c.ID == existing.ID {
+		t.Errorf("new car reused existing ID %q", c.ID)
+	}
+	if calls < 2 {
+		t.Errorf("generateID calls = %d, want >= 2 (retry happened)", calls)
 	}
 }

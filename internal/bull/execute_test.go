@@ -599,3 +599,26 @@ func TestExecuteTriage_AIError(t *testing.T) {
 		t.Errorf("expected error to contain AI error message, got %q", err.Error())
 	}
 }
+
+// TestExecuteTriage_UnknownTrack: the triage LLM can hallucinate a track.
+// A car created on a track absent from the config is unclaimable by every
+// engine and sits open forever — refuse it at create time (railyard-d5f).
+func TestExecuteTriage_UnknownTrack(t *testing.T) {
+	client := &mockTriageClient{}
+	ai := &mockTriageAI{response: makeAIResponse("bug", map[string]interface{}{"track": "bakend"})}
+	store := &mockTriageStore{carIDToReturn: "CAR-XXX"}
+
+	issue := makeIssue(77, "Crash on save", "The app crashes whenever I save a draft with an attachment present")
+	opts := defaultOpts(client, ai, store)
+
+	_, err := ExecuteTriage(context.Background(), issue, opts)
+	if err == nil {
+		t.Fatal("expected error for track not present in config")
+	}
+	if !strings.Contains(err.Error(), "bakend") {
+		t.Errorf("error should name the unknown track, got: %v", err)
+	}
+	if len(store.createdCars) != 0 {
+		t.Errorf("cars created = %d, want 0", len(store.createdCars))
+	}
+}
