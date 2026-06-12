@@ -47,6 +47,7 @@ import (
 	"log/slog"
 	"sync"
 
+	"google.golang.org/protobuf/types/known/structpb"
 	"gopkg.in/yaml.v3"
 
 	"github.com/zulandar/railyard/pkg/plugin"
@@ -373,11 +374,24 @@ func (h *FakeHost) DispatchCommand(ctx context.Context, name string, args plugin
 // unit tests can assert what the plugin tried to publish. Inject EmitErr
 // to exercise the plugin's error handling (railyard-77h.9).
 func (h *FakeHost) Emit(_ context.Context, topic string, payload map[string]any) error {
+	// Coerce the payload through a structpb round-trip exactly as the real
+	// host does on the wire (hostclient_adapter), so the recorded payload
+	// carries the same types a subscriber actually receives — notably every
+	// number as float64, not the caller's Go int/int64. Without this a test
+	// could assert on int and pass while production delivers float64
+	// (railyard-uv8.11). A payload that cannot be represented as a
+	// structpb.Struct fails here, mirroring the real Emit.
+	st, err := structpb.NewStruct(payload)
+	if err != nil {
+		return fmt.Errorf("plugintest: Emit: payload not representable on the wire: %w", err)
+	}
+	coerced := st.AsMap()
+
 	h.mu.Lock()
-	h.emits = append(h.emits, RecordedEmit{Topic: topic, Payload: payload})
-	err := h.EmitErr
+	h.emits = append(h.emits, RecordedEmit{Topic: topic, Payload: coerced})
+	emitErr := h.EmitErr
 	h.mu.Unlock()
-	return err
+	return emitErr
 }
 
 // Emits returns a snapshot of the [FakeHost.Emit] calls made so far.

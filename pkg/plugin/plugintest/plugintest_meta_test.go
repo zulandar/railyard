@@ -70,8 +70,12 @@ func TestFakeHostEmit(t *testing.T) {
 	if emits[0].Topic != "trainmaster.synced" {
 		t.Errorf("emit topic = %q, want trainmaster.synced", emits[0].Topic)
 	}
-	if emits[0].Payload["n"] != 1 {
-		t.Errorf("emit payload = %v, want n=1", emits[0].Payload)
+	// Production marshals the payload to a structpb.Struct on the wire, so a
+	// Go int arrives at subscribers as float64. The fake coerces identically
+	// (railyard-uv8.11) so a test asserting on Emits() cannot pass on int
+	// where production would deliver float64.
+	if got, ok := emits[0].Payload["n"].(float64); !ok || got != 1 {
+		t.Errorf("emit payload n = %#v, want float64(1) (structpb fidelity)", emits[0].Payload["n"])
 	}
 
 	// EmitErr is injected and still records the attempt.
