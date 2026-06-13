@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
@@ -24,8 +25,10 @@ type bucket struct {
 }
 
 // rateLimiter returns Gin middleware that enforces per-IP rate limiting.
-// Static asset paths (/static/) are excluded from rate limiting.
-func rateLimiter(cfg RateLimitConfig) gin.HandlerFunc {
+// Static asset paths (/static/) are excluded from rate limiting. The eviction
+// goroutine stops when ctx is cancelled, so a middleware instance does not
+// leak a goroutine for process lifetime (railyard-9dw).
+func rateLimiter(ctx context.Context, cfg RateLimitConfig) gin.HandlerFunc {
 	if !cfg.Enabled {
 		return func(c *gin.Context) { c.Next() }
 	}
@@ -34,21 +37,26 @@ func rateLimiter(cfg RateLimitConfig) gin.HandlerFunc {
 	rpm := float64(cfg.RequestsPerMinute)
 	refillRate := rpm / 60.0 // tokens per second
 
-	// Cleanup goroutine: evict stale buckets every 5 minutes.
+	// Cleanup goroutine: evict stale buckets every 5 minutes; exits on ctx done.
 	go func() {
 		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
-		for range ticker.C {
-			stale := time.Now().Add(-10 * time.Minute)
-			buckets.Range(func(key, value any) bool {
-				b := value.(*bucket)
-				b.mu.Lock()
-				if b.lastTime.Before(stale) {
-					buckets.Delete(key)
-				}
-				b.mu.Unlock()
-				return true
-			})
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				stale := time.Now().Add(-10 * time.Minute)
+				buckets.Range(func(key, value any) bool {
+					b := value.(*bucket)
+					b.mu.Lock()
+					if b.lastTime.Before(stale) {
+						buckets.Delete(key)
+					}
+					b.mu.Unlock()
+					return true
+				})
+			}
 		}
 	}()
 
@@ -78,8 +86,11 @@ func rateLimiter(cfg RateLimitConfig) gin.HandlerFunc {
 		b.lastTime = now
 
 		if b.tokens < 1 {
-			b.mu.Unlock()
+			// Compute Retry-After while still holding the lock — reading
+			// b.tokens after Unlock races concurrent requests from the same IP
+			// (railyard-9dw).
 			retryAfter := int((1 - b.tokens) / refillRate)
+			b.mu.Unlock()
 			if retryAfter < 1 {
 				retryAfter = 1
 			}

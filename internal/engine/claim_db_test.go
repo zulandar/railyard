@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -108,5 +110,30 @@ func TestMarkInProgress_WrongAssignee(t *testing.T) {
 	}
 	if c.Assignee != "eng-2" {
 		t.Errorf("assignee = %q, want %q (untouched)", c.Assignee, "eng-2")
+	}
+}
+
+// TestClaimCar_NoReadyCars_CleanError: the idle path (no claimable car) must
+// return an error wrapping gorm.ErrRecordNotFound whose message names the
+// track and does NOT mention retries — the old message claimed "3 retries" on
+// every idle poll, which is misleading noise during triage (railyard-j0j).
+func TestClaimCar_NoReadyCars_CleanError(t *testing.T) {
+	gormDB := claimTestDB(t)
+
+	_, err := ClaimCar(gormDB, "eng-idle", "backend")
+	if err == nil {
+		t.Fatal("expected error when no ready cars exist")
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Errorf("idle error must wrap gorm.ErrRecordNotFound, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "retries") {
+		t.Errorf("idle error must not mention retries, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "no ready cars") {
+		t.Errorf("idle error should say 'no ready cars', got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "backend") {
+		t.Errorf("idle error should name the track, got: %v", err)
 	}
 }

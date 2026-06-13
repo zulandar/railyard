@@ -45,7 +45,7 @@ func Start(ctx context.Context, opts StartOpts) error {
 	router := gin.New()
 	router.Use(gin.Recovery())
 	router.Use(securityHeaders())
-	router.Use(rateLimiter(opts.RateLimit))
+	router.Use(rateLimiter(ctx, opts.RateLimit))
 
 	// Parse embedded templates.
 	tmpl, err := parseTemplates()

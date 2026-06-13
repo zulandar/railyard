@@ -1,8 +1,11 @@
 package dashboard
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -11,7 +14,7 @@ import (
 // rateLimitedRouter creates a test router with rate limiting enabled.
 func rateLimitedRouter(rpm int) *gin.Engine {
 	router := gin.New()
-	router.Use(rateLimiter(RateLimitConfig{Enabled: true, RequestsPerMinute: rpm}))
+	router.Use(rateLimiter(context.Background(), RateLimitConfig{Enabled: true, RequestsPerMinute: rpm}))
 	router.GET("/", func(c *gin.Context) { c.String(200, "ok") })
 	router.GET("/static/style.css", func(c *gin.Context) { c.String(200, "css") })
 	return router
@@ -67,7 +70,7 @@ func TestRateLimiter_DifferentIPsTrackedSeparately(t *testing.T) {
 
 func TestRateLimiter_Disabled(t *testing.T) {
 	router := gin.New()
-	router.Use(rateLimiter(RateLimitConfig{Enabled: false}))
+	router.Use(rateLimiter(context.Background(), RateLimitConfig{Enabled: false}))
 	router.GET("/", func(c *gin.Context) { c.String(200, "ok") })
 
 	for i := range 100 {
@@ -107,5 +110,38 @@ func TestRateLimitConfig_Defaults(t *testing.T) {
 	}
 	if cfg.RequestsPerMinute != 0 {
 		t.Errorf("default RPM = %d, want 0", cfg.RequestsPerMinute)
+	}
+}
+
+// TestRateLimiter_ConcurrentSameIP_NoRace hammers one IP past the limit from
+// many goroutines. Before the fix, the reject path read b.tokens after
+// b.mu.Unlock(), a data race flagged by -race; every 429 must still carry a
+// Retry-After >= 1 (railyard-9dw). Run with: go test -race.
+func TestRateLimiter_ConcurrentSameIP_NoRace(t *testing.T) {
+	router := rateLimitedRouter(5)
+
+	const workers = 50
+	var wg sync.WaitGroup
+	var tooMany int32
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest("GET", "/", nil)
+			req.RemoteAddr = "203.0.113.7:9999"
+			router.ServeHTTP(w, req)
+			if w.Code == http.StatusTooManyRequests {
+				atomic.AddInt32(&tooMany, 1)
+				if ra := w.Header().Get("Retry-After"); ra == "" || ra == "0" {
+					t.Errorf("429 missing valid Retry-After, got %q", ra)
+				}
+			}
+		}()
+	}
+	wg.Wait()
+
+	if tooMany == 0 {
+		t.Error("expected some requests to be rate-limited past the limit")
 	}
 }
