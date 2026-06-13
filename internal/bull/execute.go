@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"log"
 	"strings"
 	"text/template"
 
@@ -28,6 +29,9 @@ type TriageAI interface {
 type TriageStore interface {
 	CreateCar(ctx context.Context, opts CarCreateOpts) (string, error)
 	RecordTriagedIssue(ctx context.Context, issue models.BullIssue) error
+	// CreateCarAndRecord creates the car and the bull_issues tracking row
+	// atomically (railyard-p9t).
+	CreateCarAndRecord(ctx context.Context, opts CarCreateOpts, issue models.BullIssue) (string, error)
 }
 
 // CarCreateOpts holds parameters for creating a car from triage.
@@ -150,25 +154,27 @@ func handleCreateCar(ctx context.Context, issue *github.Issue, opts TriageOpts, 
 		RequestedBy:  issue.GetUser().GetLogin(),
 	}
 
-	carID, err := opts.Store.CreateCar(ctx, carOpts)
-	if err != nil {
-		return nil, fmt.Errorf("bull: create car for #%d: %w", number, err)
-	}
-
 	bullIssue := models.BullIssue{
 		IssueNumber:     number,
-		CarID:           carID,
 		LastKnownStatus: "draft",
 		TriageSummary:   result.Description,
 		TriageResponse:  rawResponse,
 		TriageMode:      opts.Config.TriageMode,
 	}
-	if err := opts.Store.RecordTriagedIssue(ctx, bullIssue); err != nil {
-		return nil, fmt.Errorf("bull: record triaged issue #%d: %w", number, err)
+
+	// Create the car and record the tracking row atomically: a failure or
+	// crash between the two writes used to orphan a car and re-triage it into
+	// a duplicate on the next cycle (railyard-p9t).
+	carID, err := opts.Store.CreateCarAndRecord(ctx, carOpts, bullIssue)
+	if err != nil {
+		return nil, fmt.Errorf("bull: create car + record issue #%d: %w", number, err)
 	}
 
+	// The label is best-effort: the bull_issues row already blocks re-triage,
+	// so a transient GitHub failure here must not abort triage or strand the
+	// car. A missing label is recovered on a later sync.
 	if err := opts.Client.AddLabel(ctx, number, opts.Config.Labels.UnderReview); err != nil {
-		return nil, fmt.Errorf("bull: apply under_review label to #%d: %w", number, err)
+		log.Printf("bull: apply under_review label to #%d failed (non-fatal): %v", number, err)
 	}
 
 	return &TriageOutcome{

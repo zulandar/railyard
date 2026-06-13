@@ -112,3 +112,47 @@ func (s *Store) RecordTriagedIssue(_ context.Context, issue models.BullIssue) er
 	}
 	return nil
 }
+
+// CreateCarAndRecord creates the car and records the bull_issues tracking row
+// in a single transaction, setting the row's CarID to the new car. Atomicity
+// closes the duplicate-car hole: a failure (or crash) between the two writes
+// previously left an untracked car that the next poll re-triaged into a second
+// car. On rollback, neither row persists (railyard-p9t).
+func (s *Store) CreateCarAndRecord(_ context.Context, opts CarCreateOpts, issue models.BullIssue) (string, error) {
+	var carID string
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		c, err := car.CreateWithBus(tx, nil, car.CreateOpts{
+			Title:        opts.Title,
+			Description:  opts.Description,
+			Type:         opts.Type,
+			Priority:     opts.Priority,
+			Track:        opts.Track,
+			DesignNotes:  opts.DesignNotes,
+			Acceptance:   opts.Acceptance,
+			BranchPrefix: opts.BranchPrefix,
+			RequestedBy:  opts.RequestedBy,
+		})
+		if err != nil {
+			return fmt.Errorf("bull store: create car: %w", err)
+		}
+
+		if opts.SourceIssue > 0 {
+			if err := tx.Model(&models.Car{}).Where("id = ?", c.ID).
+				Update("source_issue", opts.SourceIssue).Error; err != nil {
+				return fmt.Errorf("bull store: set source issue: %w", err)
+			}
+		}
+
+		issue.CarID = c.ID
+		if err := tx.Create(&issue).Error; err != nil {
+			return fmt.Errorf("bull store: record triaged issue: %w", err)
+		}
+
+		carID = c.ID
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	return carID, nil
+}

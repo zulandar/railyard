@@ -184,3 +184,6 @@ func (d *daemonDeps) CreateCar(ctx context.Context, opts CarCreateOpts) (string,
 func (d *daemonDeps) RecordTriagedIssue(ctx context.Context, issue models.BullIssue) error {
 	return d.store.RecordTriagedIssue(ctx, issue)
 }
+func (d *daemonDeps) CreateCarAndRecord(ctx context.Context, opts CarCreateOpts, issue models.BullIssue) (string, error) {
+	return d.store.CreateCarAndRecord(ctx, opts, issue)
+}

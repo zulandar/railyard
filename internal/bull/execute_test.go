@@ -90,6 +90,20 @@ func (m *mockTriageStore) RecordTriagedIssue(_ context.Context, issue models.Bul
 	return m.recordErr
 }
 
+func (m *mockTriageStore) CreateCarAndRecord(_ context.Context, opts CarCreateOpts, issue models.BullIssue) (string, error) {
+	if m.createErr != nil {
+		return "", m.createErr
+	}
+	if m.recordErr != nil {
+		// Atomic: a record failure rolls the car back, so nothing is tracked.
+		return "", m.recordErr
+	}
+	m.createdCars = append(m.createdCars, opts)
+	issue.CarID = m.carIDToReturn
+	m.recordedIssues = append(m.recordedIssues, issue)
+	return m.carIDToReturn, nil
+}
+
 // --- Helper functions ---
 
 func makeAIResponse(classification string, extra map[string]interface{}) string {
