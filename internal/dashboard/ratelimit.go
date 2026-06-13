@@ -88,8 +88,13 @@ func rateLimiter(ctx context.Context, cfg RateLimitConfig) gin.HandlerFunc {
 		if b.tokens < 1 {
 			// Compute Retry-After while still holding the lock — reading
 			// b.tokens after Unlock races concurrent requests from the same IP
-			// (railyard-9dw).
-			retryAfter := int((1 - b.tokens) / refillRate)
+			// (railyard-9dw). Guard refillRate==0 (Enabled with
+			// RequestsPerMinute=0) so the division can't yield int(+Inf), which
+			// is platform-dependent and slips past the floor below on arm64.
+			retryAfter := 1
+			if refillRate > 0 {
+				retryAfter = int((1 - b.tokens) / refillRate)
+			}
 			b.mu.Unlock()
 			if retryAfter < 1 {
 				retryAfter = 1
