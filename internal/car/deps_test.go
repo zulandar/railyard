@@ -3,6 +3,8 @@ package car
 import (
 	"strings"
 	"testing"
+
+	"github.com/zulandar/railyard/internal/models"
 )
 
 // --- AddDep tests ---
@@ -423,5 +425,29 @@ func TestReadyCars_ResolvedStatuses(t *testing.T) {
 	}
 	if len(ready) != 2 {
 		t.Errorf("ReadyCars with resolved blockers: got %d, want 2", len(ready))
+	}
+}
+
+// TestAddDep_FailsClosedOnCycleCheckError: a DB error during the cycle DFS
+// must refuse the edge, not silently read as "no cycle" — a transient error
+// approving an edge can commit a cycle that strands both cars forever
+// (railyard-9ki).
+func TestAddDep_FailsClosedOnCycleCheckError(t *testing.T) {
+	db := testDB(t)
+
+	a := createCar(t, db, CreateOpts{Title: "A", Track: "backend"})
+	b := createCar(t, db, CreateOpts{Title: "B", Track: "backend"})
+
+	// Break the dep table so the cycle-check query errors.
+	if err := db.Migrator().DropTable(&models.CarDep{}); err != nil {
+		t.Fatalf("drop table: %v", err)
+	}
+
+	err := AddDep(db, a.ID, b.ID, "blocks")
+	if err == nil {
+		t.Fatal("expected error when cycle check cannot run")
+	}
+	if !strings.Contains(err.Error(), "cycle check") {
+		t.Errorf("error = %q, want a cycle-check error (fail closed), not a late create error", err.Error())
 	}
 }
