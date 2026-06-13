@@ -4,6 +4,7 @@ package protov1
 
 import (
 	"errors"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -41,7 +42,7 @@ func TestProtoBreakingCompat(t *testing.T) {
 
 	mainRef := resolveMainRef(repoRoot)
 	if mainRef == "" {
-		t.Skip("no resolvable main ref (origin/main or main); skipping breaking check. " +
+		t.Skip("no main ref distinct from HEAD (origin/main or main); skipping breaking check. " +
 			"The CI Proto job fetches main and runs the authoritative gate.")
 	}
 
@@ -64,19 +65,130 @@ func TestProtoBreakingCompat(t *testing.T) {
 
 // resolveMainRef returns the first git ref that names the last-merged
 // contract baseline — preferring the remote-tracking origin/main, then a
-// local main — or "" when neither resolves (a shallow checkout, or a
-// clone that has never seen main). It never returns the currently checked
-// out HEAD: comparing against the local main while sitting on it is the
-// intended no-op when main is the working branch.
+// local main — or "" when neither resolves (a shallow checkout, or a clone
+// that has never seen main) or the only candidate points at HEAD. A ref
+// equal to HEAD (sitting on main, or a just-merged commit) would make `buf
+// breaking` compare the contract against itself and validate nothing, so it
+// is treated as no baseline rather than a silent pass; the CI Proto job
+// fetches the pre-merge main and is the authoritative gate.
 func resolveMainRef(repoRoot string) string {
+	head := gitRevParse(repoRoot, "HEAD")
 	for _, ref := range []string{"refs/remotes/origin/main", "refs/heads/main"} {
-		cmd := exec.Command("git", "rev-parse", "--verify", "--quiet", ref)
-		cmd.Dir = repoRoot
-		if err := cmd.Run(); err == nil {
-			return ref
+		sha := gitRevParse(repoRoot, ref)
+		if sha == "" {
+			continue // ref does not resolve
 		}
+		if sha == head {
+			continue // points at HEAD: comparing against it is a no-op
+		}
+		return ref
 	}
 	return ""
+}
+
+// gitRevParse returns the commit SHA that rev names, or "" if rev does not
+// resolve.
+func gitRevParse(repoRoot, rev string) string {
+	cmd := exec.Command("git", "rev-parse", "--verify", "--quiet", rev)
+	cmd.Dir = repoRoot
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// TestResolveMainRef exercises the baseline-ref selection, including the
+// guard that refuses a ref pointing at HEAD: comparing the contract
+// against itself validates nothing, so it must be treated as "no baseline"
+// (skip) rather than a silent pass.
+func TestResolveMainRef(t *testing.T) {
+	t.Parallel()
+
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	t.Run("sitting on main with no origin returns empty", func(t *testing.T) {
+		repo := t.TempDir()
+		gitInitMain(t, repo)
+		// HEAD == refs/heads/main and there is no origin/main, so the only
+		// candidate points at HEAD: no meaningful baseline.
+		if got := resolveMainRef(repo); got != "" {
+			t.Fatalf("expected empty (HEAD is main, no distinct baseline), got %q", got)
+		}
+	})
+
+	t.Run("feature branch uses local main when it differs from HEAD", func(t *testing.T) {
+		repo := t.TempDir()
+		gitInitMain(t, repo)
+		gitCmd(t, repo, "checkout", "-b", "feature")
+		gitCommit(t, repo, "a.txt", "2")
+		if got := resolveMainRef(repo); got != "refs/heads/main" {
+			t.Fatalf("expected refs/heads/main, got %q", got)
+		}
+	})
+
+	t.Run("prefers origin/main when it differs from HEAD", func(t *testing.T) {
+		repo := t.TempDir()
+		gitInitMain(t, repo)
+		base := gitCmd(t, repo, "rev-parse", "HEAD")
+		gitCmd(t, repo, "checkout", "-b", "feature")
+		gitCommit(t, repo, "a.txt", "2")
+		gitCmd(t, repo, "update-ref", "refs/remotes/origin/main", base)
+		if got := resolveMainRef(repo); got != "refs/remotes/origin/main" {
+			t.Fatalf("expected refs/remotes/origin/main, got %q", got)
+		}
+	})
+
+	t.Run("on main still uses origin/main when origin is behind HEAD", func(t *testing.T) {
+		repo := t.TempDir()
+		gitInitMain(t, repo)
+		base := gitCmd(t, repo, "rev-parse", "HEAD")
+		gitCommit(t, repo, "a.txt", "2") // main now ahead of origin
+		gitCmd(t, repo, "update-ref", "refs/remotes/origin/main", base)
+		// HEAD == refs/heads/main (skipped, == HEAD) but origin/main is a
+		// distinct older commit, so it is the baseline.
+		if got := resolveMainRef(repo); got != "refs/remotes/origin/main" {
+			t.Fatalf("expected refs/remotes/origin/main, got %q", got)
+		}
+	})
+}
+
+// gitInitMain initialises a repo with a single commit on a `main` branch.
+func gitInitMain(t *testing.T, dir string) {
+	t.Helper()
+	gitCmd(t, dir, "init")
+	gitCommit(t, dir, "a.txt", "1")
+	gitCmd(t, dir, "branch", "-M", "main")
+}
+
+// gitCommit writes file and commits it.
+func gitCommit(t *testing.T, dir, file, content string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, file), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, dir, "add", file)
+	gitCmd(t, dir, "commit", "-m", "c")
+}
+
+// gitCmd runs git in dir with a deterministic identity and fails the test
+// on error, returning trimmed combined output.
+func gitCmd(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	base := []string{
+		"-c", "user.name=test",
+		"-c", "user.email=test@example.com",
+		"-c", "commit.gpgsign=false",
+	}
+	cmd := exec.Command("git", append(base, args...)...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // findBuf returns the path to a usable buf binary, checking PATH first
