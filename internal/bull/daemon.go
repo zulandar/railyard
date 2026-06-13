@@ -49,6 +49,7 @@ type DaemonStore interface {
 	// TriageStore
 	CreateCar(ctx context.Context, opts CarCreateOpts) (string, error)
 	RecordTriagedIssue(ctx context.Context, issue models.BullIssue) error
+	CreateCarAndRecord(ctx context.Context, opts CarCreateOpts, issue models.BullIssue) (string, error)
 }
 
 // DaemonOpts bundles all configuration for RunDaemon.
@@ -110,11 +111,22 @@ func RunDaemon(ctx context.Context, deps interface {
 		}
 		opts.RateLimitUntil = time.Time{} // reset after backoff
 
-		// Collect tracked issues once per cycle for filtering.
+		// Collect tracked issues once per cycle for filtering. On failure,
+		// SKIP the whole cycle: proceeding with an empty tracked list would
+		// defeat the "already tracked" skip for every previously-triaged
+		// issue and re-create duplicate cars from one transient DB error
+		// (railyard-p9t).
 		trackedIssues, err := deps.GetTrackedIssues(ctx)
 		if err != nil {
-			log.Printf("bull: get tracked issues: %v", err)
-			trackedIssues = nil
+			log.Printf("bull: get tracked issues (skipping cycle): %v", err)
+			// Can't goto endCycle here — it would jump over the tracked/
+			// trackedSet declarations below — so end the cycle inline.
+			cycle++
+			if opts.OnCycleEnd != nil {
+				opts.OnCycleEnd(cycle)
+			}
+			sleepCtx(ctx, opts.PollInterval)
+			continue
 		}
 		tracked := make([]ExistingIssue, len(trackedIssues))
 		for i, ti := range trackedIssues {

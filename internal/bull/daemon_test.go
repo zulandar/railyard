@@ -185,6 +185,13 @@ func (m *mockDaemonDeps) RecordTriagedIssue(ctx context.Context, issue models.Bu
 	return nil
 }
 
+func (m *mockDaemonDeps) CreateCarAndRecord(ctx context.Context, opts CarCreateOpts, issue models.BullIssue) (string, error) {
+	m.createdCars = append(m.createdCars, opts)
+	issue.CarID = "car-test"
+	m.recordedIssues = append(m.recordedIssues, issue)
+	return "car-test", nil
+}
+
 // ---------- Helpers ----------
 
 func daemonConfig() config.BullConfig {
@@ -745,5 +752,50 @@ func TestRunDaemon_RetryQueue_NoDuplicateEntries(t *testing.T) {
 	retryCount := strings.Count(output, "Retrying triage for issue #5")
 	if retryCount != 1 {
 		t.Errorf("expected exactly 1 retry entry for issue #5, got %d; output:\n%s", retryCount, output)
+	}
+}
+
+// TestRunDaemon_SkipsCycleWhenTrackedIssuesUnavailable: a GetTrackedIssues
+// failure must skip the whole cycle, not proceed with an empty tracked list —
+// otherwise every previously-triaged under-review issue is re-sent to the AI
+// and re-creates duplicate cars (railyard-p9t).
+func TestRunDaemon_SkipsCycleWhenTrackedIssuesUnavailable(t *testing.T) {
+	deps := &mockDaemonDeps{
+		issues: []*github.Issue{
+			makeIssue(1, "Unique bug title", "A valid bug report with enough text to pass the heuristic filter"),
+		},
+		syncErr:         errors.New("transient tracked-issues DB error"),
+		syncCarStatuses: map[string]string{},
+		releases:        []*github.RepositoryRelease{},
+		mergedIssues:    []models.BullIssue{},
+	}
+	ai := &countingMockAI{successResponse: makeAIResponse("bug", nil)}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var buf bytes.Buffer
+	opts := DaemonOpts{
+		Config:       daemonConfig(),
+		Tracks:       []TrackInfo{{Name: "backend"}},
+		BranchPrefix: "ry/test",
+		PollInterval: time.Millisecond,
+		Out:          &buf,
+		AI:           ai,
+		OnCycleEnd:   func(cycle int) { cancel() },
+	}
+
+	if err := RunDaemon(ctx, deps, opts); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if ai.calls != 0 {
+		t.Errorf("AI called %d times; want 0 when tracked issues unavailable", ai.calls)
+	}
+	if len(deps.createdCars) != 0 {
+		t.Errorf("created %d cars; want 0 when tracked issues unavailable", len(deps.createdCars))
+	}
+	for _, p := range deps.phasesRun {
+		if p == "poll" {
+			t.Error("Phase 1 poll ran despite tracked-issues failure; cycle should be skipped")
+		}
 	}
 }
