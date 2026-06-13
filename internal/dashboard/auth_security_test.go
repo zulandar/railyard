@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"context"
 	"fmt"
 	"html/template"
 	"net/http"
@@ -27,7 +28,7 @@ func init() {
 func testRouter() *gin.Engine {
 	router := gin.New()
 	router.Use(gin.Recovery())
-	router.Use(rateLimiter(RateLimitConfig{Enabled: true, RequestsPerMinute: 120}))
+	router.Use(rateLimiter(context.Background(), RateLimitConfig{Enabled: true, RequestsPerMinute: 120}))
 
 	// Use a simple HTML template to avoid template parse errors.
 	router.SetHTMLTemplate(mustParseTemplates())
@@ -286,7 +287,7 @@ func TestSSEConnectionLimit_BelowMax(t *testing.T) {
 // returns 429 Too Many Requests when a client exceeds the allowed RPM.
 func TestRateLimiting_Enforcement(t *testing.T) {
 	router := gin.New()
-	router.Use(rateLimiter(RateLimitConfig{Enabled: true, RequestsPerMinute: 5}))
+	router.Use(rateLimiter(context.Background(), RateLimitConfig{Enabled: true, RequestsPerMinute: 5}))
 	router.SetHTMLTemplate(mustParseTemplates())
 	registerRoutes(router, nil, "")
 

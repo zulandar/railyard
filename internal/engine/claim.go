@@ -91,8 +91,11 @@ func ClaimCar(db *gorm.DB, engineID, track string) (*models.Car, error) {
 		}
 
 		if strings.Contains(lastErr.Error(), "no ready cars") {
-			// No cars available — not an error worth retrying.
-			break
+			// No claimable car — the common idle-poll path, not a failure.
+			// Return a clean message (no "retries" noise) that still wraps
+			// gorm.ErrRecordNotFound so callers' errors.Is checks hold
+			// (railyard-j0j).
+			return nil, fmt.Errorf("engine: no ready cars on track %q: %w", track, gorm.ErrRecordNotFound)
 		}
 
 		if !isSerializationError(lastErr) {
@@ -100,6 +103,10 @@ func ClaimCar(db *gorm.DB, engineID, track string) (*models.Car, error) {
 		}
 
 		// Retryable serialization failure — backoff with jitter and try again.
+		// Skip the sleep on the final attempt: it would just delay the return.
+		if attempt == claimMaxRetries-1 {
+			break
+		}
 		slog.Warn("engine: claim serialization conflict, retrying",
 			"engine", engineID,
 			"track", track,
