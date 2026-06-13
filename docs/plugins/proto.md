@@ -26,7 +26,7 @@ against the **last-merged contract on the `main` branch** — a git ref,
 not a committed snapshot file:
 
 ```bash
-buf breaking --against '.git#branch=main'
+buf breaking --against '.git#ref=refs/remotes/origin/main'
 ```
 
 There is no in-tree baseline to keep in sync, and nothing to refresh

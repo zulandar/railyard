@@ -14,7 +14,7 @@
 //   - Removing a field requires reserving its number and name so it
 //     can never be reused on the v1 wire.
 //   - `buf breaking` runs against the last-merged contract on the main
-//     branch (`--against '.git#branch=main'`) on every change, so a
+//     branch (`--against '.git#ref=refs/remotes/origin/main'`) on every change, so a
 //     wire-incompatible edit is caught even when the proto and any local
 //     baseline are touched in the same commit; see docs/plugins/proto.md.
 

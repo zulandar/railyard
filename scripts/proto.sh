@@ -12,7 +12,7 @@
 #   protoc-gen-go-grpc go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 #
 # The breaking-change baseline is the last-merged contract on the main
-# branch — `buf breaking --against '.git#branch=main'` — not a committed
+# branch — `buf breaking --against '.git#ref=refs/remotes/origin/main'` — not a committed
 # snapshot. There is nothing to refresh after a deliberate wire change:
 # the new contract becomes the baseline as soon as it merges to main. The
 # compat test (pkg/plugin/proto/v1/compat_test.go) runs the same check,
