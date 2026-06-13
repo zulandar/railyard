@@ -65,19 +65,24 @@ jobs:
     #
     # `buf lint` enforces the STANDARD ruleset against
     # pkg/plugin/proto/v1/plugin.proto. `buf breaking` compares the live
-    # module to the committed snapshot at pkg/plugin/proto/snapshots/v1/
-    # — any wire-incompatible change must be made deliberately by
-    # updating the snapshot (see docs/plugins/proto.md).
+    # proto to the last-merged contract on the main branch — not a
+    # committed snapshot — so a wire-incompatible edit is caught even when
+    # the proto and any baseline are touched in the same commit (see
+    # docs/plugins/proto.md).
     #
-    # The Go-level golden test at pkg/plugin/proto/v1/compat_test.go
-    # already shells out to buf as part of `go test ./...`; this
-    # dedicated job gives a clearer failure surface in the PR check
-    # list and ensures buf-specific regressions don't hide behind a
-    # generic "tests failed" status.
+    # The Go-level golden test at pkg/plugin/proto/v1/compat_test.go runs
+    # the same check as part of `go test ./...`, but skips when it cannot
+    # resolve main (a shallow checkout). This dedicated job fetches main
+    # explicitly and is therefore the authoritative, non-skippable gate;
+    # it also gives a clearer failure surface in the PR check list.
     name: Proto
     runs-on: ubuntu-latest
     steps:
+      # fetch-depth: 0 gives buf the history it needs to read the proto
+      # tree at the main ref for the breaking-change comparison below.
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       # Pinned to v1.69.0 (current stable). Bump deliberately — `latest`
       # is intentionally avoided so a buf release that changes the lint
@@ -97,15 +102,20 @@ jobs:
       - name: buf lint
         run: buf lint
 
-      # NOTE: comparing against the committed snapshot only catches a
-      # breaking change if the snapshot is updated in a SEPARATE reviewed
-      # step. A single commit that edits plugin.proto and refreshes the
-      # snapshot in lockstep compares new-vs-new and validates nothing. The
-      # robust gate is `buf breaking --against '.git#branch=main'` (needs
-      # checkout fetch-depth: 0); see docs/plugins/proto.md. Tracked as a
-      # follow-up.
-      - name: buf breaking (against committed snapshot)
-        run: buf breaking --against pkg/plugin/proto/snapshots/v1
+      # On PR builds the checkout is a detached merge ref with no local
+      # `main` branch, so create the remote-tracking ref explicitly. This
+      # is also robust on push-to-main builds (main is not the current
+      # branch's name from git's perspective when fetched into a remote
+      # ref).
+      - name: Fetch main for breaking-change baseline
+        run: git fetch --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
+
+      # Compare the live proto against the last-merged contract on main.
+      # Because the baseline is a git ref (not an in-PR file), a commit
+      # that edits plugin.proto cannot also move the baseline — the gate
+      # cannot be bypassed in lockstep. See docs/plugins/proto.md.
+      - name: buf breaking (against last-merged main)
+        run: buf breaking --against '.git#ref=refs/remotes/origin/main'
 
   govulncheck:
     name: Vulnerability Check

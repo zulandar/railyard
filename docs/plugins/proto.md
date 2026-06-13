@@ -19,25 +19,30 @@ pkg/plugin/proto/v1/plugin.proto            # the contract
 pkg/plugin/proto/v1/plugin.pb.go            # generated; Go package `protov1`
 pkg/plugin/proto/v1/plugin_grpc.pb.go       # generated
 pkg/plugin/proto/v1/compat_test.go          # golden compat check (runs `buf breaking`)
-pkg/plugin/proto/snapshots/v1/plugin.proto  # last-known-good snapshot for `buf breaking`
 ```
 
-`pkg/plugin/proto/v1` is the active module. The sibling
-`pkg/plugin/proto/snapshots/v1` holds the last-known-good snapshot
-against which `buf breaking` compares. The snapshot lives outside the
-active module so buf does not try to compile two copies of every type.
+`pkg/plugin/proto/v1` is the active module. `buf breaking` compares it
+against the **last-merged contract on the `main` branch** — a git ref,
+not a committed snapshot file:
 
-> **Caveat — the snapshot gate can be defeated in a single commit.**
-> `buf breaking --against pkg/plugin/proto/snapshots/v1` only protects you
-> if the snapshot is updated in a *separate, reviewed* step from the proto
-> change. If a single commit edits `plugin.proto` *and* refreshes the
-> snapshot in lockstep, buf compares the new proto against the new snapshot
-> and validates nothing. Additivity was verified by hand for the Phase 3
-> changes; the robust gate is `buf breaking --against '.git#branch=main'`,
-> which compares the working proto against the last-merged proto and cannot
-> be bypassed this way. Switching CI to it requires checking out full
-> history (`fetch-depth: 0`) and validating buf's git-ref branch
-> resolution; tracked as a follow-up.
+```bash
+buf breaking --against '.git#branch=main'
+```
+
+There is no in-tree baseline to keep in sync, and nothing to refresh
+after a wire change: once a change merges to `main` it *becomes* the
+baseline for the next change.
+
+> **Why a git ref and not a committed snapshot.**
+> The contract used to be guarded by a sibling snapshot tree
+> (`buf breaking --against pkg/plugin/proto/snapshots/v1`). That gate could
+> be defeated in a single commit: if one commit edited `plugin.proto` *and*
+> refreshed the snapshot in lockstep, buf compared the new proto against
+> the new snapshot and validated nothing. Comparing against `main` closes
+> the hole — a single commit cannot move the baseline, because the baseline
+> is the last *merged* commit, not a file in the working tree. The CI
+> "Proto" job checks out full history (`fetch-depth: 0`), fetches `main`
+> explicitly, and runs the comparison; it is the authoritative gate.
 
 ## Services
 
@@ -138,31 +143,22 @@ The v1 contract is forward-compatible for **additive** changes only.
 
 | Change                                  | Compat   | Required action                                           |
 | --------------------------------------- | -------- | --------------------------------------------------------- |
-| New field on an existing message        | additive | bump snapshot, commit                                     |
-| New enum value on `EventType` or `Kind` | additive | bump snapshot, commit                                     |
-| New oneof arm on `Event.payload`        | additive | bump snapshot, commit                                     |
-| New message type                        | additive | bump snapshot, commit                                     |
-| New RPC on either service               | additive | bump snapshot, commit                                     |
+| New field on an existing message        | additive | regenerate stubs, commit                                  |
+| New enum value on `EventType` or `Kind` | additive | regenerate stubs, commit                                  |
+| New oneof arm on `Event.payload`        | additive | regenerate stubs, commit                                  |
+| New message type                        | additive | regenerate stubs, commit                                  |
+| New RPC on either service               | additive | regenerate stubs, commit                                  |
 | Rename a field, message, or enum value  | breaking | `v2` package required                                     |
 | Renumber a field                        | breaking | `v2` package required                                     |
 | Change a field's type                   | breaking | `v2` package required                                     |
 | Remove a field, message, or enum value  | breaking | reserve the number+name on the removed slot; `v2` package |
 
-`buf breaking` runs against `pkg/plugin/proto/snapshots/v1` and flags
+`buf breaking` runs against the last-merged contract on `main` and flags
 any non-additive change. The Go test
 `pkg/plugin/proto/v1/compat_test.go` invokes the same check so CI fails
-on accidental breaks.
-
-When a deliberate, additive change is reviewed and merged, refresh the
-snapshot in the same commit:
-
-```bash
-cp pkg/plugin/proto/v1/plugin.proto pkg/plugin/proto/snapshots/v1/plugin.proto
-```
-
-Without that refresh, every future commit will appear to "add" the
-same fields when compared against the stale snapshot — harmless but
-noisy.
+on accidental breaks. There is no committed baseline to refresh: an
+additive change merges as-is and automatically becomes the baseline the
+next change is measured against.
 
 If a wire-breaking change is genuinely required, create a new
 `pkg/plugin/proto/v2/` package alongside v1. v1 stays live until every
