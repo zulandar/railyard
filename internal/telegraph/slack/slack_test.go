@@ -1806,3 +1806,27 @@ func TestClose_ClosesInboundChannel(t *testing.T) {
 		t.Fatal("inbound channel not closed after Close")
 	}
 }
+
+// TestListen_CtxCancelClosesInbound: cancelling the ctx passed to Listen (without
+// calling Close) must close the inbound channel so consumers ranging over it
+// terminate — mirrors the Discord adapter (railyard-hpy).
+func TestListen_CtxCancelClosesInbound(t *testing.T) {
+	a, _, _ := newTestAdapter(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	ch, err := a.Listen(ctx)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+
+	cancel()
+
+	select {
+	case _, ok := <-ch:
+		if ok {
+			t.Error("expected inbound channel closed, but received a value")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("inbound channel not closed within 2s of ctx cancel")
+	}
+}

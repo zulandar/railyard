@@ -180,6 +180,15 @@ func (a *Adapter) Listen(ctx context.Context) (<-chan telegraph.InboundMessage, 
 	// Pump events from socket mode to inbound channel.
 	go a.pumpEvents(listenCtx)
 
+	// On ctx cancellation, close the inbound channel so consumers ranging over
+	// it terminate — mirrors the Discord adapter (railyard-hpy). Without this,
+	// shutting down via the Listen ctx (rather than Close) would leave the
+	// channel open and any consumer blocked forever. teardown is idempotent.
+	go func() {
+		<-listenCtx.Done()
+		a.teardown()
+	}()
+
 	return a.inbound, nil
 }
 

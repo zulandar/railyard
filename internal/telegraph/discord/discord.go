@@ -374,8 +374,9 @@ func (a *Adapter) Close() error {
 		cancel()
 	}
 	// Unregister the handler and close inbound (idempotent — the Listen-ctx
-	// goroutine may also call this). Done outside a.mu so it can't deadlock
-	// with an in-flight handleMessage that takes a.mu (railyard-hpy).
+	// goroutine may also call this). Done outside a.mu because teardown itself
+	// acquires a.mu (to read removeHandler) and a.mu is not reentrant, so
+	// calling it under the lock would self-deadlock (railyard-hpy).
 	a.teardown()
 
 	if a.sess != nil {
