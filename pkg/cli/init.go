@@ -389,6 +389,56 @@ func isExpoProject(root string) bool {
 	return false
 }
 
+// isReactNativeProject reports whether the repo declares a "react-native"
+// dependency in package.json — a bare (non-Expo) React Native app
+// (railyard-3gh). Parsed as JSON and matched on the exact dependency key, so
+// related packages like react-native-web do not count. Expo apps also carry
+// react-native; callers that special-case Expo should check isExpoProject
+// first.
+func isReactNativeProject(root string) bool {
+	pkg, ok := readPackageJSON(root)
+	if !ok {
+		return false
+	}
+	if _, dep := pkg.Dependencies["react-native"]; dep {
+		return true
+	}
+	if _, dep := pkg.DevDependencies["react-native"]; dep {
+		return true
+	}
+	return false
+}
+
+// applyReactNativePreset rebrands a ts/js frontend track as the bare React
+// Native mobile track: name "mobile", RN conventions injected into engine
+// prompts, and a direct jest invocation when the repo carries jest (React
+// Native's default test runner) (railyard-3gh).
+func applyReactNativePreset(tr *config.TrackConfig, root string) {
+	tr.Name = "mobile"
+	tr.Conventions = map[string]interface{}{
+		"framework": "react-native",
+		"tooling":   "use the React Native CLI ('npx react-native'); this is a React Native mobile app, not a web frontend",
+	}
+	if pkg, ok := readPackageJSON(root); ok {
+		if _, dep := pkg.DevDependencies["jest"]; dep {
+			tr.TestCommand = "npx jest"
+		}
+	}
+}
+
+// applyMobilePreset converts a ts/js frontend track into a mobile track when
+// the repo is a React Native app. Expo is checked first because Expo apps also
+// carry a react-native dependency, and the Expo conventions are more specific
+// (railyard-3gh).
+func applyMobilePreset(tr *config.TrackConfig, root string) {
+	switch {
+	case isExpoProject(root):
+		applyExpoPreset(tr, root)
+	case isReactNativeProject(root):
+		applyReactNativePreset(tr, root)
+	}
+}
+
 // applyExpoPreset rebrands a ts/js frontend track as the Expo mobile track:
 // name "mobile", Expo conventions injected into engine prompts, and a direct
 // jest invocation when the repo tests via jest-expo (npm test isn't guaranteed
@@ -429,9 +479,7 @@ func languagePreset(lang, root string) config.TrackConfig {
 			EngineSlots:  2,
 			TestCommand:  "npm test",
 		}
-		if isExpoProject(root) {
-			applyExpoPreset(&tr, root)
-		}
+		applyMobilePreset(&tr, root)
 		return tr
 	case "javascript":
 		tr := config.TrackConfig{
@@ -440,9 +488,7 @@ func languagePreset(lang, root string) config.TrackConfig {
 			EngineSlots:  2,
 			TestCommand:  "npm test",
 		}
-		if isExpoProject(root) {
-			applyExpoPreset(&tr, root)
-		}
+		applyMobilePreset(&tr, root)
 		return tr
 	case "python":
 		return config.TrackConfig{
