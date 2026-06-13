@@ -1971,3 +1971,137 @@ func TestPromptPassword_NotEchoed(t *testing.T) {
 		t.Error("password was echoed in output — should be hidden")
 	}
 }
+
+// TestIsReactNativeProject covers bare React Native detection (railyard-3gh):
+// a "react-native" dependency in package.json. Related packages
+// (react-native-web) are distinct dependency keys and must not match.
+func TestIsReactNativeProject(t *testing.T) {
+	write := func(t *testing.T, dir, content string) string {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+		return dir
+	}
+
+	t.Run("react-native dependency", func(t *testing.T) {
+		dir := write(t, t.TempDir(), `{"dependencies": {"react-native": "0.76.0", "react": "18.0.0"}}`)
+		if !isReactNativeProject(dir) {
+			t.Error("react-native in dependencies should be detected")
+		}
+	})
+
+	t.Run("react-native devDependency", func(t *testing.T) {
+		dir := write(t, t.TempDir(), `{"devDependencies": {"react-native": "0.76.0"}}`)
+		if !isReactNativeProject(dir) {
+			t.Error("react-native in devDependencies should be detected")
+		}
+	})
+
+	t.Run("react-native-web alone is not react-native", func(t *testing.T) {
+		dir := write(t, t.TempDir(), `{"dependencies": {"react-native-web": "0.19.0", "react": "18.0.0"}}`)
+		if isReactNativeProject(dir) {
+			t.Error("react-native-web without react-native must not be detected")
+		}
+	})
+
+	t.Run("plain web repo is not react-native", func(t *testing.T) {
+		dir := write(t, t.TempDir(), `{"dependencies": {"next": "15.0.0", "react": "18.0.0"}}`)
+		if isReactNativeProject(dir) {
+			t.Error("a Next.js repo must not be classified as react-native")
+		}
+	})
+
+	t.Run("no package.json", func(t *testing.T) {
+		if isReactNativeProject(t.TempDir()) {
+			t.Error("empty dir must not be classified as react-native")
+		}
+	})
+}
+
+// TestLanguagePreset_ReactNative verifies a bare React Native repo's ts/js
+// track is named "mobile" with react-native conventions, jest is selected when
+// present, and Expo takes priority when both signals exist (railyard-3gh).
+func TestLanguagePreset_ReactNative(t *testing.T) {
+	t.Run("typescript react-native becomes mobile track", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "package.json"),
+			[]byte(`{"dependencies": {"react-native": "0.76.0"}}`), 0644); err != nil {
+			t.Fatal(err)
+		}
+		tr := languagePreset("typescript", dir)
+		if tr.Name != "mobile" {
+			t.Errorf("Name = %q, want %q", tr.Name, "mobile")
+		}
+		if tr.Conventions == nil || tr.Conventions["framework"] != "react-native" {
+			t.Errorf("Conventions = %v, want framework=react-native", tr.Conventions)
+		}
+	})
+
+	t.Run("jest devDependency selects npx jest", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "package.json"),
+			[]byte(`{"dependencies": {"react-native": "0.76.0"}, "devDependencies": {"jest": "29.0.0"}}`), 0644); err != nil {
+			t.Fatal(err)
+		}
+		tr := languagePreset("typescript", dir)
+		if tr.TestCommand != "npx jest" {
+			t.Errorf("TestCommand = %q, want %q", tr.TestCommand, "npx jest")
+		}
+	})
+
+	t.Run("expo takes priority over react-native", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "package.json"),
+			[]byte(`{"dependencies": {"expo": "~52.0.0", "react-native": "0.76.0"}}`), 0644); err != nil {
+			t.Fatal(err)
+		}
+		tr := languagePreset("typescript", dir)
+		if tr.Conventions["framework"] != "expo" {
+			t.Errorf("framework = %v, want expo (expo wins over react-native)", tr.Conventions["framework"])
+		}
+	})
+
+	t.Run("non-mobile stays frontend", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "package.json"),
+			[]byte(`{"dependencies": {"next": "15.0.0"}}`), 0644); err != nil {
+			t.Fatal(err)
+		}
+		tr := languagePreset("typescript", dir)
+		if tr.Name != "frontend" {
+			t.Errorf("Name = %q, want frontend", tr.Name)
+		}
+	})
+}
+
+// TestDetectLanguages_EjectedReactNative verifies a bare/ejected RN repo with
+// generated android/ and ios/ dirs is detected as just its JS/TS language —
+// the generated native dirs must not emit kotlin+swift tracks (railyard-rdk).
+func TestDetectLanguages_EjectedReactNative(t *testing.T) {
+	dir := t.TempDir()
+
+	if err := os.WriteFile(filepath.Join(dir, "package.json"),
+		[]byte(`{"dependencies": {"react-native": "0.76.0"}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "tsconfig.json"), []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Generated native scaffolding.
+	androidManifest := filepath.Join(dir, "android", "app", "src", "main")
+	if err := os.MkdirAll(androidManifest, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(androidManifest, "AndroidManifest.xml"), []byte("<manifest/>\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "ios", "MyApp.xcodeproj"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	languages := detectLanguages(dir)
+	if len(languages) != 1 || languages[0] != "typescript" {
+		t.Errorf("expected [typescript] only (generated native dirs suppressed), got %v", languages)
+	}
+}

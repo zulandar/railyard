@@ -442,8 +442,32 @@ func detectLanguages(root string) []string {
 	}
 
 	languages = suppressRedundantLanguages(languages)
+	languages = suppressGeneratedNativeTracks(languages, root)
 	sort.Strings(languages)
 	return languages
+}
+
+// suppressGeneratedNativeTracks drops kotlin/swift from a React Native or Expo
+// repo. A bare/ejected RN (or prebuilt Expo) app has android/ and ios/
+// directories, which trip the Android and Swift markers — but those native
+// dirs are generated scaffolding, not hand-authored native code, so emitting
+// kotlin+swift tracks alongside the JS/TS track is a confusing multi-track mix
+// for what is a single JS/TS codebase (railyard-rdk). Managed Expo apps have
+// no native dirs, so this is a no-op for them; it only matters once a repo has
+// ejected/prebuilt. Flutter and hand-written native apps have no react-native/
+// expo dependency, so they keep their kotlin/swift tracks.
+func suppressGeneratedNativeTracks(languages []string, root string) []string {
+	if !isReactNativeProject(root) && !isExpoProject(root) {
+		return languages
+	}
+	filtered := languages[:0]
+	for _, l := range languages {
+		if l == "kotlin" || l == "swift" {
+			continue
+		}
+		filtered = append(filtered, l)
+	}
+	return filtered
 }
 
 // indicatorMatches reports whether any candidate path (literal or glob) exists
