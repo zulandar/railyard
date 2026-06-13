@@ -5,7 +5,6 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/zulandar/railyard/internal/events"
 	"github.com/zulandar/railyard/internal/models"
@@ -1007,9 +1006,10 @@ func TestUpdateWithBus_NoEventOnConflict(t *testing.T) {
 		t.Fatal("expected concurrent-modification error")
 	}
 
-	// Delivery is async on the subscriber's drain goroutine — give any
-	// (erroneous) publish time to land before asserting none arrived.
-	time.Sleep(100 * time.Millisecond)
+	// unsub() is a deterministic drain barrier: it closes the subscriber
+	// channel and blocks until the drain goroutine has processed every queued
+	// event, so any (erroneous) publish has landed by the time it returns.
+	unsub()
 
 	if n := published.Load(); n != 0 {
 		t.Errorf("events published on conflicted write = %d, want 0", n)
