@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"regexp"
 	"strings"
 	"sync"
 	"syscall"
@@ -83,15 +84,18 @@ func NewStallDetector(sess *Session, cfg StallConfig) *StallDetector {
 	}
 
 	// Register callback on stdout to track activity and scan for repeated errors.
-	sess.stdout.onWrite = func(p []byte) {
+	// Published through setOnWrite (under the writer lock) because the
+	// subprocess may already be writing by the time NewStallDetector runs
+	// (railyard-qes).
+	sess.stdout.setOnWrite(func(p []byte) {
 		sd.observeOutput(p)
-	}
+	})
 
 	// Register callback on stderr too — many tools (go test, compilers) write to stderr.
 	// Stderr only resets the activity timer; repeated-error scanning stays stdout-only.
-	sess.stderr.onWrite = func(p []byte) {
+	sess.stderr.setOnWrite(func(p []byte) {
 		sd.touchActivity()
-	}
+	})
 
 	// Set up process-alive checker using the subprocess PID.
 	sd.isProcessAlive = func() bool {
@@ -235,10 +239,10 @@ func (sd *StallDetector) observeOutput(p []byte) {
 	}
 
 	// Check for repeated error lines.
-	if repeated := sd.findRepeatedLine(); repeated != "" {
+	if repeated, count := sd.findRepeatedLine(); repeated != "" {
 		sd.emitStall(StallReason{
 			Type:    "repeated_error",
-			Detail:  fmt.Sprintf("line repeated %d times: %s", sd.cfg.RepeatedErrorMax, repeated),
+			Detail:  fmt.Sprintf("error line repeated %d times: %s", count, repeated),
 			Snippet: sd.lastSnippet,
 		})
 	}
@@ -256,17 +260,44 @@ func (sd *StallDetector) touchActivity() {
 	}
 }
 
-// findRepeatedLine checks whether any line appears RepeatedErrorMax times
-// in the recent window. Returns the repeated line or empty string.
-func (sd *StallDetector) findRepeatedLine() string {
+// minRepeatedLineLen is the shortest line considered for repeated-error
+// detection. It filters trivially-repeating plain-text output ("ok", "PASS",
+// "}", "---", "FAIL") that healthy non-claude providers emit constantly
+// (railyard-bkd).
+const minRepeatedLineLen = 8
+
+// errorLineRe matches lines that look like genuine errors. The repeated-line
+// check only counts such lines, so benign repeated output on plain-text
+// providers (codex/gemini/copilot) no longer fires a spurious "repeated_error"
+// stall — only an actual error loop does (railyard-bkd).
+var errorLineRe = regexp.MustCompile(`(?i)(error|panic|exception|fatal|traceback|failed|failure|cannot|unable|denied|refused|timeout|timed out|segfault|segmentation fault)`)
+
+// isErrorLikeLine reports whether a line is long enough and error-shaped
+// enough to count toward repeated-error detection.
+func isErrorLikeLine(line string) bool {
+	if len(line) < minRepeatedLineLen {
+		return false
+	}
+	return errorLineRe.MatchString(line)
+}
+
+// findRepeatedLine checks whether any error-like line appears RepeatedErrorMax
+// times in the recent window. Returns the repeated line and its observed count,
+// or ("", 0) if none qualifies. Non-error-like and very short lines are
+// ignored so healthy plain-text output does not trip the detector
+// (railyard-bkd).
+func (sd *StallDetector) findRepeatedLine() (string, int) {
 	counts := make(map[string]int)
 	for _, line := range sd.recentLines {
+		if !isErrorLikeLine(line) {
+			continue
+		}
 		counts[line]++
 		if counts[line] >= sd.cfg.RepeatedErrorMax {
-			return line
+			return line, counts[line]
 		}
 	}
-	return ""
+	return "", 0
 }
 
 // monitor periodically checks for stdout timeout.

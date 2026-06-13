@@ -73,6 +73,12 @@ type Adapter struct {
 	baseBackoff     time.Duration // reconnection base backoff (default: baseBackoff const)
 	maxBackoff      time.Duration // reconnection max backoff (default: maxBackoff const)
 	maxReconnect    int           // max reconnection attempts (default: maxReconnectAttempts)
+
+	// Inbound lifecycle, guarded by sendMu so a send can never race the close
+	// in teardown (mirrors the Discord adapter — railyard-hpy).
+	sendMu        sync.Mutex
+	inboundClosed bool
+	teardownOnce  sync.Once
 }
 
 // AdapterOpts holds parameters for creating a Slack Adapter.
@@ -302,17 +308,49 @@ func (a *Adapter) ThreadHistory(ctx context.Context, channelID, threadID string,
 // Close shuts down the adapter and closes the inbound channel.
 func (a *Adapter) Close() error {
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	if a.closed {
+		a.mu.Unlock()
 		return nil
 	}
 	a.closed = true
 	a.connected = false
-	if a.cancelFunc != nil {
-		a.cancelFunc()
+	cancel := a.cancelFunc
+	a.mu.Unlock()
+
+	if cancel != nil {
+		cancel()
 	}
-	close(a.inbound)
+	a.teardown()
 	return nil
+}
+
+// sendInbound delivers msg unless the adapter is shutting down. Holding sendMu
+// makes the closed-check and the send atomic with respect to teardown, so a
+// pumpEvents send can never hit a closed channel; the non-blocking send keeps
+// a stalled consumer from blocking the socket-mode pump (railyard-hpy).
+func (a *Adapter) sendInbound(msg telegraph.InboundMessage) {
+	a.sendMu.Lock()
+	defer a.sendMu.Unlock()
+	if a.inboundClosed {
+		return
+	}
+	select {
+	case a.inbound <- msg:
+	default:
+		log.Printf("slack: inbound buffer full, dropping message from %s", msg.UserID)
+	}
+}
+
+// teardown closes the inbound channel exactly once so consumers ranging over
+// it terminate. Idempotent: safe to call from Close (cancelFunc also stops the
+// pump goroutines).
+func (a *Adapter) teardown() {
+	a.teardownOnce.Do(func() {
+		a.sendMu.Lock()
+		a.inboundClosed = true
+		close(a.inbound)
+		a.sendMu.Unlock()
+	})
 }
 
 // BotUserID returns the bot's Slack user ID (available after Connect).
@@ -433,7 +471,7 @@ func (a *Adapter) handleMessage(ev *slackevents.MessageEvent) {
 		return
 	}
 
-	a.inbound <- telegraph.InboundMessage{
+	a.sendInbound(telegraph.InboundMessage{
 		Platform:  "slack",
 		ChannelID: ev.Channel,
 		ThreadID:  ev.ThreadTimeStamp,
@@ -442,7 +480,7 @@ func (a *Adapter) handleMessage(ev *slackevents.MessageEvent) {
 		UserName:  a.resolveUserName(ev.User),
 		Text:      ev.Text,
 		Timestamp: parseSlackTimestamp(ev.TimeStamp),
-	}
+	})
 }
 
 // handleAppMention converts a Slack @mention event to an InboundMessage.
@@ -456,7 +494,7 @@ func (a *Adapter) handleAppMention(ev *slackevents.AppMentionEvent) {
 		return
 	}
 
-	a.inbound <- telegraph.InboundMessage{
+	a.sendInbound(telegraph.InboundMessage{
 		Platform:  "slack",
 		ChannelID: ev.Channel,
 		ThreadID:  ev.ThreadTimeStamp,
@@ -465,7 +503,7 @@ func (a *Adapter) handleAppMention(ev *slackevents.AppMentionEvent) {
 		UserName:  a.resolveUserName(ev.User),
 		Text:      ev.Text,
 		Timestamp: parseSlackTimestamp(ev.TimeStamp),
-	}
+	})
 }
 
 // resolveUserName looks up a user's display name. Falls back to user ID.

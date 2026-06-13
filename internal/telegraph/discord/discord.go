@@ -92,6 +92,13 @@ type Adapter struct {
 	baseBackoff     time.Duration
 	maxBackoff      time.Duration
 	maxReconnect    int
+
+	// Inbound lifecycle, guarded by sendMu (separate from mu so a buffered
+	// send never blocks connection-state operations). teardown is the single
+	// idempotent shutdown path shared by Close and Listen-ctx cancellation.
+	sendMu        sync.Mutex
+	inboundClosed bool
+	teardownOnce  sync.Once
 }
 
 // AdapterOpts holds parameters for creating a Discord Adapter.
@@ -205,12 +212,51 @@ func (a *Adapter) Listen(ctx context.Context) (<-chan telegraph.InboundMessage, 
 	a.removeHandler = remove
 	a.mu.Unlock()
 
-	// Close inbound channel when context is cancelled.
+	// On ctx cancellation, tear down: unregister the handler and close the
+	// inbound channel so consumers ranging over it terminate. Previously this
+	// goroutine cleaned up nothing (railyard-hpy).
 	go func() {
 		<-listenCtx.Done()
+		a.teardown()
 	}()
 
 	return a.inbound, nil
+}
+
+// sendInbound delivers msg to the inbound channel unless the adapter is
+// shutting down. Holding sendMu makes the closed-check and the send atomic
+// with respect to teardown, so we never send on a closed channel. The send is
+// non-blocking: a stalled consumer (full buffer) drops the message rather than
+// blocking the discordgo gateway dispatch goroutine (railyard-hpy).
+func (a *Adapter) sendInbound(msg telegraph.InboundMessage) {
+	a.sendMu.Lock()
+	defer a.sendMu.Unlock()
+	if a.inboundClosed {
+		return
+	}
+	select {
+	case a.inbound <- msg:
+	default:
+		log.Printf("discord: inbound buffer full, dropping message from %s", msg.UserID)
+	}
+}
+
+// teardown unregisters the gateway handler and closes the inbound channel
+// exactly once. Shared by Close and the Listen-ctx-cancel goroutine.
+func (a *Adapter) teardown() {
+	a.teardownOnce.Do(func() {
+		a.mu.Lock()
+		rm := a.removeHandler
+		a.mu.Unlock()
+		if rm != nil {
+			rm()
+		}
+
+		a.sendMu.Lock()
+		a.inboundClosed = true
+		close(a.inbound)
+		a.sendMu.Unlock()
+	})
 }
 
 // Send delivers a message to Discord. Translates OutboundMessage to Discord Embeds.
@@ -315,19 +361,23 @@ func (a *Adapter) ThreadHistory(ctx context.Context, channelID, threadID string,
 // Close gracefully shuts down the adapter connection.
 func (a *Adapter) Close() error {
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	if a.closed {
+		a.mu.Unlock()
 		return nil
 	}
 	a.closed = true
 	a.connected = false
-	if a.cancelFunc != nil {
-		a.cancelFunc()
+	cancel := a.cancelFunc
+	a.mu.Unlock()
+
+	if cancel != nil {
+		cancel()
 	}
-	if a.removeHandler != nil {
-		a.removeHandler()
-	}
-	close(a.inbound)
+	// Unregister the handler and close inbound (idempotent — the Listen-ctx
+	// goroutine may also call this). Done outside a.mu so it can't deadlock
+	// with an in-flight handleMessage that takes a.mu (railyard-hpy).
+	a.teardown()
+
 	if a.sess != nil {
 		return a.sess.Close()
 	}
@@ -386,7 +436,7 @@ func (a *Adapter) handleMessage(m *discordgo.MessageCreate) {
 
 	ts, _ := discordgo.SnowflakeTimestamp(m.ID)
 
-	a.inbound <- telegraph.InboundMessage{
+	a.sendInbound(telegraph.InboundMessage{
 		Platform:  "discord",
 		ChannelID: channelID,
 		ThreadID:  threadID,
@@ -395,7 +445,7 @@ func (a *Adapter) handleMessage(m *discordgo.MessageCreate) {
 		UserName:  m.Author.Username,
 		Text:      m.Content,
 		Timestamp: ts,
-	}
+	})
 }
 
 // buildMessageSend translates an OutboundMessage into a Discord MessageSend.

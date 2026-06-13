@@ -22,21 +22,9 @@ func (d *RateLimitDetector) AttachToSession(sess *Session) {
 		return
 	}
 	if sess.stdout != nil {
-		prev := sess.stdout.onWrite
-		sess.stdout.onWrite = func(p []byte) {
-			if prev != nil {
-				prev(p)
-			}
-			d.observeOutput(p)
-		}
+		sess.stdout.chainOnWrite(d.observeOutput)
 	}
 	if sess.stderr != nil {
-		prev := sess.stderr.onWrite
-		sess.stderr.onWrite = func(p []byte) {
-			if prev != nil {
-				prev(p)
-			}
-			d.observeOutput(p)
-		}
+		sess.stderr.chainOnWrite(d.observeOutput)
 	}
 }
