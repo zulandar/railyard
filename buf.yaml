@@ -1,21 +1,21 @@
 # buf workspace configuration for the railyard plugin gRPC contract.
 #
 # Layout: protos live under pkg/plugin/proto/v1/ alongside their
-# generated Go stubs. The breaking-change baseline is the snapshot
-# committed at pkg/plugin/proto/v1/snapshots/. Run `scripts/proto.sh`
-# from the repo root to regenerate the Go stubs after editing the
-# .proto.
+# generated Go stubs. The breaking-change baseline is the last-merged
+# contract on the main branch (`buf breaking --against '.git#ref=refs/remotes/origin/main'`),
+# not a committed snapshot. Run `scripts/proto.sh` from the repo root to
+# regenerate the Go stubs after editing the .proto.
 version: v2
 
 modules:
   - path: pkg/plugin/proto/v1
     name: buf.build/zulandar/railyard-plugin
 
-# The breaking-change baseline lives at pkg/plugin/proto/snapshots/v1/
-# — a sibling of the live module, not a child. `buf breaking` compares
-# the live module against that sibling tree. Snapshots are updated
-# manually after a deliberate, reviewed wire change lands; see
-# docs/plugins/proto.md.
+# `buf breaking` compares the live module against the same module as it
+# exists on the main branch (a git ref). Because the baseline is the
+# last-merged commit and not an in-tree file, a wire-incompatible change
+# cannot be hidden by editing proto and baseline together in one commit.
+# See docs/plugins/proto.md.
 
 lint:
   use:

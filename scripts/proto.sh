@@ -11,14 +11,12 @@
 #   protoc-gen-go      go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
 #   protoc-gen-go-grpc go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 #
-# After landing a deliberate wire change, refresh the breaking-change
-# baseline with:
-#
-#   cp pkg/plugin/proto/v1/plugin.proto pkg/plugin/proto/snapshots/v1/plugin.proto
-#
-# and commit both files in the same change. The compat test
-# (pkg/plugin/proto/v1/compat_test.go) runs `buf breaking` against the
-# snapshot in CI.
+# The breaking-change baseline is the last-merged contract on the main
+# branch — `buf breaking --against '.git#ref=refs/remotes/origin/main'` — not a committed
+# snapshot. There is nothing to refresh after a deliberate wire change:
+# the new contract becomes the baseline as soon as it merges to main. The
+# compat test (pkg/plugin/proto/v1/compat_test.go) runs the same check,
+# and the CI "Proto" job is the authoritative, non-skippable gate.
 
 set -euo pipefail
 
@@ -71,7 +69,35 @@ if (( CHECK )); then
   fi
 fi
 
-# Breaking-change check against the committed snapshot. Additive
-# changes (new fields, new enum values, new messages) pass; renames,
-# renumbers, and removals fail.
-buf breaking --against pkg/plugin/proto/snapshots/v1
+# Breaking-change check against the last-merged contract on main, so a
+# wire-incompatible edit is caught even when proto and baseline are
+# touched in the same commit. Additive changes (new fields, new enum
+# values, new messages) pass; renames, renumbers, and removals fail.
+#
+# Resolve a baseline ref locally: prefer the remote-tracking origin/main,
+# then a local main, but only accept one whose commit differs from HEAD. A
+# ref that points at HEAD (sitting on main, or a just-merged commit) would
+# compare the contract against itself and validate nothing. If no distinct
+# baseline exists (a shallow clone, a checkout that has never seen main, or
+# HEAD already is main) skip the breaking check with a warning rather than
+# fail regeneration — the CI Proto job remains the authoritative gate.
+HEAD_SHA=$(git rev-parse --verify --quiet HEAD || true)
+MAIN_REF=""
+for ref in refs/remotes/origin/main refs/heads/main; do
+  ref_sha=$(git rev-parse --verify --quiet "$ref" || true)
+  if [[ -z "$ref_sha" ]]; then
+    continue
+  fi
+  if [[ -n "$HEAD_SHA" && "$ref_sha" == "$HEAD_SHA" ]]; then
+    continue
+  fi
+  MAIN_REF="$ref"
+  break
+done
+
+if [[ -n "$MAIN_REF" ]]; then
+  buf breaking --against ".git#ref=${MAIN_REF}"
+else
+  echo "scripts/proto.sh: no main ref distinct from HEAD (origin/main or main) to compare against;" >&2
+  echo "  skipping breaking-change check. CI runs the authoritative gate." >&2
+fi
