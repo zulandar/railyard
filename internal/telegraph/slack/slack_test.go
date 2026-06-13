@@ -1737,3 +1737,96 @@ func TestBuildMsgOptions_TextOnly(t *testing.T) {
 
 var _ telegraph.Adapter = (*Adapter)(nil)
 var _ telegraph.ThreadStarter = (*Adapter)(nil)
+
+// --- railyard-hpy: Close race safety (mirrors the Discord adapter) ---
+
+// TestClose_NoRaceWithInflightSend: Close must not race or panic against
+// in-flight handleMessage sends from the event pump. Run with -race.
+func TestClose_NoRaceWithInflightSend(t *testing.T) {
+	a, _, _ := newTestAdapter(t)
+
+	ch, err := a.Listen(context.Background())
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+
+	drained := make(chan struct{})
+	go func() {
+		for range ch {
+		}
+		close(drained)
+	}()
+
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			a.handleMessage(&slackevents.MessageEvent{
+				User:      fmt.Sprintf("U%d", i),
+				Channel:   "C1",
+				Text:      "hi",
+				TimeStamp: "1700000000.000001",
+			})
+		}(i)
+	}
+
+	if err := a.Close(); err != nil {
+		t.Errorf("close: %v", err)
+	}
+	wg.Wait()
+
+	select {
+	case <-drained:
+	case <-time.After(2 * time.Second):
+		t.Fatal("consumer did not terminate after Close")
+	}
+}
+
+// TestClose_ClosesInboundChannel: consumers ranging over the inbound channel
+// terminate after Close (railyard-hpy).
+func TestClose_ClosesInboundChannel(t *testing.T) {
+	a, _, _ := newTestAdapter(t)
+
+	ch, err := a.Listen(context.Background())
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+
+	if err := a.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	select {
+	case _, ok := <-ch:
+		if ok {
+			t.Error("expected inbound channel closed, got a value")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("inbound channel not closed after Close")
+	}
+}
+
+// TestListen_CtxCancelClosesInbound: cancelling the ctx passed to Listen (without
+// calling Close) must close the inbound channel so consumers ranging over it
+// terminate — mirrors the Discord adapter (railyard-hpy).
+func TestListen_CtxCancelClosesInbound(t *testing.T) {
+	a, _, _ := newTestAdapter(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	ch, err := a.Listen(ctx)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+
+	cancel()
+
+	select {
+	case _, ok := <-ch:
+		if ok {
+			t.Error("expected inbound channel closed, but received a value")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("inbound channel not closed within 2s of ctx cancel")
+	}
+}

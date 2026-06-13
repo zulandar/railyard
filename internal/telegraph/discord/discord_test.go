@@ -1697,3 +1697,88 @@ func TestHandleMessage_EmptyAllowedChannels_AllowsAll(t *testing.T) {
 // --- Verify Adapter interface compliance ---
 
 var _ telegraph.Adapter = (*Adapter)(nil)
+
+// --- railyard-hpy: Listen ctx cleanup + Close race safety ---
+
+// TestListen_CtxCancelClosesInbound: cancelling the ctx passed to Listen must
+// unregister the handler and close the inbound channel so consumers ranging
+// over it terminate. Previously the Listen goroutine only blocked on Done()
+// and cleaned up nothing (railyard-hpy).
+func TestListen_CtxCancelClosesInbound(t *testing.T) {
+	a, sess := newTestAdapter(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	ch, err := a.Listen(ctx)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+
+	cancel()
+
+	select {
+	case _, ok := <-ch:
+		if ok {
+			t.Error("expected inbound channel closed, but received a value")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("inbound channel not closed within 2s of ctx cancel")
+	}
+
+	// Handler must be unregistered too.
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		sess.mu.Lock()
+		rc := sess.removeCount
+		sess.mu.Unlock()
+		if rc > 0 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Error("expected handler removed after ctx cancel")
+}
+
+// TestClose_NoRaceWithInflightHandler: Close must not panic or race against
+// in-flight handleMessage sends. Run with -race (railyard-hpy).
+func TestClose_NoRaceWithInflightHandler(t *testing.T) {
+	a, _ := newTestAdapter(t)
+
+	ch, err := a.Listen(context.Background())
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+
+	// Drain until the channel closes.
+	drained := make(chan struct{})
+	go func() {
+		for range ch {
+		}
+		close(drained)
+	}()
+
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			a.handleMessage(&discordgo.MessageCreate{Message: &discordgo.Message{
+				ID:        "123456789012345678",
+				ChannelID: "C1",
+				Content:   "hi",
+				Author:    &discordgo.User{ID: fmt.Sprintf("U%d", i), Username: "u"},
+			}})
+		}(i)
+	}
+
+	// Close concurrently with the in-flight sends.
+	if err := a.Close(); err != nil {
+		t.Errorf("close: %v", err)
+	}
+	wg.Wait()
+
+	select {
+	case <-drained:
+	case <-time.After(2 * time.Second):
+		t.Fatal("consumer did not terminate after Close")
+	}
+}

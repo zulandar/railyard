@@ -756,3 +756,76 @@ func newMockSession() *Session {
 		},
 	}
 }
+
+// --- railyard-bkd: repeated-line false positives on plain-text providers ---
+
+// TestStallDetector_HealthyPlainTextNoStall feeds realistic plain-text agent
+// output (go test style) where benign lines like "ok", "PASS", and "}" repeat
+// well past the threshold. None are error-like, so no stall must fire
+// (railyard-bkd).
+func TestStallDetector_HealthyPlainTextNoStall(t *testing.T) {
+	sess := newMockSession()
+	sd := NewStallDetector(sess, StallConfig{
+		StdoutTimeout:    10 * time.Second,
+		RepeatedErrorMax: 3,
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sd.Start(ctx)
+
+	// 100 lines of plausible healthy output: many repeated "ok"/"PASS"/"}".
+	var b strings.Builder
+	for i := 0; i < 20; i++ {
+		b.WriteString("ok\tgithub.com/zulandar/railyard/internal/pkg" + fmt.Sprint(i) + "\t0.5s\n")
+		b.WriteString("ok\n")
+		b.WriteString("PASS\n")
+		b.WriteString("}\n")
+		b.WriteString("--- \n")
+	}
+	sess.stdout.Write([]byte(b.String()))
+
+	time.Sleep(100 * time.Millisecond)
+	select {
+	case reason := <-sd.Stalled():
+		t.Errorf("unexpected stall on healthy plain-text output: %+v", reason)
+	default:
+	}
+}
+
+// TestStallDetector_RepeatedError_AccurateCount: a genuine error loop still
+// fires, and the Detail reports the OBSERVED count, not the threshold constant
+// (railyard-bkd).
+func TestStallDetector_RepeatedError_AccurateCount(t *testing.T) {
+	sess := newMockSession()
+	sd := NewStallDetector(sess, StallConfig{
+		StdoutTimeout:    10 * time.Second,
+		RepeatedErrorMax: 3,
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sd.Start(ctx)
+
+	// Five identical error lines — threshold is 3, so the detector fires as
+	// soon as the count reaches 3. Detail must say "3 times", not a fabricated
+	// number, and not the literal threshold via a different value.
+	for i := 0; i < 5; i++ {
+		sess.stdout.Write([]byte("panic: runtime error: invalid memory address\n"))
+	}
+
+	select {
+	case reason := <-sd.Stalled():
+		if reason.Type != "repeated_error" {
+			t.Errorf("Type = %q, want repeated_error", reason.Type)
+		}
+		if !strings.Contains(reason.Detail, "3 times") {
+			t.Errorf("Detail = %q, want accurate count '3 times'", reason.Detail)
+		}
+		if !strings.Contains(reason.Detail, "invalid memory address") {
+			t.Errorf("Detail = %q, want the offending line", reason.Detail)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for repeated_error stall on a genuine error loop")
+	}
+}

@@ -130,11 +130,13 @@ func SpawnAgent(ctx context.Context, db *gorm.DB, opts SpawnOpts) (*Session, err
 		waitCh <- waitErr
 	}()
 
-	// Update engine's session ID.
+	// Update engine's session ID. Non-fatal — log capture still works — but
+	// a swallowed failure here breaks dashboard log attribution, so surface
+	// it (railyard-qes).
 	if err := db.Model(&models.Engine{}).Where("id = ?", opts.EngineID).
 		Update("session_id", sessionID).Error; err != nil {
-		// Non-fatal: log capture still works even if this fails.
-		// The caller can check engine state separately.
+		slog.Warn("engine: update session_id failed (non-fatal)",
+			"engine", opts.EngineID, "session", sessionID, "error", err)
 	}
 
 	return &Session{
@@ -227,6 +229,32 @@ func (w *logWriter) Write(p []byte) (int, error) {
 		w.onWrite(p)
 	}
 	return n, err
+}
+
+// setOnWrite installs the onWrite callback under the writer lock. The
+// subprocess goroutine calls Write (which reads w.onWrite under w.mu) the
+// instant cmd.Start returns, so callbacks attached afterward — by
+// NewStallDetector — must be published through the same lock to avoid a data
+// race on the func field (railyard-qes).
+func (w *logWriter) setOnWrite(fn func([]byte)) {
+	w.mu.Lock()
+	w.onWrite = fn
+	w.mu.Unlock()
+}
+
+// chainOnWrite atomically wraps the current onWrite so both the previous
+// callback and next observe each write. Used by the rate-limit detector to
+// stack onto the stall detector's callback (railyard-qes).
+func (w *logWriter) chainOnWrite(next func([]byte)) {
+	w.mu.Lock()
+	prev := w.onWrite
+	w.onWrite = func(p []byte) {
+		if prev != nil {
+			prev(p)
+		}
+		next(p)
+	}
+	w.mu.Unlock()
 }
 
 // Flush writes accumulated buffer contents to agent_logs and resets the buffer.

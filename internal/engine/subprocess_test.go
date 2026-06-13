@@ -686,3 +686,61 @@ func TestRedactSecrets_APIKeys(t *testing.T) {
 		})
 	}
 }
+
+// TestLogWriter_SetOnWrite_ConcurrentWithWrite exercises the onWrite setter
+// against concurrent Writes. Before the fix, NewStallDetector assigned
+// w.onWrite directly (no lock) while the subprocess goroutine called Write
+// (which reads w.onWrite under w.mu) — a data race flagged by -race. The
+// setter must take w.mu so this is clean (railyard-qes).
+func TestLogWriter_SetOnWrite_ConcurrentWithWrite(t *testing.T) {
+	w := &logWriter{
+		direction: "out",
+		writeFn:   func(models.AgentLog) error { return nil },
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 1000; i++ {
+			w.Write([]byte("output chunk\n"))
+		}
+	}()
+
+	// Concurrently install callbacks while writes are in flight.
+	for i := 0; i < 100; i++ {
+		w.setOnWrite(func([]byte) {})
+	}
+	wg.Wait()
+}
+
+// TestLogWriter_ChainOnWrite_ConcurrentWithWrite covers the rate-limit
+// detector's chaining path under the same concurrency (railyard-qes).
+func TestLogWriter_ChainOnWrite_ConcurrentWithWrite(t *testing.T) {
+	w := &logWriter{
+		direction: "out",
+		writeFn:   func(models.AgentLog) error { return nil },
+	}
+
+	var count int
+	var mu sync.Mutex
+	w.setOnWrite(func([]byte) {
+		mu.Lock()
+		count++
+		mu.Unlock()
+	})
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 1000; i++ {
+			w.Write([]byte("chunk\n"))
+		}
+	}()
+
+	for i := 0; i < 100; i++ {
+		w.chainOnWrite(func([]byte) {})
+	}
+	wg.Wait()
+}
