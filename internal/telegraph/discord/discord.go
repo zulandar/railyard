@@ -402,7 +402,9 @@ func (a *Adapter) Close() error {
 	return nil
 }
 
-// BotUserID returns the bot's Discord user ID (available after Connect and first message).
+// BotUserID returns the bot's Discord user ID. It is empty until the gateway
+// READY event fires (use WaitReady to block for it) and is refreshed on every
+// READY, including reconnects.
 func (a *Adapter) BotUserID() string {
 	a.mu.Lock()
 	defer a.mu.Unlock()

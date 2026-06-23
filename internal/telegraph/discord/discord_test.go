@@ -1492,6 +1492,35 @@ func TestWaitReady_BlocksUntilBotIDKnown(t *testing.T) {
 	}
 }
 
+// TestWaitReady_Timeout documents the degraded path: when READY never arrives,
+// WaitReady returns nil (not an error) once readyTimeout elapses, so a
+// slow/failed gateway connect cannot hang telegraph startup. The bot id stays
+// empty until a real READY lands — and because the router resolves the id live
+// from the adapter, a late READY still heals @mention routing (railyard-1q9).
+func TestWaitReady_Timeout(t *testing.T) {
+	sess := newMockSession()
+	a, err := New(AdapterOpts{Session: sess})
+	if err != nil {
+		t.Fatalf("new adapter: %v", err)
+	}
+	if err := a.Connect(context.Background()); err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	a.readyTimeout = 20 * time.Millisecond
+
+	// READY never fires; WaitReady must wait for the timeout and then return nil.
+	start := time.Now()
+	if err := a.WaitReady(context.Background()); err != nil {
+		t.Errorf("WaitReady() on timeout = %v, want nil (degraded, non-fatal)", err)
+	}
+	if elapsed := time.Since(start); elapsed < a.readyTimeout {
+		t.Errorf("WaitReady returned after %s, expected to wait for the %s timeout", elapsed, a.readyTimeout)
+	}
+	if got := a.BotUserID(); got != "" {
+		t.Errorf("BotUserID() = %q after timeout, want empty", got)
+	}
+}
+
 // TestWaitReady_RespectsContextCancel verifies WaitReady returns when the
 // context is cancelled even though READY never arrives, so a slow/failed
 // gateway connect cannot hang telegraph startup forever.

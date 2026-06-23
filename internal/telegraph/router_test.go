@@ -781,6 +781,50 @@ func TestIsSelfMessage(t *testing.T) {
 	}
 }
 
+// TestIsBotMention_SelfHealsFromAdapter verifies the router matches @mentions
+// using the adapter's live bot user id rather than a value frozen at
+// construction. The daemon reads BotUserID() at startup and, on a slow gateway,
+// can capture an empty id before the Discord READY event lands. Resolving the
+// id live means a late (or post-reconnect) READY heals @mention routing instead
+// of leaving it broken until restart (railyard-1q9).
+func TestIsBotMention_SelfHealsFromAdapter(t *testing.T) {
+	db := openRouterTestDB(t)
+	// Empty static id mimics the daemon reading BotUserID() before READY.
+	router, adapter, _ := setupRouter(t, db, "", nil)
+
+	// Before READY the adapter has no id, so a mention cannot be verified.
+	if router.isBotMention("<@123456> status") {
+		t.Fatal("isBotMention should be false before the bot id is known")
+	}
+
+	// READY arrives and populates the adapter's bot id after construction.
+	adapter.SetBotUserID("123456")
+
+	// The router resolves the live id from the adapter, so the same mention
+	// now matches without rebuilding the router.
+	if !router.isBotMention("<@123456> status") {
+		t.Error("isBotMention should self-heal once the adapter learns its bot id (railyard-1q9)")
+	}
+}
+
+// TestIsSelfMessage_SelfHealsFromAdapter verifies self-message filtering also
+// uses the adapter's live bot id, so the bot stops treating its own messages as
+// user input once READY populates the id (railyard-1q9).
+func TestIsSelfMessage_SelfHealsFromAdapter(t *testing.T) {
+	db := openRouterTestDB(t)
+	router, adapter, _ := setupRouter(t, db, "", nil)
+
+	if router.isSelfMessage(InboundMessage{UserID: "B1"}) {
+		t.Fatal("isSelfMessage should be false before the bot id is known")
+	}
+
+	adapter.SetBotUserID("B1")
+
+	if !router.isSelfMessage(InboundMessage{UserID: "B1"}) {
+		t.Error("isSelfMessage should self-heal once the adapter learns its bot id (railyard-1q9)")
+	}
+}
+
 // --- @mention with command routes to command handler ---
 
 func TestHandle_DiscordMentionWithCommand(t *testing.T) {

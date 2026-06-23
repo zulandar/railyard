@@ -22,7 +22,7 @@ type Router struct {
 	sessionMgr *SessionManager
 	cmdHandler *CommandHandler
 	adapter    Adapter
-	botUserID  string // the bot's own user ID (to filter self-messages)
+	botUserID  string // construction-time bot user ID; fallback when the adapter exposes no live id (see resolveBotUserID)
 	out        io.Writer
 	titleGen   TitleGenerator // generates descriptive thread titles; nil → fallback
 
@@ -377,9 +377,26 @@ func (r *Router) nextAck() string {
 	return phrase
 }
 
+// resolveBotUserID returns the bot's own user id, preferring the adapter's live
+// value (populated by the gateway READY event and refreshed on reconnect) over
+// the id captured when the router was built. Reading it live means a READY that
+// lands after the daemon already read an empty id still heals self-message
+// filtering and @mention routing, rather than freezing the broken empty id for
+// the router's lifetime (railyard-1q9). Falls back to the construction-time id
+// for adapters that do not expose one.
+func (r *Router) resolveBotUserID() string {
+	if b, ok := r.adapter.(BotUserIDer); ok {
+		if id := b.BotUserID(); id != "" {
+			return id
+		}
+	}
+	return r.botUserID
+}
+
 // isSelfMessage returns true if the message is from the bot itself.
 func (r *Router) isSelfMessage(msg InboundMessage) bool {
-	return r.botUserID != "" && msg.UserID == r.botUserID
+	botID := r.resolveBotUserID()
+	return botID != "" && msg.UserID == botID
 }
 
 // isCommand returns true if the text is a known "!ry" command (e.g. "!ry status",
@@ -450,15 +467,18 @@ func (r *Router) extractMentionCommand(text string) string {
 
 // isBotMention returns true only when the text contains a platform mention
 // of THE BOT (mention ID == botUserID). Bare '@' text — emails, @here,
-// @everyone, mentions of other users — never counts (railyard-992). When
-// botUserID is unknown, mentions cannot be verified, so this always returns
-// false and only the explicit !ry prefix routes messages.
+// @everyone, mentions of other users — never counts (railyard-992). The bot id
+// is resolved live from the adapter (see resolveBotUserID), so while it is still
+// unknown mentions cannot be verified and only the explicit !ry prefix routes —
+// but once the gateway READY event populates it, mentions start matching
+// without rebuilding the router (railyard-1q9).
 func (r *Router) isBotMention(text string) bool {
-	if r.botUserID == "" {
+	botID := r.resolveBotUserID()
+	if botID == "" {
 		return false
 	}
 	for _, m := range mentionRe.FindAllStringSubmatch(text, -1) {
-		if m[1] == r.botUserID {
+		if m[1] == botID {
 			return true
 		}
 	}
