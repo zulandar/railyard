@@ -6,7 +6,11 @@
 cocoindex==0.3.34
 psycopg2-binary>=2.9
 sentence-transformers>=2.2
-numpy>=1.24
+# numpy must stay <2.5: cocoindex 0.3.34's NDArray dtype introspection cannot
+# decode NDArray[numpy.float32] on numpy>=2.5.0, which breaks the embedding
+# flow's schema analysis on a fresh install (railyard-f4y.1). numpy<2.0 has no
+# Python 3.13 wheels, so the working range is >=2.1,<2.5.
+numpy>=1.24,<2.5
 PyYAML>=6.0
 mcp>=1.0
 pytest>=7.0
