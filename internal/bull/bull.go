@@ -4,9 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net/url"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/google/go-github/v68/github"
@@ -48,7 +46,7 @@ func Start(ctx context.Context, opts StartOpts) error {
 		out = io.Discard
 	}
 
-	ghOwner, ghRepo, err := parseGitHubRepo(opts.Config.Repo)
+	ghOwner, ghRepo, err := config.ParseGitHubRepo(opts.Config.Repo)
 	if err != nil {
 		return fmt.Errorf("bull: %w", err)
 	}
@@ -75,32 +73,6 @@ func Start(ctx context.Context, opts StartOpts) error {
 		Out:          out,
 		AI:           ai,
 	})
-}
-
-// parseGitHubRepo extracts owner and repo name from a GitHub URL or "owner/repo" string.
-func parseGitHubRepo(repo string) (string, string, error) {
-	// Handle "owner/repo" shorthand.
-	if !strings.Contains(repo, "://") {
-		parts := strings.SplitN(repo, "/", 2)
-		if len(parts) == 2 && parts[0] != "" && parts[1] != "" {
-			return parts[0], parts[1], nil
-		}
-		return "", "", fmt.Errorf("invalid repo %q: expected owner/repo or a GitHub URL", repo)
-	}
-
-	u, err := url.Parse(repo)
-	if err != nil {
-		return "", "", fmt.Errorf("invalid repo URL %q: %w", repo, err)
-	}
-
-	// Path is like "/zulandar/railyard-website.git"
-	path := strings.Trim(u.Path, "/")
-	path = strings.TrimSuffix(path, ".git")
-	parts := strings.SplitN(path, "/", 2)
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return "", "", fmt.Errorf("invalid repo URL %q: expected github.com/owner/repo", repo)
-	}
-	return parts[0], parts[1], nil
 }
 
 // buildTrackInfos converts TrackConfig entries into TrackInfo values

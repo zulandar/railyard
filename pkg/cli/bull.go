@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/zulandar/railyard/internal/bull"
+	"github.com/zulandar/railyard/internal/config"
 )
 
 func newBullCmd() *cobra.Command {
@@ -87,7 +88,11 @@ func runBullTriage(cmd *cobra.Command, configPath, issueArg string) error {
 	}
 
 	out := cmd.OutOrStdout()
-	client, err := bull.NewClient(cfg.Owner, cfg.Repo, cfg.Bull)
+	owner, name, err := config.ParseGitHubRepo(cfg.Repo)
+	if err != nil {
+		return fmt.Errorf("bull: %w", err)
+	}
+	client, err := bull.NewClient(owner, name, cfg.Bull)
 	if err != nil {
 		return fmt.Errorf("bull: %w", err)
 	}
