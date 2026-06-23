@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -647,6 +649,12 @@ var infraPatterns = []string{
 	"module not found",
 	"no such module",
 	"already checked out",
+	// Laravel / PDO environment failures — the merge-gate worktree boots the
+	// app without a generated .env/APP_KEY or a migrated test DB.
+	"no application encryption key",
+	"could not find driver",
+	"sqlstate[",
+	"database file at path",
 }
 
 // classifyTestFailure distinguishes infrastructure failures from code test
@@ -670,7 +678,63 @@ func classifyTestFailure(err error, output string) SwitchFailureCategory {
 		}
 	}
 
+	// A run where most tests errored out with almost no assertions indicates a
+	// broken test environment (e.g. a Laravel suite booting without an app
+	// key/DB in the bare worktree), not code assertion failures.
+	if looksLikeEnvErrorRun(output) {
+		return SwitchFailInfra
+	}
+
 	return SwitchFailTest
+}
+
+// Test-summary parsers for the env-error heuristic. They match xUnit-style
+// summary lines such as PHPUnit's "Tests: 47, Assertions: 17, Errors: 38".
+var (
+	reSummaryTests      = regexp.MustCompile(`(?i)\btests:\s*(\d+)`)
+	reSummaryAssertions = regexp.MustCompile(`(?i)\bassertions:\s*(\d+)`)
+	reSummaryErrors     = regexp.MustCompile(`(?i)\berrors:\s*(\d+)`)
+	reSummaryFailures   = regexp.MustCompile(`(?i)\bfailures:\s*(\d+)`)
+)
+
+// looksLikeEnvErrorRun reports whether a test run's summary indicates the test
+// environment is broken rather than the code: errors dominate failures and the
+// majority of tests never reached an assertion. Returns false when no parseable
+// summary is present, so non-PHPUnit output is unaffected.
+func looksLikeEnvErrorRun(output string) bool {
+	tests, ok := summaryCount(reSummaryTests, output)
+	if !ok || tests == 0 {
+		return false
+	}
+	errs, ok := summaryCount(reSummaryErrors, output)
+	if !ok || errs == 0 {
+		return false
+	}
+	// Require an Assertions count so this only fires on a genuine PHPUnit-style
+	// summary (Tests:/Assertions:/Errors:). Go, Jest, pytest, and JUnit output
+	// never combine all three labels, so their failures are left untouched.
+	assertions, ok := summaryCount(reSummaryAssertions, output)
+	if !ok {
+		return false
+	}
+	failures, _ := summaryCount(reSummaryFailures, output)
+
+	// Errors outnumber failures, errors cover at least half the tests, and
+	// fewer than half the tests produced an assertion.
+	return errs >= failures && errs*2 >= tests && assertions*2 < tests
+}
+
+// summaryCount extracts the first integer captured by re from s.
+func summaryCount(re *regexp.Regexp, s string) (int, bool) {
+	m := re.FindStringSubmatch(s)
+	if len(m) < 2 {
+		return 0, false
+	}
+	n, err := strconv.Atoi(m[1])
+	if err != nil {
+		return 0, false
+	}
+	return n, true
 }
 
 // infraHint returns an actionable suggestion when an infrastructure failure

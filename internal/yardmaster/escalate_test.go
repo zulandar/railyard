@@ -3,6 +3,7 @@ package yardmaster
 import (
 	"context"
 	"errors"
+	"os/exec"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -346,5 +347,44 @@ func TestEscalationTracker_ConcurrentAccess(t *testing.T) {
 	// depends on timing but there must be no race detector failures.
 	if allowed.Load() < 1 {
 		t.Errorf("expected at least 1 allowed escalation, got %d", allowed.Load())
+	}
+}
+
+func TestEscalationFailureResult_AlertsHuman(t *testing.T) {
+	// When the escalation agent itself can't be reached, the fallback must
+	// alert the human (not dead-end) and preserve the diagnostic detail.
+	escErr := errors.New("exit status 1: claude: command not found")
+	res := escalationFailureResult("car-991de", "repeated-test-failure", escErr)
+	if res.Action != EscalateHuman {
+		t.Fatalf("action = %q, want %q", res.Action, EscalateHuman)
+	}
+	for _, want := range []string{"car-991de", "repeated-test-failure", "command not found"} {
+		if !strings.Contains(res.Message, want) {
+			t.Errorf("message %q should contain %q", res.Message, want)
+		}
+	}
+}
+
+func TestRunAgentCommand_CapturesStderr(t *testing.T) {
+	// A non-zero exit must surface the command's stderr so opaque failures
+	// (missing binary, auth error) are diagnosable instead of just "exit status 1".
+	cmd := exec.Command("sh", "-c", "echo stdout-line; echo stderr-detail 1>&2; exit 1")
+	_, err := runAgentCommand(cmd)
+	if err == nil {
+		t.Fatal("expected error for non-zero exit")
+	}
+	if !strings.Contains(err.Error(), "stderr-detail") {
+		t.Errorf("error should include captured stderr, got: %v", err)
+	}
+}
+
+func TestRunAgentCommand_Success(t *testing.T) {
+	cmd := exec.Command("sh", "-c", "echo hello-out")
+	out, err := runAgentCommand(cmd)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "hello-out") {
+		t.Errorf("out = %q, want to contain hello-out", out)
 	}
 }

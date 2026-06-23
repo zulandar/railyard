@@ -143,6 +143,70 @@ func TestHandleRetryMerge_RejectsOpenStatus(t *testing.T) {
 	}
 }
 
+func TestCountMergeRetries(t *testing.T) {
+	db := testDB(t)
+	db.Create(&models.Car{ID: "car-cmr1", Type: "task", Status: "merge-failed", Track: "backend"})
+	writeProgressNote(db, "car-cmr1", "dispatch", "Retry merge requested: a")
+	writeProgressNote(db, "car-cmr1", "dispatch", "Retry merge requested: b")
+	writeProgressNote(db, "car-cmr1", "yardmaster", "switch:test-failed: boom") // not a retry
+
+	if got := countMergeRetries(db, "car-cmr1"); got != 2 {
+		t.Errorf("countMergeRetries = %d, want 2", got)
+	}
+}
+
+func TestHandleRetryMerge_AllowsRetriesBelowLimit(t *testing.T) {
+	db := testDB(t)
+	db.Create(&models.Car{ID: "car-loop2", Type: "task", Status: "merge-failed", Track: "backend"})
+
+	// Two prior retries — still under the limit. A config/env fix is a
+	// legitimate retry and does not change the branch HEAD.
+	writeProgressNote(db, "car-loop2", "dispatch", "Retry merge requested: fixed env")
+	writeProgressNote(db, "car-loop2", "dispatch", "Retry merge requested: fixed env again")
+
+	var buf bytes.Buffer
+	logger := actTestLogger(&buf)
+	msg := models.Message{Subject: "retry-merge", CarID: "car-loop2", Body: "fixed pre_test_command"}
+	handleRetryMerge(db, msg, logger)
+
+	var car models.Car
+	db.First(&car, "id = ?", "car-loop2")
+	if car.Status != "done" {
+		t.Errorf("car status = %q, want %q (should re-arm below limit)", car.Status, "done")
+	}
+}
+
+func TestHandleRetryMerge_EscalatesAfterMaxRetries(t *testing.T) {
+	db := testDB(t)
+	db.Create(&models.Car{ID: "car-loop1", Type: "task", Status: "merge-failed", Track: "backend"})
+
+	// maxMergeRetries prior retry-merge requests that each re-failed: the loop
+	// is futile, so the next retry must alert a human instead of re-arming.
+	for i := 0; i < maxMergeRetries; i++ {
+		writeProgressNote(db, "car-loop1", "dispatch", "Retry merge requested: transient?")
+	}
+
+	var buf bytes.Buffer
+	logger := actTestLogger(&buf)
+	msg := models.Message{Subject: "retry-merge", CarID: "car-loop1", Body: "transient again"}
+	handleRetryMerge(db, msg, logger)
+
+	var car models.Car
+	db.First(&car, "id = ?", "car-loop1")
+	if car.Status != "merge-failed" {
+		t.Errorf("car status = %q, want %q (must not re-arm after limit)", car.Status, "merge-failed")
+	}
+	if !strings.Contains(buf.String(), "retry limit reached") {
+		t.Errorf("output = %q, want 'retry limit reached'", buf.String())
+	}
+
+	var humanMsgs int64
+	db.Model(&models.Message{}).Where("to_agent = ? AND car_id = ?", "human", "car-loop1").Count(&humanMsgs)
+	if humanMsgs == 0 {
+		t.Error("expected a human escalation message to be sent")
+	}
+}
+
 // --- handleRequeueCar ---
 
 func TestHandleRequeueCar_NoCarID(t *testing.T) {

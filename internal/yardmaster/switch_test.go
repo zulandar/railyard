@@ -125,6 +125,82 @@ func TestClassifyTestFailure_AlreadyCheckedOut(t *testing.T) {
 	}
 }
 
+func TestClassifyTestFailure_EnvErrorSignatures(t *testing.T) {
+	tests := []struct {
+		name   string
+		output string
+	}{
+		{"laravel missing app key", "RuntimeException: No application encryption key has been specified."},
+		{"pdo missing driver", "PDOException: could not find driver"},
+		{"sqlstate db error", "SQLSTATE[42S02]: Base table or view not found: 1146 Table 'app.users' doesn't exist"},
+		{"sqlite missing db file", "Database file at path [database/database.sqlite] does not exist."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := fmt.Errorf("tests failed: exit status 2")
+			cat := classifyTestFailure(err, tt.output)
+			if cat != SwitchFailInfra {
+				t.Errorf("output %q: got %q, want %q", tt.output, cat, SwitchFailInfra)
+			}
+		})
+	}
+}
+
+func TestClassifyTestFailure_MassErrorsHeuristic(t *testing.T) {
+	// PHPUnit booting without env/DB in the bare merge-gate worktree: most tests
+	// error out and almost no assertions run. This is the car-991de signature.
+	err := fmt.Errorf("tests failed: exit status 2")
+	output := "ERRORS!\nTests: 47, Assertions: 17, Errors: 38."
+	cat := classifyTestFailure(err, output)
+	if cat != SwitchFailInfra {
+		t.Errorf("mass-errors run: got %q, want %q", cat, SwitchFailInfra)
+	}
+}
+
+func TestClassifyTestFailure_NormalFailuresNotInfra(t *testing.T) {
+	// A normal failing suite has many assertions and failures, not mass errors —
+	// the heuristic must NOT swallow it as infrastructure.
+	err := fmt.Errorf("tests failed: exit status 1")
+	output := "FAILURES!\nTests: 47, Assertions: 120, Failures: 2, Errors: 0."
+	cat := classifyTestFailure(err, output)
+	if cat != SwitchFailTest {
+		t.Errorf("normal failing suite: got %q, want %q", cat, SwitchFailTest)
+	}
+}
+
+func TestClassifyTestFailure_OtherLanguagesNotInfra(t *testing.T) {
+	// Real code failures in non-PHP toolchains must stay SwitchFailTest — the
+	// env heuristic and PDO/Laravel patterns must not swallow them.
+	tests := []struct {
+		name   string
+		output string
+	}{
+		{"go test fail", "--- FAIL: TestThing (0.00s)\n    want 1 got 2\nFAIL\tgithub.com/acme/pkg\t0.01s"},
+		{"go panic", "panic: runtime error: index out of range [3]\n\ngoroutine 1 [running]:\nFAIL\tgithub.com/acme/pkg\t0.02s"},
+		{"jest failures", "Tests:       2 failed, 5 passed, 7 total\nSnapshots:   0 total\nTime:        1.2 s"},
+		{"pytest failures", "===== 2 failed, 8 passed in 0.53s ====="},
+		{"junit maven", "Tests run: 5, Failures: 1, Errors: 2, Skipped: 0"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := fmt.Errorf("tests failed: exit status 1")
+			if cat := classifyTestFailure(err, tt.output); cat != SwitchFailTest {
+				t.Errorf("output %q: got %q, want %q", tt.output, cat, SwitchFailTest)
+			}
+		})
+	}
+}
+
+func TestClassifyTestFailure_HeuristicRequiresPHPUnitSummary(t *testing.T) {
+	// Tests:+Errors: without an Assertions: count is not a PHPUnit summary; the
+	// mass-error heuristic must not fire, keeping the guard language-safe.
+	err := fmt.Errorf("tests failed: exit status 1")
+	output := "Tests: 5, Errors: 5"
+	if cat := classifyTestFailure(err, output); cat != SwitchFailTest {
+		t.Errorf("non-PHPUnit Tests/Errors summary: got %q, want %q", cat, SwitchFailTest)
+	}
+}
+
 func TestTruncateOutput_Short(t *testing.T) {
 	out := truncateOutput("hello", 100)
 	if out != "hello" {

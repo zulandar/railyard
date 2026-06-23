@@ -1051,6 +1051,7 @@ func maybeSwitchEscalateWithBus(ctx context.Context, db *gorm.DB, cfg *config.Co
 			})
 			if escErr != nil {
 				logger.Error("Escalation error", "car", carID, "error", escErr)
+				handleEscalateResult(db, "", carID, escalationFailureResult(carID, reason, escErr), logger)
 				return
 			}
 			handleEscalateResult(db, "", carID, res, logger)
@@ -1116,6 +1117,7 @@ func maybeSwitchEscalateWithBus(ctx context.Context, db *gorm.DB, cfg *config.Co
 		})
 		if escErr != nil {
 			logger.Error("Escalation error", "car", carID, "error", escErr)
+			handleEscalateResult(db, "", carID, escalationFailureResult(carID, reason, escErr), logger)
 			return
 		}
 		handleEscalateResult(db, "", carID, res, logger)

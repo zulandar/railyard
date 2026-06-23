@@ -2,7 +2,9 @@ package yardmaster
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -91,6 +93,17 @@ type EscalateResult struct {
 	Message string
 }
 
+// escalationFailureResult builds an ESCALATE_HUMAN decision for when the
+// escalation agent itself could not be reached. Routing it through
+// handleEscalateResult ensures a failed escalation alerts the human operator
+// instead of dead-ending in a swallowed error.
+func escalationFailureResult(carID, reason string, escErr error) *EscalateResult {
+	return &EscalateResult{
+		Action:  EscalateHuman,
+		Message: fmt.Sprintf("Escalation for car %s (%s) could not reach the supervisor agent: %v", carID, reason, escErr),
+	}
+}
+
 // EscalateToAgent spawns a short-lived agent session with a focused prompt
 // and parses the structured decision response. Uses the provider configured
 // in opts.ProviderName (defaults to "claude").
@@ -125,12 +138,28 @@ func EscalateToAgent(ctx context.Context, opts EscalateOpts) (*EscalateResult, e
 	cmd, cancel := provider.BuildPromptCommand(ctx, prompt, opts.Model)
 	defer cancel()
 
-	output, err := cmd.Output()
+	output, err := runAgentCommand(cmd)
 	if err != nil {
 		return nil, fmt.Errorf("yardmaster: escalate: %w", err)
 	}
 
-	return parseEscalateResponse(string(output)), nil
+	return parseEscalateResponse(output), nil
+}
+
+// runAgentCommand executes the escalation agent command and returns its stdout.
+// On a non-zero exit it folds the command's captured stderr into the error so
+// opaque failures (missing binary, auth error, rate limit) are diagnosable
+// rather than surfacing as a bare "exit status 1".
+func runAgentCommand(cmd *exec.Cmd) (string, error) {
+	out, err := cmd.Output()
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && len(exitErr.Stderr) > 0 {
+			return "", fmt.Errorf("%w: %s", err, strings.TrimSpace(string(exitErr.Stderr)))
+		}
+		return "", err
+	}
+	return string(out), nil
 }
 
 // EscalateToClaude is a backward-compatible alias for EscalateToAgent.

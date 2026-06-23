@@ -229,9 +229,27 @@ repo: git@github.com:org/myproject.git
 #   language         (required) — primary language (go, typescript, python, etc.)
 #   file_patterns    (optional) — glob patterns for files this track owns
 #   engine_slots     (optional) — max engines on this track (default: 3)
-#   pre_test_command (optional) — shell command run before tests (e.g. "go mod vendor", "npm install")
+#   pre_test_command (optional) — shell command run before tests (e.g. "go mod vendor", "npm install").
+#                                 Use this to PROVISION the test environment — see the merge-gate note below.
 #   test_command     (optional) — shell command to run tests (default: "go test ./...")
 #   conventions      (optional) — key/value pairs injected into engine prompts
+#
+# ── MERGE-GATE TEST ENVIRONMENT (read this if your tests need .env or a DB) ──
+# The yardmaster runs each track's pre_test_command + test_command inside a
+# DEDICATED git worktree (.railyard/yardmaster/), NOT your normal checkout.
+# A git worktree contains only files TRACKED by git at the merged commit, so
+# anything .gitignore'd — .env, a generated app key, a local SQLite DB, vendored
+# deps, node_modules — is ABSENT until pre_test_command recreates it. Tests that
+# pass in your dev checkout can mass-ERROR here purely from a missing
+# environment. pre_test_command is the one hook that provisions this worktree;
+# make it reproduce a clean, runnable environment. Examples:
+#   Go:       pre_test_command: "go mod download"
+#   Node:     pre_test_command: "npm ci"
+#   Laravel:  pre_test_command: "composer install --no-interaction --prefer-dist && cp -n .env.example .env && php artisan key:generate --force && php artisan migrate --force"
+#             (or pin APP_KEY + DB_CONNECTION=sqlite / DB_DATABASE=:memory: in phpunit.xml so no .env/DB is needed)
+# A run that errors out on a missing app key / DB driver / DB connection is
+# classified as an INFRASTRUCTURE failure (not a code test failure), so the
+# escalation points you here — at the environment — instead of at the code.
 
 tracks:
   - name: backend
