@@ -43,6 +43,20 @@ need curl
 need tar
 need uname
 
+# sha256_of prints the lowercase sha256 hex digest of file "$1" using whichever
+# tool is available: sha256sum (Linux) or `shasum -a 256` (macOS). Fails closed
+# with an error if neither is present, so checksum verification is never skipped.
+sha256_of() {
+	if command -v sha256sum >/dev/null 2>&1; then
+		sha256sum "$1" | awk '{print $1}'
+	elif command -v shasum >/dev/null 2>&1; then
+		shasum -a 256 "$1" | awk '{print $1}'
+	else
+		err "cannot verify download: neither 'sha256sum' nor 'shasum' is available in PATH. Install one (coreutils provides 'sha256sum') and re-run, or build from source with:
+    ${GO_INSTALL}"
+	fi
+}
+
 # --- OS / architecture detection ---------------------------------------------
 
 detect_os() {
@@ -133,6 +147,7 @@ main() {
 	asset="ry-${VERSION}-${OS}-${ARCH}"
 	tarball="${asset}.tar.gz"
 	url="https://github.com/${REPO}/releases/download/${VERSION}/${tarball}"
+	sums_url="https://github.com/${REPO}/releases/download/${VERSION}/checksums.txt"
 
 	# Install directory (default ~/.local/bin).
 	INSTALL_DIR="${RAILYARD_INSTALL_DIR:-${HOME}/.local/bin}"
@@ -148,6 +163,38 @@ main() {
   The release '${VERSION}' may not publish a ${OS}/${ARCH} build, or the network is unavailable.
   Available downloads: ${RELEASES_PAGE}
   Or build from source with: ${GO_INSTALL}"
+	fi
+
+	# --- Checksum verification (fail closed) ---------------------------------
+	# Fetch the release's checksums.txt and verify the downloaded tarball before
+	# extracting. Abort on any problem (missing/empty checksums file, no entry
+	# for this tarball, or a digest mismatch) — never silently skip.
+	info "Verifying checksum..."
+	if ! curl -fsSL "${sums_url}" -o "${tmp}/checksums.txt"; then
+		err "could not download checksums file: ${sums_url}
+  Refusing to install an unverified binary. The release '${VERSION}' may be incomplete or the network is unavailable.
+  Available downloads: ${RELEASES_PAGE}
+  Or build from source with: ${GO_INSTALL}"
+	fi
+	if [ ! -s "${tmp}/checksums.txt" ]; then
+		err "checksums file is empty: ${sums_url}
+  Refusing to install an unverified binary. Available downloads: ${RELEASES_PAGE}"
+	fi
+
+	# Expected digest: the line in checksums.txt naming this tarball.
+	# checksums.txt uses the standard `sha256sum` format: "<hash>  <filename>".
+	expected="$(grep -E "[[:space:]]\\*?${tarball}\$" "${tmp}/checksums.txt" | awk '{print $1}' | head -n1)"
+	if [ -z "${expected}" ]; then
+		err "no checksum entry for '${tarball}' in checksums.txt from ${sums_url}
+  Refusing to install an unverified binary. The release layout may have changed; please report this at ${RELEASES_PAGE}"
+	fi
+
+	actual="$(sha256_of "${tmp}/${tarball}")"
+	if [ "${actual}" != "${expected}" ]; then
+		err "checksum mismatch for ${tarball} — refusing to install.
+  expected: ${expected}
+  actual:   ${actual}
+  The download may be corrupted or tampered with. Retry, or report this at ${RELEASES_PAGE}"
 	fi
 
 	info "Extracting..."
@@ -193,13 +240,3 @@ main() {
 }
 
 main "$@"
-
-# --- Optional: checksum verification (NICE-TO-HAVE, not currently published) -
-# The release workflow does not publish a checksums file today, so the
-# installer does not verify checksums. If a checksums.txt is added to releases
-# in the future, fetch it alongside the tarball and verify before install, e.g.:
-#
-#   sums_url="https://github.com/${REPO}/releases/download/${VERSION}/checksums.txt"
-#   if curl -fsSL "${sums_url}" -o "${tmp}/checksums.txt" 2>/dev/null; then
-#     ( cd "${tmp}" && grep " ${tarball}\$" checksums.txt | sha256sum -c - )
-#   fi

@@ -196,6 +196,17 @@ jobs:
           path: artifacts
           merge-multiple: true
 
+      - name: Generate checksums
+        run: |
+          # Produce checksums.txt in the standard `sha256sum` format
+          # ("<hash>  <filename>", two spaces) covering every published tarball.
+          # Run inside artifacts/ so filenames are bare (no path prefix), keeping
+          # them consistent with how install.sh names and verifies the tarball,
+          # and so `sha256sum -c checksums.txt` works from the assets directory.
+          cd artifacts
+          sha256sum ./*.tar.gz | sed 's# \./# #' > checksums.txt
+          cat checksums.txt
+
       - name: Generate changelog
         id: changelog
         run: |
