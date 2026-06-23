@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -692,6 +693,49 @@ func TestEmbeddedRequirements_CocoIndexExactlyPinned(t *testing.T) {
 
 	if !found {
 		t.Fatalf("no cocoindex requirement line found in embedded requirements:\n%s", embeddedRequirements)
+	}
+}
+
+func TestEmbeddedRequirements_NumpyUpperBounded(t *testing.T) {
+	// Pinning cocoindex alone is not enough: cocoindex 0.3.34 cannot decode
+	// NDArray[numpy.float32] under numpy>=2.5.0, so a fresh `ry cocoindex init`
+	// that resolves the latest numpy fails at the embedding flow's schema
+	// analysis ("Unsupported type annotation: NDArray[numpy.float32]"), breaking
+	// indexing on first run (railyard-f4y.1). The embedded numpy requirement must
+	// keep an upper bound that excludes 2.5.0 so a floating transitive pin can
+	// never reintroduce the break.
+	boundRe := regexp.MustCompile(`<\s*(\d+)(?:\.(\d+))?`)
+
+	var found, bounded bool
+	for _, raw := range strings.Split(embeddedRequirements, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" || strings.HasPrefix(line, "#") || !strings.HasPrefix(line, "numpy") {
+			continue
+		}
+		found = true
+		m := boundRe.FindStringSubmatch(line)
+		if m == nil {
+			t.Errorf("numpy requirement %q has no '<' upper bound; cocoindex 0.3.34 breaks on numpy>=2.5.0", line)
+			continue
+		}
+		major, _ := strconv.Atoi(m[1])
+		minor := 0
+		if m[2] != "" {
+			minor, _ = strconv.Atoi(m[2])
+		}
+		// The strict upper bound must be at or below 2.5 so 2.5.0 is excluded.
+		if major > 2 || (major == 2 && minor > 5) {
+			t.Errorf("numpy upper bound in %q allows numpy>=2.5.0, which breaks cocoindex 0.3.34 indexing", line)
+			continue
+		}
+		bounded = true
+	}
+
+	if !found {
+		t.Fatalf("no numpy requirement line found in embedded requirements:\n%s", embeddedRequirements)
+	}
+	if !bounded {
+		t.Errorf("embedded numpy requirement lacks an upper bound excluding 2.5.0:\n%s", embeddedRequirements)
 	}
 }
 
