@@ -113,11 +113,11 @@ tracks:
       template: "tests/pr-demos/_template.spec.ts"
 ```
 
-`ry init` also scaffolded a starter `tests/pr-demos/_template.spec.ts` and a reference CI workflow at `.github/workflows/pr-demo.yml.example`. Commit them so engines (and CI) see them:
+`ry init` commits `railyard.yaml` for you. The scaffolded `tests/pr-demos/_template.spec.ts` and reference CI workflow at `.github/workflows/pr-demo.yml.example` are left for you to commit so engines (and CI) see them:
 
 ```bash
-git add tests/pr-demos/_template.spec.ts .github/workflows/pr-demo.yml.example railyard.yaml
-git commit -m "Add Railyard config + Playwright PR-demo scaffolding"
+git add tests/pr-demos/_template.spec.ts .github/workflows/pr-demo.yml.example
+git commit -m "Add Playwright PR-demo scaffolding"
 ```
 
 To activate CI, rename the workflow (it ships as `.example` so it never auto-runs until you do):

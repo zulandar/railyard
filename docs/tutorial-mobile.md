@@ -3,13 +3,13 @@
 Mobile is the stretch case for "any language." This tutorial uses **React Native via Expo** — it keeps prerequisites near-zero (no Xcode/Android Studio needed for the core loop) and stays in the JavaScript/TypeScript ecosystem most readers know. It also doubles as the **landing page for mobile**: Flutter, Swift, and Kotlin all have detection presets, pointed to at the end.
 
 **What you'll learn:**
-- What `ry init` actually detects on an Expo/React Native repo (shown honestly, including the gaps)
+- What `ry init` actually detects on an Expo/React Native repo — it now generates a **mobile-aware** track (named `mobile`), not a generic web frontend
 - Running a feature through dependency-ordered cars with **jest** as the merge gate
 - How engines verify UI-adjacent work without a device, and why Playwright does **not** apply to native mobile
 
 **Time:** ~10 minutes of setup, then the engines build.
 
-> **Honesty note.** The `ry init` detection output below was captured from a **real run** on a minimal Expo-shaped project (the detection-relevant files: `package.json` with `expo`/`react-native`, `tsconfig.json`, `app.json`, an `app/index.tsx`). A full `npx create-expo-app` produces more files but the **detection result is the same**. Steps that spawn live AI engines are marked; no agent output is fabricated here.
+> **What's exact vs. described:** the `ry init` commands and the generated `railyard.yaml` below match a **real run** of `ry init` on a minimal Expo-shaped project (the detection-relevant files: `package.json` with `expo`/`react-native`, `tsconfig.json`, `app.json`, an `app/index.tsx`). A full `npx create-expo-app` produces more files but the **detection result is the same**. Steps that spawn live AI engines are marked; those commands are exact, but their behavior is described from Railyard's design rather than captured — no agent output is fabricated here.
 
 ---
 
@@ -37,7 +37,7 @@ A default Expo app is TypeScript-based: it has a `package.json` (with `expo`, `r
 
 ---
 
-## Step 2: `ry init` — what gets detected (and what doesn't)
+## Step 2: `ry init` — what gets detected
 
 ```console
 $ ry init --yes
@@ -56,20 +56,22 @@ The generated track:
 
 ```yaml
 tracks:
-  - name: frontend
+  - name: mobile
     language: typescript
     file_patterns: ["**/*.ts", "**/*.tsx", "**/*.js", "**/*.jsx"]
     engine_slots: 2
-    test_command: "npm test"
+    test_command: "npx jest"
 ```
 
-**What this gets right:** the `tsconfig.json` makes it a TypeScript track, and the patterns include `**/*.tsx` — so your screens and components are routed correctly. With `"test": "jest"` in `package.json`, `npm test` runs your jest suite, which is the right merge gate.
+**What this gets right:** the `tsconfig.json` makes it a TypeScript track, and the patterns include `**/*.tsx` — so your screens and components are routed correctly. Because `ry init` recognizes the `expo` dependency (or a top-level `expo` key in `app.json`), it applies the **Expo preset**: the track is named **`mobile`** rather than `frontend`, and engine prompts get an Expo/React-Native convention (use `npx expo`, treat this as a React Native app — not a web frontend). The track is **mobile-aware**, not a generic web frontend.
 
-**What it does NOT do (honest gaps):**
-- It's detected as a **generic `typescript` frontend track**, not a React-Native- or "mobile"-aware track. There's no RN-specific convention injected, and the track is named `frontend`, not `mobile`. (Railyard's `mobile` classification today applies to Swift/Kotlin/Dart — see below — not to RN, which presents as a Node project.)
-- A **managed** Expo app has no native `android/`/`ios/` directories, so detection stays clean. A **bare** RN/Expo app that has ejected to native code *would* additionally trip the Kotlin (AndroidManifest) and Swift (`ios/*.xcodeproj`) markers, producing extra `mobile` tracks — a multi-track mix you'd likely want to prune.
+**About the test command:** with `jest-expo` in your `devDependencies`, the preset sets `test_command` to **`npx jest`** (a fresh Expo app doesn't always wire a `test` npm script, so init invokes jest directly rather than assuming `npm test` exists). If `jest-expo` is **not** present, the track keeps the default `test_command: "npm test"` — add a jest preset (see Troubleshooting) so the merge gate has a real suite to run.
 
-These gaps are filed as follow-up beads (see ["Detection gaps filed"](#detection-gaps-filed) below); for now, the generated track is usable as-is for a managed Expo app.
+> **Note on conventions.** The Expo convention the preset injects guides the engines' prompts but is **not** written into `railyard.yaml` — `ry init` only emits `name`, `language`, `file_patterns`, `engine_slots`, and `test_command`. So the generated file shows the `mobile` track name and `npx jest` gate, not a `conventions:` block.
+
+**Managed vs. bare/ejected:**
+- A **managed** Expo app has no native `android/`/`ios/` directories, so only the TypeScript signal fires — you get the single `mobile` track above.
+- A **bare** RN/Expo app that has ejected/prebuilt to native code *does* have `android/` and `ios/` directories, which would normally trip the Kotlin (AndroidManifest) and Swift (`ios/*.xcodeproj`) markers. Railyard now **suppresses** those generated-native tracks when it sees a `react-native`/`expo` dependency, so you still get a single `mobile` (typescript) track — not a confusing kotlin+swift+typescript mix. (For a bare, non-Expo RN repo the preset is the React Native variant: same `mobile` track, and `test_command` becomes `npx jest` when `jest` is in `devDependencies`.)
 
 ---
 
@@ -78,7 +80,7 @@ These gaps are filed as follow-up beads (see ["Detection gaps filed"](#detection
 We'll add a settings screen with a persisted theme toggle:
 
 ```console
-$ ry car create --type epic --track frontend --title "Settings screen with persisted theme toggle"
+$ ry car create --type epic --track mobile --title "Settings screen with persisted theme toggle"
 Created car car-b9583
 
 $ ry car create --parent car-b9583 --type task --title "Theme context with AsyncStorage persistence"
@@ -99,23 +101,23 @@ Only the foundational card is ready:
 
 ```console
 $ ry car ready
-ID         TITLE                                     TRACK     PRI
-car-d8f67  Theme context with AsyncStorage persi...  frontend  2
+ID         TITLE                                     TRACK   PRI
+car-d8f67  Theme context with AsyncStorage persi...  mobile  2
 ```
 
 ---
 
 ## Step 4: Run engines with jest as the merge gate
 
-> ⚠️ **Live engines below.** `ry start` spawns AI sessions (real API usage). Commands are exact; behavior described is from Railyard's design, not captured here.
+> ⚠️ **Live engines below.** `ry start` spawns AI coding sessions that consume real API usage. Commands are exact; the behavior described is from Railyard's design, not captured here.
 
 ```bash
 ry start --engines 2
 tmux attach -t railyard
 ```
 
-- Engines work the theme-context → settings-UI → wiring chain in dependency order on `ry/yourname/frontend/<car-id>` branches.
-- **Yardmaster runs `npm test` (jest)** on each completed branch and merges only if it passes.
+- Engines work the theme-context → settings-UI → wiring chain in dependency order on `ry/yourname/mobile/<car-id>` branches.
+- **Yardmaster runs the track's `test_command` (here, `npx jest`)** on each completed branch and merges only if it passes. (If your repo has no `jest-expo` preset, the track's gate is `npm test` instead — wire one up so the gate actually runs your suite.)
 
 ### Verifying UI work without a device
 
@@ -140,19 +142,23 @@ A full walkthrough for these stacks isn't included here (React Native was chosen
 
 ---
 
-## Detection gaps filed
+## How RN/Expo detection works today
 
-While writing this tutorial, the following React Native detection gaps were filed as follow-up work (linked from bead railyard-a37.8):
+An earlier version of this tutorial flagged two React Native detection gaps as follow-up work. Both are now **resolved**, and the behavior described above is the result:
 
-- React Native / Expo repos are classified as a generic `typescript` `frontend` track with no RN-specific preset or `mobile` classification — consider an RN-aware preset.
-- A bare (ejected) RN/Expo repo additionally emits Kotlin + Swift tracks from its `android/`/`ios/` native dirs, producing a confusing multi-track mix that likely needs pruning.
+- **RN/Expo no longer falls back to a generic `frontend` track.** When `ry init` sees an `expo` dependency (or an `expo` key in `app.json`) it applies the **Expo preset**; a bare `react-native` dependency applies the **React Native preset**. Either way the track is named `mobile`, carries a React-Native/Expo convention for the engines, and uses `npx jest` as its gate when the matching jest preset (`jest-expo` for Expo, `jest` for bare RN) is installed.
+- **Bare/ejected repos no longer emit phantom kotlin + swift tracks.** The generated `android/` and `ios/` native directories would otherwise trip the Android (`AndroidManifest.xml`) and Swift (`*.xcodeproj`) markers, but Railyard now suppresses those generated-native tracks whenever a `react-native`/`expo` dependency is present, leaving a single `mobile` (typescript) track.
+
+Hand-authored native apps and Flutter projects (which carry no `react-native`/`expo` dependency) are unaffected — they keep their own `mobile` tracks, covered next.
 
 ---
 
 ## Troubleshooting
 
-- **`ry init` detects extra `mobile` tracks** — you're on a bare/ejected RN app with native dirs; remove the Swift/Kotlin tracks from `railyard.yaml` if you only want the RN/jest track.
-- **`npm test` fails immediately** — ensure a jest preset is configured (`jest-expo`) and `@testing-library/react-native` is installed.
+- **Track is named `frontend`, not `mobile`** — the Expo/RN preset only fires when `ry init` sees an `expo` dependency (or `app.json` `expo` key) or a `react-native` dependency. If your `package.json` doesn't declare one (or `app.json` lacks the `expo` key), detection treats the repo as a plain Node/TypeScript project. Add the dependency and re-run, or rename the track to `mobile` in `railyard.yaml`.
+- **`test_command` is `npm test`, not `npx jest`** — the preset only switches to `npx jest` when the matching jest preset (`jest-expo` for Expo, `jest` for bare RN) is in `devDependencies`. Install it and re-run `ry init`, or edit `test_command` directly.
+- **The merge gate fails immediately** — ensure a jest preset is configured (`jest-expo`) and `@testing-library/react-native` is installed so the suite actually runs.
+- **A bare/ejected RN repo still emits Swift/Kotlin tracks** — this shouldn't happen on current Railyard (generated-native tracks are suppressed when a `react-native`/`expo` dependency is present). If it does, confirm the dependency is declared in `package.json`; otherwise prune the extra tracks from `railyard.yaml`.
 - **Engines stall on native builds** — keep engine work to the JS/TS layer + jest; native device builds are out of scope for the core loop.
 
 ---
