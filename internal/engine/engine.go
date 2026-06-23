@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/zulandar/railyard/internal/messaging"
 	"github.com/zulandar/railyard/internal/models"
 	"gorm.io/gorm"
 )
@@ -88,7 +89,29 @@ func Register(db *gorm.DB, opts RegisterOpts) (*models.Engine, error) {
 		return nil, fmt.Errorf("engine: register: %w", err)
 	}
 
+	// Ack any pre-existing broadcast backlog so a freshly registered engine
+	// only obeys broadcasts sent after it came online. Without this, a stale
+	// "drain" broadcast left in the messages table by a prior `ry stop` would
+	// shut the new engine down on its first poll cycle (railyard-d3n).
+	ackBroadcastBacklog(db, engine.ID)
+
 	return &engine, nil
+}
+
+// ackBroadcastBacklog marks every broadcast message that already exists as
+// acknowledged for engineID, so [ProcessInbox] does not surface them. Done at
+// registration time (railyard-d3n). Best-effort: a failure here at worst
+// leaves the prior behavior intact, so it must never fail registration.
+func ackBroadcastBacklog(db *gorm.DB, engineID string) {
+	var ids []uint
+	if err := db.Model(&models.Message{}).
+		Where("to_agent = ?", "broadcast").
+		Pluck("id", &ids).Error; err != nil {
+		return
+	}
+	for _, id := range ids {
+		_ = messaging.AcknowledgeBroadcast(db, id, engineID)
+	}
 }
 
 // Deregister marks an engine as dead.
