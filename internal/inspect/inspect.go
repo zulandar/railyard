@@ -37,7 +37,11 @@ func Start(ctx context.Context, opts StartOpts) error {
 	}
 
 	// Create GitHub client from config.
-	ghClient, err := NewGitHubClient(opts.Config.Owner, opts.Config.Repo, opts.Config.Inspect)
+	owner, name, err := config.ParseGitHubRepo(opts.Config.Repo)
+	if err != nil {
+		return fmt.Errorf("inspect: %w", err)
+	}
+	ghClient, err := NewGitHubClient(owner, name, opts.Config.Inspect)
 	if err != nil {
 		return fmt.Errorf("inspect: create github client: %w", err)
 	}
