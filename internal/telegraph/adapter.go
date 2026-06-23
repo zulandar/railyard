@@ -70,6 +70,16 @@ type BotUserIDer interface {
 	BotUserID() string
 }
 
+// ReadyWaiter is an optional interface that adapters can implement to let
+// callers block until the adapter has learned its own identity (e.g. the
+// Discord gateway READY event populates the bot user ID). The daemon waits on
+// this before reading BotUserID() and building the Router, so @mention matching
+// gets a real bot ID instead of the empty string captured by reading too early
+// (railyard-1q9).
+type ReadyWaiter interface {
+	WaitReady(ctx context.Context) error
+}
+
 // ThreadStarter is an optional interface that adapters can implement to
 // support creating threads from messages. When a top-level @mention triggers
 // a new dispatch session, the router uses this to create a thread from the

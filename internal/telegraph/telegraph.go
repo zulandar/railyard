@@ -94,6 +94,21 @@ func (d *Daemon) Run(ctx context.Context) error {
 	}()
 	hc.SetConnected(true)
 
+	// Best-effort wait for the adapter to learn its own identity (e.g. the
+	// Discord gateway READY event) before reading the bot user ID. Connect()
+	// returns before READY arrives, so reading BotUserID() immediately would
+	// capture an empty id; waiting avoids dropping the first few @mentions at
+	// startup. This is no longer load-bearing for correctness — the Router
+	// resolves the bot id live from the adapter, so a late READY (or a timed-out
+	// wait) self-heals @mention routing rather than freezing the empty id
+	// (railyard-1q9).
+	if rw, ok := d.adapter.(ReadyWaiter); ok {
+		if err := rw.WaitReady(ctx); err != nil {
+			d.adapter.Close()
+			return fmt.Errorf("telegraph: wait for adapter ready: %w", err)
+		}
+	}
+
 	// Extract bot user ID if the adapter supports it.
 	var botUserID string
 	if bui, ok := d.adapter.(BotUserIDer); ok {

@@ -29,6 +29,7 @@ type mockSession struct {
 	messages       []*discordgo.Message
 	messagesErr    error
 	handler        interface{}
+	readyHandler   func(*discordgo.Session, *discordgo.Ready)
 	removeCount    int
 	channels       map[string]*discordgo.Channel // for Channel() lookups
 }
@@ -118,10 +119,24 @@ func (m *mockSession) AddHandler(handler interface{}) func() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.handler = handler
+	if rh, ok := handler.(func(*discordgo.Session, *discordgo.Ready)); ok {
+		m.readyHandler = rh
+	}
 	return func() {
 		m.mu.Lock()
 		defer m.mu.Unlock()
 		m.removeCount++
+	}
+}
+
+// fireReady simulates the gateway delivering the READY event to the registered
+// handler, as discordgo does asynchronously after Open() in production.
+func (m *mockSession) fireReady(userID string) {
+	m.mu.Lock()
+	rh := m.readyHandler
+	m.mu.Unlock()
+	if rh != nil {
+		rh(nil, &discordgo.Ready{User: &discordgo.User{ID: userID, Username: "MockBot"}})
 	}
 }
 
@@ -1439,6 +1454,91 @@ func TestSetBotUserID(t *testing.T) {
 	a.SetBotUserID("NEW_BOT_ID")
 	if a.BotUserID() != "NEW_BOT_ID" {
 		t.Errorf("bot user ID = %q, want NEW_BOT_ID", a.BotUserID())
+	}
+}
+
+// TestWaitReady_BlocksUntilBotIDKnown verifies the adapter exposes a way to
+// block until the gateway READY event has populated the bot user id. The
+// telegraph daemon relies on this so the Router's @mention matching gets a
+// real bot id instead of the empty string it captured by reading BotUserID()
+// the instant Connect() returned (railyard-1q9).
+func TestWaitReady_BlocksUntilBotIDKnown(t *testing.T) {
+	sess := newMockSession()
+	a, err := New(AdapterOpts{Session: sess})
+	if err != nil {
+		t.Fatalf("new adapter: %v", err)
+	}
+	if err := a.Connect(context.Background()); err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+
+	// The mock's Open() does not deliver READY, mirroring the real gateway:
+	// the bot id is not known the instant Connect() returns.
+	if got := a.BotUserID(); got != "" {
+		t.Fatalf("bot id should be empty before READY, got %q", got)
+	}
+
+	// READY arrives shortly after, as discordgo delivers it asynchronously.
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		sess.fireReady("BOT_FROM_READY")
+	}()
+
+	if err := a.WaitReady(context.Background()); err != nil {
+		t.Fatalf("WaitReady: %v", err)
+	}
+	if got := a.BotUserID(); got != "BOT_FROM_READY" {
+		t.Errorf("BotUserID() = %q after WaitReady; want it populated from READY", got)
+	}
+}
+
+// TestWaitReady_Timeout documents the degraded path: when READY never arrives,
+// WaitReady returns nil (not an error) once readyTimeout elapses, so a
+// slow/failed gateway connect cannot hang telegraph startup. The bot id stays
+// empty until a real READY lands — and because the router resolves the id live
+// from the adapter, a late READY still heals @mention routing (railyard-1q9).
+func TestWaitReady_Timeout(t *testing.T) {
+	sess := newMockSession()
+	a, err := New(AdapterOpts{Session: sess})
+	if err != nil {
+		t.Fatalf("new adapter: %v", err)
+	}
+	if err := a.Connect(context.Background()); err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	a.readyTimeout = 20 * time.Millisecond
+
+	// READY never fires; WaitReady must wait for the timeout and then return nil.
+	start := time.Now()
+	if err := a.WaitReady(context.Background()); err != nil {
+		t.Errorf("WaitReady() on timeout = %v, want nil (degraded, non-fatal)", err)
+	}
+	if elapsed := time.Since(start); elapsed < a.readyTimeout {
+		t.Errorf("WaitReady returned after %s, expected to wait for the %s timeout", elapsed, a.readyTimeout)
+	}
+	if got := a.BotUserID(); got != "" {
+		t.Errorf("BotUserID() = %q after timeout, want empty", got)
+	}
+}
+
+// TestWaitReady_RespectsContextCancel verifies WaitReady returns when the
+// context is cancelled even though READY never arrives, so a slow/failed
+// gateway connect cannot hang telegraph startup forever.
+func TestWaitReady_RespectsContextCancel(t *testing.T) {
+	sess := newMockSession()
+	a, err := New(AdapterOpts{Session: sess})
+	if err != nil {
+		t.Fatalf("new adapter: %v", err)
+	}
+	if err := a.Connect(context.Background()); err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if err := a.WaitReady(ctx); err != context.Canceled {
+		t.Errorf("WaitReady() = %v, want context.Canceled", err)
 	}
 }
 
