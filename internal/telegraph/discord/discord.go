@@ -24,6 +24,10 @@ const (
 	maxReconnectAttempts = 10
 	// defaultPageSize is the default number of messages per page for history.
 	defaultPageSize = 100
+	// defaultReadyTimeout bounds how long WaitReady blocks for the gateway
+	// READY event before proceeding (degraded) so a slow/failed connect cannot
+	// hang telegraph startup forever.
+	defaultReadyTimeout = 30 * time.Second
 )
 
 // session abstracts the discordgo.Session methods we use, enabling test mocks.
@@ -93,6 +97,14 @@ type Adapter struct {
 	maxBackoff      time.Duration
 	maxReconnect    int
 
+	// readyCh is closed once the gateway READY event has populated botUserID.
+	// WaitReady blocks on it so callers (telegraph) read a populated bot id
+	// instead of the empty string the Router would otherwise capture by reading
+	// BotUserID() the instant Connect() returns (railyard-1q9).
+	readyCh      chan struct{}
+	readyOnce    sync.Once
+	readyTimeout time.Duration
+
 	// Inbound lifecycle, guarded by sendMu (separate from mu so a buffered
 	// send never blocks connection-state operations). teardown is the single
 	// idempotent shutdown path shared by Close and Listen-ctx cancellation.
@@ -132,6 +144,8 @@ func New(opts AdapterOpts) (*Adapter, error) {
 		baseBackoff:     baseBackoff,
 		maxBackoff:      maxBackoff,
 		maxReconnect:    maxReconnectAttempts,
+		readyCh:         make(chan struct{}),
+		readyTimeout:    defaultReadyTimeout,
 	}
 
 	if opts.Session != nil {
@@ -167,6 +181,9 @@ func (a *Adapter) Connect(ctx context.Context) error {
 		a.mu.Lock()
 		a.botUserID = r.User.ID
 		a.mu.Unlock()
+		// Signal WaitReady that the bot identity is now known. READY can fire
+		// again on reconnect; the id is unchanged, so close exactly once.
+		a.readyOnce.Do(func() { close(a.readyCh) })
 		log.Printf("discord: connected as %s (ID: %s)", r.User.Username, r.User.ID)
 	})
 
@@ -397,6 +414,22 @@ func (a *Adapter) SetBotUserID(id string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.botUserID = id
+}
+
+// WaitReady blocks until the gateway READY event has been received (so the bot
+// user ID is populated), the context is cancelled, or readyTimeout elapses. On
+// timeout it logs and returns nil so startup proceeds (degraded) rather than
+// hanging; only context cancellation returns an error.
+func (a *Adapter) WaitReady(ctx context.Context) error {
+	select {
+	case <-a.readyCh:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(a.readyTimeout):
+		log.Printf("discord: timed out after %s waiting for gateway READY; bot user ID may be unset", a.readyTimeout)
+		return nil
+	}
 }
 
 // handleMessage converts a Discord message event to an InboundMessage.
