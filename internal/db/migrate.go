@@ -18,6 +18,7 @@ func AllModels() []interface{} {
 		&models.Car{},
 		&models.CarDep{},
 		&models.CarProgress{},
+		&models.CarMemory{},
 		&models.Track{},
 		&models.Engine{},
 		&models.Message{},
