@@ -385,6 +385,13 @@ tracks:
 #     in_progress: "bull: in progress"    # Applied when car is claimed by engine (default)
 #     fix_merged: "bull: fix merged"      # Applied when car's branch is merged (default)
 #     ignore: "bull: ignore"              # Applied to rejected issues / manually ignored (default)
+#   # Maximum agent-loop tool-calling rounds per triage run. When unset (0),
+#   # the native loop defaults to 30 iterations when CocoIndex/codesearch is
+#   # enabled (tool-capable path) and 16 when it is not (tool-less one-shot).
+#   # Raise this when codesearch + read_file lookups need more headroom to
+#   # converge. Hitting the cap surfaces as an error; Bull retries up to 3
+#   # times via its internal retry queue before giving up on the issue.
+#   max_triage_iterations: 0
 
 # ---------------------------------------------------------------------------
 # Inspection Pit — Automated PR code review (optional)
@@ -410,6 +417,14 @@ tracks:
 #     in_progress: "inspect: in-progress"
 #     reviewed: "inspect: reviewed"
 #     re_review: "inspect: re-review"
+#   # Maximum agent-loop tool-calling rounds per review run. When unset (0),
+#   # the native loop defaults to 30 iterations when deep_review/codesearch is
+#   # enabled (tool-capable path) and 16 when it is not (tool-less one-shot).
+#   # Raise this when deep_review codesearch + read_file calls need more
+#   # headroom to converge. Hitting the cap triggers per-PR attempt tracking:
+#   # after 3 consecutive cap hits, the daemon stops re-reviewing the PR and
+#   # applies an "inspect: cap-hit-exhausted" label to prevent infinite loops.
+#   max_review_iterations: 0
 
 # ---------------------------------------------------------------------------
 # Custom MCP servers (optional)
