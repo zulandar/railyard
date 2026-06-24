@@ -205,6 +205,51 @@ func TestClaimOrReclaim_ReclaimExisting(t *testing.T) {
 	}
 }
 
+func TestClaimOrReclaim_ReclaimAfterFreshClaim(t *testing.T) {
+	// After a fresh ClaimCar, the eng struct should have CurrentCar set
+	// so a subsequent call re-claims (instead of claiming a different car).
+	// This simulates the clear-cycle re-claim path: agent exits, engine
+	// returns to the top of the daemon loop, and claimOrReclaim must return
+	// the same car (railyard-8m6.engsync).
+	gormDB := mockTestDB(t)
+
+	now := time.Now()
+	gormDB.Create(&models.Engine{ID: "eng-1", Track: "backend", Status: "idle", StartedAt: now, LastActivity: now})
+	gormDB.Create(&models.Car{ID: "car-alpha", Title: "Alpha", Status: "open", Track: "backend", Priority: 2, CreatedAt: now, UpdatedAt: now})
+
+	var eng models.Engine
+	if err := gormDB.First(&eng, "id = ?", "eng-1").Error; err != nil {
+		t.Fatalf("fetch engine: %v", err)
+	}
+
+	// First call: fresh claim via engine.ClaimCar.
+	claimed, err := claimOrReclaim(gormDB, &eng, "backend")
+	if err != nil {
+		t.Skipf("ClaimCar failed with SQLite (expected): %v", err)
+	}
+	if claimed.ID != "car-alpha" {
+		t.Errorf("first claim: got car %q, want %q", claimed.ID, "car-alpha")
+	}
+
+	// Verify in-memory CurrentCar is set (the core fix).
+	if eng.CurrentCar != "car-alpha" {
+		t.Errorf("eng.CurrentCar after first claim = %q, want %q", eng.CurrentCar, "car-alpha")
+	}
+
+	// Transition the car to in_progress (as MarkInProgress would).
+	gormDB.Model(&models.Car{}).Where("id = ?", "car-alpha").Update("status", "in_progress")
+	claimed.Status = "in_progress" // keep the local copy consistent
+
+	// Second call: should re-claim the same car (clear-cycle path).
+	reclaimed, err := claimOrReclaim(gormDB, &eng, "backend")
+	if err != nil {
+		t.Fatalf("re-claim: unexpected error: %v", err)
+	}
+	if reclaimed.ID != "car-alpha" {
+		t.Errorf("re-claim: got car %q, want %q (should re-claim same car)", reclaimed.ID, "car-alpha")
+	}
+}
+
 func TestClaimOrReclaim_SkipDoneCar(t *testing.T) {
 	gormDB := mockTestDB(t)
 
