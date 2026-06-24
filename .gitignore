@@ -22,9 +22,7 @@ minikube-values.yaml
 *.secret
 credentials.json
 
-.beads/*
-!.beads/config.yaml
-!.beads/metadata.json
+.beads/
 
 # Beads / Dolt files (added by bd init)
 .dolt/
