@@ -40,6 +40,7 @@ type SwitchOpts struct {
 	SwitchTimeoutSec int                              // max seconds for runTests (default 600 if 0)
 	CommentCounter   func(branch string) (int, error) // nil-safe; returns non-author comment count (inline + conversation) for pr_open snapshot
 	RevisedLabel     string                           // label to apply after a revision pushes to an existing PR (e.g. "railyard: revised")
+	ReReviewLabel    string                           // inspect re-review label applied alongside RevisedLabel so the inspect daemon re-reviews the pushed revision (e.g. "inspect: re-review")
 	ConfigPath       string                           // path to railyard.yaml; re-read at PR-open time so current track config (e.g. Playwright) wins over dispatch-time config
 
 	// PR operation hooks — nil defaults to the gh-CLI implementations.
@@ -364,6 +365,18 @@ func Switch(db *gorm.DB, carID string, opts SwitchOpts) (*SwitchResult, error) {
 			if opts.RevisedLabel != "" {
 				if err := addLabel(opts.RepoDir, car.Branch, opts.RevisedLabel); err != nil {
 					slog.Warn("Add revised label failed", "car", carID, "error", err)
+				}
+			}
+
+			// Apply the inspect re-review label so the inspect daemon re-reviews the
+			// pushed revision. The daemon skips PRs that already carry the "reviewed"
+			// label unless this re-review label is present; without it the revision is
+			// never re-reviewed, the revised label is never cleared, and the
+			// yardmaster stale-CHANGES_REQUESTED guard blocks reopen forever
+			// (railyard-1d0.5).
+			if opts.ReReviewLabel != "" {
+				if err := addLabel(opts.RepoDir, car.Branch, opts.ReReviewLabel); err != nil {
+					slog.Warn("Add re-review label failed", "car", carID, "error", err)
 				}
 			}
 

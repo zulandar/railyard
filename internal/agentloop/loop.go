@@ -3,6 +3,7 @@ package agentloop
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -12,15 +13,25 @@ import (
 // a model keeps calling tools without ever finishing.
 const defaultMaxIterations = 30
 
+// ErrMaxIterations is the sentinel returned (wrapped) when an agent loop hits
+// its iteration cap (StopMaxIterations) before the model finishes. Native loops
+// wrap it with %w so callers can match it with errors.Is regardless of how the
+// surrounding message is phrased — robust to message-wording changes that a
+// substring match would silently miss.
+var ErrMaxIterations = errors.New("agent did not finish within iteration cap")
+
 // IsMaxIterationsError reports whether err is the result of an agent loop
-// hitting its iteration cap (StopMaxIterations). Both bull's and inspect's
-// native loops surface this as a wrapped error containing the characteristic
-// "agent did not finish within" substring. Callers use this to distinguish
+// hitting its iteration cap (StopMaxIterations). It matches the ErrMaxIterations
+// sentinel via errors.Is, and retains a legacy substring check for errors that
+// were formatted without wrapping the sentinel. Callers use this to distinguish
 // cap hits from other errors (network, API, etc.) for retry/terminal-state
 // decisions.
 func IsMaxIterationsError(err error) bool {
 	if err == nil {
 		return false
+	}
+	if errors.Is(err, ErrMaxIterations) {
+		return true
 	}
 	return strings.Contains(err.Error(), "agent did not finish within")
 }

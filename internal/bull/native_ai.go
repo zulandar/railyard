@@ -85,7 +85,7 @@ func (a *NativeAI) RunPrompt(ctx context.Context, prompt string) (string, error)
 	// FinalText is a synthesized placeholder, not a triage result. Surface it as
 	// an error so the caller doesn't try to parse a non-decision.
 	if res.StopReason == agentloop.StopMaxIterations {
-		return "", fmt.Errorf("bull: native run prompt: agent did not finish within %d iterations", res.Iterations)
+		return "", fmt.Errorf("bull: native run prompt: %w (%d iterations)", agentloop.ErrMaxIterations, res.Iterations)
 	}
 	return strings.TrimSpace(res.FinalText), nil
 }

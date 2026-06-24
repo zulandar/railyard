@@ -64,6 +64,12 @@ type DaemonOpts struct {
 	// number. Not persisted across daemon restarts (deliberately: after a
 	// restart the model or config may have changed).
 	CapHitCounts map[int]int
+	// RevisedLabel is the yardmaster "revision pushed" label (e.g.
+	// "railyard: revised"). When set, the daemon removes it after reviewing so
+	// the yardmaster knows the latest pushed revision has been reviewed and can
+	// act on the fresh verdict without re-opening on a stale CHANGES_REQUESTED
+	// (railyard-1d0.5). Empty disables this coordination.
+	RevisedLabel string
 }
 
 // RunDaemon runs the inspect daemon loop: poll GitHub for reviewable PRs,
@@ -349,6 +355,15 @@ func reviewOnePR(
 		raw, err = opts.AI.RunPrompt(ctx, prompt)
 		if err != nil {
 			logger.Error("inspect: AI retry failed", "pr", prNum, "error", err)
+			// A cap hit on the retry leg is an iteration-cap hit, not a parse
+			// failure: route it through the cap-hit machinery (so it counts toward
+			// the terminal cap-hit-exhausted state) instead of posting a
+			// summary-only fallback COMMENT review (railyard-1d0.6).
+			if agentloop.IsMaxIterationsError(err) {
+				handleReviewError(ctx, client, logger, &opts, prNum, err)
+				releaseWithCleanup(ctx, client, store, logger, car.ID, prNum, labels)
+				return
+			}
 			submitFallbackReview(ctx, client, logger, prNum, raw)
 			releaseWithCleanup(ctx, client, store, logger, car.ID, prNum, labels)
 			return
@@ -394,6 +409,20 @@ func reviewOnePR(
 		logger.Error("inspect: submit review", "pr", prNum, "error", err)
 		releaseWithCleanup(ctx, client, store, logger, car.ID, prNum, labels)
 		return
+	}
+
+	// A successful review converged (no cap hit): clear any accumulated per-PR
+	// cap-hit count so stale partial counts don't carry into a future re-review
+	// and prematurely mark the PR cap-hit-exhausted (railyard-1d0.8).
+	delete(opts.CapHitCounts, prNum)
+
+	// The latest pushed revision has now been reviewed: clear the yardmaster
+	// "revised" marker so the yardmaster acts on this fresh verdict instead of
+	// looping reopen on a stale CHANGES_REQUESTED review (railyard-1d0.5).
+	if opts.RevisedLabel != "" {
+		if err := client.RemoveLabel(ctx, prNum, opts.RevisedLabel); err != nil {
+			logger.Warn("inspect: remove revised label", "pr", prNum, "error", err)
+		}
 	}
 
 	latency := time.Since(start)

@@ -82,5 +82,6 @@ func Start(ctx context.Context, opts StartOpts) error {
 		AI:           ai,
 		BotLogin:     botLogin,
 		Logger:       logger,
+		RevisedLabel: opts.Config.Yardmaster.RevisedLabel,
 	})
 }
