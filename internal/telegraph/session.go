@@ -2,6 +2,7 @@ package telegraph
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -342,7 +343,14 @@ func (sm *SessionManager) CloseSession(channelID, threadID string) error {
 
 	as.process.Close()
 	as.cancel()
-	return ReleaseLock(sm.db, as.dbSession.ID)
+
+	// The process-exit cleanup goroutine (monitorProcess) may release the lock
+	// first when Close above makes the process exit. An already-released session
+	// means the close succeeded, so don't surface that as an error.
+	if err := ReleaseLock(sm.db, as.dbSession.ID); err != nil && !errors.Is(err, ErrSessionNotActive) {
+		return err
+	}
+	return nil
 }
 
 // monitorProcess watches for process exit and cleans up the session.
