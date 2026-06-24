@@ -26,6 +26,7 @@ type StartResult struct {
 	YardmasterSession string
 	TelegraphSession  string // set when Telegraph=true
 	BullSession       string // set when bull.enabled=true
+	InspectSession    string // set when inspect.enabled=true
 	EngineSessions    []EngineSessionInfo
 }
 
@@ -140,6 +141,23 @@ func Start(opts StartOpts) (*StartResult, error) {
 			return nil, fmt.Errorf("orchestration: start bull: %w", err)
 		}
 		result.BullSession = bullSess
+	}
+
+	// Optional inspect (PR review) daemon session.
+	if opts.Config.Inspect.Enabled {
+		inspSess := InspectSession(owner)
+		if err := opts.Tmux.CreateSession(inspSess); err != nil {
+			cleanup()
+			return nil, fmt.Errorf("orchestration: create inspect session: %w", err)
+		}
+		createdSessions = append(createdSessions, inspSess)
+
+		inspCmd := fmt.Sprintf("ry inspect --config %s", opts.ConfigPath)
+		if err := opts.Tmux.SendKeys(inspSess, inspCmd); err != nil {
+			cleanup()
+			return nil, fmt.Errorf("orchestration: start inspect: %w", err)
+		}
+		result.InspectSession = inspSess
 	}
 
 	// Engine sessions — one per engine.

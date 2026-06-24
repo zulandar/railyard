@@ -659,6 +659,298 @@ func TestStart_ZeroEngineSlots(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Start tests: inspect daemon
+// ---------------------------------------------------------------------------
+
+func TestStart_WithInspect(t *testing.T) {
+	db := testDB(t)
+	m := &mockTmux{}
+	cfg := &config.Config{
+		Owner:   "test",
+		Tracks:  []config.TrackConfig{{Name: "backend", EngineSlots: 1}},
+		Inspect: config.InspectConfig{Enabled: true},
+	}
+	result, err := Start(StartOpts{
+		Config:     cfg,
+		ConfigPath: "/tmp/test.yaml",
+		DB:         db,
+		Tmux:       m,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.InspectSession == "" {
+		t.Error("inspect session should not be empty when inspect.enabled=true")
+	}
+	if result.InspectSession != InspectSession("test") {
+		t.Errorf("inspect session = %q, want %q", result.InspectSession, InspectSession("test"))
+	}
+	// 1 yardmaster + 1 inspect + 1 engine = 3 sessions, 3 send-keys.
+	if len(m.createdSessions) != 3 {
+		t.Errorf("created sessions = %d, want 3", len(m.createdSessions))
+	}
+	if len(m.sentKeys) != 3 {
+		t.Errorf("sent keys = %d, want 3", len(m.sentKeys))
+	}
+	// Verify inspect command was sent.
+	foundInspect := false
+	for _, k := range m.sentKeys {
+		if strings.Contains(k, "ry inspect --config") {
+			foundInspect = true
+		}
+	}
+	if !foundInspect {
+		t.Errorf("expected 'ry inspect --config' in sent keys: %v", m.sentKeys)
+	}
+}
+
+func TestStart_InspectDisabled(t *testing.T) {
+	db := testDB(t)
+	m := &mockTmux{}
+	cfg := &config.Config{
+		Owner:   "test",
+		Tracks:  []config.TrackConfig{{Name: "backend", EngineSlots: 1}},
+		Inspect: config.InspectConfig{Enabled: false},
+	}
+	result, err := Start(StartOpts{
+		Config:     cfg,
+		ConfigPath: "/tmp/test.yaml",
+		DB:         db,
+		Tmux:       m,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.InspectSession != "" {
+		t.Errorf("inspect session = %q, want empty (not enabled)", result.InspectSession)
+	}
+	// Only yardmaster + engine, no inspect.
+	if len(m.createdSessions) != 2 {
+		t.Errorf("created sessions = %d, want 2", len(m.createdSessions))
+	}
+}
+
+func TestStart_InspectCreateSessionError(t *testing.T) {
+	db := testDB(t)
+	m := &mockTmux{
+		createSessionFunc: func(name string) error {
+			if strings.Contains(name, "inspect") {
+				return fmt.Errorf("session create failed")
+			}
+			return nil
+		},
+	}
+	cfg := &config.Config{
+		Owner:   "test",
+		Tracks:  []config.TrackConfig{{Name: "a", EngineSlots: 1}},
+		Inspect: config.InspectConfig{Enabled: true},
+	}
+	_, err := Start(StartOpts{
+		Config:     cfg,
+		ConfigPath: "/tmp/test.yaml",
+		DB:         db,
+		Tmux:       m,
+	})
+	if err == nil {
+		t.Fatal("expected error for inspect session creation failure")
+	}
+	if !strings.Contains(err.Error(), "create inspect session") {
+		t.Errorf("error = %q, want to contain 'create inspect session'", err.Error())
+	}
+}
+
+func TestStart_InspectSendKeysError(t *testing.T) {
+	db := testDB(t)
+	m := &mockTmux{
+		sendKeysFunc: func(session, keys string) error {
+			if strings.Contains(keys, "ry inspect") {
+				return fmt.Errorf("send keys failed")
+			}
+			return nil
+		},
+	}
+	cfg := &config.Config{
+		Owner:   "test",
+		Tracks:  []config.TrackConfig{{Name: "a", EngineSlots: 1}},
+		Inspect: config.InspectConfig{Enabled: true},
+	}
+	_, err := Start(StartOpts{
+		Config:     cfg,
+		ConfigPath: "/tmp/test.yaml",
+		DB:         db,
+		Tmux:       m,
+	})
+	if err == nil {
+		t.Fatal("expected error for inspect send keys failure")
+	}
+	if !strings.Contains(err.Error(), "start inspect") {
+		t.Errorf("error = %q, want to contain 'start inspect'", err.Error())
+	}
+}
+
+func TestStart_InspectCleanupOnEngineFailure(t *testing.T) {
+	db := testDB(t)
+	callCount := 0
+	m := &mockTmux{
+		createSessionFunc: func(name string) error {
+			callCount++
+			// Fail on 3rd call (first engine; yardmaster=1, inspect=2).
+			if callCount >= 3 {
+				return fmt.Errorf("engine session failed")
+			}
+			return nil
+		},
+	}
+	cfg := &config.Config{
+		Owner:   "test",
+		Tracks:  []config.TrackConfig{{Name: "a", EngineSlots: 1}},
+		Inspect: config.InspectConfig{Enabled: true},
+	}
+	_, err := Start(StartOpts{
+		Config:     cfg,
+		ConfigPath: "/tmp/test.yaml",
+		DB:         db,
+		Tmux:       m,
+	})
+	if err == nil {
+		t.Fatal("expected error for engine session creation failure")
+	}
+	// Both yardmaster and inspect should be killed by cleanup.
+	if len(m.killedSessions) != 2 {
+		t.Errorf("killed sessions = %d, want 2 (yardmaster + inspect cleanup)", len(m.killedSessions))
+	}
+	// Verify inspect session was killed.
+	inspectKilled := false
+	for _, s := range m.killedSessions {
+		if strings.Contains(s, "inspect") {
+			inspectKilled = true
+		}
+	}
+	if !inspectKilled {
+		t.Error("inspect session should have been killed during cleanup")
+	}
+}
+
+func TestStart_InspectAndBullTogether(t *testing.T) {
+	db := testDB(t)
+	m := &mockTmux{}
+	cfg := &config.Config{
+		Owner:   "test",
+		Tracks:  []config.TrackConfig{{Name: "backend", EngineSlots: 1}},
+		Bull:    config.BullConfig{Enabled: true},
+		Inspect: config.InspectConfig{Enabled: true},
+	}
+	result, err := Start(StartOpts{
+		Config:     cfg,
+		ConfigPath: "/tmp/test.yaml",
+		DB:         db,
+		Tmux:       m,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.BullSession == "" {
+		t.Error("bull session should not be empty when bull.enabled=true")
+	}
+	if result.InspectSession == "" {
+		t.Error("inspect session should not be empty when inspect.enabled=true")
+	}
+	// 1 yardmaster + 1 bull + 1 inspect + 1 engine = 4 sessions.
+	if len(m.createdSessions) != 4 {
+		t.Errorf("created sessions = %d, want 4", len(m.createdSessions))
+	}
+	// Sessions order: yardmaster, bull, inspect, engine.
+	if m.createdSessions[0] != YardmasterSession("test") {
+		t.Errorf("session[0] = %q, want yardmaster", m.createdSessions[0])
+	}
+	if m.createdSessions[1] != BullSession("test") {
+		t.Errorf("session[1] = %q, want bull", m.createdSessions[1])
+	}
+	if m.createdSessions[2] != InspectSession("test") {
+		t.Errorf("session[2] = %q, want inspect", m.createdSessions[2])
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Stop tests: inspect session discovery
+// ---------------------------------------------------------------------------
+
+func TestStop_FindsInspectSession(t *testing.T) {
+	db := testDB(t)
+	// Create some engines.
+	db.Create(&models.Engine{ID: "eng-1", Track: "backend", Status: "idle"})
+
+	cfg := testConfig("test")
+	m := &mockTmux{
+		listSessionsFunc: func(prefix string) ([]string, error) {
+			return []string{
+				"railyard_test_yardmaster",
+				"railyard_test_eng000",
+				"railyard_test_inspect",
+			}, nil
+		},
+	}
+	err := Stop(StopOpts{DB: db, Config: cfg, Timeout: 1 * time.Millisecond, Tmux: m})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Should have sent C-c to 3 sessions.
+	if len(m.sentSignals) != 3 {
+		t.Errorf("sent signals = %d, want 3", len(m.sentSignals))
+	}
+	if len(m.killedSessions) != 3 {
+		t.Errorf("killed sessions = %d, want 3", len(m.killedSessions))
+	}
+	// Verify inspect session was killed.
+	inspectKilled := false
+	for _, s := range m.killedSessions {
+		if strings.Contains(s, "inspect") {
+			inspectKilled = true
+		}
+	}
+	if !inspectKilled {
+		t.Error("inspect session should have been killed by stop")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Status tests: inspect session reporting
+// ---------------------------------------------------------------------------
+
+func TestStatus_ReportsInspectSession(t *testing.T) {
+	db := testDB(t)
+	cfg := testConfig("test")
+	m := &mockTmux{
+		listSessionsFunc: func(prefix string) ([]string, error) {
+			return []string{
+				"railyard_test_yardmaster",
+				"railyard_test_inspect",
+				"railyard_test_eng000",
+			}, nil
+		},
+	}
+	info, err := Status(db, m, cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !info.SessionRunning {
+		t.Error("expected session running")
+	}
+	if len(info.ComponentSessions) != 3 {
+		t.Errorf("component sessions = %d, want 3", len(info.ComponentSessions))
+	}
+	inspectFound := false
+	for _, s := range info.ComponentSessions {
+		if strings.Contains(s, "inspect") {
+			inspectFound = true
+		}
+	}
+	if !inspectFound {
+		t.Error("inspect session should appear in component sessions")
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Stop tests
 // ---------------------------------------------------------------------------
 
@@ -1608,6 +1900,12 @@ func TestSessionNaming(t *testing.T) {
 	}
 	if got := DispatchSession("testuser"); got != "railyard_testuser_dispatch" {
 		t.Errorf("DispatchSession = %q, want railyard_testuser_dispatch", got)
+	}
+	if got := BullSession("testuser"); got != "railyard_testuser_bull" {
+		t.Errorf("BullSession = %q, want railyard_testuser_bull", got)
+	}
+	if got := InspectSession("testuser"); got != "railyard_testuser_inspect" {
+		t.Errorf("InspectSession = %q, want railyard_testuser_inspect", got)
 	}
 }
 
