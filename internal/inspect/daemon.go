@@ -88,6 +88,14 @@ func RunDaemon(ctx context.Context, client DaemonClient, store DaemonStore, opts
 		"deep_review", opts.Config.DeepReview,
 	)
 
+	// Initialize CapHitCounts so that the shared map reference survives value
+	// copies through the call chain (reviewCycle -> reviewOnePR ->
+	// handleReviewError). Without this, handleReviewError's make() operates on
+	// a local copy and the counter resets every poll cycle.
+	if opts.CapHitCounts == nil {
+		opts.CapHitCounts = make(map[int]int)
+	}
+
 	// Start health server in a background goroutine.
 	hs := NewHealthServer(opts.PollInterval)
 	go func() {
