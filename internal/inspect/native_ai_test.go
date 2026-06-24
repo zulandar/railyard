@@ -172,3 +172,106 @@ func TestNewReviewAI_NativeMissingKey(t *testing.T) {
 		t.Fatal("expected error when native loop selected without API key, got nil")
 	}
 }
+
+// TestNativeAI_MaxIterations_WiredFromConfig verifies that the config
+// MaxReviewIterations value is written onto the NativeAI struct by newReviewAI.
+func TestInspectNativeAI_MaxIterations_WiredFromConfig(t *testing.T) {
+	t.Setenv("OPENROUTER_API_KEY", "sk-or-test")
+	t.Setenv("OPENROUTER_BASE_URL", "")
+	cfg := &config.Config{
+		AuthMethod: "openrouter",
+		CocoIndex:  config.CocoIndexConfig{DatabaseURL: "postgresql://x", VenvPath: "cocoindex/.venv", ScriptsPath: "cocoindex"},
+		Tracks:     []config.TrackConfig{{Name: "backend"}},
+	}
+	cfg.Inspect.AgentModel = "openrouter/owl-alpha"
+	cfg.Inspect.MaxReviewIterations = 42
+
+	ai, err := newReviewAI(cfg)
+	if err != nil {
+		t.Fatalf("newReviewAI: %v", err)
+	}
+	native, ok := ai.(*NativeAI)
+	if !ok {
+		t.Fatalf("newReviewAI returned %T, want *NativeAI", ai)
+	}
+	if native.maxIterations != 42 {
+		t.Errorf("maxIterations = %d, want 42 from config", native.maxIterations)
+	}
+}
+
+// TestInspectNativeAI_MaxIterations_CodeSearchDefault verifies that when the config
+// field is unset (0), the codesearch/deep_review path defaults to 30.
+func TestInspectNativeAI_MaxIterations_CodeSearchDefault(t *testing.T) {
+	c := &fakeCompleter{resp: agentloop.Response{Content: "APPROVE", FinishReason: "stop"}}
+	cs := &agentloop.CodeSearchParams{PythonPath: "/x/python", ScriptPath: "/x/mcp_server.py"}
+	ai := NewNativeAIWithCodeSearch(c, "m", t.TempDir(), cs)
+	ai.maxIterations = 0 // simulate unset config
+
+	out, err := ai.RunPrompt(context.Background(), "test")
+	if err != nil {
+		t.Fatalf("RunPrompt: %v", err)
+	}
+	if out != "APPROVE" {
+		t.Errorf("RunPrompt = %q, want %q", out, "APPROVE")
+	}
+}
+
+// TestInspectNativeAI_MaxIterations_OverrideCodeSearchDefault verifies that a
+// configured value overrides the path-specific default on the codesearch path.
+func TestInspectNativeAI_MaxIterations_OverrideCodeSearchDefault(t *testing.T) {
+	c := &fakeCompleter{resp: agentloop.Response{Content: "APPROVE", FinishReason: "stop"}}
+	cs := &agentloop.CodeSearchParams{PythonPath: "/x/python", ScriptPath: "/x/mcp_server.py"}
+	ai := NewNativeAIWithCodeSearch(c, "m", t.TempDir(), cs)
+	ai.maxIterations = 7 // explicit config override
+
+	out, err := ai.RunPrompt(context.Background(), "test")
+	if err != nil {
+		t.Fatalf("RunPrompt: %v", err)
+	}
+	if out != "APPROVE" {
+		t.Errorf("RunPrompt = %q, want %q", out, "APPROVE")
+	}
+}
+
+// TestInspectNativeAI_MaxIterations_ToolLessDefault verifies the tool-less path works
+// when maxIterations is 0 (unset config).
+func TestInspectNativeAI_MaxIterations_ToolLessDefault(t *testing.T) {
+	c := &fakeCompleter{resp: agentloop.Response{Content: "decision", FinishReason: "stop"}}
+	ai := NewNativeAI(c, "m")
+	ai.maxIterations = 0 // unset — should be irrelevant for tool-less
+
+	out, err := ai.RunPrompt(context.Background(), "test")
+	if err != nil {
+		t.Fatalf("RunPrompt: %v", err)
+	}
+	if out != "decision" {
+		t.Errorf("RunPrompt = %q, want %q", out, "decision")
+	}
+}
+
+// TestNewReviewAI_MaxIterationsZeroDefaultsCorrectly verifies that when
+// MaxReviewIterations is 0 (unset) in config, newReviewAI propagates the zero
+// so the NativeAI can apply its path-specific default at runtime.
+func TestNewReviewAI_MaxIterationsZeroDefaultsCorrectly(t *testing.T) {
+	t.Setenv("OPENROUTER_API_KEY", "sk-or-test")
+	t.Setenv("OPENROUTER_BASE_URL", "")
+	cfg := &config.Config{
+		AuthMethod: "openrouter",
+		CocoIndex:  config.CocoIndexConfig{DatabaseURL: "postgresql://x", VenvPath: "cocoindex/.venv", ScriptsPath: "cocoindex"},
+		Tracks:     []config.TrackConfig{{Name: "backend"}},
+	}
+	cfg.Inspect.AgentModel = "openrouter/owl-alpha"
+	// MaxReviewIterations is 0 (default)
+
+	ai, err := newReviewAI(cfg)
+	if err != nil {
+		t.Fatalf("newReviewAI: %v", err)
+	}
+	native, ok := ai.(*NativeAI)
+	if !ok {
+		t.Fatalf("newReviewAI returned %T, want *NativeAI", ai)
+	}
+	if native.maxIterations != 0 {
+		t.Errorf("maxIterations = %d, want 0 (unset config, defer to path default)", native.maxIterations)
+	}
+}

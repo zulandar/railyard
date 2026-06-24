@@ -325,7 +325,7 @@ func reviewOnePR(
 	raw, err := opts.AI.RunPrompt(ctx, prompt)
 	if err != nil {
 		logger.Error("inspect: AI prompt failed", "pr", prNum, "error", err)
-		if agentloop.IsMaxIterationsError(err) && handleReviewError(ctx, client, logger, &opts, prNum, labels, err) {
+		if agentloop.IsMaxIterationsError(err) && handleReviewError(ctx, client, logger, &opts, prNum, err) {
 			// Terminal: cap-hit attempts exhausted. Release claim and stop.
 			releaseWithCleanup(ctx, client, store, logger, car.ID, prNum, labels)
 			return
@@ -456,6 +456,10 @@ func handleReviewError(
 	// (network, API, etc.) are not cap-hit related.
 	if !agentloop.IsMaxIterationsError(err) {
 		return false
+	}
+
+	if logger == nil {
+		logger = slog.Default()
 	}
 
 	if opts.CapHitCounts == nil {

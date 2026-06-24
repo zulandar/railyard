@@ -403,6 +403,11 @@ bull:
     inProgress: "bull: in progress"
     fixMerged: "bull: fix merged"
     ignore: "bull: ignore"
+  # -- Maximum agent-loop tool-calling rounds per triage run. When unset (0),
+  # the native loop defaults to 30 iterations on the codesearch path and 16 on
+  # the tool-less one-shot path. Hitting the cap surfaces as an error; Bull
+  # retries up to 3 times via its internal retry queue.
+  maxTriageIterations: 0
 
 # ---------------------------------------------------------------------------
 # Inspection Pit (automated PR code review)
@@ -435,6 +440,14 @@ inspect:
     inProgress: "inspect: in-progress"
     reviewed: "inspect: reviewed"
     reReview: "inspect: re-review"
+  # -- Maximum agent-loop tool-calling rounds per review run. When unset (0),
+  # the native loop defaults to 30 iterations on the codesearch/deep_review path
+  # and 16 on the tool-less one-shot path. Hitting the cap triggers per-PR
+  # attempt tracking — after 3 consecutive cap hits the daemon stops re-reviewing
+  # the PR and applies an "inspect: cap-hit-exhausted" label. Raise this value
+  # when deep_review codesearch and read_file calls need more headroom to
+  # converge.
+  maxReviewIterations: 0
 
 # ---------------------------------------------------------------------------
 # Network policies

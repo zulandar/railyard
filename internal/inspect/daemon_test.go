@@ -3,6 +3,7 @@ package inspect
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -156,9 +157,13 @@ func (m *mockStore) UpdateCarStatus(_ context.Context, _ string, _ string) error
 
 type mockAI struct {
 	response string
+	err      error
 }
 
 func (m *mockAI) RunPrompt(_ context.Context, _ string) (string, error) {
+	if m.err != nil {
+		return "", m.err
+	}
 	return m.response, nil
 }
 
@@ -187,6 +192,9 @@ func TestStart_NotEnabled(t *testing.T) {
 	}
 }
 
+// TestRunDaemon_SingleCycle tests a complete review cycle that processes one
+// car/PR pair end-to-end: car is claimed, review is submitted, and labels are
+// managed.
 func TestRunDaemon_SingleCycle(t *testing.T) {
 	// Build a valid AI response.
 	result := ReviewResult{
@@ -278,5 +286,204 @@ func TestRunDaemon_SingleCycle(t *testing.T) {
 	}
 	if !store.released {
 		t.Error("expected car to be released after review")
+	}
+}
+
+// maxIterationsErr returns an error that agentloop.IsMaxIterationsError will
+// recognize as an iteration-cap hit. Used by tests that exercise the daemon's
+// cap-hit bounding machinery.
+func maxIterationsErr(iter int) error {
+	return fmt.Errorf("inspect: native run prompt: agent did not finish within %d iterations", iter)
+}
+
+func TestHandleReviewError_TracksCapHits(t *testing.T) {
+	client := newMockClient()
+	opts := &DaemonOpts{}
+	ctx := context.Background()
+	prNum := 99
+
+	// First cap hit: should not be terminal.
+	term := handleReviewError(ctx, client, nil, opts, prNum, maxIterationsErr(16))
+	if term {
+		t.Error("first cap hit should not be terminal")
+	}
+	if opts.CapHitCounts[prNum] != 1 {
+		t.Errorf("CapHitCounts[%d] = %d, want 1", prNum, opts.CapHitCounts[prNum])
+	}
+
+	// Second cap hit: still not terminal.
+	term = handleReviewError(ctx, client, nil, opts, prNum, maxIterationsErr(16))
+	if term {
+		t.Error("second cap hit should not be terminal")
+	}
+	if opts.CapHitCounts[prNum] != 2 {
+		t.Errorf("CapHitCounts[%d] = %d, want 2", prNum, opts.CapHitCounts[prNum])
+	}
+
+	// Third (final) cap hit: terminal, applies label.
+	term = handleReviewError(ctx, client, nil, opts, prNum, maxIterationsErr(16))
+	if !term {
+		t.Error("third cap hit should be terminal")
+	}
+	if opts.CapHitCounts[prNum] != 3 {
+		t.Errorf("CapHitCounts[%d] = %d, want 3", prNum, opts.CapHitCounts[prNum])
+	}
+
+	// Verify the terminal label was applied.
+	has, err := client.PRHasLabel(ctx, prNum, inspectCapHitExhaustedLabel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !has {
+		t.Errorf("expected terminal label %q to be applied", inspectCapHitExhaustedLabel)
+	}
+}
+
+func TestHandleReviewError_NonCapHitIgnored(t *testing.T) {
+	client := newMockClient()
+	opts := &DaemonOpts{}
+	ctx := context.Background()
+	prNum := 99
+
+	// A non-cap-hit error (e.g., network) should not increment the counter.
+	err := fmt.Errorf("network timeout")
+	term := handleReviewError(ctx, client, nil, opts, prNum, err)
+	if term {
+		t.Error("non-cap-hit error should not be terminal")
+	}
+	if opts.CapHitCounts[prNum] != 0 {
+		t.Errorf("CapHitCounts[%d] = %d, want 0 for non-cap-hit error", prNum, opts.CapHitCounts[prNum])
+	}
+}
+
+func TestHandleReviewError_NilCapHitCounts(t *testing.T) {
+	client := newMockClient()
+	opts := &DaemonOpts{CapHitCounts: nil} // explicitly nil
+	ctx := context.Background()
+	prNum := 99
+
+	term := handleReviewError(ctx, client, nil, opts, prNum, maxIterationsErr(16))
+	if term {
+		t.Error("first cap hit with nil map should not be terminal")
+	}
+	if opts.CapHitCounts[prNum] != 1 {
+		t.Errorf("CapHitCounts[%d] = %d, want 1 after first cap hit", prNum, opts.CapHitCounts[prNum])
+	}
+}
+
+func TestHandleReviewError_DifferentPRsTrackSeparately(t *testing.T) {
+	client := newMockClient()
+	opts := &DaemonOpts{}
+	ctx := context.Background()
+
+	// PR 1 hits cap twice (non-terminal).
+	handleReviewError(ctx, client, nil, opts, 1, maxIterationsErr(16))
+	handleReviewError(ctx, client, nil, opts, 1, maxIterationsErr(16))
+
+	// PR 2 hits cap once (non-terminal).
+	handleReviewError(ctx, client, nil, opts, 2, maxIterationsErr(16))
+
+	if opts.CapHitCounts[1] != 2 {
+		t.Errorf("CapHitCounts[1] = %d, want 2", opts.CapHitCounts[1])
+	}
+	if opts.CapHitCounts[2] != 1 {
+		t.Errorf("CapHitCounts[2] = %d, want 1", opts.CapHitCounts[2])
+	}
+
+	// PR 1 third hit: terminal.
+	term := handleReviewError(ctx, client, nil, opts, 1, maxIterationsErr(16))
+	if !term {
+		t.Error("PR 1 third hit should be terminal")
+	}
+
+	// PR 2 still at 1.
+	if opts.CapHitCounts[2] != 1 {
+		t.Errorf("CapHitCounts[2] = %d, want 1 (unaffected by PR 1)", opts.CapHitCounts[2])
+	}
+}
+
+func TestReviewCycle_SkipsCapHitExhaustedPR(t *testing.T) {
+	ai := &mockAI{response: "{}"} // won't be called because PR gets skipped
+
+	client := newMockClient()
+	client.prs = []*github.PullRequest{
+		{
+			Number: github.Ptr(42),
+			Head: &github.PullRequestBranch{
+				Ref: github.Ptr("ry/test-branch"),
+				SHA: github.Ptr("abc123"),
+			},
+			Title: github.Ptr("Test PR"),
+		},
+	}
+	client.files = []*github.CommitFile{
+		{
+			Filename: github.Ptr("main.go"),
+			Patch:    github.Ptr("@@ -1,3 +1,4 @@\n+new line"),
+			Changes:  github.Ptr(1),
+		},
+	}
+	client.fileContents["main.go"] = "package main\n\nfunc main() {}\n"
+	// Pre-set the terminal cap-hit-exhausted label.
+	client.labelsByPR[42] = map[string]bool{
+		inspectCapHitExhaustedLabel: true,
+	}
+
+	store := &mockStore{
+		cars: []models.Car{
+			{
+				ID:     "car-1",
+				Branch: "ry/test-branch",
+				Track:  "backend",
+				Status: "pr_open",
+			},
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opts := DaemonOpts{
+		Config: config.InspectConfig{
+			Enabled:         true,
+			PollIntervalSec: 1,
+			MaxDiffLines:    10000,
+			HealthPort:      0,
+			Labels: config.InspectLabelsConfig{
+				InProgress: "inspect: in-progress",
+				Reviewed:   "inspect: reviewed",
+				ReReview:   "inspect: re-review",
+			},
+		},
+		Tracks: []config.TrackConfig{
+			{Name: "backend", Language: "go"},
+		},
+		ReplicaID:    "test-replica",
+		PollInterval: 1 * time.Millisecond,
+		AI:           ai,
+		BotLogin:     "railyard-bot[bot]",
+		OnCycleEnd: func(cycle int) {
+			if cycle >= 1 {
+				cancel()
+			}
+		},
+	}
+
+	err := RunDaemon(ctx, client, store, opts)
+	if err != nil && err != context.Canceled {
+		t.Fatalf("RunDaemon returned unexpected error: %v", err)
+	}
+
+	// Car should NOT have been claimed because the PR was skipped.
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if store.claimedCar == "car-1" {
+		t.Error("car should not have been claimed for a cap-hit-exhausted PR")
+	}
+	// No review should have been submitted.
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	if client.submittedPR != 0 {
+		t.Errorf("no review should be submitted for cap-hit-exhausted PR, got PR %d", client.submittedPR)
 	}
 }
