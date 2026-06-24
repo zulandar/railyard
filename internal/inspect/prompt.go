@@ -47,7 +47,13 @@ const (
 
 // reviewEvent maps a review result to the GitHub review event the Inspection
 // Pit should submit. A review with actionable inline comments, or a
-// warning/critical overall severity, requests changes; anything else approves.
+// warning/critical overall severity, requests changes; a clean review (the
+// documented "info" severity with no comments) approves. Anything else — empty
+// or unrecognized severity with no comments — is treated as a degenerate result
+// (e.g. the model returned "{}") and yields a neutral COMMENT that carries no
+// verdict. This MUST NOT fail open to APPROVE: with auto_merge_on_approval a
+// false APPROVE would auto-merge unreviewed code (railyard-1d0.1).
+//
 // This is the verdict the yardmaster keys reopen/merge decisions off of, so it
 // must reflect whether the engine has real work left to do.
 func reviewEvent(r *ReviewResult) string {
@@ -57,8 +63,10 @@ func reviewEvent(r *ReviewResult) string {
 	switch strings.ToLower(r.Severity) {
 	case "warning", "critical":
 		return reviewEventRequestChanges
-	default:
+	case "info":
 		return reviewEventApprove
+	default:
+		return reviewEventComment
 	}
 }
 

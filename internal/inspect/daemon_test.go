@@ -409,6 +409,145 @@ func TestHandleReviewError_DifferentPRsTrackSeparately(t *testing.T) {
 	}
 }
 
+// scriptedAI returns a different (response, error) pair on each successive
+// RunPrompt call, so tests can drive the parse-failure retry path.
+type scriptedAI struct {
+	calls []struct {
+		resp string
+		err  error
+	}
+	n int
+}
+
+func (s *scriptedAI) RunPrompt(_ context.Context, _ string) (string, error) {
+	if s.n >= len(s.calls) {
+		return "", fmt.Errorf("scriptedAI: unexpected call %d", s.n)
+	}
+	c := s.calls[s.n]
+	s.n++
+	return c.resp, c.err
+}
+
+// runSingleReviewCycle wires up a one-shot RunDaemon cycle against PR 42 / car-1
+// with the given AI and starting cap-hit counts, returning the client/store so
+// the caller can assert on side effects. prep, if non-nil, mutates the client
+// before the cycle runs (e.g. to pre-seed labels).
+func runSingleReviewCycle(t *testing.T, ai ReviewAI, opts DaemonOpts, prep func(*mockClient)) (*mockClient, *mockStore) {
+	t.Helper()
+	client := newMockClient()
+	client.prs = []*github.PullRequest{
+		{
+			Number: github.Ptr(42),
+			Head:   &github.PullRequestBranch{Ref: github.Ptr("ry/test-branch"), SHA: github.Ptr("abc123")},
+			Title:  github.Ptr("Test PR"),
+		},
+	}
+	client.files = []*github.CommitFile{
+		{Filename: github.Ptr("main.go"), Patch: github.Ptr("@@ -1,3 +1,4 @@\n+new line"), Changes: github.Ptr(1)},
+	}
+	client.fileContents["main.go"] = "package main\n\nfunc main() {}\n"
+	if prep != nil {
+		prep(client)
+	}
+
+	store := &mockStore{cars: []models.Car{{ID: "car-1", Branch: "ry/test-branch", Track: "backend", Status: "pr_open"}}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opts.Config.Enabled = true
+	opts.Config.MaxDiffLines = 10000
+	opts.Config.HealthPort = 0
+	if opts.Config.Labels.InProgress == "" {
+		opts.Config.Labels = config.InspectLabelsConfig{
+			InProgress: "inspect: in-progress",
+			Reviewed:   "inspect: reviewed",
+			ReReview:   "inspect: re-review",
+		}
+	}
+	opts.Tracks = []config.TrackConfig{{Name: "backend", Language: "go"}}
+	opts.ReplicaID = "test-replica"
+	opts.PollInterval = 1 * time.Millisecond
+	opts.AI = ai
+	opts.BotLogin = "railyard-bot[bot]"
+	opts.OnCycleEnd = func(cycle int) {
+		if cycle >= 1 {
+			cancel()
+		}
+	}
+
+	if err := RunDaemon(ctx, client, store, opts); err != nil && err != context.Canceled {
+		t.Fatalf("RunDaemon returned unexpected error: %v", err)
+	}
+	return client, store
+}
+
+// TestReviewOnePR_ResetsCapHitsOnSuccess verifies a successful review clears the
+// per-PR cap-hit counter so stale partial counts don't accumulate across
+// re-reviews of the same PR (railyard-1d0.8).
+func TestReviewOnePR_ResetsCapHitsOnSuccess(t *testing.T) {
+	result := ReviewResult{Summary: "Looks good.", Severity: "info"}
+	resultJSON, _ := json.Marshal(result)
+	ai := &mockAI{response: string(resultJSON)}
+
+	opts := DaemonOpts{CapHitCounts: map[int]int{42: 2}}
+	_, _ = runSingleReviewCycle(t, ai, opts, nil)
+
+	if got := opts.CapHitCounts[42]; got != 0 {
+		t.Errorf("CapHitCounts[42] = %d after successful review, want 0 (reset)", got)
+	}
+}
+
+// TestReviewOnePR_RetryCapHitIsTracked verifies that when the first prompt
+// parses badly and the retry hits the iteration cap, the cap hit is counted via
+// the cap-hit machinery instead of being silently posted as a fallback COMMENT
+// review (railyard-1d0.6).
+func TestReviewOnePR_RetryCapHitIsTracked(t *testing.T) {
+	ai := &scriptedAI{calls: []struct {
+		resp string
+		err  error
+	}{
+		{resp: "not json at all", err: nil},   // first prompt: parse fails
+		{resp: "", err: maxIterationsErr(30)}, // retry: iteration cap hit
+	}}
+
+	opts := DaemonOpts{CapHitCounts: map[int]int{}}
+	client, _ := runSingleReviewCycle(t, ai, opts, nil)
+
+	if got := opts.CapHitCounts[42]; got != 1 {
+		t.Errorf("CapHitCounts[42] = %d, want 1 (retry-leg cap hit must be tracked)", got)
+	}
+	// A cap hit is not a parse failure: no fallback COMMENT review should be posted.
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	if client.submittedPR != 0 {
+		t.Errorf("no review should be submitted on a retry cap hit, got PR %d event %q", client.submittedPR, client.submittedEvent)
+	}
+}
+
+// TestReviewOnePR_ClearsRevisedLabel verifies the inspect daemon removes the
+// yardmaster "revised" label when it reviews, signalling that the latest pushed
+// revision has been reviewed so a fresh verdict can drive a reopen without the
+// stale-CHANGES_REQUESTED reopen loop (railyard-1d0.5).
+func TestReviewOnePR_ClearsRevisedLabel(t *testing.T) {
+	result := ReviewResult{Summary: "Looks good.", Severity: "info"}
+	resultJSON, _ := json.Marshal(result)
+	ai := &mockAI{response: string(resultJSON)}
+
+	opts := DaemonOpts{RevisedLabel: "railyard: revised"}
+	client, _ := runSingleReviewCycle(t, ai, opts, func(c *mockClient) {
+		c.labelsByPR[42] = map[string]bool{"railyard: revised": true}
+	})
+
+	has, err := client.PRHasLabel(context.Background(), 42, "railyard: revised")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if has {
+		t.Error("expected the revised label to be removed after a review")
+	}
+}
+
 func TestReviewCycle_SkipsCapHitExhaustedPR(t *testing.T) {
 	ai := &mockAI{response: "{}"} // won't be called because PR gets skipped
 

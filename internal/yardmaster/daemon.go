@@ -1156,10 +1156,19 @@ func effectiveReviewDecision(reviewDecision string, reviews []prReview) string {
 		return reviewDecision
 	}
 
-	// reviews are chronological; later reviews overwrite earlier ones per author.
+	// reviews are chronological. Per GitHub's algorithm, only APPROVED and
+	// CHANGES_REQUESTED carry a verdict: a later COMMENTED review must NOT
+	// supersede an author's standing verdict, and a DISMISSED review clears it
+	// (railyard-1d0.3).
 	latest := make(map[string]string, len(reviews))
 	for _, r := range reviews {
-		latest[r.Author] = r.State
+		switch r.State {
+		case "APPROVED", "CHANGES_REQUESTED":
+			latest[r.Author] = r.State
+		case "DISMISSED":
+			delete(latest, r.Author)
+		}
+		// COMMENTED and "" carry no verdict: leave the standing verdict unchanged.
 	}
 
 	approved := false
@@ -1528,6 +1537,17 @@ func handlePrOpenCars(db *gorm.DB, viewer PRViewer, autoMerge bool, repoDir, ymD
 			runPostMerge(db, c, logger)
 
 		case decision == "CHANGES_REQUESTED":
+			// If a revision is already pending review (the "revised" label is
+			// present), this CHANGES_REQUESTED verdict is stale: the engine has
+			// pushed a revision since the review, and the inspect daemon clears
+			// the revised label once it re-reviews. Re-opening now would loop the
+			// engine on already-addressed feedback every tick until the
+			// re-review lands (railyard-1d0.5).
+			if revisedLabel != "" && hasReworkLabel(status.Labels, revisedLabel) {
+				logger.Debug("PR changes requested but revision pending re-review, skipping reopen",
+					"car", c.ID)
+				continue
+			}
 			reopenCarWithFeedback(db, viewer, c, status.Reviews, revisedLabel, logger)
 			logger.Info("PR changes requested", "car", c.ID, "transition", "pr_open->open")
 
@@ -1581,8 +1601,25 @@ func reopenCarWithFeedback(db *gorm.DB, viewer PRViewer, c models.Car, reviews [
 		logger.Warn("Fetch comments error", "car", c.ID, "error", fetchErr)
 	}
 
-	note := formatReviewNote(reviews, inline, conversation)
+	note := formatReviewNote(changesRequestedReviews(reviews), inline, conversation)
 	writeProgressNote(db, c.ID, "yardmaster", note)
+}
+
+// changesRequestedReviews returns only the reviews whose bodies belong in a
+// "changes requested" rework note. A stale APPROVED body or a neutral
+// COMMENTED/DISMISSED body would contradict the rework instructions handed to
+// the engine, so those states are excluded; CHANGES_REQUESTED (and unset state)
+// are kept (railyard-1d0.9).
+func changesRequestedReviews(reviews []prReview) []prReview {
+	var out []prReview
+	for _, r := range reviews {
+		switch r.State {
+		case "APPROVED", "COMMENTED", "DISMISSED":
+			continue
+		}
+		out = append(out, r)
+	}
+	return out
 }
 
 // formatReviewNote builds a structured progress note from all PR feedback types.

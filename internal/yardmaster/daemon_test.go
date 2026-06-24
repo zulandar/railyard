@@ -2104,6 +2104,24 @@ func TestEffectiveReviewDecision(t *testing.T) {
 			want:           "",
 		},
 		{
+			name:           "later comment does not overwrite changes requested",
+			reviewDecision: "",
+			reviews: []prReview{
+				{State: "CHANGES_REQUESTED", Author: "inspect[bot]"},
+				{State: "COMMENTED", Author: "inspect[bot]"},
+			},
+			want: "CHANGES_REQUESTED",
+		},
+		{
+			name:           "later comment does not overwrite approval",
+			reviewDecision: "",
+			reviews: []prReview{
+				{State: "APPROVED", Author: "inspect[bot]"},
+				{State: "COMMENTED", Author: "inspect[bot]"},
+			},
+			want: "APPROVED",
+		},
+		{
 			name:           "dismissed review is ignored",
 			reviewDecision: "",
 			reviews: []prReview{
@@ -2873,6 +2891,114 @@ func TestReopenCarWithFeedback_ProgressNoteFormat(t *testing.T) {
 	}
 	if !strings.Contains(note, "Needs work") {
 		t.Errorf("note should contain review body, got:\n%s", note)
+	}
+}
+
+// TestHandlePrOpenCars_ChangesRequestedSkippedWhenRevisionPending verifies the
+// yardmaster does NOT re-open a car on a CHANGES_REQUESTED verdict while a
+// revision is already pending review (the "revised" label is present). Re-opening
+// then would loop the engine on already-addressed feedback until the inspect
+// daemon re-reviews and dismisses the stale review (railyard-1d0.5).
+func TestHandlePrOpenCars_ChangesRequestedSkippedWhenRevisionPending(t *testing.T) {
+	db := testDB(t)
+	db.Create(&models.Car{
+		ID:     "car-stale1",
+		Branch: "ry/backend/car-stale1",
+		Status: "pr_open",
+		Track:  "backend",
+	})
+
+	viewer := &mockPRViewer{
+		reviewDecision: "",
+		state:          "OPEN",
+		reviews:        []prReview{{State: "CHANGES_REQUESTED", Body: "fix it", Author: "inspect[bot]"}},
+		labels:         []string{"railyard: revised"},
+	}
+	cfg := &config.Config{}
+	cfg.Yardmaster.RevisedLabel = "railyard: revised"
+
+	var buf bytes.Buffer
+	logger := testLogger(&buf)
+	if err := handlePrOpenCars(db, viewer, false, "", "", cfg, logger); err != nil {
+		t.Fatalf("handlePrOpenCars: %v", err)
+	}
+
+	var c models.Car
+	db.First(&c, "id = ?", "car-stale1")
+	if c.Status != "pr_open" {
+		t.Errorf("status = %q, want %q (stale CHANGES_REQUESTED with revision pending must not reopen)", c.Status, "pr_open")
+	}
+}
+
+// TestHandlePrOpenCars_ChangesRequestedReopensWhenNoRevisionPending is the
+// control for the staleness guard: with no "revised" label present, a
+// CHANGES_REQUESTED verdict still reopens the car (railyard-1d0.5).
+func TestHandlePrOpenCars_ChangesRequestedReopensWhenNoRevisionPending(t *testing.T) {
+	db := testDB(t)
+	db.Create(&models.Car{
+		ID:     "car-fresh1",
+		Branch: "ry/backend/car-fresh1",
+		Status: "pr_open",
+		Track:  "backend",
+	})
+
+	viewer := &mockPRViewer{
+		reviewDecision: "",
+		state:          "OPEN",
+		reviews:        []prReview{{State: "CHANGES_REQUESTED", Body: "fix it", Author: "inspect[bot]"}},
+	}
+	cfg := &config.Config{}
+	cfg.Yardmaster.RevisedLabel = "railyard: revised"
+
+	var buf bytes.Buffer
+	logger := testLogger(&buf)
+	if err := handlePrOpenCars(db, viewer, false, "", "", cfg, logger); err != nil {
+		t.Fatalf("handlePrOpenCars: %v", err)
+	}
+
+	var c models.Car
+	db.First(&c, "id = ?", "car-fresh1")
+	if c.Status != "open" {
+		t.Errorf("status = %q, want %q (fresh CHANGES_REQUESTED must reopen)", c.Status, "open")
+	}
+}
+
+// TestReopenCarWithFeedback_ExcludesNonChangesRequestedReviewBodies verifies the
+// rework note only carries CHANGES_REQUESTED review bodies — a stale APPROVED or
+// neutral COMMENTED body would contradict the "changes requested" instructions
+// handed to the engine (railyard-1d0.9).
+func TestReopenCarWithFeedback_ExcludesNonChangesRequestedReviewBodies(t *testing.T) {
+	db := testDB(t)
+	db.Create(&models.Car{
+		ID:     "car-filter1",
+		Branch: "ry/backend/car-filter1",
+		Status: "pr_open",
+	})
+
+	viewer := &mockPRViewer{}
+	var buf bytes.Buffer
+	logger := testLogger(&buf)
+	reviews := []prReview{
+		{State: "APPROVED", Body: "Looks good, merge when ready", Author: "inspect[bot]"},
+		{State: "COMMENTED", Body: "just a thought", Author: "inspect[bot]"},
+		{State: "CHANGES_REQUESTED", Body: "fix the nil deref", Author: "inspect[bot]"},
+	}
+	reopenCarWithFeedback(db, viewer, models.Car{ID: "car-filter1", Branch: "ry/backend/car-filter1"}, reviews, "", logger)
+
+	var notes []models.CarProgress
+	db.Where("car_id = ?", "car-filter1").Find(&notes)
+	if len(notes) == 0 {
+		t.Fatal("expected progress note")
+	}
+	note := notes[0].Note
+	if !strings.Contains(note, "fix the nil deref") {
+		t.Errorf("note should contain the CHANGES_REQUESTED body, got:\n%s", note)
+	}
+	if strings.Contains(note, "Looks good, merge when ready") {
+		t.Errorf("note must not contain the stale APPROVED body, got:\n%s", note)
+	}
+	if strings.Contains(note, "just a thought") {
+		t.Errorf("note must not contain the neutral COMMENTED body, got:\n%s", note)
 	}
 }
 

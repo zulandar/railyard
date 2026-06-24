@@ -152,9 +152,19 @@ func TestReviewEvent(t *testing.T) {
 			want:   reviewEventApprove,
 		},
 		{
-			name:   "empty severity approves",
+			name:   "empty severity does not approve (degenerate result)",
 			result: ReviewResult{Summary: "Nothing to flag."},
-			want:   reviewEventApprove,
+			want:   reviewEventComment,
+		},
+		{
+			name:   "empty json object does not approve",
+			result: ReviewResult{},
+			want:   reviewEventComment,
+		},
+		{
+			name:   "unrecognized severity does not approve",
+			result: ReviewResult{Summary: "huh", Severity: "bogus"},
+			want:   reviewEventComment,
 		},
 		{
 			name: "inline comments request changes",
