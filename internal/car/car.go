@@ -261,6 +261,50 @@ func List(db *gorm.DB, filters ListFilters) ([]models.Car, error) {
 	return cars, nil
 }
 
+// Search returns cars where query appears (case-insensitive) in Title,
+// Description, DesignNotes, or Acceptance, composable with ListFilters.
+// If limit <= 0, all matching rows are returned.
+func Search(db *gorm.DB, query string, filters ListFilters, limit int) ([]models.Car, error) {
+	if query == "" {
+		return List(db, filters)
+	}
+
+	q := db.Model(&models.Car{})
+
+	// Case-insensitive LIKE across text columns.
+	pattern := "%" + strings.ToLower(query) + "%"
+	q = q.Where(
+		"(LOWER(title) LIKE ? OR LOWER(description) LIKE ? OR LOWER(design_notes) LIKE ? OR LOWER(acceptance) LIKE ?)",
+		pattern, pattern, pattern, pattern,
+	)
+
+	if filters.Track != "" {
+		q = q.Where("track = ?", filters.Track)
+	}
+	if filters.Status != "" {
+		q = q.Where("status = ?", filters.Status)
+	}
+	if filters.Type != "" {
+		q = q.Where("type = ?", filters.Type)
+	}
+	if filters.Assignee != "" {
+		q = q.Where("assignee = ?", filters.Assignee)
+	}
+	if filters.ParentID != "" {
+		q = q.Where("parent_id = ?", filters.ParentID)
+	}
+
+	if limit > 0 {
+		q = q.Limit(limit)
+	}
+
+	var cars []models.Car
+	if err := q.Order("priority ASC, created_at ASC").Find(&cars).Error; err != nil {
+		return nil, fmt.Errorf("car: search: %w", err)
+	}
+	return cars, nil
+}
+
 // ErrConcurrentModification is returned by Update/UpdateWithBus when a status
 // change validated against a snapshot could not be applied because another
 // writer changed the car's status between the read and the write. Callers may

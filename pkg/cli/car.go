@@ -24,6 +24,7 @@ func newCarCmd() *cobra.Command {
 
 	cmd.AddCommand(newCarCreateCmd())
 	cmd.AddCommand(newCarListCmd())
+	cmd.AddCommand(newCarSearchCmd())
 	cmd.AddCommand(newCarShowCmd())
 	cmd.AddCommand(newCarUpdateCmd())
 	cmd.AddCommand(newCarDepCmd())
@@ -167,6 +168,116 @@ func runCarList(cmd *cobra.Command, configPath string, filters car.ListFilters) 
 	}
 
 	cars, err := car.List(gormDB, filters)
+	if err != nil {
+		return err
+	}
+
+	out := cmd.OutOrStdout()
+	if len(cars) == 0 {
+		fmt.Fprintln(out, "No cars found.")
+		return nil
+	}
+
+	// Build token and cycle maps.
+	ids := make([]string, len(cars))
+	for i, b := range cars {
+		ids[i] = b.ID
+	}
+	tokenMap, err := car.CarTokenMap(gormDB, ids)
+	if err != nil {
+		return err
+	}
+	cycleMap, err := car.CarCycleMap(gormDB, ids)
+	if err != nil {
+		return err
+	}
+
+	// Show BASE column only when cars target multiple base branches.
+	showBase := hasMultipleBaseBranches(cars)
+
+	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	if showBase {
+		fmt.Fprintln(w, "ID\tTITLE\tSTATUS\tTRACK\tBASE\tPRI\tASSIGNEE\tTOKENS\tCYCLES")
+	} else {
+		fmt.Fprintln(w, "ID\tTITLE\tSTATUS\tTRACK\tPRI\tASSIGNEE\tTOKENS\tCYCLES")
+	}
+	for _, b := range cars {
+		a := b.Assignee
+		if a == "" {
+			a = "-"
+		}
+		base := b.BaseBranch
+		if base == "" {
+			base = "main"
+		}
+		tokens := "-"
+		if ts, ok := tokenMap[b.ID]; ok && ts.TotalTokens > 0 {
+			tokens = formatTokenCount(ts.TotalTokens)
+		}
+		cycles := "-"
+		if cs, ok := cycleMap[b.ID]; ok && cs.TotalCycles > 0 {
+			cycles = fmt.Sprintf("%d", cs.TotalCycles)
+		}
+		if showBase {
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\n",
+				b.ID, truncate(b.Title, 40), b.Status, b.Track, base, b.Priority, a, tokens, cycles)
+		} else {
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\n",
+				b.ID, truncate(b.Title, 40), b.Status, b.Track, b.Priority, a, tokens, cycles)
+		}
+	}
+	w.Flush()
+	return nil
+}
+
+func newCarSearchCmd() *cobra.Command {
+	var (
+		configPath string
+		track      string
+		status     string
+		carType    string
+		assignee   string
+		parentID   string
+		limit      int
+	)
+
+	cmd := &cobra.Command{
+		Use:   "search <query>",
+		Short: "Search cars by keyword",
+		Long: `Search cars with a case-insensitive keyword match across Title, Description,
+Design Notes, and Acceptance criteria. Results are formatted as a table, same as 'ry car list'.
+
+Composes with the standard filter flags: --track, --status, --type, --assignee, --parent.
+Use --limit to cap the result set.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runCarSearch(cmd, configPath, args[0], car.ListFilters{
+				Track:    track,
+				Status:   status,
+				Type:     carType,
+				Assignee: assignee,
+				ParentID: parentID,
+			}, limit)
+		},
+	}
+
+	cmd.Flags().StringVarP(&configPath, "config", "c", "railyard.yaml", "path to Railyard config file")
+	cmd.Flags().StringVar(&track, "track", "", "filter by track")
+	cmd.Flags().StringVar(&status, "status", "", "filter by status")
+	cmd.Flags().StringVar(&carType, "type", "", "filter by type")
+	cmd.Flags().StringVar(&assignee, "assignee", "", "filter by assignee")
+	cmd.Flags().StringVar(&parentID, "parent", "", "filter by parent epic ID")
+	cmd.Flags().IntVar(&limit, "limit", 0, "maximum number of results (0 = unlimited)")
+	return cmd
+}
+
+func runCarSearch(cmd *cobra.Command, configPath, query string, filters car.ListFilters, limit int) error {
+	_, gormDB, err := connectFromConfig(configPath)
+	if err != nil {
+		return err
+	}
+
+	cars, err := car.Search(gormDB, query, filters, limit)
 	if err != nil {
 		return err
 	}

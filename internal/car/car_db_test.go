@@ -1073,3 +1073,299 @@ func TestCreateWithBus_RetriesOnDuplicateID(t *testing.T) {
 		t.Errorf("generateID calls = %d, want >= 2 (retry happened)", calls)
 	}
 }
+
+// --- Search tests ---
+
+func TestSearch_TitleMatch(t *testing.T) {
+	db := testDB(t)
+
+	createCar(t, db, CreateOpts{Title: "Implement login", Track: "backend"})
+	createCar(t, db, CreateOpts{Title: "Fix button", Track: "frontend"})
+	createCar(t, db, CreateOpts{Title: "Add logging", Track: "backend"})
+
+	cars, err := Search(db, "login", ListFilters{}, 0)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(cars) != 1 {
+		t.Fatalf("Search login: got %d, want 1", len(cars))
+	}
+	if cars[0].Title != "Implement login" {
+		t.Errorf("Title = %q, want %q", cars[0].Title, "Implement login")
+	}
+}
+
+func TestSearch_DescriptionMatch(t *testing.T) {
+	db := testDB(t)
+
+	createCar(t, db, CreateOpts{Title: "Task A", Description: "deploy pipeline for staging", Track: "backend"})
+	createCar(t, db, CreateOpts{Title: "Task B", Description: "update readme", Track: "backend"})
+
+	cars, err := Search(db, "pipeline", ListFilters{}, 0)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(cars) != 1 {
+		t.Fatalf("Search pipeline: got %d, want 1", len(cars))
+	}
+	if cars[0].Title != "Task A" {
+		t.Errorf("Title = %q, want %q", cars[0].Title, "Task A")
+	}
+}
+
+func TestSearch_DesignNotesMatch(t *testing.T) {
+	db := testDB(t)
+
+	createCar(t, db, CreateOpts{Title: "Design car", DesignNotes: "use redis for caching", Track: "backend"})
+	createCar(t, db, CreateOpts{Title: "Plain car", Track: "backend"})
+
+	cars, err := Search(db, "redis", ListFilters{}, 0)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(cars) != 1 {
+		t.Fatalf("Search redis: got %d, want 1", len(cars))
+	}
+	if cars[0].Title != "Design car" {
+		t.Errorf("Title = %q, want %q", cars[0].Title, "Design car")
+	}
+}
+
+func TestSearch_AcceptanceMatch(t *testing.T) {
+	db := testDB(t)
+
+	createCar(t, db, CreateOpts{Title: "Accept car", Acceptance: "user can reset password", Track: "backend"})
+	createCar(t, db, CreateOpts{Title: "Plain car", Track: "backend"})
+
+	cars, err := Search(db, "reset", ListFilters{}, 0)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(cars) != 1 {
+		t.Fatalf("Search reset: got %d, want 1", len(cars))
+	}
+	if cars[0].Title != "Accept car" {
+		t.Errorf("Title = %q, want %q", cars[0].Title, "Accept car")
+	}
+}
+
+func TestSearch_CaseInsensitive(t *testing.T) {
+	db := testDB(t)
+
+	createCar(t, db, CreateOpts{Title: "UPPERCASE TITLE", Track: "backend"})
+	createCar(t, db, CreateOpts{Title: "lowercase title", Track: "backend"})
+
+	cars, err := Search(db, "UPPERCASE", ListFilters{}, 0)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(cars) != 1 {
+		t.Fatalf("Search UPPERCASE: got %d, want 1", len(cars))
+	}
+	if cars[0].Title != "UPPERCASE TITLE" {
+		t.Errorf("Title = %q, want %q", cars[0].Title, "UPPERCASE TITLE")
+	}
+
+	cars, err = Search(db, "lowercase", ListFilters{}, 0)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(cars) != 1 {
+		t.Fatalf("Search lowercase: got %d, want 1", len(cars))
+	}
+	if cars[0].Title != "lowercase title" {
+		t.Errorf("Title = %q, want %q", cars[0].Title, "lowercase title")
+	}
+
+	// Mixed case query should match both.
+	cars, err = Search(db, "Title", ListFilters{}, 0)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(cars) != 2 {
+		t.Fatalf("Search Title: got %d, want 2", len(cars))
+	}
+}
+
+func TestSearch_MultipleMatches(t *testing.T) {
+	db := testDB(t)
+
+	createCar(t, db, CreateOpts{Title: "Add auth module", Track: "backend"})
+	createCar(t, db, CreateOpts{Title: "Fix auth bug", Track: "backend"})
+	createCar(t, db, CreateOpts{Title: "Update docs", Track: "backend"})
+
+	cars, err := Search(db, "auth", ListFilters{}, 0)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(cars) != 2 {
+		t.Fatalf("Search auth: got %d, want 2", len(cars))
+	}
+}
+
+func TestSearch_NoMatch(t *testing.T) {
+	db := testDB(t)
+
+	createCar(t, db, CreateOpts{Title: "Add auth", Track: "backend"})
+	createCar(t, db, CreateOpts{Title: "Fix bug", Track: "frontend"})
+
+	cars, err := Search(db, "nonexistent", ListFilters{}, 0)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(cars) != 0 {
+		t.Errorf("Search nonexistent: got %d, want 0", len(cars))
+	}
+}
+
+func TestSearch_EmptyQueryFallsBackToList(t *testing.T) {
+	db := testDB(t)
+
+	createCar(t, db, CreateOpts{Title: "Car 1", Track: "backend"})
+	createCar(t, db, CreateOpts{Title: "Car 2", Track: "frontend"})
+
+	cars, err := Search(db, "", ListFilters{}, 0)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(cars) != 2 {
+		t.Errorf("Search empty: got %d, want 2", len(cars))
+	}
+}
+
+func TestSearch_WithLimit(t *testing.T) {
+	db := testDB(t)
+
+	createCar(t, db, CreateOpts{Title: "Auth 1", Track: "backend", Priority: 0})
+	createCar(t, db, CreateOpts{Title: "Auth 2", Track: "backend", Priority: 1})
+	createCar(t, db, CreateOpts{Title: "Auth 3", Track: "backend", Priority: 2})
+
+	cars, err := Search(db, "auth", ListFilters{}, 2)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(cars) != 2 {
+		t.Fatalf("Search auth limit 2: got %d, want 2", len(cars))
+	}
+
+	// Verify that without limit we get all 3.
+	all, err := Search(db, "auth", ListFilters{}, 0)
+	if err != nil {
+		t.Fatalf("Search all: %v", err)
+	}
+	if len(all) != 3 {
+		t.Fatalf("Search auth no limit: got %d, want 3", len(all))
+	}
+}
+
+func TestSearch_WithFilters(t *testing.T) {
+	db := testDB(t)
+
+	createCar(t, db, CreateOpts{Title: "Auth backend", Track: "backend", Type: "task"})
+	createCar(t, db, CreateOpts{Title: "Auth frontend", Track: "frontend", Type: "task"})
+	createCar(t, db, CreateOpts{Title: "Auth epic", Track: "backend", Type: "epic"})
+
+	// Filter by track.
+	cars, err := Search(db, "auth", ListFilters{Track: "backend"}, 0)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(cars) != 2 {
+		t.Fatalf("Search auth track=backend: got %d, want 2", len(cars))
+	}
+
+	// Filter by type.
+	cars, err = Search(db, "auth", ListFilters{Type: "epic"}, 0)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(cars) != 1 {
+		t.Fatalf("Search auth type=epic: got %d, want 1", len(cars))
+	}
+	if cars[0].Title != "Auth epic" {
+		t.Errorf("Title = %q, want %q", cars[0].Title, "Auth epic")
+	}
+}
+
+func TestSearch_WithParentFilter(t *testing.T) {
+	db := testDB(t)
+
+	epic := createCar(t, db, CreateOpts{Title: "Parent epic", Track: "backend", Type: "epic"})
+	createCar(t, db, CreateOpts{Title: "Child auth task", Track: "backend", ParentID: epic.ID})
+	createCar(t, db, CreateOpts{Title: "Orphan auth task", Track: "backend"})
+
+	cars, err := Search(db, "auth", ListFilters{ParentID: epic.ID}, 0)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(cars) != 1 {
+		t.Fatalf("Search auth parentID: got %d, want 1", len(cars))
+	}
+	if cars[0].Title != "Child auth task" {
+		t.Errorf("Title = %q, want %q", cars[0].Title, "Child auth task")
+	}
+}
+
+func TestSearch_DBError(t *testing.T) {
+	db := closedDB(t)
+	_, err := Search(db, "test", ListFilters{}, 0)
+	if err == nil {
+		t.Fatal("expected error from Search with closed DB")
+	}
+	if !strings.Contains(err.Error(), "car: search") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "car: search")
+	}
+}
+
+func TestSearch_PartialMatch(t *testing.T) {
+	db := testDB(t)
+
+	createCar(t, db, CreateOpts{Title: "Authentication module", Track: "backend"})
+	createCar(t, db, CreateOpts{Title: "Authorization check", Track: "backend"})
+
+	// "auth" should match both as a partial substring.
+	cars, err := Search(db, "auth", ListFilters{}, 0)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(cars) != 2 {
+		t.Fatalf("Search auth: got %d, want 2", len(cars))
+	}
+
+	// "enti" should match only "Authentication".
+	cars, err = Search(db, "enti", ListFilters{}, 0)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(cars) != 1 {
+		t.Fatalf("Search enti: got %d, want 1", len(cars))
+	}
+	if cars[0].Title != "Authentication module" {
+		t.Errorf("Title = %q, want %q", cars[0].Title, "Authentication module")
+	}
+}
+
+func TestSearch_OrderByPriorityThenCreated(t *testing.T) {
+	db := testDB(t)
+
+	createCar(t, db, CreateOpts{Title: "Auth low", Track: "backend", Priority: 4})
+	createCar(t, db, CreateOpts{Title: "Auth high", Track: "backend", Priority: 0})
+	createCar(t, db, CreateOpts{Title: "Auth med", Track: "backend", Priority: 2})
+
+	cars, err := Search(db, "auth", ListFilters{}, 0)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(cars) != 3 {
+		t.Fatalf("Search: got %d, want 3", len(cars))
+	}
+	if cars[0].Title != "Auth high" {
+		t.Errorf("first = %q, want %q", cars[0].Title, "Auth high")
+	}
+	if cars[1].Title != "Auth med" {
+		t.Errorf("second = %q, want %q", cars[1].Title, "Auth med")
+	}
+	if cars[2].Title != "Auth low" {
+		t.Errorf("third = %q, want %q", cars[2].Title, "Auth low")
+	}
+}
