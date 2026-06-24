@@ -12,11 +12,6 @@ import (
 	"github.com/zulandar/railyard/internal/engine"
 )
 
-// nativeReviewMaxIterationsDefault is the fallback iteration cap for the
-// tool-less one-shot review path (no codesearch/deep_review). It is used only
-// when the config field is 0 (unset).
-const nativeReviewMaxIterationsDefault = 16
-
 // nativeReviewMaxIterationsCodeSearch is the fallback iteration cap for the
 // codesearch/deep_review path. Codesearch needs more rounds for
 // look-up-then-decide; matching agentloop.defaultMaxIterations (30).

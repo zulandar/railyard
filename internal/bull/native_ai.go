@@ -12,11 +12,6 @@ import (
 	"github.com/zulandar/railyard/internal/engine"
 )
 
-// nativeTriageMaxIterationsDefault is the fallback iteration cap for the
-// tool-less one-shot triage path (no codesearch). It is used only when the
-// config field is 0 (unset).
-const nativeTriageMaxIterationsDefault = 16
-
 // nativeTriageMaxIterationsCodeSearch is the fallback iteration cap for the
 // codesearch-enabled path. Codesearch needs more rounds for look-up-then-decide;
 // matching agentloop.defaultMaxIterations (30).
