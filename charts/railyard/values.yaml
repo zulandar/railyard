@@ -294,7 +294,10 @@ yardmaster:
   resources: {}
   # -- Port for /healthz and /readyz probes.
   healthPort: 8081
-  # -- Auto-merge APPROVED PRs via gh CLI (requires require_pr mode).
+  # -- When true, auto-merge PRs that carry an APPROVED verdict. The Inspection
+  # Pit submits an APPROVE review when a PR is clean and REQUEST_CHANGES when the
+  # engine still has work to do, so this closes the loop fully autonomously
+  # (requires require_pr mode). When false, approved PRs wait for a human merge.
   autoMergeOnApproval: false
   # -- GitHub label that triggers car rework on pr_open PRs.
   # Applied manually or by bots; removed automatically after the car is reopened.

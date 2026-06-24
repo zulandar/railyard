@@ -36,6 +36,32 @@ type ReviewResult struct {
 	Severity string          `json:"severity"`
 }
 
+// GitHub PR review event types. APPROVE signals the change is acceptable;
+// REQUEST_CHANGES signals the engine should keep working; COMMENT is a neutral
+// review carrying no verdict (used only when a verdict can't be determined).
+const (
+	reviewEventApprove        = "APPROVE"
+	reviewEventRequestChanges = "REQUEST_CHANGES"
+	reviewEventComment        = "COMMENT"
+)
+
+// reviewEvent maps a review result to the GitHub review event the Inspection
+// Pit should submit. A review with actionable inline comments, or a
+// warning/critical overall severity, requests changes; anything else approves.
+// This is the verdict the yardmaster keys reopen/merge decisions off of, so it
+// must reflect whether the engine has real work left to do.
+func reviewEvent(r *ReviewResult) string {
+	if len(r.Comments) > 0 {
+		return reviewEventRequestChanges
+	}
+	switch strings.ToLower(r.Severity) {
+	case "warning", "critical":
+		return reviewEventRequestChanges
+	default:
+		return reviewEventApprove
+	}
+}
+
 // ReviewComment is a single inline comment on a PR diff.
 type ReviewComment struct {
 	Path string `json:"path"`

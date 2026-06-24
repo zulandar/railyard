@@ -2049,6 +2049,84 @@ func (m *mockPRViewer) RemoveLabel(branch, label string) error {
 	return m.removeLabelErr
 }
 
+func TestEffectiveReviewDecision(t *testing.T) {
+	tests := []struct {
+		name           string
+		reviewDecision string
+		reviews        []prReview
+		want           string
+	}{
+		{
+			name:           "trusts github computed approved",
+			reviewDecision: "APPROVED",
+			reviews:        []prReview{{State: "COMMENTED", Author: "x"}},
+			want:           "APPROVED",
+		},
+		{
+			name:           "trusts github computed changes requested",
+			reviewDecision: "CHANGES_REQUESTED",
+			want:           "CHANGES_REQUESTED",
+		},
+		{
+			name:           "derives approved when decision empty",
+			reviewDecision: "",
+			reviews:        []prReview{{State: "APPROVED", Author: "inspect[bot]"}},
+			want:           "APPROVED",
+		},
+		{
+			name:           "derives changes requested when decision empty",
+			reviewDecision: "",
+			reviews:        []prReview{{State: "CHANGES_REQUESTED", Author: "inspect[bot]"}},
+			want:           "CHANGES_REQUESTED",
+		},
+		{
+			name:           "latest review per author wins",
+			reviewDecision: "",
+			reviews: []prReview{
+				{State: "CHANGES_REQUESTED", Author: "inspect[bot]"},
+				{State: "APPROVED", Author: "inspect[bot]"},
+			},
+			want: "APPROVED",
+		},
+		{
+			name:           "changes requested beats approval from another author",
+			reviewDecision: "",
+			reviews: []prReview{
+				{State: "APPROVED", Author: "alice"},
+				{State: "CHANGES_REQUESTED", Author: "inspect[bot]"},
+			},
+			want: "CHANGES_REQUESTED",
+		},
+		{
+			name:           "comment-only reviews carry no verdict",
+			reviewDecision: "",
+			reviews:        []prReview{{State: "COMMENTED", Author: "inspect[bot]"}},
+			want:           "",
+		},
+		{
+			name:           "dismissed review is ignored",
+			reviewDecision: "",
+			reviews: []prReview{
+				{State: "CHANGES_REQUESTED", Author: "inspect[bot]"},
+				{State: "DISMISSED", Author: "inspect[bot]"},
+			},
+			want: "",
+		},
+		{
+			name:           "no reviews and no decision is empty",
+			reviewDecision: "",
+			want:           "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := effectiveReviewDecision(tt.reviewDecision, tt.reviews); got != tt.want {
+				t.Errorf("effectiveReviewDecision() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestViewPR_IncludesMergeable(t *testing.T) {
 	viewer := &mockPRViewer{
 		state:     "OPEN",
@@ -3104,76 +3182,6 @@ func TestHasReworkLabel_EmptyLabels(t *testing.T) {
 	}
 }
 
-func TestHandlePrOpenCars_NewComments(t *testing.T) {
-	db := testDB(t)
-	db.Create(&models.Car{
-		ID:                 "car-cmt1",
-		Branch:             "ry/backend/car-cmt1",
-		Status:             "pr_open",
-		Track:              "backend",
-		LastPRCommentCount: 0,
-	})
-
-	viewer := &mockPRViewer{
-		state:        "OPEN",
-		commentCount: 2,
-		inlineComments: []prInlineComment{
-			{Path: "main.go", Line: 10, Body: "Fix this", Author: "reviewer"},
-			{Path: "main.go", Line: 20, Body: "And this", Author: "reviewer"},
-		},
-	}
-
-	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
-	var buf bytes.Buffer
-	logger := testLogger(&buf)
-	err := handlePrOpenCars(db, viewer, false, "", "", cfg, logger)
-	if err != nil {
-		t.Fatalf("handlePrOpenCars: %v", err)
-	}
-
-	var c models.Car
-	db.First(&c, "id = ?", "car-cmt1")
-	if c.Status != "open" {
-		t.Errorf("status = %q, want %q", c.Status, "open")
-	}
-
-	var notes []models.CarProgress
-	db.Where("car_id = ?", "car-cmt1").Find(&notes)
-	if len(notes) == 0 {
-		t.Error("expected progress note with review comments")
-	}
-}
-
-func TestHandlePrOpenCars_NoNewComments(t *testing.T) {
-	db := testDB(t)
-	db.Create(&models.Car{
-		ID:                 "car-cmt2",
-		Branch:             "ry/backend/car-cmt2",
-		Status:             "pr_open",
-		Track:              "backend",
-		LastPRCommentCount: 3,
-	})
-
-	viewer := &mockPRViewer{
-		state:        "OPEN",
-		commentCount: 3,
-	}
-
-	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
-	var buf bytes.Buffer
-	logger := testLogger(&buf)
-	err := handlePrOpenCars(db, viewer, false, "", "", cfg, logger)
-	if err != nil {
-		t.Fatalf("handlePrOpenCars: %v", err)
-	}
-
-	var c models.Car
-	db.First(&c, "id = ?", "car-cmt2")
-	if c.Status != "pr_open" {
-		t.Errorf("status = %q, want %q", c.Status, "pr_open")
-	}
-}
-
 func TestHandlePrOpenCars_CommentsIgnoredWhenApproved(t *testing.T) {
 	db := testDB(t)
 	db.Create(&models.Car{
@@ -3205,19 +3213,18 @@ func TestHandlePrOpenCars_CommentsIgnoredWhenApproved(t *testing.T) {
 	}
 }
 
-func TestHandlePrOpenCars_InlineCountDecreasesNoTrigger(t *testing.T) {
+// TestHandlePrOpenCars_MultipleCarsNoVerdictNoReopen verifies the handler
+// iterates over multiple pr_open cars and leaves them all pr_open when there is
+// no changes-requested verdict, even with PR comments present.
+func TestHandlePrOpenCars_MultipleCarsNoVerdictNoReopen(t *testing.T) {
 	db := testDB(t)
-	db.Create(&models.Car{
-		ID:                 "car-cmt4",
-		Branch:             "ry/backend/car-cmt4",
-		Status:             "pr_open",
-		Track:              "backend",
-		LastPRCommentCount: 5,
-	})
+	db.Create(&models.Car{ID: "car-multi-a", Branch: "ry/backend/car-multi-a", Status: "pr_open", Track: "backend"})
+	db.Create(&models.Car{ID: "car-multi-b", Branch: "ry/backend/car-multi-b", Status: "pr_open", Track: "backend"})
+	db.Create(&models.Car{ID: "car-multi-c", Branch: "ry/backend/car-multi-c", Status: "pr_open", Track: "backend"})
 
 	viewer := &mockPRViewer{
 		state:        "OPEN",
-		commentCount: 3,
+		commentCount: 4, // comments present but no verdict
 	}
 
 	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
@@ -3228,162 +3235,27 @@ func TestHandlePrOpenCars_InlineCountDecreasesNoTrigger(t *testing.T) {
 		t.Fatalf("handlePrOpenCars: %v", err)
 	}
 
-	var c models.Car
-	db.First(&c, "id = ?", "car-cmt4")
-	if c.Status != "pr_open" {
-		t.Errorf("status = %q, want %q (decreased count should not trigger)", c.Status, "pr_open")
+	for _, id := range []string{"car-multi-a", "car-multi-b", "car-multi-c"} {
+		var c models.Car
+		db.First(&c, "id = ?", id)
+		if c.Status != "pr_open" {
+			t.Errorf("%s status = %q, want pr_open (no verdict must not reopen)", id, c.Status)
+		}
 	}
 }
 
-func TestHandlePrOpenCars_CountErrorSkipsCar(t *testing.T) {
+func TestHandlePrOpenCars_ReworkLabelReopens(t *testing.T) {
 	db := testDB(t)
 	db.Create(&models.Car{
-		ID:                 "car-cmt5a",
-		Branch:             "ry/backend/car-cmt5a",
-		Status:             "pr_open",
-		Track:              "backend",
-		LastPRCommentCount: 0,
-	})
-	db.Create(&models.Car{
-		ID:                 "car-cmt5b",
-		Branch:             "ry/backend/car-cmt5b",
-		Status:             "pr_open",
-		Track:              "backend",
-		LastPRCommentCount: 0,
+		ID:     "car-int1",
+		Branch: "ry/backend/car-int1",
+		Status: "pr_open",
+		Track:  "backend",
 	})
 
 	viewer := &mockPRViewer{
-		state:    "OPEN",
-		countErr: fmt.Errorf("gh api failed"),
-	}
-
-	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
-	var buf bytes.Buffer
-	logger := testLogger(&buf)
-	err := handlePrOpenCars(db, viewer, false, "", "", cfg, logger)
-	if err != nil {
-		t.Fatalf("handlePrOpenCars: %v", err)
-	}
-
-	var c1, c2 models.Car
-	db.First(&c1, "id = ?", "car-cmt5a")
-	db.First(&c2, "id = ?", "car-cmt5b")
-	if c1.Status != "pr_open" {
-		t.Errorf("car-cmt5a status = %q, want %q", c1.Status, "pr_open")
-	}
-	if c2.Status != "pr_open" {
-		t.Errorf("car-cmt5b status = %q, want %q", c2.Status, "pr_open")
-	}
-}
-
-func TestHandlePrOpenCars_ZeroToZeroNoTrigger(t *testing.T) {
-	db := testDB(t)
-	db.Create(&models.Car{
-		ID:                 "car-cmt6",
-		Branch:             "ry/backend/car-cmt6",
-		Status:             "pr_open",
-		Track:              "backend",
-		LastPRCommentCount: 0,
-	})
-
-	viewer := &mockPRViewer{
-		state:        "OPEN",
-		commentCount: 0,
-	}
-
-	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
-	var buf bytes.Buffer
-	logger := testLogger(&buf)
-	err := handlePrOpenCars(db, viewer, false, "", "", cfg, logger)
-	if err != nil {
-		t.Fatalf("handlePrOpenCars: %v", err)
-	}
-
-	var c models.Car
-	db.First(&c, "id = ?", "car-cmt6")
-	if c.Status != "pr_open" {
-		t.Errorf("status = %q, want %q", c.Status, "pr_open")
-	}
-}
-
-func TestHandlePrOpenCars_MultiplePrOpenCars(t *testing.T) {
-	db := testDB(t)
-	db.Create(&models.Car{ID: "car-cmt7a", Branch: "ry/backend/car-cmt7a", Status: "pr_open", Track: "backend", LastPRCommentCount: 0})
-	db.Create(&models.Car{ID: "car-cmt7b", Branch: "ry/backend/car-cmt7b", Status: "pr_open", Track: "backend", LastPRCommentCount: 5})
-	db.Create(&models.Car{ID: "car-cmt7c", Branch: "ry/backend/car-cmt7c", Status: "pr_open", Track: "backend", LastPRCommentCount: 0})
-
-	viewer := &mockPRViewer{
-		state:        "OPEN",
-		commentCount: 2,
-	}
-
-	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
-	var buf bytes.Buffer
-	logger := testLogger(&buf)
-	err := handlePrOpenCars(db, viewer, false, "", "", cfg, logger)
-	if err != nil {
-		t.Fatalf("handlePrOpenCars: %v", err)
-	}
-
-	var ca, cb, cc models.Car
-	db.First(&ca, "id = ?", "car-cmt7a")
-	db.First(&cb, "id = ?", "car-cmt7b")
-	db.First(&cc, "id = ?", "car-cmt7c")
-	if ca.Status != "open" {
-		t.Errorf("car-cmt7a status = %q, want open (new comments)", ca.Status)
-	}
-	if cb.Status != "pr_open" {
-		t.Errorf("car-cmt7b status = %q, want pr_open (count decreased)", cb.Status)
-	}
-	if cc.Status != "open" {
-		t.Errorf("car-cmt7c status = %q, want open (new comments)", cc.Status)
-	}
-}
-
-func TestHandlePrOpenCars_CommentCountResetOnReentry(t *testing.T) {
-	db := testDB(t)
-	db.Create(&models.Car{
-		ID:                 "car-reentry1",
-		Branch:             "ry/backend/car-reentry1",
-		Status:             "pr_open",
-		Track:              "backend",
-		LastPRCommentCount: 2,
-	})
-
-	viewer := &mockPRViewer{
-		state:        "OPEN",
-		commentCount: 4,
-	}
-
-	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
-	var buf bytes.Buffer
-	logger := testLogger(&buf)
-	err := handlePrOpenCars(db, viewer, false, "", "", cfg, logger)
-	if err != nil {
-		t.Fatalf("handlePrOpenCars: %v", err)
-	}
-
-	var c models.Car
-	db.First(&c, "id = ?", "car-reentry1")
-	if c.Status != "open" {
-		t.Errorf("status = %q, want %q (new comments since last snapshot)", c.Status, "open")
-	}
-}
-
-func TestHandlePrOpenCars_LabelTakesPriorityOverComments(t *testing.T) {
-	db := testDB(t)
-	db.Create(&models.Car{
-		ID:                 "car-int1",
-		Branch:             "ry/backend/car-int1",
-		Status:             "pr_open",
-		Track:              "backend",
-		LastPRCommentCount: 0,
-	})
-
-	viewer := &mockPRViewer{
-		state:        "OPEN",
-		labels:       []string{"railyard: rework"},
-		commentCount: 5,
+		state:  "OPEN",
+		labels: []string{"railyard: rework"},
 	}
 
 	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
@@ -3400,12 +3272,152 @@ func TestHandlePrOpenCars_LabelTakesPriorityOverComments(t *testing.T) {
 		t.Errorf("status = %q, want %q", c.Status, "open")
 	}
 	if !viewer.removeLabelCalled {
-		t.Error("expected label trigger to fire (priority over comments)")
+		t.Error("expected rework label trigger to fire")
 	}
 	var notes []models.CarProgress
 	db.Where("car_id = ?", "car-int1").Find(&notes)
 	if len(notes) != 1 {
 		t.Errorf("expected 1 progress note (single trigger), got %d", len(notes))
+	}
+}
+
+// TestHandlePrOpenCars_NewCommentsDoNotReopen is the regression test for the
+// false-positive reopen loop: a PR that gains comments (e.g. the Inspection
+// Pit's own review comments) but has no changes-requested verdict must NOT be
+// reopened.
+func TestHandlePrOpenCars_NewCommentsDoNotReopen(t *testing.T) {
+	db := testDB(t)
+	db.Create(&models.Car{
+		ID:                 "car-noreopen",
+		Branch:             "ry/backend/car-noreopen",
+		Status:             "pr_open",
+		Track:              "backend",
+		LastPRCommentCount: 0,
+	})
+
+	viewer := &mockPRViewer{
+		state:        "OPEN",
+		commentCount: 3, // comments appeared, but no changes-requested verdict
+		inlineComments: []prInlineComment{
+			{Path: "main.go", Line: 10, Body: "Looks good!", Author: "inspect[bot]"},
+		},
+	}
+
+	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
+	var buf bytes.Buffer
+	logger := testLogger(&buf)
+	err := handlePrOpenCars(db, viewer, false, "", "", cfg, logger)
+	if err != nil {
+		t.Fatalf("handlePrOpenCars: %v", err)
+	}
+
+	var c models.Car
+	db.First(&c, "id = ?", "car-noreopen")
+	if c.Status != "pr_open" {
+		t.Errorf("status = %q, want %q (comments alone must not reopen)", c.Status, "pr_open")
+	}
+}
+
+// TestHandlePrOpenCars_DerivedApproveAutoMerges verifies that an inspect APPROVE
+// is honored even when GitHub leaves reviewDecision empty (no required-review
+// branch protection): the decision is derived from the review state.
+func TestHandlePrOpenCars_DerivedApproveAutoMerges(t *testing.T) {
+	db := testDB(t)
+	db.Create(&models.Car{
+		ID:     "car-approve",
+		Branch: "ry/backend/car-approve",
+		Status: "pr_open",
+		Track:  "backend",
+	})
+
+	viewer := &mockPRViewer{
+		state:          "OPEN",
+		reviewDecision: "", // branch protection not requiring reviews
+		reviews:        []prReview{{State: "APPROVED", Author: "inspect[bot]"}},
+	}
+
+	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
+	var buf bytes.Buffer
+	logger := testLogger(&buf)
+	err := handlePrOpenCars(db, viewer, true /* autoMerge */, "", "", cfg, logger)
+	if err != nil {
+		t.Fatalf("handlePrOpenCars: %v", err)
+	}
+
+	if !viewer.mergeCalled {
+		t.Error("expected auto-merge to fire for derived APPROVED decision")
+	}
+	var c models.Car
+	db.First(&c, "id = ?", "car-approve")
+	if c.Status != "merged" {
+		t.Errorf("status = %q, want %q", c.Status, "merged")
+	}
+}
+
+// TestHandlePrOpenCars_DerivedApproveAwaitsHumanWhenAutoMergeOff verifies that
+// when auto-merge is disabled an approved PR is left for a human to merge and is
+// not reopened.
+func TestHandlePrOpenCars_DerivedApproveAwaitsHumanWhenAutoMergeOff(t *testing.T) {
+	db := testDB(t)
+	db.Create(&models.Car{
+		ID:     "car-approve-nomerge",
+		Branch: "ry/backend/car-approve-nomerge",
+		Status: "pr_open",
+		Track:  "backend",
+	})
+
+	viewer := &mockPRViewer{
+		state:   "OPEN",
+		reviews: []prReview{{State: "APPROVED", Author: "inspect[bot]"}},
+	}
+
+	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
+	var buf bytes.Buffer
+	logger := testLogger(&buf)
+	err := handlePrOpenCars(db, viewer, false /* autoMerge off */, "", "", cfg, logger)
+	if err != nil {
+		t.Fatalf("handlePrOpenCars: %v", err)
+	}
+
+	if viewer.mergeCalled {
+		t.Error("auto-merge must not fire when disabled")
+	}
+	var c models.Car
+	db.First(&c, "id = ?", "car-approve-nomerge")
+	if c.Status != "pr_open" {
+		t.Errorf("status = %q, want %q (await human merge)", c.Status, "pr_open")
+	}
+}
+
+// TestHandlePrOpenCars_DerivedChangesRequestedReopens verifies that an inspect
+// REQUEST_CHANGES reopens the car even when GitHub leaves reviewDecision empty.
+func TestHandlePrOpenCars_DerivedChangesRequestedReopens(t *testing.T) {
+	db := testDB(t)
+	db.Create(&models.Car{
+		ID:     "car-reqchanges",
+		Branch: "ry/backend/car-reqchanges",
+		Status: "pr_open",
+		Track:  "backend",
+	})
+
+	viewer := &mockPRViewer{
+		state:          "OPEN",
+		reviewDecision: "", // not populated by GitHub
+		reviews:        []prReview{{Body: "Fix the bug", State: "CHANGES_REQUESTED", Author: "inspect[bot]"}},
+	}
+
+	cfg := testConfig(config.TrackConfig{Name: "backend", Language: "go"})
+	var buf bytes.Buffer
+	logger := testLogger(&buf)
+	err := handlePrOpenCars(db, viewer, false, "", "", cfg, logger)
+	if err != nil {
+		t.Fatalf("handlePrOpenCars: %v", err)
+	}
+
+	var c models.Car
+	db.First(&c, "id = ?", "car-reqchanges")
+	if c.Status != "open" {
+		t.Errorf("status = %q, want %q (derived CHANGES_REQUESTED must reopen)", c.Status, "open")
 	}
 }
 

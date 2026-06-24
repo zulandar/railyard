@@ -18,16 +18,17 @@ import (
 type mockClient struct {
 	mu sync.Mutex
 
-	prs           []*github.PullRequest
-	files         []*github.CommitFile
-	fileContents  map[string]string // path -> content
-	prState       string
-	prMerged      bool
-	labelsByPR    map[int]map[string]bool
-	commentCount  int
-	submittedPR   int
-	submittedBody string
-	ensuredLabels bool
+	prs            []*github.PullRequest
+	files          []*github.CommitFile
+	fileContents   map[string]string // path -> content
+	prState        string
+	prMerged       bool
+	labelsByPR     map[int]map[string]bool
+	commentCount   int
+	submittedPR    int
+	submittedBody  string
+	submittedEvent string
+	ensuredLabels  bool
 }
 
 func newMockClient() *mockClient {
@@ -66,11 +67,12 @@ func (m *mockClient) GetPRState(_ context.Context, _ int) (string, bool, error) 
 	return m.prState, m.prMerged, nil
 }
 
-func (m *mockClient) SubmitReview(_ context.Context, number int, summary string, _ []InlineComment) error {
+func (m *mockClient) SubmitReview(_ context.Context, number int, summary string, _ []InlineComment, event string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.submittedPR = number
 	m.submittedBody = summary
+	m.submittedEvent = event
 	return nil
 }
 
@@ -276,6 +278,11 @@ func TestRunDaemon_SingleCycle(t *testing.T) {
 	defer client.mu.Unlock()
 	if client.submittedPR != 42 {
 		t.Errorf("expected review submitted for PR 42, got %d", client.submittedPR)
+	}
+	// The review carries inline comments, so the verdict must request changes
+	// (this is the signal the yardmaster reopens the car on).
+	if client.submittedEvent != reviewEventRequestChanges {
+		t.Errorf("expected REQUEST_CHANGES event, got %q", client.submittedEvent)
 	}
 
 	// Verify the car was claimed.

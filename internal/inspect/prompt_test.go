@@ -140,6 +140,56 @@ func TestParseReviewResult_Empty(t *testing.T) {
 	}
 }
 
+func TestReviewEvent(t *testing.T) {
+	tests := []struct {
+		name   string
+		result ReviewResult
+		want   string
+	}{
+		{
+			name:   "clean review approves",
+			result: ReviewResult{Summary: "Looks good.", Severity: "info"},
+			want:   reviewEventApprove,
+		},
+		{
+			name:   "empty severity approves",
+			result: ReviewResult{Summary: "Nothing to flag."},
+			want:   reviewEventApprove,
+		},
+		{
+			name: "inline comments request changes",
+			result: ReviewResult{
+				Summary:  "A few issues.",
+				Severity: "info",
+				Comments: []ReviewComment{{Path: "main.go", Line: 10, Body: "Fix this."}},
+			},
+			want: reviewEventRequestChanges,
+		},
+		{
+			name:   "warning severity requests changes",
+			result: ReviewResult{Summary: "Concern in approach.", Severity: "warning"},
+			want:   reviewEventRequestChanges,
+		},
+		{
+			name:   "critical severity requests changes",
+			result: ReviewResult{Summary: "Serious bug.", Severity: "critical"},
+			want:   reviewEventRequestChanges,
+		},
+		{
+			name:   "severity casing is ignored",
+			result: ReviewResult{Summary: "Concern.", Severity: "CRITICAL"},
+			want:   reviewEventRequestChanges,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := reviewEvent(&tt.result); got != tt.want {
+				t.Errorf("reviewEvent() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestTruncateDiff_UnderLimit(t *testing.T) {
 	files := []DiffFile{
 		{Path: "a.go", Diff: "diff a", Lines: 10},

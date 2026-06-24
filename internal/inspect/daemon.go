@@ -21,7 +21,7 @@ type DaemonClient interface {
 	ListPRFiles(ctx context.Context, number int) ([]*github.CommitFile, error)
 	GetFileContent(ctx context.Context, path, ref string) (string, error)
 	GetPRState(ctx context.Context, number int) (state string, merged bool, err error)
-	SubmitReview(ctx context.Context, number int, summary string, comments []InlineComment) error
+	SubmitReview(ctx context.Context, number int, summary string, comments []InlineComment, event string) error
 	DismissReviewsByBot(ctx context.Context, number int, botLogin string) error
 	AddLabel(ctx context.Context, number int, label string) error
 	RemoveLabel(ctx context.Context, number int, label string) error
@@ -386,8 +386,11 @@ func reviewOnePR(
 		inlineComments = append(inlineComments, InlineComment(c))
 	}
 
-	// Submit the review.
-	if err := client.SubmitReview(ctx, prNum, result.Summary, inlineComments); err != nil {
+	// Submit the review with a machine-readable verdict: APPROVE when the PR is
+	// clean, REQUEST_CHANGES when the engine still has work to do. The yardmaster
+	// keys reopen/auto-merge off this verdict.
+	event := reviewEvent(result)
+	if err := client.SubmitReview(ctx, prNum, result.Summary, inlineComments, event); err != nil {
 		logger.Error("inspect: submit review", "pr", prNum, "error", err)
 		releaseWithCleanup(ctx, client, store, logger, car.ID, prNum, labels)
 		return
@@ -400,6 +403,7 @@ func reviewOnePR(
 		"branch", car.Branch,
 		"comments", len(result.Comments),
 		"severity", result.Severity,
+		"event", event,
 		"latency_ms", latency.Milliseconds(),
 		"replica", opts.ReplicaID,
 	)
@@ -508,7 +512,7 @@ func submitFallbackReview(
 		"Automated review encountered an issue parsing AI output. Raw response (truncated):\n\n```\n%.500s\n```",
 		rawOutput,
 	)
-	if err := client.SubmitReview(ctx, prNum, summary, nil); err != nil {
+	if err := client.SubmitReview(ctx, prNum, summary, nil, reviewEventComment); err != nil {
 		logger.Error("inspect: fallback review failed", "pr", prNum, "error", err)
 	}
 }
