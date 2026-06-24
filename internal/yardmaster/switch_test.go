@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -2429,6 +2430,7 @@ type prCallTracker struct {
 	markReadyErr     error
 	addLabelCalled   bool
 	addedLabel       string
+	addedLabels      []string
 	addLabelErr      error
 }
 
@@ -2461,6 +2463,7 @@ func (p *prCallTracker) hooks() (
 	addLabelFn = func(_, _, label string) error {
 		p.addLabelCalled = true
 		p.addedLabel = label
+		p.addedLabels = append(p.addedLabels, label)
 		return p.addLabelErr
 	}
 	return
@@ -2588,6 +2591,55 @@ func TestSwitch_RequirePR_ExistingPR_MarksReadyAndLabels(t *testing.T) {
 	db.First(&car, "id = ?", "car-pr2")
 	if car.Status != "pr_open" {
 		t.Errorf("status = %q, want %q", car.Status, "pr_open")
+	}
+}
+
+func TestSwitch_RequirePR_ExistingPR_AddsReReviewLabel(t *testing.T) {
+	// A revision pushed to an existing (already-reviewed) PR must apply the
+	// inspect re-review label in addition to the revised label. Without it the
+	// inspect daemon skips the PR (it already carries the "reviewed" label),
+	// the revised label is never cleared, and the yardmaster stale-
+	// CHANGES_REQUESTED guard blocks reopen indefinitely (railyard-1d0.5).
+	repoDir, _, run := initTestRepoWithRemote(t)
+	db := testDB(t)
+
+	run(repoDir, "git", "checkout", "-b", "ry/backend/car-pr-rereview")
+	writeFile(t, repoDir, "feature.go", "package main\n// revised again\n")
+	run(repoDir, "git", "add", ".")
+	run(repoDir, "git", "commit", "-m", "revision")
+	run(repoDir, "git", "checkout", "main")
+
+	db.Create(&models.Car{
+		ID: "car-pr-rereview", Title: "Revised Feature", Track: "backend",
+		Status: "done", Branch: "ry/backend/car-pr-rereview",
+	})
+
+	tracker := &prCallTracker{
+		getExistingURL: "https://github.com/org/repo/pull/9", // existing PR
+	}
+	push, getEx, createDr, updateBd, markRd, addLb := tracker.hooks()
+
+	_, err := Switch(db, "car-pr-rereview", SwitchOpts{
+		RepoDir:         repoDir,
+		RequirePR:       true,
+		RevisedLabel:    "railyard: revised",
+		ReReviewLabel:   "inspect: re-review",
+		PushBranchFn:    push,
+		GetExistingPRFn: getEx,
+		CreateDraftPRFn: createDr,
+		UpdatePRBodyFn:  updateBd,
+		MarkPRReadyFn:   markRd,
+		AddPRLabelFn:    addLb,
+	})
+	if err != nil {
+		t.Fatalf("Switch: %v", err)
+	}
+
+	if !slices.Contains(tracker.addedLabels, "railyard: revised") {
+		t.Errorf("addedLabels = %v, want it to contain %q", tracker.addedLabels, "railyard: revised")
+	}
+	if !slices.Contains(tracker.addedLabels, "inspect: re-review") {
+		t.Errorf("addedLabels = %v, want it to contain %q", tracker.addedLabels, "inspect: re-review")
 	}
 }
 

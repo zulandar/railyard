@@ -610,6 +610,7 @@ func handleCompletedCarsWithBus(ctx context.Context, db *gorm.DB, cfg *config.Co
 			SwitchTimeoutSec: cfg.Stall.SwitchTimeoutSec,
 			CommentCounter:   commentCounter,
 			RevisedLabel:     cfg.Yardmaster.RevisedLabel,
+			ReReviewLabel:    cfg.Inspect.Labels.ReReview,
 			ConfigPath:       configPath,
 			Bus:              bus,
 		})
