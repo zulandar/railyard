@@ -635,6 +635,33 @@ func TestCloseSession_NotFound(t *testing.T) {
 	}
 }
 
+// TestCloseSession_ToleratesAlreadyReleasedLock reproduces the race where the
+// process-exit cleanup goroutine (monitorProcess) releases the dispatch lock
+// before an explicit CloseSession does. CloseSession must treat an
+// already-released session as success — the goal (session closed) is met — and
+// not return the "not found or not active" error.
+func TestCloseSession_ToleratesAlreadyReleasedLock(t *testing.T) {
+	db := openSessionTestDB(t)
+	sm, _ := NewSessionManager(SessionManagerOpts{DB: db, Spawner: &mockSpawner{}})
+	session, err := sm.NewSession(context.Background(), "telegraph", "alice", "thread-1", "C01")
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+
+	// Simulate the monitorProcess goroutine winning the cleanup race: the lock
+	// is released out from under the upcoming CloseSession.
+	if err := ReleaseLock(db, session.ID); err != nil {
+		t.Fatalf("ReleaseLock (simulated process exit): %v", err)
+	}
+
+	if err := sm.CloseSession("C01", "thread-1"); err != nil {
+		t.Fatalf("CloseSession after lock already released: %v", err)
+	}
+	if sm.HasSession("C01", "thread-1") {
+		t.Error("session should be removed after close")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Process exit cleanup test
 // ---------------------------------------------------------------------------

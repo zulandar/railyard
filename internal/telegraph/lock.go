@@ -1,6 +1,7 @@
 package telegraph
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -12,6 +13,11 @@ import (
 // DefaultHeartbeatTimeout is the duration after which a session's heartbeat
 // is considered stale and the lock can be reclaimed.
 const DefaultHeartbeatTimeout = 90 * time.Second
+
+// ErrSessionNotActive indicates the targeted session does not exist or is no
+// longer active (e.g. already released or expired). Callers that only need the
+// session to end can treat this as success via errors.Is.
+var ErrSessionNotActive = errors.New("session not found or not active")
 
 // AcquireLock attempts to acquire a dispatch lock for the given source,
 // user, thread, and channel. It first expires any stale sessions (heartbeat
@@ -94,7 +100,7 @@ func ReleaseLock(db *gorm.DB, sessionID uint) error {
 		return fmt.Errorf("telegraph: release lock: %w", result.Error)
 	}
 	if result.RowsAffected == 0 {
-		return fmt.Errorf("telegraph: release lock: session %d not found or not active", sessionID)
+		return fmt.Errorf("telegraph: release lock: session %d: %w", sessionID, ErrSessionNotActive)
 	}
 	return nil
 }
