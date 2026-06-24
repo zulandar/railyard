@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/go-github/v68/github"
+	"github.com/zulandar/railyard/internal/agentloop"
 	"github.com/zulandar/railyard/internal/config"
 	"github.com/zulandar/railyard/internal/models"
 )
@@ -37,6 +38,17 @@ type DaemonStore interface {
 	UpdateCarStatus(ctx context.Context, carID, status string) error
 }
 
+// maxInspectCapHitAttempts bounds the number of times a single PR can hit the
+// iteration cap before the daemon stops re-reviewing it. Mirrors bull's
+// maxTriageRetries pattern. When exhausted, the daemon applies a terminal
+// label so the PR is not re-reviewed on subsequent cycles.
+const maxInspectCapHitAttempts = 3
+
+// inspectCapHitExhaustedLabel is applied when a PR has repeatedly hit the
+// iteration cap and the daemon stops re-reviewing it. It signals to humans
+// that the review is stuck — the model never converged even after retries.
+const inspectCapHitExhaustedLabel = "inspect: cap-hit-exhausted"
+
 // DaemonOpts bundles all configuration for RunDaemon.
 type DaemonOpts struct {
 	Config       config.InspectConfig
@@ -47,6 +59,11 @@ type DaemonOpts struct {
 	BotLogin     string
 	Logger       *slog.Logger
 	OnCycleEnd   func(cycle int) // test hook
+	// CapHitCounts tracks per-PR cap-hit attempts so the daemon can stop
+	// re-reviewing a PR that repeatedly hits the iteration cap. Keyed by PR
+	// number. Not persisted across daemon restarts (deliberately: after a
+	// restart the model or config may have changed).
+	CapHitCounts map[int]int
 }
 
 // RunDaemon runs the inspect daemon loop: poll GitHub for reviewable PRs,
@@ -70,6 +87,14 @@ func RunDaemon(ctx context.Context, client DaemonClient, store DaemonStore, opts
 		"poll_interval", opts.PollInterval.String(),
 		"deep_review", opts.Config.DeepReview,
 	)
+
+	// Initialize CapHitCounts so that the shared map reference survives value
+	// copies through the call chain (reviewCycle -> reviewOnePR ->
+	// handleReviewError). Without this, handleReviewError's make() operates on
+	// a local copy and the counter resets every poll cycle.
+	if opts.CapHitCounts == nil {
+		opts.CapHitCounts = make(map[int]int)
+	}
 
 	// Start health server in a background goroutine.
 	hs := NewHealthServer(opts.PollInterval)
@@ -156,6 +181,18 @@ func reviewCycle(ctx context.Context, client DaemonClient, store DaemonStore, op
 			continue
 		}
 		if hasReviewed && !hasReReview {
+			continue
+		}
+
+		// Skip if the iteration cap has been repeatedly hit and the daemon
+		// has given up on this PR (terminal label applied).
+		hasCapExhausted, err := client.PRHasLabel(ctx, prNum, inspectCapHitExhaustedLabel)
+		if err != nil {
+			logger.Error("inspect: check cap-hit-exhausted label", "pr", prNum, "error", err)
+			continue
+		}
+		if hasCapExhausted {
+			logger.Debug("inspect: skipping PR with exhausted cap-hit attempts", "pr", prNum)
 			continue
 		}
 
@@ -296,6 +333,11 @@ func reviewOnePR(
 	raw, err := opts.AI.RunPrompt(ctx, prompt)
 	if err != nil {
 		logger.Error("inspect: AI prompt failed", "pr", prNum, "error", err)
+		if agentloop.IsMaxIterationsError(err) && handleReviewError(ctx, client, logger, &opts, prNum, err) {
+			// Terminal: cap-hit attempts exhausted. Release claim and stop.
+			releaseWithCleanup(ctx, client, store, logger, car.ID, prNum, labels)
+			return
+		}
 		releaseWithCleanup(ctx, client, store, logger, car.ID, prNum, labels)
 		return
 	}
@@ -400,6 +442,58 @@ func releaseWithCleanup(
 	if err := client.RemoveLabel(ctx, prNum, labels.InProgress); err != nil {
 		logger.Error("inspect: remove in-progress cleanup", "pr", prNum, "error", err)
 	}
+}
+
+// handleReviewError checks if err is an iteration-cap hit. When it is, the
+// per-PR cap-hit counter is incremented. On the final attempt the
+// cap-hit-exhausted terminal label is applied and the PR will not be
+// re-reviewed on subsequent cycles. Non-cap-hit errors are not tracked.
+//
+// Returns true if the caller should stop reviewing this PR (either because
+// the cap-hit is terminal or the label couldn't be applied). Returns false
+// when the caller should retry normally (cap hit but attempts remain).
+func handleReviewError(
+	ctx context.Context,
+	client DaemonClient,
+	logger *slog.Logger,
+	opts *DaemonOpts,
+	prNum int,
+	err error,
+) bool {
+	// Only track iteration-cap hits (agent did not finish). Other errors
+	// (network, API, etc.) are not cap-hit related.
+	if !agentloop.IsMaxIterationsError(err) {
+		return false
+	}
+
+	if logger == nil {
+		logger = slog.Default()
+	}
+
+	if opts.CapHitCounts == nil {
+		opts.CapHitCounts = make(map[int]int)
+	}
+	capHits := opts.CapHitCounts[prNum] + 1
+	opts.CapHitCounts[prNum] = capHits
+
+	if capHits < maxInspectCapHitAttempts {
+		logger.Warn("inspect: iteration cap hit, will retry",
+			"pr", prNum,
+			"attempt", capHits,
+			"max_attempts", maxInspectCapHitAttempts,
+		)
+		return false // caller should release for retry, but NOT mark terminal
+	}
+
+	logger.Warn("inspect: iteration cap hit exhausted, marking terminal",
+		"pr", prNum,
+		"attempts", capHits,
+		"max_attempts", maxInspectCapHitAttempts,
+	)
+	if lerr := client.AddLabel(ctx, prNum, inspectCapHitExhaustedLabel); lerr != nil {
+		logger.Error("inspect: apply cap-hit-exhausted label", "pr", prNum, "error", lerr)
+	}
+	return true // caller should stop, terminal state applied
 }
 
 // submitFallbackReview posts a summary-only review when AI output can't be parsed.

@@ -536,6 +536,11 @@ type BullConfig struct {
 	AgentModel      string             `yaml:"agent_model"`
 	Comments        BullCommentsConfig `yaml:"comments"`
 	Labels          BullLabelsConfig   `yaml:"labels"`
+	// MaxTriageIterations caps the agent-loop tool-calling rounds per triage
+	// run. When 0 (unset), the native loop defaults to 30 on the codesearch
+	// path and 16 on the tool-less one-shot path. Hitting the cap surfaces
+	// as an error; the daemon retries up to 3 times via its retry queue.
+	MaxTriageIterations int `yaml:"max_triage_iterations"`
 }
 
 // InspectLabelsConfig defines the GitHub labels Inspection Pit uses.
@@ -559,6 +564,13 @@ type InspectConfig struct {
 	MaxDiffLines     int                 `yaml:"max_diff_lines"`
 	HealthPort       int                 `yaml:"health_port"`
 	Labels           InspectLabelsConfig `yaml:"labels"`
+	// MaxReviewIterations caps the agent-loop tool-calling rounds per review
+	// run. When 0 (unset), the native loop defaults to 30 on the
+	// codesearch/deep_review path and 16 on the tool-less one-shot path.
+	// Hitting the cap surfaces as an error; the daemon tracks cap-hit
+	// attempts per PR and stops re-reviewing after a bounded number of hits
+	// to prevent an infinite re-review loop.
+	MaxReviewIterations int `yaml:"max_review_iterations"`
 }
 
 // TelegraphConfig holds settings for the Telegraph chat bridge.
