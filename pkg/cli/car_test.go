@@ -23,7 +23,7 @@ func TestCarCmd_Help(t *testing.T) {
 	if !strings.Contains(out, "Car management") {
 		t.Errorf("expected help to mention 'Car management', got: %s", out)
 	}
-	for _, sub := range []string{"create", "list", "show", "update", "children"} {
+	for _, sub := range []string{"create", "list", "show", "update", "children", "search"} {
 		if !strings.Contains(out, sub) {
 			t.Errorf("expected help to list %q subcommand, got: %s", sub, out)
 		}

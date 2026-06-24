@@ -870,3 +870,272 @@ func TestRunCarPublish_NoDrafts(t *testing.T) {
 		t.Errorf("expected 'No draft cars', got:\n%s", out)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// 10. runCarSearch
+// ---------------------------------------------------------------------------
+
+func TestRunCarSearch_TitleMatch(t *testing.T) {
+	gormDB := mockTestDB(t)
+	cleanup := withMockDB(t, gormDB)
+	defer cleanup()
+
+	now := time.Now()
+	gormDB.Create(&models.Car{ID: "car-s1", Title: "Implement login", Status: "open", Track: "backend", Priority: 2, CreatedAt: now, UpdatedAt: now})
+	gormDB.Create(&models.Car{ID: "car-s2", Title: "Fix button", Status: "open", Track: "frontend", Priority: 2, CreatedAt: now, UpdatedAt: now})
+
+	out, err := execCmd(t, []string{"car", "search", "login", "--config", "test.yaml"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "car-s1") {
+		t.Errorf("expected output to contain 'car-s1', got:\n%s", out)
+	}
+	if strings.Contains(out, "car-s2") {
+		t.Errorf("expected output NOT to contain 'car-s2', got:\n%s", out)
+	}
+}
+
+func TestRunCarSearch_CaseInsensitive(t *testing.T) {
+	gormDB := mockTestDB(t)
+	cleanup := withMockDB(t, gormDB)
+	defer cleanup()
+
+	now := time.Now()
+	gormDB.Create(&models.Car{ID: "car-ci", Title: "UPPERCASE TITLE", Status: "open", Track: "backend", Priority: 2, CreatedAt: now, UpdatedAt: now})
+
+	// Lowercase query.
+	out, err := execCmd(t, []string{"car", "search", "uppercase", "--config", "test.yaml"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "car-ci") {
+		t.Errorf("expected output to contain 'car-ci', got:\n%s", out)
+	}
+
+	// Mixed case query.
+	out, err = execCmd(t, []string{"car", "search", "UpPeRcAsE", "--config", "test.yaml"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "car-ci") {
+		t.Errorf("expected output to contain 'car-ci', got:\n%s", out)
+	}
+}
+
+func TestRunCarSearch_NoMatch(t *testing.T) {
+	gormDB := mockTestDB(t)
+	cleanup := withMockDB(t, gormDB)
+	defer cleanup()
+
+	now := time.Now()
+	gormDB.Create(&models.Car{ID: "car-s3", Title: "Add auth", Status: "open", Track: "backend", Priority: 2, CreatedAt: now, UpdatedAt: now})
+
+	out, err := execCmd(t, []string{"car", "search", "nonexistent", "--config", "test.yaml"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "No cars found.") {
+		t.Errorf("expected 'No cars found.', got:\n%s", out)
+	}
+}
+
+func TestRunCarSearch_WithTrackFilter(t *testing.T) {
+	gormDB := mockTestDB(t)
+	cleanup := withMockDB(t, gormDB)
+	defer cleanup()
+
+	now := time.Now()
+	gormDB.Create(&models.Car{ID: "car-auth-be", Title: "Auth backend", Status: "open", Track: "backend", Priority: 2, CreatedAt: now, UpdatedAt: now})
+	gormDB.Create(&models.Car{ID: "car-auth-fe", Title: "Auth frontend", Status: "open", Track: "frontend", Priority: 2, CreatedAt: now, UpdatedAt: now})
+
+	out, err := execCmd(t, []string{"car", "search", "auth", "--track", "backend", "--config", "test.yaml"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "car-auth-be") {
+		t.Errorf("expected output to contain 'car-auth-be', got:\n%s", out)
+	}
+	if strings.Contains(out, "car-auth-fe") {
+		t.Errorf("expected output NOT to contain 'car-auth-fe', got:\n%s", out)
+	}
+}
+
+func TestRunCarSearch_WithStatusFilter(t *testing.T) {
+	gormDB := mockTestDB(t)
+	cleanup := withMockDB(t, gormDB)
+	defer cleanup()
+
+	now := time.Now()
+	gormDB.Create(&models.Car{ID: "car-s-open", Title: "Open auth", Status: "open", Track: "backend", Priority: 2, CreatedAt: now, UpdatedAt: now})
+	gormDB.Create(&models.Car{ID: "car-s-done", Title: "Done auth", Status: "done", Track: "backend", Priority: 2, CreatedAt: now, UpdatedAt: now})
+
+	out, err := execCmd(t, []string{"car", "search", "auth", "--status", "open", "--config", "test.yaml"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "car-s-open") {
+		t.Errorf("expected output to contain 'car-s-open', got:\n%s", out)
+	}
+	if strings.Contains(out, "car-s-done") {
+		t.Errorf("expected output NOT to contain 'car-s-done', got:\n%s", out)
+	}
+}
+
+func TestRunCarSearch_WithTypeFilter(t *testing.T) {
+	gormDB := mockTestDB(t)
+	cleanup := withMockDB(t, gormDB)
+	defer cleanup()
+
+	now := time.Now()
+	gormDB.Create(&models.Car{ID: "car-s-task", Title: "Auth task", Status: "open", Track: "backend", Type: "task", Priority: 2, CreatedAt: now, UpdatedAt: now})
+	gormDB.Create(&models.Car{ID: "car-s-bug", Title: "Auth bug", Status: "open", Track: "backend", Type: "bug", Priority: 2, CreatedAt: now, UpdatedAt: now})
+
+	out, err := execCmd(t, []string{"car", "search", "auth", "--type", "bug", "--config", "test.yaml"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "car-s-bug") {
+		t.Errorf("expected output to contain 'car-s-bug', got:\n%s", out)
+	}
+	if strings.Contains(out, "car-s-task") {
+		t.Errorf("expected output NOT to contain 'car-s-task', got:\n%s", out)
+	}
+}
+
+func TestRunCarSearch_WithParentFilter(t *testing.T) {
+	gormDB := mockTestDB(t)
+	cleanup := withMockDB(t, gormDB)
+	defer cleanup()
+
+	now := time.Now()
+	gormDB.Create(&models.Car{ID: "car-epic", Title: "Epic", Status: "open", Track: "backend", Type: "epic", CreatedAt: now, UpdatedAt: now})
+
+	parentID := "car-epic"
+	gormDB.Create(&models.Car{ID: "car-child-auth", Title: "Child auth", Status: "open", Track: "backend", ParentID: &parentID, Priority: 2, CreatedAt: now, UpdatedAt: now})
+	gormDB.Create(&models.Car{ID: "car-orphan-auth", Title: "Orphan auth", Status: "open", Track: "backend", Priority: 2, CreatedAt: now, UpdatedAt: now})
+
+	out, err := execCmd(t, []string{"car", "search", "auth", "--parent", "car-epic", "--config", "test.yaml"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "car-child-auth") {
+		t.Errorf("expected output to contain 'car-child-auth', got:\n%s", out)
+	}
+	if strings.Contains(out, "car-orphan-auth") {
+		t.Errorf("expected output NOT to contain 'car-orphan-auth', got:\n%s", out)
+	}
+}
+
+func TestRunCarSearch_WithLimit(t *testing.T) {
+	gormDB := mockTestDB(t)
+	cleanup := withMockDB(t, gormDB)
+	defer cleanup()
+
+	now := time.Now()
+	gormDB.Create(&models.Car{ID: "car-lim1", Title: "Auth 1", Status: "open", Track: "backend", Priority: 0, CreatedAt: now, UpdatedAt: now})
+	gormDB.Create(&models.Car{ID: "car-lim2", Title: "Auth 2", Status: "open", Track: "backend", Priority: 1, CreatedAt: now, UpdatedAt: now})
+	gormDB.Create(&models.Car{ID: "car-lim3", Title: "Auth 3", Status: "open", Track: "backend", Priority: 2, CreatedAt: now, UpdatedAt: now})
+
+	out, err := execCmd(t, []string{"car", "search", "auth", "--limit", "2", "--config", "test.yaml"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "car-lim1") {
+		t.Errorf("expected output to contain 'car-lim1', got:\n%s", out)
+	}
+	if !strings.Contains(out, "car-lim2") {
+		t.Errorf("expected output to contain 'car-lim2', got:\n%s", out)
+	}
+	if strings.Contains(out, "car-lim3") {
+		t.Errorf("expected output NOT to contain 'car-lim3' (limit=2), got:\n%s", out)
+	}
+}
+
+func TestRunCarSearch_DescriptionMatch(t *testing.T) {
+	gormDB := mockTestDB(t)
+	cleanup := withMockDB(t, gormDB)
+	defer cleanup()
+
+	now := time.Now()
+	gormDB.Create(&models.Car{ID: "car-desc", Title: "Task A", Description: "deploy pipeline for staging", Status: "open", Track: "backend", Priority: 2, CreatedAt: now, UpdatedAt: now})
+	gormDB.Create(&models.Car{ID: "car-nodesc", Title: "Task B", Status: "open", Track: "backend", Priority: 2, CreatedAt: now, UpdatedAt: now})
+
+	out, err := execCmd(t, []string{"car", "search", "pipeline", "--config", "test.yaml"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "car-desc") {
+		t.Errorf("expected output to contain 'car-desc', got:\n%s", out)
+	}
+	if strings.Contains(out, "car-nodesc") {
+		t.Errorf("expected output NOT to contain 'car-nodesc', got:\n%s", out)
+	}
+}
+
+func TestRunCarSearch_DesignNotesMatch(t *testing.T) {
+	gormDB := mockTestDB(t)
+	cleanup := withMockDB(t, gormDB)
+	defer cleanup()
+
+	now := time.Now()
+	gormDB.Create(&models.Car{ID: "car-dn", Title: "Design car", DesignNotes: "use redis for caching", Status: "open", Track: "backend", Priority: 2, CreatedAt: now, UpdatedAt: now})
+
+	out, err := execCmd(t, []string{"car", "search", "redis", "--config", "test.yaml"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "car-dn") {
+		t.Errorf("expected output to contain 'car-dn', got:\n%s", out)
+	}
+}
+
+func TestRunCarSearch_AcceptanceMatch(t *testing.T) {
+	gormDB := mockTestDB(t)
+	cleanup := withMockDB(t, gormDB)
+	defer cleanup()
+
+	now := time.Now()
+	gormDB.Create(&models.Car{ID: "car-ac", Title: "Accept car", Acceptance: "user can reset password", Status: "open", Track: "backend", Priority: 2, CreatedAt: now, UpdatedAt: now})
+
+	out, err := execCmd(t, []string{"car", "search", "reset", "--config", "test.yaml"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "car-ac") {
+		t.Errorf("expected output to contain 'car-ac', got:\n%s", out)
+	}
+}
+
+func TestRunCarSearch_HasTableHeaders(t *testing.T) {
+	gormDB := mockTestDB(t)
+	cleanup := withMockDB(t, gormDB)
+	defer cleanup()
+
+	now := time.Now()
+	gormDB.Create(&models.Car{ID: "car-hdr", Title: "Header test", Status: "open", Track: "backend", Priority: 2, CreatedAt: now, UpdatedAt: now})
+
+	out, err := execCmd(t, []string{"car", "search", "header", "--config", "test.yaml"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, hdr := range []string{"ID", "TITLE", "STATUS", "TRACK", "PRI"} {
+		if !strings.Contains(out, hdr) {
+			t.Errorf("expected output to contain header %q, got:\n%s", hdr, out)
+		}
+	}
+}
+
+func TestRunCarSearch_MissingQueryArg(t *testing.T) {
+	gormDB := mockTestDB(t)
+	cleanup := withMockDB(t, gormDB)
+	defer cleanup()
+
+	_, err := execCmd(t, []string{"car", "search", "--config", "test.yaml"})
+	if err == nil {
+		t.Fatal("expected error for missing query argument")
+	}
+	if !strings.Contains(err.Error(), "accepts 1 arg") {
+		t.Errorf("error should mention arg count, got: %v", err)
+	}
+}
