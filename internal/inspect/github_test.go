@@ -101,8 +101,8 @@ func TestSubmitReview(t *testing.T) {
 		var body map[string]interface{}
 		json.NewDecoder(r.Body).Decode(&body)
 
-		if body["event"] != "COMMENT" {
-			t.Errorf("expected COMMENT event, got %v", body["event"])
+		if body["event"] != "REQUEST_CHANGES" {
+			t.Errorf("expected REQUEST_CHANGES event, got %v", body["event"])
 		}
 		if body["body"] == nil || body["body"] == "" {
 			t.Errorf("expected non-empty body")
@@ -121,7 +121,7 @@ func TestSubmitReview(t *testing.T) {
 	comments := []InlineComment{
 		{Path: "main.go", Line: 10, Side: "RIGHT", Body: "Consider renaming this."},
 	}
-	err := gc.SubmitReview(context.Background(), 10, "Looks mostly good.", comments)
+	err := gc.SubmitReview(context.Background(), 10, "Looks mostly good.", comments, reviewEventRequestChanges)
 	if err != nil {
 		t.Fatalf("SubmitReview() error: %v", err)
 	}

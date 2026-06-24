@@ -183,9 +183,11 @@ func (g *GitHubClient) GetPRState(ctx context.Context, number int) (state string
 	return pr.GetState(), pr.GetMerged(), nil
 }
 
-// SubmitReview posts a PR review with COMMENT event. It includes inline
-// comments as DraftReviewComments and the summary as the review body.
-func (g *GitHubClient) SubmitReview(ctx context.Context, number int, summary string, comments []InlineComment) error {
+// SubmitReview posts a PR review with the given event (APPROVE,
+// REQUEST_CHANGES, or COMMENT). It includes inline comments as
+// DraftReviewComments and the summary as the review body. The event is the
+// machine-readable verdict the yardmaster keys reopen/merge decisions off of.
+func (g *GitHubClient) SubmitReview(ctx context.Context, number int, summary string, comments []InlineComment, event string) error {
 	var draftComments []*github.DraftReviewComment
 	for _, c := range comments {
 		draftComments = append(draftComments, &github.DraftReviewComment{
@@ -197,7 +199,7 @@ func (g *GitHubClient) SubmitReview(ctx context.Context, number int, summary str
 	}
 	review := &github.PullRequestReviewRequest{
 		Body:     github.Ptr(summary),
-		Event:    github.Ptr("COMMENT"),
+		Event:    github.Ptr(event),
 		Comments: draftComments,
 	}
 	_, resp, err := g.client.PullRequests.CreateReview(ctx, g.owner, g.repo, number, review)

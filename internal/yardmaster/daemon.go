@@ -1139,6 +1139,42 @@ func getHeadCommit(repoDir string) string {
 type prReview struct {
 	Body   string
 	Author string
+	State  string // APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED, ""
+}
+
+// effectiveReviewDecision returns the review decision to act on. GitHub only
+// populates reviewDecision when branch protection requires reviews; when it is
+// empty we derive the decision from the individual review states so the
+// yardmaster behaves consistently regardless of branch-protection config.
+//
+// The derivation mirrors GitHub's own algorithm: only the latest non-dismissed
+// review per author counts, a CHANGES_REQUESTED from any author wins, otherwise
+// an APPROVED from any author yields APPROVED. COMMENTED reviews carry no
+// verdict.
+func effectiveReviewDecision(reviewDecision string, reviews []prReview) string {
+	if reviewDecision != "" {
+		return reviewDecision
+	}
+
+	// reviews are chronological; later reviews overwrite earlier ones per author.
+	latest := make(map[string]string, len(reviews))
+	for _, r := range reviews {
+		latest[r.Author] = r.State
+	}
+
+	approved := false
+	for _, state := range latest {
+		switch state {
+		case "CHANGES_REQUESTED":
+			return "CHANGES_REQUESTED"
+		case "APPROVED":
+			approved = true
+		}
+	}
+	if approved {
+		return "APPROVED"
+	}
+	return ""
 }
 
 // prInlineComment holds a file-level review comment from a PR.
@@ -1193,6 +1229,7 @@ func (g *ghPRViewer) ViewPR(branch string) (*prStatus, error) {
 		Mergeable      string `json:"mergeable"`
 		Reviews        []struct {
 			Body   string `json:"body"`
+			State  string `json:"state"`
 			Author struct {
 				Login string `json:"login"`
 			} `json:"author"`
@@ -1211,7 +1248,7 @@ func (g *ghPRViewer) ViewPR(branch string) (*prStatus, error) {
 		Mergeable:      result.Mergeable,
 	}
 	for _, r := range result.Reviews {
-		ps.Reviews = append(ps.Reviews, prReview{Body: r.Body, Author: r.Author.Login})
+		ps.Reviews = append(ps.Reviews, prReview{Body: r.Body, Author: r.Author.Login, State: r.State})
 	}
 	for _, l := range result.Labels {
 		ps.Labels = append(ps.Labels, l.Name)
@@ -1402,6 +1439,16 @@ func handlePrOpenCars(db *gorm.DB, viewer PRViewer, autoMerge bool, repoDir, ymD
 			continue
 		}
 
+		// Derive the verdict to act on. This is robust to repos without
+		// required-review branch protection, where GitHub leaves
+		// reviewDecision empty even after an APPROVE/REQUEST_CHANGES review.
+		//
+		// A car is reopened only on an explicit verdict — CHANGES_REQUESTED or
+		// the rework label. New PR comments alone do NOT reopen a car: the
+		// Inspection Pit posts its own review comments, and counting them caused
+		// a false-positive reopen loop on positive/neutral reviews.
+		decision := effectiveReviewDecision(status.ReviewDecision, status.Reviews)
+
 		switch {
 		case status.Mergeable == "CONFLICTING" && status.State == "OPEN":
 			// Check if base branch has advanced since last rebase attempt.
@@ -1463,7 +1510,7 @@ func handlePrOpenCars(db *gorm.DB, viewer PRViewer, autoMerge bool, repoDir, ymD
 			}
 			logger.Info("PR closed", "car", c.ID, "transition", "pr_open->cancelled")
 
-		case autoMerge && status.ReviewDecision == "APPROVED" && status.State == "OPEN":
+		case autoMerge && decision == "APPROVED" && status.State == "OPEN":
 			if err := viewer.MergePR(c.Branch); err != nil {
 				logger.Error("Auto-merge PR failed", "car", c.ID, "error", err)
 				writeProgressNote(db, c.ID, "yardmaster", fmt.Sprintf("Auto-merge failed: %v", err))
@@ -1480,7 +1527,7 @@ func handlePrOpenCars(db *gorm.DB, viewer PRViewer, autoMerge bool, repoDir, ymD
 			logger.Info("PR approved and auto-merged", "car", c.ID)
 			runPostMerge(db, c, logger)
 
-		case status.ReviewDecision == "CHANGES_REQUESTED":
+		case decision == "CHANGES_REQUESTED":
 			reopenCarWithFeedback(db, viewer, c, status.Reviews, revisedLabel, logger)
 			logger.Info("PR changes requested", "car", c.ID, "transition", "pr_open->open")
 
@@ -1493,19 +1540,6 @@ func handlePrOpenCars(db *gorm.DB, viewer PRViewer, autoMerge bool, repoDir, ymD
 			}
 			reopenCarWithFeedback(db, viewer, c, nil, revisedLabel, logger)
 			logger.Info("PR rework label detected", "car", c.ID, "transition", "pr_open->open")
-
-		case status.State == "OPEN" && status.ReviewDecision != "APPROVED":
-			count, countErr := viewer.CountComments(c.Branch)
-			if countErr != nil {
-				logger.Warn("Count comments", "car", c.ID, "error", countErr)
-				continue
-			}
-			if count > c.LastPRCommentCount {
-				reopenCarWithFeedback(db, viewer, c, nil, revisedLabel, logger)
-				logger.Info("PR new comments detected", "car", c.ID,
-					"old_count", c.LastPRCommentCount, "new_count", count,
-					"transition", "pr_open->open")
-			}
 		}
 	}
 

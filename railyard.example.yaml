@@ -160,7 +160,9 @@ repo: git@github.com:org/myproject.git
 
 # yardmaster:
 #   health_port: 8081                # port for /healthz and /readyz k8s probes
-#   auto_merge_on_approval: false    # auto-merge APPROVED PRs via gh CLI
+#   auto_merge_on_approval: false    # auto-merge PRs with an APPROVED verdict. The Inspection Pit
+#                                    # approves clean reviews and requests changes otherwise, so
+#                                    # true = fully autonomous loop; false = await human merge.
 #   rework_label: "railyard: rework" # GitHub label that triggers rework on pr_open PRs
 #                                    # Applied manually or by bots; removed after car is reopened.
 #                                    # Configurable per-project in Helm values (yardmaster.reworkLabel).
