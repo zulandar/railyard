@@ -468,6 +468,9 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 				logger.Error("Completion handling error", "car", claimed.ID, "error", err)
 				handleCompletionFailure(gormDB, claimed.ID, eng.ID, sess.ID, err)
 			}
+			// Clear current_car so the engine doesn't appear to be mid-cycle
+			// on the next poll tick (mirrors outcomeStall path).
+			eng.CurrentCar = ""
 			// Emit cycle summary and reset.
 			if cycle > 0 && (cStats.completed+cStats.stalled) > 0 {
 				total := cStats.completed + cStats.stalled
@@ -488,7 +491,7 @@ func runEngineStart(cmd *cobra.Command, configPath, track string, pollInterval t
 			cycleLog.Info("Agent exited, clear cycle",
 				"car", claimed.ID,
 				"session", sess.ID,
-				"will_reclaim", true,
+				"will_reclaim", eng.CurrentCar != "",
 			)
 			if err := engine.HandleClearCycle(gormDB, claimed, eng, engine.ClearCycleOpts{
 				RepoDir:   workDir,
@@ -912,7 +915,12 @@ func claimOrReclaim(gormDB *gorm.DB, eng *models.Engine, track string) (*models.
 		eng.CurrentCar = ""
 	}
 
-	return engine.ClaimCar(gormDB, eng.ID, track)
+	claimed, err := engine.ClaimCar(gormDB, eng.ID, track)
+	if err != nil {
+		return nil, err
+	}
+	eng.CurrentCar = claimed.ID
+	return claimed, nil
 }
 
 // loadProgress retrieves progress notes for a car.
