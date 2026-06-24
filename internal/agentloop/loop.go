@@ -5,11 +5,25 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 )
 
 // defaultMaxIterations bounds runaway tool/answer cycles (and token burn) when
 // a model keeps calling tools without ever finishing.
 const defaultMaxIterations = 30
+
+// IsMaxIterationsError reports whether err is the result of an agent loop
+// hitting its iteration cap (StopMaxIterations). Both bull's and inspect's
+// native loops surface this as a wrapped error containing the characteristic
+// "agent did not finish within" substring. Callers use this to distinguish
+// cap hits from other errors (network, API, etc.) for retry/terminal-state
+// decisions.
+func IsMaxIterationsError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "agent did not finish within")
+}
 
 // Tool is a plain-Go, transport-unaware capability the model can invoke.
 type Tool interface {

@@ -12,12 +12,15 @@ import (
 	"github.com/zulandar/railyard/internal/engine"
 )
 
-// nativeReviewMaxIterations bounds the read-only review loop. Review is a
-// look-up-then-decide task (a few codesearch/read_file calls before answering),
-// so the cap sits well below the engine's coding budget. Hitting it means the
-// model never converged, and RunPrompt surfaces that as an error rather than a
-// placeholder the review parser would silently reject.
-const nativeReviewMaxIterations = 16
+// nativeReviewMaxIterationsDefault is the fallback iteration cap for the
+// tool-less one-shot review path (no codesearch/deep_review). It is used only
+// when the config field is 0 (unset).
+const nativeReviewMaxIterationsDefault = 16
+
+// nativeReviewMaxIterationsCodeSearch is the fallback iteration cap for the
+// codesearch/deep_review path. Codesearch needs more rounds for
+// look-up-then-decide; matching agentloop.defaultMaxIterations (30).
+const nativeReviewMaxIterationsCodeSearch = 30
 
 // NativeAI implements ReviewAI using the Railyard-owned agent loop. When
 // CocoIndex is configured it runs a tool-capable loop with a READ-ONLY toolset
@@ -34,6 +37,9 @@ type NativeAI struct {
 	// codeSearch, when non-nil, switches RunPrompt to the tool-capable read-only
 	// loop. nil preserves the original tool-less one-shot behavior.
 	codeSearch *agentloop.CodeSearchParams
+	// maxIterations is the agent-loop iteration cap (0 means use the
+	// path-appropriate default). Drawn from config.Inspect.MaxReviewIterations.
+	maxIterations int
 }
 
 // NewNativeAI creates a tool-less one-shot ReviewAI backed by an
@@ -65,10 +71,15 @@ func (a *NativeAI) RunPrompt(ctx context.Context, prompt string) (string, error)
 		return strings.TrimSpace(resp.Content), nil
 	}
 
+	maxIter := a.maxIterations
+	if maxIter <= 0 {
+		maxIter = nativeReviewMaxIterationsCodeSearch
+	}
+
 	loop := agentloop.NewLoop(a.client, agentloop.LoopConfig{
 		Model:         a.model,
 		Tools:         agentloop.ReadOnlyTools(a.workDir, a.codeSearch),
-		MaxIterations: nativeReviewMaxIterations,
+		MaxIterations: maxIter,
 		Role:          "inspect",
 	})
 	res, err := loop.Run(ctx, prompt)
@@ -100,7 +111,9 @@ func newReviewAI(cfg *config.Config) (ReviewAI, error) {
 		// tracks, no overlay) is the right search target. nil when CocoIndex is
 		// unconfigured, which keeps the tool-less one-shot behavior.
 		workDir, _ := os.Getwd()
-		return NewNativeAIWithCodeSearch(client, cfg.Inspect.AgentModel, workDir, engine.MainIndexCodeSearchParams(cfg)), nil
+		ai := NewNativeAIWithCodeSearch(client, cfg.Inspect.AgentModel, workDir, engine.MainIndexCodeSearchParams(cfg))
+		ai.maxIterations = cfg.Inspect.MaxReviewIterations
+		return ai, nil
 	}
 	return NewProviderAI(cfg.Inspect.AgentProvider, cfg.Inspect.AgentModel)
 }
