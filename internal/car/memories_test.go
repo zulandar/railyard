@@ -417,6 +417,91 @@ func TestForget_DBError(t *testing.T) {
 	}
 }
 
+// --- GetTrackMemories tests ---
+
+func TestGetTrackMemories_ReturnsAllForTrack(t *testing.T) {
+	db := testMemDB(t)
+	createMemCar(t, db, "car-gt1", "Car A", "backend")
+	createMemCar(t, db, "car-gt2", "Car B", "backend")
+
+	Remember(db, "car-gt1", "author", "Alice")
+	Remember(db, "car-gt2", "color", "blue")
+
+	mems, err := GetTrackMemories(db, "backend")
+	if err != nil {
+		t.Fatalf("GetTrackMemories: %v", err)
+	}
+	if len(mems) != 2 {
+		t.Errorf("got %d memories, want 2", len(mems))
+	}
+	// Ordered by keyword ASC, car_id ASC.
+	if mems[0].Keyword != "author" || mems[0].CarID != "car-gt1" {
+		t.Errorf("first = %q/%q, want author/car-gt1", mems[0].Keyword, mems[0].CarID)
+	}
+	if mems[1].Keyword != "color" || mems[1].CarID != "car-gt2" {
+		t.Errorf("second = %q/%q, want color/car-gt2", mems[1].Keyword, mems[1].CarID)
+	}
+}
+
+func TestGetTrackMemories_OnlyReturnsMatchingTrack(t *testing.T) {
+	db := testMemDB(t)
+	createMemCar(t, db, "car-gt3", "Backend Car", "backend")
+	createMemCar(t, db, "car-gt4", "Frontend Car", "frontend")
+
+	Remember(db, "car-gt3", "author", "Alice")
+	Remember(db, "car-gt4", "color", "blue")
+
+	mems, err := GetTrackMemories(db, "backend")
+	if err != nil {
+		t.Fatalf("GetTrackMemories: %v", err)
+	}
+	if len(mems) != 1 {
+		t.Fatalf("got %d memories, want 1", len(mems))
+	}
+	if mems[0].Keyword != "author" || mems[0].CarID != "car-gt3" {
+		t.Errorf("got %q/%q, want author/car-gt3", mems[0].Keyword, mems[0].CarID)
+	}
+}
+
+func TestGetTrackMemories_EmptySlice(t *testing.T) {
+	db := testMemDB(t)
+	createMemCar(t, db, "car-gt5", "Test car", "backend")
+
+	mems, err := GetTrackMemories(db, "backend")
+	if err != nil {
+		t.Fatalf("GetTrackMemories: %v", err)
+	}
+	if len(mems) != 0 {
+		t.Errorf("got %d memories, want 0", len(mems))
+	}
+}
+
+func TestGetTrackMemories_EmptyTrack(t *testing.T) {
+	db := testMemDB(t)
+
+	_, err := GetTrackMemories(db, "")
+	if err == nil {
+		t.Fatal("expected error for empty track")
+	}
+	if !strings.Contains(err.Error(), "track is required") {
+		t.Errorf("error = %q, want to contain 'track is required'", err.Error())
+	}
+}
+
+func TestGetTrackMemories_DBError(t *testing.T) {
+	db := testMemDB(t)
+	createMemCar(t, db, "car-gte", "Test car", "backend")
+	Remember(db, "car-gte", "author", "Alice")
+
+	sqlDB, _ := db.DB()
+	sqlDB.Close()
+
+	_, err := GetTrackMemories(db, "backend")
+	if err == nil {
+		t.Fatal("expected error with closed DB")
+	}
+}
+
 // --- Round-trip test ---
 
 func TestMemoryRoundTrip(t *testing.T) {

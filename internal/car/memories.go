@@ -97,6 +97,21 @@ func Forget(db *gorm.DB, carID, keyword string) error {
 	return nil
 }
 
+// GetTrackMemories returns all CarMemory rows scoped to the given track.
+// These are shared across all cars on the same track.
+// Returns an empty slice (not nil) when no memories exist.
+func GetTrackMemories(db *gorm.DB, track string) ([]models.CarMemory, error) {
+	if track == "" {
+		return nil, fmt.Errorf("car: get track memories: track is required")
+	}
+
+	var memories []models.CarMemory
+	if err := db.Where("track = ?", track).Order("keyword ASC, car_id ASC").Find(&memories).Error; err != nil {
+		return nil, fmt.Errorf("car: get track memories for %s: %w", track, err)
+	}
+	return memories, nil
+}
+
 // carTrack returns the track of a car, or an error if not found.
 func carTrack(db *gorm.DB, carID string) (string, error) {
 	var c models.Car

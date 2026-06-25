@@ -313,3 +313,119 @@ func TestRunCarShow_WithTokenUsage(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// runCarShow – memories
+// ---------------------------------------------------------------------------
+
+func TestRunCarShow_WithMemories(t *testing.T) {
+	gormDB := mockTestDB(t)
+	cleanup := withMockDB(t, gormDB)
+	defer cleanup()
+
+	now := time.Now()
+	gormDB.Create(&models.Car{ID: "car-mem", Title: "Memory Car", Status: "open", Track: "backend", Priority: 2, CreatedAt: now, UpdatedAt: now})
+	gormDB.Create(&models.CarMemory{CarID: "car-mem", Track: "backend", Keyword: "author", Content: "Alice"})
+	gormDB.Create(&models.CarMemory{CarID: "car-mem", Track: "backend", Keyword: "color", Content: "blue"})
+
+	out, err := execCmd(t, []string{"car", "show", "car-mem", "--config", "test.yaml"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(out, "Memories:") {
+		t.Errorf("expected output to contain 'Memories:', got:\n%s", out)
+	}
+	for _, want := range []string{"KEYWORD", "CONTENT", "author", "Alice", "color", "blue"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected output to contain %q, got:\n%s", want, out)
+		}
+	}
+}
+
+func TestRunCarShow_NoMemories(t *testing.T) {
+	gormDB := mockTestDB(t)
+	cleanup := withMockDB(t, gormDB)
+	defer cleanup()
+
+	now := time.Now()
+	gormDB.Create(&models.Car{ID: "car-nomem", Title: "No Memory Car", Status: "open", Track: "backend", Priority: 2, CreatedAt: now, UpdatedAt: now})
+
+	out, err := execCmd(t, []string{"car", "show", "car-nomem", "--config", "test.yaml"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if strings.Contains(out, "Memories:") {
+		t.Errorf("expected output NOT to contain 'Memories:' when no memories exist, got:\n%s", out)
+	}
+}
+
+func TestRunCarShow_WithTrackMemories(t *testing.T) {
+	gormDB := mockTestDB(t)
+	cleanup := withMockDB(t, gormDB)
+	defer cleanup()
+
+	now := time.Now()
+	// Two cars on the same track.
+	gormDB.Create(&models.Car{ID: "car-tm1", Title: "Track Memory Car 1", Status: "open", Track: "backend", Priority: 2, CreatedAt: now, UpdatedAt: now})
+	gormDB.Create(&models.Car{ID: "car-tm2", Title: "Track Memory Car 2", Status: "open", Track: "backend", Priority: 2, CreatedAt: now, UpdatedAt: now})
+
+	// Car-scoped memory for car-tm1.
+	gormDB.Create(&models.CarMemory{CarID: "car-tm1", Track: "backend", Keyword: "author", Content: "Alice"})
+	// Track-scoped memory from another car on same track.
+	gormDB.Create(&models.CarMemory{CarID: "car-tm2", Track: "backend", Keyword: "convention", Content: "Use Go 1.26"})
+
+	out, err := execCmd(t, []string{"car", "show", "car-tm1", "--config", "test.yaml"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Car-scoped memories section.
+	if !strings.Contains(out, "Memories:") {
+		t.Errorf("expected output to contain 'Memories:', got:\n%s", out)
+	}
+	if !strings.Contains(out, "author") || !strings.Contains(out, "Alice") {
+		t.Errorf("expected car-scoped memory (author/Alice), got:\n%s", out)
+	}
+
+	// Track memories section should contain convention from car-tm2.
+	if !strings.Contains(out, "Track Memories:") {
+		t.Errorf("expected output to contain 'Track Memories:', got:\n%s", out)
+	}
+	// CAR ID column should be present.
+	if !strings.Contains(out, "CAR ID") {
+		t.Errorf("expected output to contain 'CAR ID' column header, got:\n%s", out)
+	}
+	if !strings.Contains(out, "convention") || !strings.Contains(out, "Use Go 1.26") {
+		t.Errorf("expected track-scoped memory (convention/Use Go 1.26), got:\n%s", out)
+	}
+
+	// Track memories should also include the car-scoped ones (they share the same track).
+	if !strings.Contains(out, "author") {
+		t.Errorf("expected track-scoped memory to include 'author' (from car-tm1), got:\n%s", out)
+	}
+	// Car ID should appear.
+	if !strings.Contains(out, "car-tm2") {
+		t.Errorf("expected output to contain car ID 'car-tm2', got:\n%s", out)
+	}
+}
+
+func TestRunCarShow_NoTrackMemories(t *testing.T) {
+	gormDB := mockTestDB(t)
+	cleanup := withMockDB(t, gormDB)
+	defer cleanup()
+
+	now := time.Now()
+	// Car on a track with no memories at all.
+	gormDB.Create(&models.Car{ID: "car-ntm", Title: "No Track Memory", Status: "open", Track: "frontend", Priority: 2, CreatedAt: now, UpdatedAt: now})
+
+	out, err := execCmd(t, []string{"car", "show", "car-ntm", "--config", "test.yaml"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if strings.Contains(out, "Track Memories:") {
+		t.Errorf("expected output NOT to contain 'Track Memories:' when no track memories exist, got:\n%s", out)
+	}
+}
