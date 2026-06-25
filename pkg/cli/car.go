@@ -439,8 +439,11 @@ func runCarShow(cmd *cobra.Command, configPath, id string) error {
 	}
 
 	// Memories section.
-	carMemories, err := car.GetCarMemories(gormDB, b.ID)
-	if err == nil && len(carMemories) > 0 {
+	carMemories, err := car.Memories(gormDB, b.ID, "")
+	if err != nil {
+		return err
+	}
+	if len(carMemories) > 0 {
 		fmt.Fprintln(out, "\nMemories:")
 		w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 		fmt.Fprintln(w, "  KEYWORD\tCONTENT")
@@ -451,15 +454,20 @@ func runCarShow(cmd *cobra.Command, configPath, id string) error {
 	}
 
 	// Track Memories section.
-	trackMemories, err := car.GetTrackMemories(gormDB, b.Track)
-	if err == nil && len(trackMemories) > 0 {
-		fmt.Fprintln(out, "\nTrack Memories:")
-		w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "  KEYWORD\tCONTENT")
-		for _, m := range trackMemories {
-			fmt.Fprintf(w, "  %s\t%s\n", m.Keyword, m.Content)
+	if b.Track != "" {
+		trackMemories, err := car.GetTrackMemories(gormDB, b.Track)
+		if err != nil {
+			return err
 		}
-		w.Flush()
+		if len(trackMemories) > 0 {
+			fmt.Fprintln(out, "\nTrack Memories:")
+			w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+			fmt.Fprintln(w, "  CAR ID\tKEYWORD\tCONTENT")
+			for _, m := range trackMemories {
+				fmt.Fprintf(w, "  %s\t%s\t%s\n", m.CarID, m.Keyword, m.Content)
+			}
+			w.Flush()
+		}
 	}
 
 	// Token usage section.

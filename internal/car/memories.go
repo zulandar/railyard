@@ -97,20 +97,6 @@ func Forget(db *gorm.DB, carID, keyword string) error {
 	return nil
 }
 
-// GetCarMemories returns all CarMemory rows scoped to the given car.
-// Returns an empty slice (not nil) when no memories exist.
-func GetCarMemories(db *gorm.DB, carID string) ([]models.CarMemory, error) {
-	if carID == "" {
-		return nil, fmt.Errorf("car: get car memories: car ID is required")
-	}
-
-	var memories []models.CarMemory
-	if err := db.Where("car_id = ?", carID).Order("keyword ASC").Find(&memories).Error; err != nil {
-		return nil, fmt.Errorf("car: get car memories for %s: %w", carID, err)
-	}
-	return memories, nil
-}
-
 // GetTrackMemories returns all CarMemory rows scoped to the given track.
 // These are shared across all cars on the same track.
 // Returns an empty slice (not nil) when no memories exist.

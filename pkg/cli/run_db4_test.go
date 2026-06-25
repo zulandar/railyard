@@ -393,6 +393,10 @@ func TestRunCarShow_WithTrackMemories(t *testing.T) {
 	if !strings.Contains(out, "Track Memories:") {
 		t.Errorf("expected output to contain 'Track Memories:', got:\n%s", out)
 	}
+	// CAR ID column should be present.
+	if !strings.Contains(out, "CAR ID") {
+		t.Errorf("expected output to contain 'CAR ID' column header, got:\n%s", out)
+	}
 	if !strings.Contains(out, "convention") || !strings.Contains(out, "Use Go 1.26") {
 		t.Errorf("expected track-scoped memory (convention/Use Go 1.26), got:\n%s", out)
 	}
@@ -400,6 +404,10 @@ func TestRunCarShow_WithTrackMemories(t *testing.T) {
 	// Track memories should also include the car-scoped ones (they share the same track).
 	if !strings.Contains(out, "author") {
 		t.Errorf("expected track-scoped memory to include 'author' (from car-tm1), got:\n%s", out)
+	}
+	// Car ID should appear.
+	if !strings.Contains(out, "car-tm2") {
+		t.Errorf("expected output to contain car ID 'car-tm2', got:\n%s", out)
 	}
 }
 

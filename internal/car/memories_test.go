@@ -417,69 +417,6 @@ func TestForget_DBError(t *testing.T) {
 	}
 }
 
-// --- GetCarMemories tests ---
-
-func TestGetCarMemories_ReturnsAll(t *testing.T) {
-	db := testMemDB(t)
-	createMemCar(t, db, "car-gc1", "Test car", "backend")
-
-	Remember(db, "car-gc1", "author", "Alice")
-	Remember(db, "car-gc1", "color", "blue")
-
-	mems, err := GetCarMemories(db, "car-gc1")
-	if err != nil {
-		t.Fatalf("GetCarMemories: %v", err)
-	}
-	if len(mems) != 2 {
-		t.Errorf("got %d memories, want 2", len(mems))
-	}
-	if mems[0].Keyword != "author" {
-		t.Errorf("first = %q, want author", mems[0].Keyword)
-	}
-	if mems[1].Keyword != "color" {
-		t.Errorf("second = %q, want color", mems[1].Keyword)
-	}
-}
-
-func TestGetCarMemories_EmptySlice(t *testing.T) {
-	db := testMemDB(t)
-	createMemCar(t, db, "car-gc2", "Test car", "backend")
-
-	mems, err := GetCarMemories(db, "car-gc2")
-	if err != nil {
-		t.Fatalf("GetCarMemories: %v", err)
-	}
-	if len(mems) != 0 {
-		t.Errorf("got %d memories, want 0", len(mems))
-	}
-}
-
-func TestGetCarMemories_EmptyCarID(t *testing.T) {
-	db := testMemDB(t)
-
-	_, err := GetCarMemories(db, "")
-	if err == nil {
-		t.Fatal("expected error for empty car ID")
-	}
-	if !strings.Contains(err.Error(), "car ID is required") {
-		t.Errorf("error = %q, want to contain 'car ID is required'", err.Error())
-	}
-}
-
-func TestGetCarMemories_DBError(t *testing.T) {
-	db := testMemDB(t)
-	createMemCar(t, db, "car-gce", "Test car", "backend")
-	Remember(db, "car-gce", "author", "Alice")
-
-	sqlDB, _ := db.DB()
-	sqlDB.Close()
-
-	_, err := GetCarMemories(db, "car-gce")
-	if err == nil {
-		t.Fatal("expected error with closed DB")
-	}
-}
-
 // --- GetTrackMemories tests ---
 
 func TestGetTrackMemories_ReturnsAllForTrack(t *testing.T) {
