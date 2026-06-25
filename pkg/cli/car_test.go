@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zulandar/railyard/internal/models"
 )
@@ -23,7 +24,7 @@ func TestCarCmd_Help(t *testing.T) {
 	if !strings.Contains(out, "Car management") {
 		t.Errorf("expected help to mention 'Car management', got: %s", out)
 	}
-	for _, sub := range []string{"create", "list", "show", "update", "children", "search"} {
+	for _, sub := range []string{"create", "list", "show", "update", "children", "search", "remember", "memories", "forget"} {
 		if !strings.Contains(out, sub) {
 			t.Errorf("expected help to list %q subcommand, got: %s", sub, out)
 		}
@@ -578,5 +579,421 @@ func TestRunCarCreate_KnownTrack(t *testing.T) {
 	out, err := execCmd(t, []string{"car", "create", "--title", "ok", "--track", "backend", "--config", "test.yaml"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v\n%s", err, out)
+	}
+}
+
+// --- remember / memories / forget command tests ---
+
+func TestCarRememberCmd_Help(t *testing.T) {
+	cmd := newRootCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"car", "remember", "--help"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("car remember --help failed: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "remember") {
+		t.Errorf("expected help to mention 'remember', got: %s", out)
+	}
+	if !strings.Contains(out, "--config") {
+		t.Errorf("expected --config flag, got: %s", out)
+	}
+}
+
+func TestNewCarRememberCmd(t *testing.T) {
+	cmd := newCarRememberCmd()
+	if cmd.Use != "remember <car-id> <keyword> <content>" {
+		t.Errorf("Use = %q, want %q", cmd.Use, "remember <car-id> <keyword> <content>")
+	}
+	if cmd.Flags().Lookup("config") == nil {
+		t.Error("expected --config flag")
+	}
+}
+
+func TestCarRememberCmd_NoArgs(t *testing.T) {
+	cmd := newRootCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"car", "remember"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for missing args")
+	}
+}
+
+func TestCarRememberCmd_TooFewArgs(t *testing.T) {
+	cmd := newRootCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"car", "remember", "car-001"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for too few args")
+	}
+}
+
+func TestCarRememberCmd_MissingConfig(t *testing.T) {
+	cmd := newRootCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"car", "remember", "car-001", "key", "value", "--config", "/nonexistent/railyard.yaml"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for missing config file")
+	}
+	if !strings.Contains(err.Error(), "load config") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "load config")
+	}
+}
+
+func TestCarMemoriesCmd_Help(t *testing.T) {
+	cmd := newRootCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"car", "memories", "--help"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("car memories --help failed: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "memories") {
+		t.Errorf("expected help to mention 'memories', got: %s", out)
+	}
+	if !strings.Contains(out, "--keyword") {
+		t.Errorf("expected --keyword flag, got: %s", out)
+	}
+	if !strings.Contains(out, "--config") {
+		t.Errorf("expected --config flag, got: %s", out)
+	}
+}
+
+func TestNewCarMemoriesCmd(t *testing.T) {
+	cmd := newCarMemoriesCmd()
+	if cmd.Use != "memories <car-id> [keyword]" {
+		t.Errorf("Use = %q, want %q", cmd.Use, "memories <car-id> [keyword]")
+	}
+	if cmd.Flags().Lookup("keyword") == nil {
+		t.Error("expected --keyword flag")
+	}
+	if cmd.Flags().Lookup("config") == nil {
+		t.Error("expected --config flag")
+	}
+	kwFlag := cmd.Flags().Lookup("keyword")
+	if kwFlag.Shorthand != "k" {
+		t.Errorf("--keyword shorthand = %q, want %q", kwFlag.Shorthand, "k")
+	}
+}
+
+func TestCarMemoriesCmd_NoArgs(t *testing.T) {
+	cmd := newRootCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"car", "memories"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for missing args")
+	}
+}
+
+func TestCarMemoriesCmd_TooManyArgs(t *testing.T) {
+	cmd := newRootCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"car", "memories", "car-001", "color", "extra"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for too many args")
+	}
+}
+
+func TestCarForgetCmd_Help(t *testing.T) {
+	cmd := newRootCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"car", "forget", "--help"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("car forget --help failed: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "forget") {
+		t.Errorf("expected help to mention 'forget', got: %s", out)
+	}
+	if !strings.Contains(out, "--config") {
+		t.Errorf("expected --config flag, got: %s", out)
+	}
+}
+
+func TestNewCarForgetCmd(t *testing.T) {
+	cmd := newCarForgetCmd()
+	if cmd.Use != "forget <car-id> <keyword>" {
+		t.Errorf("Use = %q, want %q", cmd.Use, "forget <car-id> <keyword>")
+	}
+	if cmd.Flags().Lookup("config") == nil {
+		t.Error("expected --config flag")
+	}
+}
+
+func TestCarForgetCmd_NoArgs(t *testing.T) {
+	cmd := newRootCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"car", "forget"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for missing args")
+	}
+}
+
+func TestCarForgetCmd_TooFewArgs(t *testing.T) {
+	cmd := newRootCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"car", "forget", "car-001"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for too few args")
+	}
+}
+
+// --- Integration tests (in-memory DB) ---
+
+func TestRunCarRemember_Success(t *testing.T) {
+	gormDB := mockTestDB(t)
+	cleanup := withMockDB(t, gormDB)
+	defer cleanup()
+
+	// Create a car first.
+	now := time.Now()
+	gormDB.Create(&models.Car{ID: "car-mem1", Title: "Memory Test", Status: "open", Track: "backend", CreatedAt: now, UpdatedAt: now})
+
+	out, err := execCmd(t, []string{"car", "remember", "car-mem1", "author", "Alice", "--config", "test.yaml"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "Remembered") {
+		t.Errorf("expected 'Remembered', got: %s", out)
+	}
+
+	// Verify DB.
+	var mem models.CarMemory
+	if err := gormDB.Where("car_id = ? AND keyword = ?", "car-mem1", "author").First(&mem).Error; err != nil {
+		t.Fatalf("find memory: %v", err)
+	}
+	if mem.Content != "Alice" {
+		t.Errorf("Content = %q, want %q", mem.Content, "Alice")
+	}
+}
+
+func TestRunCarRemember_Upsert(t *testing.T) {
+	gormDB := mockTestDB(t)
+	cleanup := withMockDB(t, gormDB)
+	defer cleanup()
+
+	now := time.Now()
+	gormDB.Create(&models.Car{ID: "car-mem2", Title: "Upsert Test", Status: "open", Track: "backend", CreatedAt: now, UpdatedAt: now})
+
+	// First insert.
+	_, err := execCmd(t, []string{"car", "remember", "car-mem2", "color", "blue", "--config", "test.yaml"})
+	if err != nil {
+		t.Fatalf("first remember: %v", err)
+	}
+
+	// Second insert — upsert.
+	_, err = execCmd(t, []string{"car", "remember", "car-mem2", "color", "red", "--config", "test.yaml"})
+	if err != nil {
+		t.Fatalf("second remember: %v", err)
+	}
+
+	var mem models.CarMemory
+	gormDB.Where("car_id = ? AND keyword = ?", "car-mem2", "color").First(&mem)
+	if mem.Content != "red" {
+		t.Errorf("Content = %q, want %q (upserted)", mem.Content, "red")
+	}
+
+	// Only one row.
+	var count int64
+	gormDB.Model(&models.CarMemory{}).Where("car_id = ? AND keyword = ?", "car-mem2", "color").Count(&count)
+	if count != 1 {
+		t.Errorf("row count = %d, want 1", count)
+	}
+}
+
+func TestRunCarRemember_CarNotFound(t *testing.T) {
+	gormDB := mockTestDB(t)
+	cleanup := withMockDB(t, gormDB)
+	defer cleanup()
+
+	_, err := execCmd(t, []string{"car", "remember", "car-nonexistent", "key", "value", "--config", "test.yaml"})
+	if err == nil {
+		t.Fatal("expected error for nonexistent car")
+	}
+}
+
+func TestRunCarMemories_ListAll(t *testing.T) {
+	gormDB := mockTestDB(t)
+	cleanup := withMockDB(t, gormDB)
+	defer cleanup()
+
+	now := time.Now()
+	gormDB.Create(&models.Car{ID: "car-ml1", Title: "List Test", Status: "open", Track: "backend", CreatedAt: now, UpdatedAt: now})
+	gormDB.Create(&models.CarMemory{CarID: "car-ml1", Track: "backend", Keyword: "author", Content: "Bob"})
+	gormDB.Create(&models.CarMemory{CarID: "car-ml1", Track: "backend", Keyword: "color", Content: "green"})
+
+	out, err := execCmd(t, []string{"car", "memories", "car-ml1", "--config", "test.yaml"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for _, want := range []string{"author", "Bob", "color", "green", "KEYWORD", "CONTENT"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected output to contain %q, got:\n%s", want, out)
+		}
+	}
+}
+
+func TestRunCarMemories_FilterByKeywordFlag(t *testing.T) {
+	gormDB := mockTestDB(t)
+	cleanup := withMockDB(t, gormDB)
+	defer cleanup()
+
+	now := time.Now()
+	gormDB.Create(&models.Car{ID: "car-ml2", Title: "Filter Test", Status: "open", Track: "backend", CreatedAt: now, UpdatedAt: now})
+	gormDB.Create(&models.CarMemory{CarID: "car-ml2", Track: "backend", Keyword: "author", Content: "Bob"})
+	gormDB.Create(&models.CarMemory{CarID: "car-ml2", Track: "backend", Keyword: "color", Content: "green"})
+
+	out, err := execCmd(t, []string{"car", "memories", "car-ml2", "--keyword", "author", "--config", "test.yaml"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(out, "author") {
+		t.Errorf("expected output to contain 'author', got:\n%s", out)
+	}
+	if strings.Contains(out, "color") {
+		t.Errorf("expected output NOT to contain 'color', got:\n%s", out)
+	}
+}
+
+func TestRunCarMemories_FilterByKeywordArg(t *testing.T) {
+	gormDB := mockTestDB(t)
+	cleanup := withMockDB(t, gormDB)
+	defer cleanup()
+
+	now := time.Now()
+	gormDB.Create(&models.Car{ID: "car-ml3", Title: "Arg Filter", Status: "open", Track: "backend", CreatedAt: now, UpdatedAt: now})
+	gormDB.Create(&models.CarMemory{CarID: "car-ml3", Track: "backend", Keyword: "author", Content: "Bob"})
+	gormDB.Create(&models.CarMemory{CarID: "car-ml3", Track: "backend", Keyword: "color", Content: "green"})
+
+	out, err := execCmd(t, []string{"car", "memories", "car-ml3", "author", "--config", "test.yaml"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(out, "author") {
+		t.Errorf("expected output to contain 'author', got:\n%s", out)
+	}
+	if strings.Contains(out, "color") {
+		t.Errorf("expected output NOT to contain 'color', got:\n%s", out)
+	}
+}
+
+func TestRunCarMemories_NoMemories(t *testing.T) {
+	gormDB := mockTestDB(t)
+	cleanup := withMockDB(t, gormDB)
+	defer cleanup()
+
+	now := time.Now()
+	gormDB.Create(&models.Car{ID: "car-ml4", Title: "No Memories", Status: "open", Track: "backend", CreatedAt: now, UpdatedAt: now})
+
+	out, err := execCmd(t, []string{"car", "memories", "car-ml4", "--config", "test.yaml"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "No memories found") {
+		t.Errorf("expected 'No memories found', got:\n%s", out)
+	}
+}
+
+func TestRunCarMemories_CarNotFound(t *testing.T) {
+	gormDB := mockTestDB(t)
+	cleanup := withMockDB(t, gormDB)
+	defer cleanup()
+
+	_, err := execCmd(t, []string{"car", "memories", "car-nonexistent", "--config", "test.yaml"})
+	if err == nil {
+		t.Fatal("expected error for nonexistent car")
+	}
+}
+
+func TestRunCarForget_Success(t *testing.T) {
+	gormDB := mockTestDB(t)
+	cleanup := withMockDB(t, gormDB)
+	defer cleanup()
+
+	now := time.Now()
+	gormDB.Create(&models.Car{ID: "car-mf1", Title: "Forget Test", Status: "open", Track: "backend", CreatedAt: now, UpdatedAt: now})
+	gormDB.Create(&models.CarMemory{CarID: "car-mf1", Track: "backend", Keyword: "temp", Content: "delete me"})
+
+	out, err := execCmd(t, []string{"car", "forget", "car-mf1", "temp", "--config", "test.yaml"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "Forgot memory") {
+		t.Errorf("expected 'Forgot memory', got: %s", out)
+	}
+
+	// Verify DB deletion.
+	var count int64
+	gormDB.Model(&models.CarMemory{}).Where("car_id = ? AND keyword = ?", "car-mf1", "temp").Count(&count)
+	if count != 0 {
+		t.Errorf("row count = %d, want 0", count)
+	}
+}
+
+func TestRunCarForget_NotFound(t *testing.T) {
+	gormDB := mockTestDB(t)
+	cleanup := withMockDB(t, gormDB)
+	defer cleanup()
+
+	now := time.Now()
+	gormDB.Create(&models.Car{ID: "car-mf2", Title: "Forget NotFound", Status: "open", Track: "backend", CreatedAt: now, UpdatedAt: now})
+
+	_, err := execCmd(t, []string{"car", "forget", "car-mf2", "nonexistent", "--config", "test.yaml"})
+	if err == nil {
+		t.Fatal("expected error for nonexistent memory")
+	}
+}
+
+func TestRunCarForget_CarNotFound(t *testing.T) {
+	gormDB := mockTestDB(t)
+	cleanup := withMockDB(t, gormDB)
+	defer cleanup()
+
+	_, err := execCmd(t, []string{"car", "forget", "car-nonexistent", "key", "--config", "test.yaml"})
+	if err == nil {
+		t.Fatal("expected error for nonexistent car")
 	}
 }
