@@ -31,6 +31,9 @@ func newCarCmd() *cobra.Command {
 	cmd.AddCommand(newCarReadyCmd())
 	cmd.AddCommand(newCarChildrenCmd())
 	cmd.AddCommand(newCarPublishCmd())
+	cmd.AddCommand(newCarRememberCmd())
+	cmd.AddCommand(newCarMemoriesCmd())
+	cmd.AddCommand(newCarForgetCmd())
 	return cmd
 }
 
@@ -838,6 +841,122 @@ With --recursive, also publishes all draft children (useful for epics).`,
 	cmd.Flags().StringVarP(&configPath, "config", "c", "railyard.yaml", "path to Railyard config file")
 	cmd.Flags().BoolVarP(&recursive, "recursive", "r", false, "also publish all draft children (for epics)")
 	return cmd
+}
+
+// --- remember / memories / forget subcommands ---
+
+func newCarRememberCmd() *cobra.Command {
+	var configPath string
+
+	cmd := &cobra.Command{
+		Use:   "remember <car-id> <keyword> <content>",
+		Short: "Remember a fact about a car",
+		Long:  "Creates or updates a memory for a car, keyed by a keyword. If a memory with the same keyword already exists for this car, its content is replaced.",
+		Args:  cobra.ExactArgs(3),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, gormDB, err := connectFromConfig(configPath)
+			if err != nil {
+				return err
+			}
+			return runCarRemember(cmd, gormDB, args[0], args[1], args[2])
+		},
+	}
+
+	cmd.Flags().StringVarP(&configPath, "config", "c", "railyard.yaml", "path to Railyard config file")
+	return cmd
+}
+
+func runCarRemember(cmd *cobra.Command, gormDB *gorm.DB, carID, keyword, content string) error {
+	if err := car.Remember(gormDB, carID, keyword, content); err != nil {
+		return err
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "Remembered %q for car %s\n", keyword, carID)
+	return nil
+}
+
+func newCarMemoriesCmd() *cobra.Command {
+	var (
+		configPath string
+		keyword    string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "memories <car-id> [keyword]",
+		Short: "List memories for a car",
+		Long:  "Lists all memories for a car. If a keyword is provided, filters to only matching memories. Output is formatted as a table with KEYWORD and CONTENT columns.",
+		Args:  cobra.RangeArgs(1, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, gormDB, err := connectFromConfig(configPath)
+			if err != nil {
+				return err
+			}
+
+			kw := keyword
+			if len(args) >= 2 {
+				kw = args[1]
+			}
+
+			return runCarMemories(cmd, gormDB, args[0], kw)
+		},
+	}
+
+	cmd.Flags().StringVarP(&configPath, "config", "c", "railyard.yaml", "path to Railyard config file")
+	cmd.Flags().StringVarP(&keyword, "keyword", "k", "", "filter by keyword")
+	return cmd
+}
+
+func runCarMemories(cmd *cobra.Command, gormDB *gorm.DB, carID, keyword string) error {
+	memories, err := car.Memories(gormDB, carID, keyword)
+	if err != nil {
+		return err
+	}
+
+	out := cmd.OutOrStdout()
+	if len(memories) == 0 {
+		if keyword != "" {
+			fmt.Fprintf(out, "No memories found for car %s with keyword %q.\n", carID, keyword)
+		} else {
+			fmt.Fprintf(out, "No memories found for car %s.\n", carID)
+		}
+		return nil
+	}
+
+	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "KEYWORD\tCONTENT")
+	for _, m := range memories {
+		fmt.Fprintf(w, "%s\t%s\n", m.Keyword, m.Content)
+	}
+	w.Flush()
+	return nil
+}
+
+func newCarForgetCmd() *cobra.Command {
+	var configPath string
+
+	cmd := &cobra.Command{
+		Use:   "forget <car-id> <keyword>",
+		Short: "Forget a memory about a car",
+		Long:  "Deletes the memory with the given keyword for a car.",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, gormDB, err := connectFromConfig(configPath)
+			if err != nil {
+				return err
+			}
+			return runCarForget(cmd, gormDB, args[0], args[1])
+		},
+	}
+
+	cmd.Flags().StringVarP(&configPath, "config", "c", "railyard.yaml", "path to Railyard config file")
+	return cmd
+}
+
+func runCarForget(cmd *cobra.Command, gormDB *gorm.DB, carID, keyword string) error {
+	if err := car.Forget(gormDB, carID, keyword); err != nil {
+		return err
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "Forgot memory %q for car %s\n", keyword, carID)
+	return nil
 }
 
 // hasMultipleBaseBranches returns true when not all cars share the same base branch.
