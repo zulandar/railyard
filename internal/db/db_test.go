@@ -121,8 +121,8 @@ func TestConnectAdmin_WrapsOpenError(t *testing.T) {
 
 func TestAllModels_Count(t *testing.T) {
 	models := AllModels()
-	if len(models) != 15 {
-		t.Errorf("AllModels() returned %d models, want 15", len(models))
+	if len(models) != 16 {
+		t.Errorf("AllModels() returned %d models, want 16", len(models))
 	}
 }
 
